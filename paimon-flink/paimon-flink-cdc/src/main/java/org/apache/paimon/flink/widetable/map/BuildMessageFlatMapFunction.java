@@ -1,8 +1,16 @@
 package org.apache.paimon.flink.widetable.map;
 
+import org.apache.paimon.flink.widetable.msg.CollectType;
+import org.apache.paimon.flink.widetable.msg.Message;
+import org.apache.paimon.flink.widetable.utils.Constant;
+import org.apache.paimon.flink.widetable.utils.ParamUitl;
+import org.apache.paimon.flink.widetable.utils.options.JobOptions;
+import org.apache.paimon.flink.widetable.utils.options.SourceOptions;
+
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.util.Collector;
 
 import java.util.Map;
 

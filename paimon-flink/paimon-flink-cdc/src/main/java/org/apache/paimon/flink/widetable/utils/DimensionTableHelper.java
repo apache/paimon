@@ -1,5 +1,10 @@
 package org.apache.paimon.flink.widetable.utils;
 
+import org.apache.paimon.flink.widetable.bean.DimensionTable;
+import org.apache.paimon.flink.widetable.utils.options.DimensionOptions;
+import org.apache.paimon.flink.widetable.utils.options.SourceOptions;
+import org.apache.paimon.flink.widetable.utils.options.SqlInfoOptions;
+
 import org.apache.commons.lang3.StringUtils;
 import org.apache.flink.configuration.Configuration;
 

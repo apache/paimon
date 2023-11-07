@@ -1,8 +1,14 @@
 package org.apache.paimon.flink.widetable.map;
 
+import org.apache.paimon.flink.widetable.bean.ChangeLog;
+import org.apache.paimon.flink.widetable.bean.DimensionTable;
+import org.apache.paimon.flink.widetable.msg.Message;
+import org.apache.paimon.flink.widetable.utils.DimensionTableHelper;
+
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.RichFlatMapFunction;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.util.Collector;
 
 import java.sql.Connection;
 import java.sql.SQLException;

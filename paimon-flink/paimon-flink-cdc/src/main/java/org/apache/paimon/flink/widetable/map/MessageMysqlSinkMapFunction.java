@@ -1,5 +1,9 @@
 package org.apache.paimon.flink.widetable.map;
 
+import org.apache.paimon.flink.widetable.bean.DimensionTable;
+import org.apache.paimon.flink.widetable.msg.Message;
+import org.apache.paimon.flink.widetable.utils.DimensionTableHelper;
+
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.functions.RichMapFunction;
 import org.apache.flink.configuration.Configuration;

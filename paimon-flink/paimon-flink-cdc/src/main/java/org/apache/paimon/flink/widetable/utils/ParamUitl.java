@@ -3,7 +3,12 @@ package org.apache.paimon.flink.widetable.utils;
 import org.apache.paimon.flink.widetable.map.BuildMessageFlatMapFunction;
 import org.apache.paimon.flink.widetable.msg.Message;
 import org.apache.paimon.flink.widetable.msg.cdc.mysql.MysqlCDCCustomerDeserialization;
+import org.apache.paimon.flink.widetable.utils.options.SourceOptions;
+import org.apache.paimon.flink.widetable.utils.options.SqlInfoOptions;
 
+import com.ververica.cdc.connectors.mysql.source.MySqlSource;
+import com.ververica.cdc.connectors.mysql.table.StartupOptions;
+import net.sf.jsqlparser.JSQLParserException;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.configuration.ConfigOption;

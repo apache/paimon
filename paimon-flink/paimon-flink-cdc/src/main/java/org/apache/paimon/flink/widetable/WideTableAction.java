@@ -21,7 +21,10 @@ package org.apache.paimon.flink.widetable;
 import org.apache.paimon.flink.action.TableActionBase;
 import org.apache.paimon.flink.widetable.bean.ChangeLog;
 import org.apache.paimon.flink.widetable.bean.DimensionTable;
+import org.apache.paimon.flink.widetable.map.MessageMysqlFlatMapFunction;
+import org.apache.paimon.flink.widetable.map.MessageMysqlSinkMapFunction;
 import org.apache.paimon.flink.widetable.msg.Message;
+import org.apache.paimon.flink.widetable.reduce.DimensionWindowReduceFunction;
 import org.apache.paimon.flink.widetable.utils.ParamUitl;
 import org.apache.paimon.flink.widetable.utils.options.SqlInfoOptions;
 
@@ -67,8 +70,8 @@ public class WideTableAction extends TableActionBase {
     public void build() throws Exception {
         // 多source 合并
         DataStream<Message> messageDataStream =
-                ParamUitl.buildSourceDataStream(
-                        parallel, sourceConfigMap, fetchSize, startupOptions, env);
+                ParamUitl.buildSourceDataStream(1, null, 1000, null, env);
+
         DataStream<ChangeLog> changelog =
                 messageDataStream
                         // 开启窗口计算逻辑
