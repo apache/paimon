@@ -20,6 +20,15 @@
 github:
   description: "Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics."
   homepage: https://paimon.apache.org/
+  labels:
+    - paimon
+    - streaming-datalake
+    - real-time-analytics
+    - data-ingestion
+    - big-data
+    - table-store
+    - flink
+    - spark
   enabled_merge_buttons:
     squash: true
     merge: false
