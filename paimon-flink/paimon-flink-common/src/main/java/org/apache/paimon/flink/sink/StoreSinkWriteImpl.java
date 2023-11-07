@@ -63,7 +63,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected TableWriteImpl<?> write;
 
-    private MetricGroup metricGroup;
+    @Nullable private final MetricGroup metricGroup;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
@@ -146,7 +146,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                         state.stateValueFilter().filter(table.name(), part, bucket))
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .isStreamingMode(isStreamingMode);
+                        .isStreamingMode(isStreamingMode)
+                        .withMetricRegistry(new FlinkMetricRegistry(metricGroup));
 
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));
