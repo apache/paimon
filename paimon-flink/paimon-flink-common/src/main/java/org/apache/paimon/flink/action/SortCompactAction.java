@@ -65,7 +65,7 @@ public class SortCompactAction extends CompactAction {
     @Override
     public void run() throws Exception {
         build();
-        execute(env, "Sort Compact Job");
+        execute("Sort Compact Job");
     }
 
     @Override

@@ -274,6 +274,6 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        env.execute(jobName());
+        execute(jobName());
     }
 }
