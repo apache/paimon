@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
@@ -226,5 +227,16 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
 
         // select projection
         assertThat(sql("SELECT b FROM KT")).containsExactlyInAnyOrder(Row.of("7"));
+    }
+
+    @Test
+    public void testTruncateTable() {
+        batchSql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
+        List<Row> truncateResult = batchSql("TRUNCATE TABLE T");
+        assertThat(truncateResult.size()).isEqualTo(1);
+        assertThat(truncateResult.get(0)).isEqualTo(Row.ofKind(RowKind.INSERT, "OK"));
+        assertThat(batchSql("SELECT * FROM T").isEmpty()).isTrue();
     }
 }
