@@ -56,12 +56,11 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
     private class SimplePartitionIndex {
 
         public final Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
-        private final Map<Integer, Long> bucketInformation;
         private int currentBucket;
+        private int rowCountInBucket;
 
         private SimplePartitionIndex() {
-            bucketInformation = new HashMap<>();
-            loadNewBucket();
+            loadNewBucket(-1);
         }
 
         public int assign(int hash) {
@@ -70,24 +69,26 @@ public class SimpleHashBucketAssigner implements BucketAssigner {
                 return hash2Bucket.get(hash);
             }
 
-            Long num = bucketInformation.computeIfAbsent(currentBucket, i -> 0L);
-            if (num >= targetBucketRowNumber) {
-                loadNewBucket();
+            if (rowCountInBucket >= targetBucketRowNumber) {
+                loadNewBucket(currentBucket);
             }
-            bucketInformation.compute(currentBucket, (i, l) -> l == null ? 1L : l + 1);
+            rowCountInBucket++;
             hash2Bucket.put(hash, (short) currentBucket);
             return currentBucket;
         }
 
-        private void loadNewBucket() {
-            for (int i = 0; i < Short.MAX_VALUE; i++) {
-                if (i % numAssigners == assignId && !bucketInformation.containsKey(i)) {
+        private void loadNewBucket(int start) {
+            for (int i = start + 1; i < Short.MAX_VALUE; i++) {
+                if (i % numAssigners == assignId) {
                     currentBucket = i;
+                    rowCountInBucket = 0;
                     return;
                 }
             }
             throw new RuntimeException(
-                    "Can't find a suitable bucket to assign, all the bucket are assigned?");
+                    String.format(
+                            "The assigned bucket id exceeds the upper limit %s, you should increase target bucket row number %s.",
+                            Short.MAX_VALUE, targetBucketRowNumber));
         }
     }
 }
