@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source.align;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.flink.source.FileSplitEnumeratorTestBase;
 import org.apache.paimon.flink.source.FileStoreSourceSplit;
 import org.apache.paimon.flink.source.PendingSplitsCheckpoint;
 import org.apache.paimon.fs.FileIO;
@@ -53,12 +54,11 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.flink.source.ContinuousFileSplitEnumeratorTest.createSnapshotSplit;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Unit tests for the {@link AlignedContinuousFileSplitEnumerator}. */
-public class AlignedContinuousFileSplitEnumeratorTest {
+public class AlignedContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
 
     private static final RowType ROW_TYPE =
             RowType.of(
@@ -90,9 +90,7 @@ public class AlignedContinuousFileSplitEnumeratorTest {
     @Test
     public void testSplitsAssignedBySnapshot() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {
@@ -140,8 +138,7 @@ public class AlignedContinuousFileSplitEnumeratorTest {
     @Test
     public void testEnumeratorSnapshotState() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         final AlignedContinuousFileSplitEnumerator enumerator =
                 new Builder()
@@ -173,8 +170,7 @@ public class AlignedContinuousFileSplitEnumeratorTest {
     @Test
     public void testScanWithConsumerId() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         final AlignedContinuousFileSplitEnumerator enumerator =
                 new Builder()

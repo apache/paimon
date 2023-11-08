@@ -50,6 +50,7 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
                         builder.greaterThan(2, 500L),
                         null,
                         null,
+                        null,
                         null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(9L);
         // TODO validate column statistics

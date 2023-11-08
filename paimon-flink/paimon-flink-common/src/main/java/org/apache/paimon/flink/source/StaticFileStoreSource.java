@@ -43,14 +43,26 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private final SplitAssignMode splitAssignMode;
 
+    @Nullable private final DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
+
     public StaticFileStoreSource(
             ReadBuilder readBuilder,
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode) {
+        this(readBuilder, limit, splitBatchSize, splitAssignMode, null);
+    }
+
+    public StaticFileStoreSource(
+            ReadBuilder readBuilder,
+            @Nullable Long limit,
+            int splitBatchSize,
+            SplitAssignMode splitAssignMode,
+            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo) {
         super(readBuilder, limit);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
+        this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;
     }
 
     @Override
@@ -66,7 +78,8 @@ public class StaticFileStoreSource extends FlinkSource {
                 checkpoint == null ? getSplits() : checkpoint.splits();
         SplitAssigner splitAssigner =
                 createSplitAssigner(context, splitBatchSize, splitAssignMode, splits);
-        return new StaticFileStoreSplitEnumerator(context, null, splitAssigner);
+        return new StaticFileStoreSplitEnumerator(
+                context, null, splitAssigner, dynamicPartitionFilteringInfo);
     }
 
     private List<FileStoreSourceSplit> getSplits() {

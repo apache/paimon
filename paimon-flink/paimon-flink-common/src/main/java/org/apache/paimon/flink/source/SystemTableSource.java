@@ -37,6 +37,9 @@ import org.apache.flink.table.plan.stats.TableStats;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
+import java.util.List;
+
 /** A {@link FlinkTableSource} for system table. */
 public class SystemTableSource extends FlinkTableSource {
 
@@ -116,5 +119,19 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public TableStats reportStatistics() {
         throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public List<String> listAcceptedFilterFields() {
+        // system table doesn't support dynamic filtering
+        return Collections.emptyList();
+    }
+
+    @Override
+    public void applyDynamicFiltering(List<String> candidateFilterFields) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Cannot apply dynamic filtering to Paimon system table '%s'.",
+                        table.name()));
     }
 }

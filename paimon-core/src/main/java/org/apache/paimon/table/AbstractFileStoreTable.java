@@ -56,6 +56,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.tag.TagPreview;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
@@ -508,5 +509,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    public RowType logicPartitionType() {
+        return tableSchema.logicalPartitionType();
     }
 }
