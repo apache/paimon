@@ -36,10 +36,10 @@ under the License.
     <modules>
         <module>paimon-flink-common</module>
         <module>paimon-flink-1.14</module>
-        <module>paimon-flink-1.15</module>
-        <module>paimon-flink-1.16</module>
+       <!-- <module>paimon-flink-1.15</module>
+        <module>paimon-flink-1.16</module>-->
         <module>paimon-flink-1.17</module>
-        <module>paimon-flink-1.18</module>
+       <!-- <module>paimon-flink-1.18</module>-->
         <module>paimon-flink-action</module>
         <module>paimon-flink-cdc</module>
     </modules>

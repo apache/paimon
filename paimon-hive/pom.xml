@@ -37,10 +37,10 @@ under the License.
         <module>paimon-hive-catalog</module>
         <module>paimon-hive-common</module>
         <module>paimon-hive-connector-common</module>
-        <module>paimon-hive-connector-2.1</module>
+        <!--<module>paimon-hive-connector-2.1</module>
         <module>paimon-hive-connector-2.1-cdh-6.3</module>
         <module>paimon-hive-connector-2.2</module>
-        <module>paimon-hive-connector-2.3</module>
+        <module>paimon-hive-connector-2.3</module>-->
         <module>paimon-hive-connector-3.1</module>
     </modules>
 
