@@ -23,14 +23,12 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Restorable;
 
 import java.util.List;
@@ -51,20 +49,14 @@ public class TableWriteImpl<T>
     private final RecordExtractor<T> recordExtractor;
 
     private boolean batchCommitted = false;
-    private final String tableName;
-    private final FileStorePathFactory pathfactory;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
-            RecordExtractor<T> recordExtractor,
-            String tableName,
-            FileStorePathFactory pathFactory) {
+            RecordExtractor<T> recordExtractor) {
         this.write = (AbstractFileStoreWrite<T>) write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
-        this.tableName = tableName;
-        this.pathfactory = pathFactory;
     }
 
     @Override
@@ -159,11 +151,6 @@ public class TableWriteImpl<T>
     public TableWrite withMetricRegistry(MetricRegistry metricRegistry) {
         write.withMetricRegistry(metricRegistry);
         return this;
-    }
-
-    private String getPartitionString(BinaryRow partition) {
-        String partitionStr = pathfactory.getPartitionString(partition);
-        return partitionStr.replace(Path.SEPARATOR, "_").substring(0, partitionStr.length() - 1);
     }
 
     /**

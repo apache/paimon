@@ -85,7 +85,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
-    private final FileStorePathFactory pathFactory;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -133,7 +132,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
-        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -197,7 +195,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
             Levels levels,
-            CompactionMetrics metrics) {
+            @Nullable CompactionMetrics metrics) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
