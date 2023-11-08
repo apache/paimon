@@ -192,6 +192,6 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        env.execute(String.format("MongoDB-Paimon Database Sync: %s", database));
+        execute(String.format("MongoDB-Paimon Database Sync: %s", database));
     }
 }

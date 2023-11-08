@@ -212,6 +212,6 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        env.execute(String.format("KAFKA-Paimon Database Sync: %s", database));
+        execute(String.format("KAFKA-Paimon Database Sync: %s", database));
     }
 }

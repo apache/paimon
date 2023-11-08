@@ -328,6 +328,6 @@ public class MySqlSyncTableAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute(env, String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
+        execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
     }
 }

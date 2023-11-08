@@ -409,6 +409,6 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute(env, String.format("MySQL-Paimon Database Sync: %s", database));
+        execute(String.format("MySQL-Paimon Database Sync: %s", database));
     }
 }

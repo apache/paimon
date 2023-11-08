@@ -121,7 +121,7 @@ public class CompactAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute(env, "Compact job");
+        execute("Compact job");
     }
 
     public List<Map<String, String>> getPartitions() {
