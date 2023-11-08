@@ -18,8 +18,7 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
-import org.apache.paimon.data.BinaryRow
-import org.apache.paimon.index.PartitionIndex
+import org.apache.paimon.index.HashBucketAssigner
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
 import org.apache.paimon.spark.SparkUtils.createIOManager
@@ -38,10 +37,9 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.command.RunnableCommand
 import org.apache.spark.sql.functions._
 
-import java.util.function.IntPredicate
+import java.util.UUID
 
 import scala.collection.JavaConverters._
-import scala.collection.mutable
 
 /** Used to write a [[DataFrame]] into a paimon table. */
 case class WriteIntoPaimonTable(
@@ -162,7 +160,7 @@ case class WriteIntoPaimonTable(
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {
-      tableCommit.close();
+      tableCommit.close()
     }
 
     Seq.empty
@@ -236,14 +234,18 @@ object WriteIntoPaimonTable {
   ) extends BucketProcessor {
 
     private val targetBucketRowNumber = fileStoreTable.coreOptions.dynamicBucketTargetRowNum
+    private val commitUser = UUID.randomUUID.toString
 
     def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
-      val sparkPartitionId = TaskContext.getPartitionId()
-      val indexFileHandler = fileStoreTable.store.newIndexFileHandler
-      val partitionIndex = mutable.Map.empty[BinaryRow, PartitionIndex]
       val rowPartitionKeyExtractor = new RowPartitionKeyExtractor(fileStoreTable.schema)
-      val buckFilter: IntPredicate = bucket =>
-        math.abs(bucket % numSparkPartitions) == sparkPartitionId
+      val assigner = new HashBucketAssigner(
+        fileStoreTable.snapshotManager(),
+        commitUser,
+        fileStoreTable.store.newIndexFileHandler,
+        numSparkPartitions.toInt,
+        TaskContext.getPartitionId(),
+        targetBucketRowNumber
+      )
 
       new Iterator[Row]() {
         override def hasNext: Boolean = rowIterator.hasNext
@@ -253,15 +255,7 @@ object WriteIntoPaimonTable {
           val sparkRow = new SparkRow(rowType, row)
           val hash = rowPartitionKeyExtractor.trimmedPrimaryKey(sparkRow).hashCode
           val partition = rowPartitionKeyExtractor.partition(sparkRow)
-          val index = partitionIndex.getOrElseUpdate(
-            partition,
-            PartitionIndex.loadIndex(
-              indexFileHandler,
-              partition,
-              targetBucketRowNumber,
-              (_) => true,
-              buckFilter))
-          val bucket = index.assign(hash, buckFilter)
+          val bucket = assigner.assign(partition, hash)
           val sparkInternalRow = toRow(row)
           sparkInternalRow.setInt(bucketColIndex, bucket)
           fromRow(sparkInternalRow)

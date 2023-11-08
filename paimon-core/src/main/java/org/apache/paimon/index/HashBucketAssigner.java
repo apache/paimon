@@ -91,27 +91,21 @@ public class HashBucketAssigner implements BucketAssigner {
     /** Prepare commit to clear outdated partition index. */
     @Override
     public void prepareCommit(long commitIdentifier) {
-        long latestCommittedIdentifier;
-        if (partitionIndex.values().stream()
-                        .mapToLong(i -> i.lastAccessedCommitIdentifier)
-                        .max()
-                        .orElse(Long.MIN_VALUE)
-                == Long.MIN_VALUE) {
-            // Optimization for the first commit.
-            //
-            // If this is the first commit, no index has previous modified commit, so the value of
-            // `latestCommittedIdentifier` does not matter.
-            //
-            // Without this optimization, we may need to scan through all snapshots only to find
-            // that there is no previous snapshot by this user, which is very inefficient.
-            latestCommittedIdentifier = Long.MIN_VALUE;
-        } else {
-            latestCommittedIdentifier =
-                    snapshotManager
-                            .latestSnapshotOfUser(commitUser)
-                            .map(Snapshot::commitIdentifier)
-                            .orElse(Long.MIN_VALUE);
-        }
+        // Optimization for the first commit.
+        //
+        // If this is the first commit, no index has previous modified commit, so the value of
+        // `latestCommittedIdentifier` does not matter.
+        //
+        // Without this optimization, we may need to scan through all snapshots only to find
+        // that there is no previous snapshot by this user, which is very inefficient.
+        long latestCommittedIdentifier =
+                partitionIndex.values().stream()
+                                .anyMatch(i -> i.lastAccessedCommitIdentifier != Long.MIN_VALUE)
+                        ? snapshotManager
+                                .latestSnapshotOfUser(commitUser)
+                                .map(Snapshot::commitIdentifier)
+                                .orElse(Long.MIN_VALUE)
+                        : Long.MIN_VALUE;
 
         Iterator<Map.Entry<BinaryRow, PartitionIndex>> iterator =
                 partitionIndex.entrySet().iterator();
@@ -121,25 +115,23 @@ public class HashBucketAssigner implements BucketAssigner {
             PartitionIndex index = entry.getValue();
             if (index.accessed) {
                 index.lastAccessedCommitIdentifier = commitIdentifier;
-            } else {
-                if (index.lastAccessedCommitIdentifier <= latestCommittedIdentifier) {
-                    // Clear writer if no update, and if its latest modification has committed.
-                    //
-                    // We need a mechanism to clear index, otherwise there will be more and
-                    // more such as yesterday's partition that no longer needs to be accessed.
-                    if (LOG.isDebugEnabled()) {
-                        LOG.debug(
-                                "Removing index for partition {}. "
-                                        + "Index's last accessed identifier is {}, "
-                                        + "while latest committed identifier is {}, "
-                                        + "current commit identifier is {}.",
-                                partition,
-                                index.lastAccessedCommitIdentifier,
-                                latestCommittedIdentifier,
-                                commitIdentifier);
-                    }
-                    iterator.remove();
+            } else if (index.lastAccessedCommitIdentifier <= latestCommittedIdentifier) {
+                // Clear writer if no update, and if its latest modification has committed.
+                //
+                // We need a mechanism to clear index, otherwise there will be more and
+                // more such as yesterday's partition that no longer needs to be accessed.
+                if (LOG.isDebugEnabled()) {
+                    LOG.debug(
+                            "Removing index for partition {}. "
+                                    + "Index's last accessed identifier is {}, "
+                                    + "while latest committed identifier is {}, "
+                                    + "current commit identifier is {}.",
+                            partition,
+                            index.lastAccessedCommitIdentifier,
+                            latestCommittedIdentifier,
+                            commitIdentifier);
                 }
+                iterator.remove();
             }
             index.accessed = false;
         }

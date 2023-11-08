@@ -78,6 +78,7 @@ public class PartitionIndex {
             Map.Entry<Integer, Long> entry = iterator.next();
             Integer bucket = entry.getKey();
             Long number = entry.getValue();
+            // all buckets have been filtered before, no need to filter here
             if (number < targetBucketRowNumber) {
                 entry.setValue(number + 1);
                 hash2Bucket.put(hash, bucket.shortValue());
@@ -97,12 +98,10 @@ public class PartitionIndex {
             }
         }
 
-        @SuppressWarnings("OptionalGetWithoutIsPresent")
-        int maxBucket = totalBucket.stream().mapToInt(Integer::intValue).max().getAsInt();
         throw new RuntimeException(
                 String.format(
-                        "Too more bucket %s, you should increase target bucket row number %s.",
-                        maxBucket, targetBucketRowNumber));
+                        "The assigned bucket id exceeds the upper limit %s, you should increase target bucket row number %s.",
+                        Short.MAX_VALUE, targetBucketRowNumber));
     }
 
     public static PartitionIndex loadIndex(
@@ -111,7 +110,7 @@ public class PartitionIndex {
             long targetBucketRowNumber,
             IntPredicate loadFilter,
             IntPredicate bucketFilter) {
-        Int2ShortHashMap map = new Int2ShortHashMap();
+        Int2ShortHashMap hash2Bucket = new Int2ShortHashMap();
         List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
@@ -120,7 +119,7 @@ public class PartitionIndex {
                     try {
                         int hash = iterator.next();
                         if (loadFilter.test(hash)) {
-                            map.put(hash, (short) file.bucket());
+                            hash2Bucket.put(hash, (short) file.bucket());
                         }
                         if (bucketFilter.test(file.bucket())) {
                             buckets.compute(
@@ -135,6 +134,6 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(map, buckets, targetBucketRowNumber);
+        return new PartitionIndex(hash2Bucket, buckets, targetBucketRowNumber);
     }
 }
