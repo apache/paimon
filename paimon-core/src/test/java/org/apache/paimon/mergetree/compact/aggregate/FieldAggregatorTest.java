@@ -128,8 +128,8 @@ public class FieldAggregatorTest {
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMinAgg.agg(accumulator, inputField)).isEqualTo(1);
-        assertThat(fieldMinAgg.agg(accumulator, 0)).isEqualTo(0);
-        assertThat(fieldMinAgg.agg(accumulator, 2)).isEqualTo(1);
+        assertThat(fieldMinAgg.aggForOldSequence(accumulator, 0)).isEqualTo(0);
+        assertThat(fieldMinAgg.aggForOldSequence(accumulator, 2)).isEqualTo(1);
     }
 
     @Test
@@ -167,7 +167,7 @@ public class FieldAggregatorTest {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new BigIntType());
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
-        assertThat(fieldSumAgg.agg(11L, 2L)).isEqualTo(13L);
+        assertThat(fieldSumAgg.aggForOldSequence(11L, 2L)).isEqualTo(13L);
         assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
         assertThat(fieldSumAgg.retract(null, 5L)).isEqualTo(-5L);
     }
@@ -197,7 +197,8 @@ public class FieldAggregatorTest {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new DecimalType());
         assertThat(fieldSumAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
         assertThat(fieldSumAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(11));
-        assertThat(fieldSumAgg.agg(toDecimal(11), toDecimal(2))).isEqualTo(toDecimal(13));
+        assertThat(fieldSumAgg.aggForOldSequence(toDecimal(11), toDecimal(2)))
+                .isEqualTo(toDecimal(13));
         assertThat(fieldSumAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(5));
         assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
     }
