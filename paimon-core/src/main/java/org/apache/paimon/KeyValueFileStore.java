@@ -65,6 +65,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
+    private final String tableName;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -77,7 +78,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> mfFactory,
+            String tableName) {
         super(fileIO, schemaManager, schemaId, options, partitionType);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
@@ -87,6 +89,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.mfFactory = mfFactory;
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
         this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
+        this.tableName = tableName;
     }
 
     @Override
@@ -147,7 +150,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newScan(true).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
-                keyValueFieldsExtractor);
+                keyValueFieldsExtractor,
+                tableName);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

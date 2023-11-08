@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.Table;
 
 /**
@@ -58,4 +59,7 @@ public interface TableWrite extends AutoCloseable {
      * changelog.
      */
     void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception;
+
+    /** With metrics to measure compaction. */
+    TableWrite withMetricRegistry(MetricRegistry registry);
 }

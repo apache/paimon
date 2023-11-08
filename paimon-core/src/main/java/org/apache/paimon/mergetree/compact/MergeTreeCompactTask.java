@@ -24,6 +24,9 @@ import org.apache.paimon.compact.CompactUnit;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -50,7 +53,9 @@ public class MergeTreeCompactTask extends CompactTask {
             long minFileSize,
             CompactRewriter rewriter,
             CompactUnit unit,
-            boolean dropDelete) {
+            boolean dropDelete,
+            @Nullable CompactionMetrics metrics) {
+        super(metrics);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();

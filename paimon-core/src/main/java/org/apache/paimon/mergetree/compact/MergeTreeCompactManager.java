@@ -27,10 +27,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Comparator;
@@ -53,6 +56,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final int numSortedRunStopTrigger;
     private final CompactRewriter rewriter;
 
+    @Nullable private final CompactionMetrics metrics;
+
     public MergeTreeCompactManager(
             ExecutorService executor,
             Levels levels,
@@ -60,7 +65,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             Comparator<InternalRow> keyComparator,
             long compactionFileSize,
             int numSortedRunStopTrigger,
-            CompactRewriter rewriter) {
+            CompactRewriter rewriter,
+            @Nullable CompactionMetrics metrics) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -68,6 +74,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
+        this.metrics = metrics;
     }
 
     @Override
@@ -162,7 +169,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private void submitCompaction(CompactUnit unit, boolean dropDelete) {
         MergeTreeCompactTask task =
                 new MergeTreeCompactTask(
-                        keyComparator, compactionFileSize, rewriter, unit, dropDelete);
+                        keyComparator, compactionFileSize, rewriter, unit, dropDelete, metrics);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",

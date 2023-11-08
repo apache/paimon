@@ -22,16 +22,20 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.SnapshotManager;
@@ -73,18 +77,25 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
+    private MetricRegistry metricRegistry = null;
+    private final String tableName;
+    private final FileStorePathFactory pathFactory;
 
     protected AbstractFileStoreWrite(
             String commitUser,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            @Nullable IndexMaintainer.Factory<T> indexFactory) {
+            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            String tableName,
+            FileStorePathFactory pathFactory) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
 
         this.writers = new HashMap<>();
+        this.tableName = tableName;
+        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -341,6 +352,30 @@ public abstract class AbstractFileStoreWrite<T>
     @Override
     public void isStreamingMode(boolean isStreamingMode) {
         this.isStreamingMode = isStreamingMode;
+    }
+
+    @Override
+    public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
+        this.metricRegistry = metricRegistry;
+        return this;
+    }
+
+    @Nullable
+    public CompactionMetrics getCompactionMetrics(BinaryRow partition, int bucket) {
+        if (metricRegistry != null) {
+            return new CompactionMetrics(
+                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
+        }
+        return null;
+    }
+
+    private String getPartitionString(FileStorePathFactory pathFactory, BinaryRow partition) {
+        String partitionStr =
+                pathFactory.getPartitionString(partition).replace(Path.SEPARATOR, "_");
+        if (partitionStr.length() > 0) {
+            return partitionStr.substring(0, partitionStr.length() - 1);
+        }
+        return "_";
     }
 
     private List<DataFileMeta> scanExistingFileMetas(

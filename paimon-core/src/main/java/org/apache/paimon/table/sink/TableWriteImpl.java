@@ -26,6 +26,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.utils.Restorable;
@@ -144,6 +145,12 @@ public class TableWriteImpl<T>
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);
+    }
+
+    @Override
+    public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
+        write.withMetricRegistry(metricRegistry);
+        return this;
     }
 
     /**

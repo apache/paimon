@@ -50,6 +50,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -101,8 +102,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
-            KeyValueFieldsExtractor extractor) {
-        super(commitUser, snapshotManager, scan, options, indexFactory);
+            KeyValueFieldsExtractor extractor,
+            String tableName) {
+        super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -161,7 +163,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         ? new LookupCompaction(universalCompaction)
                         : universalCompaction;
         CompactManager compactManager =
-                createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
+                createCompactManager(
+                        partition,
+                        bucket,
+                        compactStrategy,
+                        compactExecutor,
+                        levels,
+                        getCompactionMetrics(partition, bucket));
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -186,7 +194,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             int bucket,
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
-            Levels levels) {
+            Levels levels,
+            @Nullable CompactionMetrics metrics) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
@@ -199,7 +208,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     keyComparator,
                     options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
-                    rewriter);
+                    rewriter,
+                    metrics);
         }
     }
 
