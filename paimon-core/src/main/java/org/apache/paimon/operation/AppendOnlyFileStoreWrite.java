@@ -166,7 +166,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                                 .withBucket(bucket)
                                                 .withDataFiles(toCompact)
                                                 .build())));
-                rewriter.close();
                 return rewriter.result();
             }
         };
