@@ -143,29 +143,22 @@ public abstract class AbstractFileStoreWrite<T>
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        long latestCommittedIdentifier;
-        if (writers.values().stream()
-                        .map(Map::values)
-                        .flatMap(Collection::stream)
-                        .mapToLong(w -> w.lastModifiedCommitIdentifier)
-                        .max()
-                        .orElse(Long.MIN_VALUE)
-                == Long.MIN_VALUE) {
-            // Optimization for the first commit.
-            //
-            // If this is the first commit, no writer has previous modified commit, so the value of
-            // `latestCommittedIdentifier` does not matter.
-            //
-            // Without this optimization, we may need to scan through all snapshots only to find
-            // that there is no previous snapshot by this user, which is very inefficient.
-            latestCommittedIdentifier = Long.MIN_VALUE;
-        } else {
-            latestCommittedIdentifier =
-                    snapshotManager
-                            .latestSnapshotOfUser(commitUser)
-                            .map(Snapshot::commitIdentifier)
-                            .orElse(Long.MIN_VALUE);
-        }
+        // Optimization for the first commit.
+        //
+        // If this is the first commit, no writer has previous modified commit, so the value of
+        // `latestCommittedIdentifier` does not matter.
+        //
+        // Without this optimization, we may need to scan through all snapshots only to find
+        // that there is no previous snapshot by this user, which is very inefficient.
+        long latestCommittedIdentifier =
+                writers.values().stream()
+                                .flatMap(map -> map.values().stream())
+                                .anyMatch(w -> w.lastModifiedCommitIdentifier != Long.MIN_VALUE)
+                        ? snapshotManager
+                                .latestSnapshotOfUser(commitUser)
+                                .map(Snapshot::commitIdentifier)
+                                .orElse(Long.MIN_VALUE)
+                        : Long.MIN_VALUE;
 
         List<CommitMessage> result = new ArrayList<>();
 
