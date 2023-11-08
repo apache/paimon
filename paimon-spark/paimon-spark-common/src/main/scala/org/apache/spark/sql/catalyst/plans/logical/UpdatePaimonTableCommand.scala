@@ -25,28 +25,27 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
-import org.apache.spark.sql.catalyst.analysis.AssignmentAlignmentHelper
-import org.apache.spark.sql.catalyst.expressions.{Alias, Expression}
+import org.apache.spark.sql.catalyst.analysis.{AssignmentAlignmentHelper, EliminateSubqueryAliases}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
-case class UpdatePaimonTableCommand(
-    relation: DataSourceV2Relation,
-    assignments: Seq[Assignment],
-    condition: Option[Expression])
+case class UpdatePaimonTableCommand(u: UpdateTable)
   extends LeafRunnableCommand
   with AssignmentAlignmentHelper {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
 
+    val relation = EliminateSubqueryAliases(u.table).asInstanceOf[DataSourceV2Relation]
+
     val updatedExprs: Seq[Alias] =
-      alignUpdateAssignments(relation.output, assignments).zip(relation.output).map {
+      alignUpdateAssignments(relation.output, u.assignments).zip(relation.output).map {
         case (expr, attr) => Alias(expr, attr.name)()
       }
 
-    val updatedPlan = Project(updatedExprs, Filter(condition.getOrElse(TrueLiteral), relation))
+    val updatedPlan = Project(updatedExprs, Filter(u.condition.getOrElse(TrueLiteral), relation))
 
     val df = Dataset
       .ofRows(sparkSession, updatedPlan)

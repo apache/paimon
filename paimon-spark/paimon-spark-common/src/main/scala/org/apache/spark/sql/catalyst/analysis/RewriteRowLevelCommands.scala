@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.optimizer
+package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.CoreOptions.MERGE_ENGINE
 import org.apache.paimon.options.Options
@@ -35,26 +35,25 @@ import java.util
 object RewriteRowLevelCommands extends Rule[LogicalPlan] with PredicateHelper {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
-    case d @ DeleteFromTable(r: DataSourceV2Relation, condition) =>
-      validateRowLevelOp(Delete, r.table.asInstanceOf[SparkTable].getTable, Option.empty)
-      if (canDeleteWhere(r, condition)) {
+    case d @ DeleteFromTable(ResolvesToPaimonTable(table), condition) =>
+      validateRowLevelOp(Delete, table.getTable, Option.empty)
+      if (canDeleteWhere(d, table, condition)) {
         d
       } else {
-        DeleteFromPaimonTableCommand(r, condition)
+        DeleteFromPaimonTableCommand(d)
       }
 
-    case UpdateTable(
-          r: DataSourceV2Relation,
-          assignments: Seq[Assignment],
-          condition: Option[Expression]) =>
-      validateRowLevelOp(
-        Update,
-        r.table.asInstanceOf[SparkTable].getTable,
-        Option.apply(assignments))
-      UpdatePaimonTableCommand(
-        r: DataSourceV2Relation,
-        assignments: Seq[Assignment],
-        condition: Option[Expression])
+    case u @ UpdateTable(ResolvesToPaimonTable(table), assignments, _) =>
+      validateRowLevelOp(Update, table.getTable, Option.apply(assignments))
+      UpdatePaimonTableCommand(u)
+  }
+
+  private object ResolvesToPaimonTable {
+    def unapply(plan: LogicalPlan): Option[SparkTable] =
+      EliminateSubqueryAliases(plan) match {
+        case DataSourceV2Relation(table: SparkTable, _, _, _, _) => Some(table)
+        case _ => None
+      }
   }
 
   private def validateRowLevelOp(
@@ -80,13 +79,16 @@ object RewriteRowLevelCommands extends Rule[LogicalPlan] with PredicateHelper {
     }
   }
 
-  private def canDeleteWhere(relation: DataSourceV2Relation, condition: Expression): Boolean = {
-    relation.table match {
+  private def canDeleteWhere(
+      d: DeleteFromTable,
+      table: SparkTable,
+      condition: Expression): Boolean = {
+    table match {
       case t: SupportsDelete if !SubqueryExpression.hasSubquery(condition) =>
         // fail if any filter cannot be converted.
         // correctness depends on removing all matching data.
         val filters = DataSourceStrategy
-          .normalizeExprs(Seq(condition), relation.output)
+          .normalizeExprs(Seq(condition), d.output)
           .flatMap(splitConjunctivePredicates(_).map {
             f =>
               DataSourceStrategy

@@ -25,20 +25,23 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
-case class DeleteFromPaimonTableCommand(relation: DataSourceV2Relation, condition: Expression)
-  extends LeafRunnableCommand {
+case class DeleteFromPaimonTableCommand(d: DeleteFromTable) extends LeafRunnableCommand {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
+    val relation = EliminateSubqueryAliases(d.table).asInstanceOf[DataSourceV2Relation]
+    val condition = d.condition
+
     val filteredPlan = if (condition != null) {
       Filter(condition, relation)
     } else {
       relation
     }
+
     val df = Dataset
       .ofRows(sparkSession, filteredPlan)
       .withColumn(ROW_KIND_COL, lit(RowKind.DELETE.toByteValue))
