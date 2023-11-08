@@ -147,7 +147,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             if (toCompact.isEmpty()) {
                 return Collections.emptyList();
             }
-            try (RowDataRollingFileWriter rewriter =
+            RowDataRollingFileWriter rewriter =
                     new RowDataRollingFileWriter(
                             fileIO,
                             schemaId,
@@ -157,7 +157,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
-                            statsCollectors)) {
+                            statsCollectors);
+            try {
                 rewriter.write(
                         new RecordReaderIterator<>(
                                 read.createReader(
@@ -166,8 +167,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                                 .withBucket(bucket)
                                                 .withDataFiles(toCompact)
                                                 .build())));
-                return rewriter.result();
+            } finally {
+                rewriter.close();
             }
+            return rewriter.result();
         };
     }
 
