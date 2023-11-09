@@ -133,13 +133,13 @@ public class FlinkSourceBuilder {
             List<String> dynamicPartitionFilteringFields) {
         if (dynamicPartitionFilteringFields != null && !dynamicPartitionFilteringFields.isEmpty()) {
             checkState(
-                    table instanceof AbstractFileStoreTable,
-                    "Only Paimon AbstractFileStoreTable supports dynamic filtering but get %s.",
+                    table instanceof FileStoreTable,
+                    "Only Paimon FileStoreTable supports dynamic filtering but get %s.",
                     table.getClass().getName());
 
             this.dynamicPartitionFilteringInfo =
                     new DynamicPartitionFilteringInfo(
-                            ((AbstractFileStoreTable) table).logicPartitionType(),
+                            ((FileStoreTable) table).schema().logicPartitionType(),
                             dynamicPartitionFilteringFields);
         }
         return this;
