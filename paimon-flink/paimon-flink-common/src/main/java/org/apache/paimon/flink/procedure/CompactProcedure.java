@@ -20,9 +20,9 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
+import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
@@ -83,7 +83,7 @@ public class CompactProcedure extends ProcedureBase {
         Map<String, String> tableConf =
                 StringUtils.isBlank(tableOptions)
                         ? Collections.emptyMap()
-                        : ActionFactory.parseCommaSeparatedKeyValues(tableOptions);
+                        : ParameterUtils.parseCommaSeparatedKeyValues(tableOptions);
         Identifier identifier = Identifier.fromString(tableId);
         CompactAction action;
         String jobName;
@@ -113,7 +113,7 @@ public class CompactProcedure extends ProcedureBase {
         }
 
         if (!(StringUtils.isBlank(partitions) || "ALL".equals(partitions))) {
-            action.withPartitions(getPartitions(partitions.split(";")));
+            action.withPartitions(ParameterUtils.getPartitions(partitions.split(";")));
         }
 
         return execute(procedureContext, action, jobName);

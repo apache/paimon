@@ -15,35 +15,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
 
-import org.apache.spark.sql.{SaveMode => SparkSaveMode}
-import org.apache.spark.sql.sources.{AlwaysTrue, Filter}
+package org.apache.paimon.spark.sort;
 
-sealed trait SaveMode extends Serializable
+import org.apache.paimon.table.FileStoreTable;
 
-object InsertInto extends SaveMode
+import org.apache.spark.sql.Column;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
 
-case class Overwrite(filters: Option[Filter]) extends SaveMode
+import java.util.List;
 
-object DynamicOverWrite extends SaveMode
+/** Order sort by alphabetical order. */
+public class OrderSorter extends TableSorter {
 
-object ErrorIfExists extends SaveMode
-
-object Ignore extends SaveMode
-
-object SaveMode {
-  def transform(saveMode: SparkSaveMode): SaveMode = {
-    saveMode match {
-      case SparkSaveMode.Overwrite => Overwrite(Some(AlwaysTrue))
-      case SparkSaveMode.Ignore => Ignore
-      case SparkSaveMode.Append => InsertInto
-      case SparkSaveMode.ErrorIfExists => ErrorIfExists
+    public OrderSorter(FileStoreTable table, List<String> orderColNames) {
+        super(table, orderColNames);
     }
-  }
 
-  // for java
-  def dynamic(): SaveMode = {
-    DynamicOverWrite
-  }
+    @Override
+    public Dataset<Row> sort(Dataset<Row> input) {
+        Column[] sortColumns = orderColNames.stream().map(input::col).toArray(Column[]::new);
+        return input.repartitionByRange(sortColumns).sort(sortColumns);
+    }
 }
