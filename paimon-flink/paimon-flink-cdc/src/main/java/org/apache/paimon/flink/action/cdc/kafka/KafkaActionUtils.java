@@ -291,10 +291,14 @@ public class KafkaActionUtils {
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
+        // the return may be null in older versions of the Kafka client
         List<PartitionInfo> partitionInfos = consumer.partitionsFor(topic);
-        if (partitionInfos.isEmpty()) {
+        if (partitionInfos == null || partitionInfos.isEmpty()) {
             throw new IllegalArgumentException(
-                    "Failed to find partition information for topic " + topic);
+                    String.format(
+                            "Failed to find partition information for topic '%s'. Please check your "
+                                    + "'topic' and 'bootstrap.servers' config.",
+                            topic));
         }
         int firstPartition =
                 partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
