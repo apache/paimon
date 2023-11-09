@@ -27,6 +27,7 @@ import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -73,7 +74,8 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             boolean waitCompaction,
             int deltaCommits,
             boolean isStreaming,
-            @Nullable MemorySegmentPool memoryPool) {
+            @Nullable MemorySegmentPool memoryPool,
+            MetricGroup metricGroup) {
         super(
                 table,
                 commitUser,
@@ -82,7 +84,8 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 ignorePreviousFiles,
                 waitCompaction,
                 isStreaming,
-                memoryPool);
+                memoryPool,
+                metricGroup);
 
         this.deltaCommits = deltaCommits;
 

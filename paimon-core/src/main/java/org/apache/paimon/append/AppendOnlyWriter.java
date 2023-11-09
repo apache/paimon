@@ -34,6 +34,7 @@ import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -74,6 +75,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
+    private WriterMetrics writerMetrics;
+
     public AppendOnlyWriter(
             FileIO fileIO,
             IOManager ioManager,
@@ -89,7 +92,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors,
+            WriterMetrics writerMetrics) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -114,10 +118,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
+        this.writerMetrics = writerMetrics;
     }
 
     @Override
     public void write(InternalRow rowData) throws Exception {
+        long start = System.currentTimeMillis();
         Preconditions.checkArgument(
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
@@ -132,6 +138,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 // code in SpillableBuffer.)
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
+        }
+
+        if (writerMetrics != null) {
+            writerMetrics.incWriteRecordNum();
+            writerMetrics.updateWriteCostMS(System.currentTimeMillis() - start);
         }
     }
 
@@ -152,13 +163,19 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
+        long start = System.currentTimeMillis();
         flush(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
-        return drainIncrement();
+        CommitIncrement increment = drainIncrement();
+        if (writerMetrics != null) {
+            writerMetrics.updatePrepareCommitCostMS(System.currentTimeMillis() - start);
+        }
+        return increment;
     }
 
     private void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
+        long start = System.currentTimeMillis();
         List<DataFileMeta> flushedFiles = sinkWriter.flush();
 
         // add new generated files
@@ -166,6 +183,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         trySyncLatestCompaction(waitForLatestCompaction);
         compactManager.triggerCompaction(forcedFullCompaction);
         newFiles.addAll(flushedFiles);
+        if (writerMetrics != null) {
+            writerMetrics.updateBufferFlushCostMS(System.currentTimeMillis() - start);
+        }
     }
 
     @Override
@@ -204,6 +224,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     private void trySyncLatestCompaction(boolean blocking)
             throws ExecutionException, InterruptedException {
+        long start = System.currentTimeMillis();
         compactManager
                 .getCompactionResult(blocking)
                 .ifPresent(
@@ -211,6 +232,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
                         });
+        writerMetrics.updateSyncLastestCompactionCostMS(System.currentTimeMillis() - start);
     }
 
     private CommitIncrement drainIncrement() {

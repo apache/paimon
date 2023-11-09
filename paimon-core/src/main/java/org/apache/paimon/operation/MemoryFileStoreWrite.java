@@ -24,6 +24,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -51,7 +52,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
 
     private final CoreOptions options;
     protected final CacheManager cacheManager;
-    private MemoryPoolFactory writeBufferPool;
+    protected MemoryPoolFactory writeBufferPool;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -113,5 +114,14 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                             .addOwners(this::memoryOwners);
         }
         writeBufferPool.notifyNewOwner((MemoryOwner) writer);
+    }
+
+    protected void registerMemoryPoolMetric(WriterMetrics writerMetrics) {
+        if (writeBufferPool != null && writerMetrics != null) {
+            MemoryPoolFactory.BufferStat bufferStat = writeBufferPool.bufferStat();
+            writerMetrics.setMemoryPreemptCount(bufferStat::bufferPreemptCount);
+            writerMetrics.setUsedWriteBufferSize(bufferStat::usedBufferSize);
+            writerMetrics.setTotaldWriteBufferSize(bufferStat::totalBufferSize);
+        }
     }
 }

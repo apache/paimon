@@ -37,9 +37,13 @@ public class MemoryPoolFactory {
 
     private Iterable<MemoryOwner> owners;
 
+    private final long totalBufferSize;
+    private long bufferPreemptCount;
+
     public MemoryPoolFactory(MemorySegmentPool innerPool) {
         this.innerPool = innerPool;
         this.totalPages = innerPool.freePages();
+        this.totalBufferSize = (long) totalPages * innerPool.pageSize();
     }
 
     public MemoryPoolFactory addOwners(Iterable<MemoryOwner> newOwners) {
@@ -81,9 +85,35 @@ public class MemoryPoolFactory {
         if (max != null) {
             try {
                 max.flushMemory();
+                ++bufferPreemptCount;
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
+        }
+    }
+
+    public BufferStat bufferStat() {
+        return new BufferStat();
+    }
+
+    /** stat for buffer metric. */
+    public class BufferStat {
+        public long bufferPreemptCount() {
+            return bufferPreemptCount;
+        }
+
+        public long usedBufferSize() {
+            long usedBufferSize = 0L;
+            if (owners != null) {
+                for (MemoryOwner owner : owners) {
+                    usedBufferSize += owner.memoryOccupancy();
+                }
+            }
+            return usedBufferSize;
+        }
+
+        public long totalBufferSize() {
+            return totalBufferSize;
         }
     }
 

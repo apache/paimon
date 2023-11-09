@@ -197,6 +197,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             sequenceNumber,
                             record.row().getRowKind(),
                             record.row());
-                });
+                },
+                name());
     }
 }

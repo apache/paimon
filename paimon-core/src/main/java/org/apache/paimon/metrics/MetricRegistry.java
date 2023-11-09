@@ -27,10 +27,18 @@ public abstract class MetricRegistry {
     private static final String KEY_TABLE = "table";
     private static final String KEY_PARTITION = "partition";
     private static final String KEY_BUCKET = "bucket";
+    private static final String COMMIT_USER = "commit_user";
 
     public MetricGroup tableMetricGroup(String groupName, String tableName) {
+        return tableMetricGroup(groupName, tableName, null);
+    }
+
+    public MetricGroup tableMetricGroup(String groupName, String tableName, String commitUser) {
         Map<String, String> variables = new LinkedHashMap<>();
         variables.put(KEY_TABLE, tableName);
+        if (commitUser != null) {
+            variables.put(COMMIT_USER, commitUser);
+        }
 
         return createMetricGroup(groupName, variables);
     }
