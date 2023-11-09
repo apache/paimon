@@ -277,7 +277,7 @@ This is of great help in replacing log deduplication in streaming computation.
 
 ## Changelog Producers
 
-Streaming queries will continuously produce the latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
+Streaming queries will continuously produce the latest changes.
 
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
 
