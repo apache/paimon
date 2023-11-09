@@ -159,15 +159,18 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors);
-            rewriter.write(
-                    new RecordReaderIterator<>(
-                            read.createReader(
-                                    DataSplit.builder()
-                                            .withPartition(partition)
-                                            .withBucket(bucket)
-                                            .withDataFiles(toCompact)
-                                            .build())));
-            rewriter.close();
+            try {
+                rewriter.write(
+                        new RecordReaderIterator<>(
+                                read.createReader(
+                                        DataSplit.builder()
+                                                .withPartition(partition)
+                                                .withBucket(bucket)
+                                                .withDataFiles(toCompact)
+                                                .build())));
+            } finally {
+                rewriter.close();
+            }
             return rewriter.result();
         };
     }
