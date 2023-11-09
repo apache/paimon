@@ -20,6 +20,8 @@ package org.apache.paimon.flink.utils;
 
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.WatermarkSpec;
+import org.apache.flink.table.catalog.Column;
+import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.table.types.utils.TypeConversions;
@@ -73,6 +75,38 @@ public class FlinkCatalogPropertiesUtil {
         return serialized;
     }
 
+    /** Serialize non-physical columns of new api. */
+    public static Map<String, String> serializeNonPhysicalNewColumns(ResolvedSchema schema) {
+        List<Column> nonPhysicalColumns =
+                schema.getColumns().stream()
+                        .filter(k -> !k.isPhysical())
+                        .collect(Collectors.toList());
+        Map<String, String> serialized = new HashMap<>();
+        List<String> columnNames = schema.getColumnNames();
+        for (Column c : nonPhysicalColumns) {
+            int index = columnNames.indexOf(c.getName());
+            serialized.put(compoundKey(SCHEMA, index, NAME), c.getName());
+            serialized.put(
+                    compoundKey(SCHEMA, index, DATA_TYPE),
+                    c.getDataType().getLogicalType().asSerializableString());
+            if (c instanceof Column.ComputedColumn) {
+                Column.ComputedColumn computedColumn = (Column.ComputedColumn) c;
+                serialized.put(
+                        compoundKey(SCHEMA, index, EXPR),
+                        computedColumn.getExpression().asSerializableString());
+            } else {
+                Column.MetadataColumn metadataColumn = (Column.MetadataColumn) c;
+                serialized.put(
+                        compoundKey(SCHEMA, index, METADATA),
+                        metadataColumn.getMetadataKey().orElse(metadataColumn.getName()));
+                serialized.put(
+                        compoundKey(SCHEMA, index, VIRTUAL),
+                        Boolean.toString(metadataColumn.isVirtual()));
+            }
+        }
+        return serialized;
+    }
+
     public static Map<String, String> serializeWatermarkSpec(WatermarkSpec watermarkSpec) {
         Map<String, String> serializedWatermarkSpec = new HashMap<>();
         String watermarkPrefix = compoundKey(SCHEMA, WATERMARK, 0);
@@ -101,6 +135,23 @@ public class FlinkCatalogPropertiesUtil {
         }
 
         return count;
+    }
+
+    public static Map<String, Integer> nonPhysicalColumns(
+            Map<String, String> tableOptions, List<String> physicalColumns) {
+        Map<String, Integer> nonPhysicalColumnIndex = new HashMap<>();
+        for (Map.Entry<String, String> entry : tableOptions.entrySet()) {
+            if (isColumnNameKey(entry.getKey()) && !physicalColumns.contains(entry.getValue())) {
+                String key = entry.getKey();
+                int index =
+                        Integer.parseInt(
+                                key.substring(
+                                        SCHEMA.length() + 1,
+                                        key.indexOf(".", SCHEMA.length() + 1)));
+                nonPhysicalColumnIndex.put(entry.getValue(), index);
+            }
+        }
+        return nonPhysicalColumnIndex;
     }
 
     private static boolean isColumnNameKey(String key) {
