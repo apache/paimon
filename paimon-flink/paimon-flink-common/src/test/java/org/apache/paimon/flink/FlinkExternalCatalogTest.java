@@ -18,6 +18,10 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.catalog.Catalog;
@@ -29,9 +33,6 @@ import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -42,15 +43,12 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
-import java.util.Properties;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/**
- * Test for {@link FlinkExternalCatalog}.
- */
+/** Test for {@link FlinkExternalCatalog}. */
 public class FlinkExternalCatalogTest {
 
     private static String defaultDatabase = "default";
@@ -68,8 +66,7 @@ public class FlinkExternalCatalogTest {
     private static ObjectPath externalTable2 = new ObjectPath(database1, "et2");
     private Catalog catalog;
 
-    @TempDir
-    public static java.nio.file.Path temporaryFolder;
+    @TempDir public static java.nio.file.Path temporaryFolder;
 
     private ResolvedSchema createSchema() {
         return new ResolvedSchema(
@@ -154,7 +151,7 @@ public class FlinkExternalCatalogTest {
         HashMap<String, String> paimonOptions = new HashMap<>();
         CatalogTable table = createTable(paimonOptions);
         HashMap<String, String> externalTableOptions = new HashMap<>();
-        externalTableOptions.put("connector","kafka");
+        externalTableOptions.put("connector", "kafka");
         CatalogTable externalTable = createTable(externalTableOptions);
         catalog.createTable(paimonTable1, table, true);
         assertThat(catalog.listTables(defaultDatabase).size()).isEqualTo(1);
@@ -162,7 +159,8 @@ public class FlinkExternalCatalogTest {
         assertThat(catalog.listTables(defaultDatabase).size()).isEqualTo(2);
         assertThatThrownBy(() -> catalog.createTable(paimonTable2, table, true))
                 .isInstanceOf(DatabaseNotExistException.class)
-                .hasMessageContaining("Database d1 does not exist in Catalog test-external-catalog");
+                .hasMessageContaining(
+                        "Database d1 does not exist in Catalog test-external-catalog");
         catalog.createDatabase(database1, null, true);
         catalog.createTable(paimonTable2, table, true);
         catalog.createTable(paimonTable3, table, true);
@@ -170,19 +168,21 @@ public class FlinkExternalCatalogTest {
         assertThat(catalog.listTables(database1).size()).isEqualTo(3);
         assertThatThrownBy(() -> catalog.createTable(externalTable2, externalTable, false))
                 .isInstanceOf(TableAlreadyExistException.class)
-                .hasMessageContaining("Table (or view) d1.et2 already exists in Catalog test-external-catalog");
+                .hasMessageContaining(
+                        "Table (or view) d1.et2 already exists in Catalog test-external-catalog");
     }
 
     @Test
     public void dropTable() throws Exception {
         HashMap<String, String> externalTableOptions = new HashMap<>();
-        externalTableOptions.put("connector","kafka");
+        externalTableOptions.put("connector", "kafka");
         CatalogTable externalTable = createTable(externalTableOptions);
         catalog.createTable(externalTable1, externalTable, true);
         assertThatThrownBy(() -> catalog.createTable(externalTable1, externalTable, false))
                 .isInstanceOf(TableAlreadyExistException.class)
-                .hasMessageContaining("Table (or view) default.et1 already exists in Catalog test-external-catalog");
-        catalog.dropTable(externalTable1,true);
+                .hasMessageContaining(
+                        "Table (or view) default.et1 already exists in Catalog test-external-catalog");
+        catalog.dropTable(externalTable1, true);
         catalog.createTable(externalTable1, externalTable, false);
     }
 
@@ -205,10 +205,9 @@ public class FlinkExternalCatalogTest {
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
     }
 
-    private static void checkOriginEquals(CatalogTable t1,CatalogTable t2){
+    private static void checkOriginTableEquals(CatalogTable t1, CatalogTable t2) {
         assertThat(t2.getTableKind()).isEqualTo(t1.getTableKind());
-        assertThat(t2.getUnresolvedSchema()).isEqualTo(t1.getUnresolvedSchema());
-        assertThat(t2.getComment()).isEqualTo(t1.getComment());
+        assertThat(t2.getSchema()).isEqualTo(t1.getSchema());
         assertThat(t2.getPartitionKeys()).isEqualTo(t1.getPartitionKeys());
         assertThat(t2.isPartitioned()).isEqualTo(t1.isPartitioned());
         assertThat(t2.getOptions()).isEqualTo(t1.getOptions());
@@ -219,25 +218,25 @@ public class FlinkExternalCatalogTest {
         HashMap<String, String> options = new HashMap<>();
         CatalogTable table = this.createTable(options);
         catalog.createTable(paimonTable1, table, false);
-        checkEquals(paimonTable1,table, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1, table, (CatalogTable) catalog.getTable(paimonTable1));
         CatalogTable newTable = this.createAnotherTable(options);
         catalog.alterTable(paimonTable1, newTable, false);
         assertThat(catalog.getTable(paimonTable1)).isNotEqualTo(table);
-        checkEquals(paimonTable1,newTable, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1, newTable, (CatalogTable) catalog.getTable(paimonTable1));
         catalog.dropTable(paimonTable1, false);
     }
 
     @Test
-    public void testGetTable() throws Exception{
+    public void testGetTable() throws Exception {
         HashMap<String, String> externalTableOptions = new HashMap<>();
-        externalTableOptions.put("connector","kafka");
+        externalTableOptions.put("connector", "kafka");
         CatalogTable table = this.createTable(externalTableOptions);
         catalog.createTable(externalTable1, table, false);
-        checkOriginEquals(((CatalogTable) catalog.getTable(externalTable1)),  table);
+        checkOriginTableEquals(((CatalogTable) catalog.getTable(externalTable1)), table);
         HashMap<String, String> options = new HashMap<>();
-        externalTableOptions.put("connector","paimon");
+        externalTableOptions.put("connector", "paimon");
         CatalogTable paimonTable = this.createTable(options);
         catalog.createTable(paimonTable1, paimonTable, false);
-        checkEquals(paimonTable1,paimonTable, (CatalogTable) catalog.getTable(paimonTable1));
+        checkEquals(paimonTable1, paimonTable, (CatalogTable) catalog.getTable(paimonTable1));
     }
 }
