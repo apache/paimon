@@ -95,4 +95,8 @@ public abstract class FlinkTableSource {
     public abstract FlinkTableSource copy();
 
     public abstract String asSummaryString();
+
+    public abstract List<String> listAcceptedFilterFields();
+
+    public abstract void applyDynamicFiltering(List<String> candidateFilterFields);
 }

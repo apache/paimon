@@ -54,6 +54,7 @@ import org.apache.flink.table.plan.stats.TableStats;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Collections;
 import java.util.List;
 import java.util.stream.IntStream;
 
@@ -69,6 +70,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
 import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Table source to create {@link StaticFileStoreSource} or {@link ContinuousFileStoreSource} under
@@ -84,13 +86,15 @@ public class DataTableSource extends FlinkTableSource {
                     "%s%s", PAIMON_PREFIX, FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key());
 
     private final ObjectIdentifier tableIdentifier;
-    protected final boolean streaming;
+    private final boolean streaming;
     private final DynamicTableFactory.Context context;
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
 
-    protected SplitStatistics splitStatistics;
+    private SplitStatistics splitStatistics;
+
+    @Nullable private List<String> dynamicPartitionFilteringFields;
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -107,6 +111,7 @@ public class DataTableSource extends FlinkTableSource {
                 null,
                 null,
                 null,
+                null,
                 null);
     }
 
@@ -119,7 +124,8 @@ public class DataTableSource extends FlinkTableSource {
             @Nullable Predicate predicate,
             @Nullable int[][] projectFields,
             @Nullable Long limit,
-            @Nullable WatermarkStrategy<RowData> watermarkStrategy) {
+            @Nullable WatermarkStrategy<RowData> watermarkStrategy,
+            @Nullable List<String> dynamicPartitionFilteringFields) {
         super(table, predicate, projectFields, limit);
         this.tableIdentifier = tableIdentifier;
         this.streaming = streaming;
@@ -129,6 +135,7 @@ public class DataTableSource extends FlinkTableSource {
         this.projectFields = projectFields;
         this.limit = limit;
         this.watermarkStrategy = watermarkStrategy;
+        this.dynamicPartitionFilteringFields = dynamicPartitionFilteringFields;
     }
 
     @Override
@@ -213,7 +220,8 @@ public class DataTableSource extends FlinkTableSource {
                         .withProjection(projectFields)
                         .withPredicate(predicate)
                         .withLimit(limit)
-                        .withWatermarkStrategy(watermarkStrategy);
+                        .withWatermarkStrategy(watermarkStrategy)
+                        .withDynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
 
         return new PaimonDataStreamScanProvider(
                 !streaming, env -> configureSource(sourceBuilder, env));
@@ -271,7 +279,8 @@ public class DataTableSource extends FlinkTableSource {
                 predicate,
                 projectFields,
                 limit,
-                watermarkStrategy);
+                watermarkStrategy,
+                dynamicPartitionFilteringFields);
     }
 
     @Override
@@ -312,6 +321,27 @@ public class DataTableSource extends FlinkTableSource {
     @Override
     public String asSummaryString() {
         return "Paimon-DataSource";
+    }
+
+    @Override
+    public List<String> listAcceptedFilterFields() {
+        // note that streaming query doesn't support dynamic filtering
+        return streaming ? Collections.emptyList() : table.partitionKeys();
+    }
+
+    @Override
+    public void applyDynamicFiltering(List<String> candidateFilterFields) {
+        checkState(
+                !streaming,
+                "Cannot apply dynamic filtering to Paimon table '%s' when streaming reading.",
+                table.name());
+
+        checkState(
+                !table.partitionKeys().isEmpty(),
+                "Cannot apply dynamic filtering to non-partitioned Paimon table '%s'.",
+                table.name());
+
+        this.dynamicPartitionFilteringFields = candidateFilterFields;
     }
 
     /** Split statistics for inferring row count and parallelism size. */

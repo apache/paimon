@@ -43,25 +43,23 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
-import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
-public class ContinuousFileSplitEnumeratorTest {
+public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
 
     @Test
     public void testSplitAllocationIsOrdered() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 4; i++) {
@@ -113,8 +111,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSplitWithBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 18; i++) {
@@ -151,8 +148,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {
@@ -196,9 +192,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSnapshotEnumerator() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -266,8 +260,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorWithBucket() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(3);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(3, 1);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -309,11 +302,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorLot() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -372,11 +361,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorAssignLater() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -432,9 +417,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testEnumeratorDeregisteredByContext() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -473,9 +456,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testRemoveReadersAwaitSuccessful() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -506,9 +487,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testTriggerScanByTaskRequest() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -549,11 +528,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testNoTriggerWhenReadLatest() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -720,20 +695,6 @@ public class ContinuousFileSplitEnumeratorTest {
                 .map(FileStoreSourceSplit::split)
                 .map(split -> (DataSplit) split)
                 .collect(Collectors.toList());
-    }
-
-    public static FileStoreSourceSplit createSnapshotSplit(
-            int snapshotId, int bucket, List<DataFileMeta> files) {
-        return new FileStoreSourceSplit(
-                UUID.randomUUID().toString(),
-                DataSplit.builder()
-                        .withSnapshot(snapshotId)
-                        .withPartition(row(1))
-                        .withBucket(bucket)
-                        .withDataFiles(files)
-                        .isStreaming(true)
-                        .build(),
-                0);
     }
 
     private static DataSplit createDataSplit(

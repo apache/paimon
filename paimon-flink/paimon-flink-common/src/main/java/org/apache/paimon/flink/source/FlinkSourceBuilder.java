@@ -53,11 +53,13 @@ import org.apache.flink.table.types.logical.RowType;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.StreamingReadMode.FILE;
 import static org.apache.paimon.flink.LogicalTypeConversion.toLogicalType;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
  * Source builder to build a Flink {@link StaticFileStoreSource} or {@link
@@ -77,6 +79,7 @@ public class FlinkSourceBuilder {
     @Nullable private Integer parallelism;
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
+    @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
         this.tableIdentifier = tableIdentifier;
@@ -125,6 +128,22 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder withDynamicPartitionFilteringFields(
+            List<String> dynamicPartitionFilteringFields) {
+        if (dynamicPartitionFilteringFields != null && !dynamicPartitionFilteringFields.isEmpty()) {
+            checkState(
+                    table instanceof FileStoreTable,
+                    "Only Paimon FileStoreTable supports dynamic filtering but get %s.",
+                    table.getClass().getName());
+
+            this.dynamicPartitionFilteringInfo =
+                    new DynamicPartitionFilteringInfo(
+                            ((FileStoreTable) table).schema().logicalPartitionType(),
+                            dynamicPartitionFilteringFields);
+        }
+        return this;
+    }
+
     private ReadBuilder createReadBuilder() {
         return table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
     }
@@ -136,7 +155,8 @@ public class FlinkSourceBuilder {
                         createReadBuilder(),
                         limit,
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
-                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE)));
+                        options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
+                        dynamicPartitionFilteringInfo));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {

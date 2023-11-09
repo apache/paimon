@@ -471,4 +471,38 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                 "T1");
         assertThat(batchSql("SELECT * FROM T1").size()).isEqualTo(2);
     }
+
+    @Test
+    public void testDynamicPartitionPruningNotWork() throws Exception {
+        // dim table
+        sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
+        sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
+
+        // partitioned fact table
+        sql(
+                "CREATE TABLE fact (a INT, b BIGINT, c STRING, p INT, `proctime` AS PROCTIME(), PRIMARY KEY (a, p) NOT ENFORCED) PARTITIONED BY (p)\n");
+        sql(
+                "INSERT INTO fact PARTITION (p = 1) VALUES (10, 100, 'aaa'), (11, 101, 'bbb'), (12, 102, 'ccc')");
+        sql(
+                "INSERT INTO fact PARTITION (p = 2) VALUES (20, 200, 'aaa'), (21, 201, 'bbb'), (22, 202, 'ccc')");
+        sql(
+                "INSERT INTO fact PARTITION (p = 3) VALUES (30, 300, 'aaa'), (31, 301, 'bbb'), (32, 302, 'ccc')");
+
+        String joinSql = "SELECT a, b, c, p, x, y FROM fact INNER JOIN dim ON x = p and z = 1";
+
+        // check dynamic partition pruning isn't working
+        assertThat(sEnv.explainSql(joinSql)).doesNotContain("DynamicFilteringDataCollector");
+
+        // check results
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(streamSqlIter(joinSql));
+        assertThat(iterator.collect(6))
+                .containsExactlyInAnyOrder(
+                        Row.of(10, 100L, "aaa", 1, 1, "a"),
+                        Row.of(11, 101L, "bbb", 1, 1, "a"),
+                        Row.of(12, 102L, "ccc", 1, 1, "a"),
+                        Row.of(20, 200L, "aaa", 2, 2, "b"),
+                        Row.of(21, 201L, "bbb", 2, 2, "b"),
+                        Row.of(22, 202L, "ccc", 2, 2, "b"));
+        iterator.close();
+    }
 }
