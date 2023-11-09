@@ -232,12 +232,20 @@ INSERT OVERWRITE MyTable SELECT ...
 
 {{< tabs "truncate-tables-syntax" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink 1.17-" >}}
 
 You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
 
 ```sql
 INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false;
+```
+
+{{< /tab >}}
+
+{{< tab "Flink 1.18" >}}
+
+```sql
+TRUNCATE TABLE MyTable;
 ```
 
 {{< /tab >}}
