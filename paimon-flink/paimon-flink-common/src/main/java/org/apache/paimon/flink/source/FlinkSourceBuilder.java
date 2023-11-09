@@ -29,7 +29,6 @@ import org.apache.paimon.flink.source.operator.MonitorFunction;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -139,7 +138,7 @@ public class FlinkSourceBuilder {
 
             this.dynamicPartitionFilteringInfo =
                     new DynamicPartitionFilteringInfo(
-                            ((FileStoreTable) table).schema().logicPartitionType(),
+                            ((FileStoreTable) table).schema().logicalPartitionType(),
                             dynamicPartitionFilteringFields);
         }
         return this;

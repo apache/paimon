@@ -123,7 +123,7 @@ public class StaticFileStoreSplitEnumerator
         if (sourceEvent instanceof DynamicFilteringEvent) {
             DynamicFilteringData dynamicFilteringData =
                     ((DynamicFilteringEvent) sourceEvent).getData();
-            LOG.warn(
+            LOG.info(
                     "Received DynamicFilteringEvent: {}, is filtering: {}.",
                     subtaskId,
                     dynamicFilteringData.isFiltering());
