@@ -68,7 +68,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 
-/** Catalog for persisting external tables */
+/** Catalog for persisting external tables. */
 public class FlinkExternalCatalog extends AbstractCatalog {
 
     private final FlinkCatalog paimon;
