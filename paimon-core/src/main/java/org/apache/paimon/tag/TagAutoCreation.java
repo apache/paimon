@@ -81,7 +81,11 @@ public class TagAutoCreation {
     }
 
     public boolean forceCreatingSnapshot() {
-        return timeExtractor.forceCreatingSnapshot();
+        return timeExtractor.forceCreatingSnapshot()
+                && (nextTag == null
+                        || isAfterOrEqual(
+                                LocalDateTime.now().minus(delay),
+                                periodHandler.nextTagTime(nextTag)));
     }
 
     public void run() {
@@ -99,12 +103,6 @@ public class TagAutoCreation {
                 }
             }
         }
-    }
-
-    public boolean canProceedWithNextTag() {
-        LocalDateTime time = LocalDateTime.now();
-        return nextTag == null
-                || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag));
     }
 
     private void tryToTag(Snapshot snapshot) {

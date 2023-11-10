@@ -120,9 +120,7 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public boolean forceCreatingSnapshot() {
-        return tagAutoCreation != null
-                && tagAutoCreation.canProceedWithNextTag()
-                && tagAutoCreation.forceCreatingSnapshot();
+        return tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot();
     }
 
     @Override
