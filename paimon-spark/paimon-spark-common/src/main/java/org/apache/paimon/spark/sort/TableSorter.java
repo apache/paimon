@@ -78,7 +78,7 @@ public abstract class TableSorter {
         }
     }
 
-    // order type for sorting
+    /** order type for sorting. */
     public enum OrderType {
         ORDER("order"),
         ZORDER("zorder"),

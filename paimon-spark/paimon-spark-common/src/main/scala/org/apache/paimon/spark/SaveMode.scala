@@ -41,9 +41,4 @@ object SaveMode {
       case SparkSaveMode.ErrorIfExists => ErrorIfExists
     }
   }
-
-  // for java
-  def dynamic(): SaveMode = {
-    DynamicOverWrite
-  }
 }

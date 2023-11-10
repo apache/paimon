@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.spark.SaveMode;
+import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -130,7 +130,7 @@ public class CompactProcedure extends BaseProcedure {
         row = StringUtils.isBlank(filter) ? row : row.where(filter);
         new WriteIntoPaimonTable(
                         table,
-                        SaveMode.dynamic(),
+                        DynamicOverWrite$.MODULE$,
                         TableSorter.getSorter(table, sortType, sortColumns).sort(row),
                         new Options())
                 .run(spark());
