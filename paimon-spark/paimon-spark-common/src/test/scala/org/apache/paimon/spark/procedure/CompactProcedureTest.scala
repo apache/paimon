@@ -230,7 +230,6 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
           val query = () => spark.sql("SELECT * FROM T")
 
           try {
-            // test zorder sort
             inputData.addData((0, 0))
             inputData.addData((0, 1))
             inputData.addData((0, 2))
