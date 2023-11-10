@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.{Dataset, Row}
+import org.apache.spark.sql.SparkSession.setActiveSession
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
@@ -27,7 +28,7 @@ import org.assertj.core.api.Assertions
 import java.util
 
 /** Test sort compact procedure. */
-class SortCompactProcedureTest extends PaimonSparkTestBase with StreamTest {
+class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
 
@@ -54,6 +55,7 @@ class SortCompactProcedureTest extends PaimonSparkTestBase with StreamTest {
             .start()
 
           val query = () => spark.sql("SELECT * FROM T")
+          spark.sql("SET ")
 
           try {
             // test zorder sort
@@ -76,7 +78,9 @@ class SortCompactProcedureTest extends PaimonSparkTestBase with StreamTest {
             }
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
 
-            checkAnswer(spark.sql("CALL sort_compact('test.T', 'zorder', 'a,b')"), Row(true) :: Nil)
+            checkAnswer(
+              spark.sql("CALL paimon.sys.compact('T', 'zorder', 'a,b')"),
+              Row(true) :: Nil)
 
             // test order sort
             val result2 = new util.ArrayList[Row]()
@@ -92,7 +96,7 @@ class SortCompactProcedureTest extends PaimonSparkTestBase with StreamTest {
 
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
 
-            checkAnswer(spark.sql("CALL sort_compact('test.T', 'order', 'a,b')"), Row(true) :: Nil)
+            checkAnswer(spark.sql("CALL paimon.sys.compact('T', 'order', 'a,b')"), Row(true) :: Nil)
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
           } finally {
             stream.stop()
@@ -104,7 +108,7 @@ class SortCompactProcedureTest extends PaimonSparkTestBase with StreamTest {
   test("test to where") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
-    val where = SortCompactProcedure.toWhere(conditions)
+    val where = CompactProcedure.toWhere(conditions)
     val whereExpected =
       "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
 

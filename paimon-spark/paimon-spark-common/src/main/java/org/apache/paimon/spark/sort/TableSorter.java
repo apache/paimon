@@ -66,15 +66,24 @@ public abstract class TableSorter {
             case HILBERT:
                 // todo support hilbert curve
                 throw new IllegalArgumentException("Not supported yet.");
+            case NONE:
+                return new TableSorter(table, orderColumns) {
+                    @Override
+                    public Dataset<Row> sort(Dataset<Row> input) {
+                        return input;
+                    }
+                };
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
         }
     }
 
-    enum OrderType {
+    // order type for sorting
+    public enum OrderType {
         ORDER("order"),
         ZORDER("zorder"),
-        HILBERT("hilbert");
+        HILBERT("hilbert"),
+        NONE("none");
 
         private final String orderType;
 
@@ -88,12 +97,14 @@ public abstract class TableSorter {
         }
 
         public static OrderType of(String orderType) {
-            if (ORDER.orderType.equals(orderType)) {
+            if (ORDER.orderType.equalsIgnoreCase(orderType)) {
                 return ORDER;
-            } else if (ZORDER.orderType.equals(orderType)) {
+            } else if (ZORDER.orderType.equalsIgnoreCase(orderType)) {
                 return ZORDER;
-            } else if (HILBERT.orderType.equals(orderType)) {
+            } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
                 return HILBERT;
+            } else if (NONE.orderType.equalsIgnoreCase(orderType)) {
+                return NONE;
             }
 
             throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");

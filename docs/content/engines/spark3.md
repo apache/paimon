@@ -425,6 +425,29 @@ val query = spark.readStream
 */
 ```
 
+## Spark Procedure
+
+This section introduce all available spark procedures about paimon.
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 4%">Procedure Name</th>
+      <th class="text-left" style="width: 4%">Usage</th>
+      <th class="text-left" style="width: 20%">Explaination</th>
+      <th class="text-left" style="width: 4%">Example</th>
+    </tr>
+    </thead>
+    <tbody style="font-size: 12px; ">
+    <tr>
+      <td>sort_compact</td>
+      <td>CALL sort_compact('&ltdatabase_name&gt.&lttable_name&gt','&ltsort_type&gt','&ltcolumn1&gt[,column2]...' [,'&ltconditions&gt'])</td>
+      <td>database_name: the target database name<br>table_name: the target table name<br>sort_type: 'order' or 'zorder'<br><nobr>conditions: "," means "AND" ";" means "OR"</nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
+      <td><nobr>SET spark.sql.shuffle.partitions=10;</nobr> <nobr>CALL sort_compact('my_db.Orders1',</nobr> 'zorder', 'f1,f2',  'f0=0,f1=1;f0=1,f1=1')</td>
+    </tr>
+    </tbody>
+</table>
+
 ## Spark Type Conversion
 
 This section lists all supported type conversion between Spark and Paimon.

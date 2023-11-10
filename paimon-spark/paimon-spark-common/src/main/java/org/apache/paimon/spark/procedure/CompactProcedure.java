@@ -50,14 +50,14 @@ import java.util.Optional;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /** Sort compact procedure for sort unaware-bucket table. */
-public class SortCompactProcedure extends BaseProcedure {
+public class CompactProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.required("order_type", StringType),
-                ProcedureParameter.required("columns", StringType),
-                ProcedureParameter.optional("conditions", StringType),
+                ProcedureParameter.optional("partition", StringType),
+                ProcedureParameter.required("order-strategy", StringType),
+                ProcedureParameter.required("order-by", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -66,7 +66,7 @@ public class SortCompactProcedure extends BaseProcedure {
                         new StructField("result", DataTypes.BooleanType, true, Metadata.empty())
                     });
 
-    protected SortCompactProcedure(TableCatalog tableCatalog) {
+    protected CompactProcedure(TableCatalog tableCatalog) {
         super(tableCatalog);
     }
 
@@ -84,10 +84,10 @@ public class SortCompactProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Preconditions.checkArgument(args.numFields() >= 3);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String sortType = args.getString(1);
-        List<String> sortColumns = Arrays.asList(args.getString(2).split(","));
+        String sortType = args.getString(2);
+        List<String> sortColumns = Arrays.asList(args.getString(3).split(","));
 
-        String partitionFilter = args.isNullAt(3) ? null : toWhere(args.getString(3));
+        String partitionFilter = args.isNullAt(1) ? null : toWhere(args.getString(1));
 
         return modifyPaimonTable(
                 tableIdent,
@@ -116,9 +116,14 @@ public class SortCompactProcedure extends BaseProcedure {
             @Nullable String filter) {
         CoreOptions coreOptions = table.store().options();
 
-        if (!(table instanceof AppendOnlyFileStoreTable) || coreOptions.bucket() != -1) {
-            throw new UnsupportedOperationException(
-                    "Spark sort compact only support unaware-bucket append-only table yet.");
+        // sort only works with bucket=-1 yet
+        if (!TableSorter.OrderType.of(sortType).equals(TableSorter.OrderType.NONE)) {
+            if (!(table instanceof AppendOnlyFileStoreTable) || coreOptions.bucket() != -1) {
+                throw new UnsupportedOperationException(
+                        "Spark compact with sort_type "
+                                + sortType
+                                + " only support unaware-bucket append-only table yet.");
+            }
         }
 
         Dataset<Row> row = spark().read().format("paimon").load(coreOptions.path().getPath());
@@ -154,10 +159,10 @@ public class SortCompactProcedure extends BaseProcedure {
     }
 
     public static ProcedureBuilder builder() {
-        return new BaseProcedure.Builder<SortCompactProcedure>() {
+        return new BaseProcedure.Builder<CompactProcedure>() {
             @Override
-            public SortCompactProcedure doBuild() {
-                return new SortCompactProcedure(tableCatalog());
+            public CompactProcedure doBuild() {
+                return new CompactProcedure(tableCatalog());
             }
         };
     }
