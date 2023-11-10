@@ -27,7 +27,7 @@ import org.assertj.core.api.Assertions
 
 import java.util
 
-/** Test sort compact procedure. */
+/** Test sort compact procedure. See {@link CompactProcedure}. */
 class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
@@ -55,7 +55,6 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
             .start()
 
           val query = () => spark.sql("SELECT * FROM T")
-          spark.sql("SET ")
 
           try {
             // test zorder sort
@@ -79,7 +78,8 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
 
             checkAnswer(
-              spark.sql("CALL paimon.sys.compact('T', 'zorder', 'a,b')"),
+              spark.sql(
+                "CALL paimon.sys.compact(table => 'T', order_strategy => 'zorder', order_by => 'a,b')"),
               Row(true) :: Nil)
 
             // test order sort
@@ -96,7 +96,10 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
 
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result2)
 
-            checkAnswer(spark.sql("CALL paimon.sys.compact('T', 'order', 'a,b')"), Row(true) :: Nil)
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.compact(table => 'T', order_strategy => 'order', order_by => 'a,b')"),
+              Row(true) :: Nil)
             Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
           } finally {
             stream.stop()
@@ -105,7 +108,157 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
-  test("test to where") {
+  test("Paimon Procedure: sort compact with partition") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (p INT, a INT, b INT)
+                       |TBLPROPERTIES ('bucket'='-1')
+                       |PARTITIONED BY (p)
+                       |""".stripMargin)
+          val location = loadTable("T").location().getPath
+
+          val inputData = MemoryStream[(Int, Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("p", "a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query0 = () => spark.sql("SELECT * FROM T WHERE p=0")
+          val query1 = () => spark.sql("SELECT * FROM T WHERE p=1")
+
+          try {
+            // test zorder sort
+            inputData.addData((0, 0, 0))
+            inputData.addData((0, 0, 1))
+            inputData.addData((0, 0, 2))
+            inputData.addData((0, 1, 0))
+            inputData.addData((0, 1, 1))
+            inputData.addData((0, 1, 2))
+            inputData.addData((0, 2, 0))
+            inputData.addData((0, 2, 1))
+            inputData.addData((0, 2, 2))
+
+            inputData.addData((1, 0, 0))
+            inputData.addData((1, 0, 1))
+            inputData.addData((1, 0, 2))
+            inputData.addData((1, 1, 0))
+            inputData.addData((1, 1, 1))
+            inputData.addData((1, 1, 2))
+            inputData.addData((1, 2, 0))
+            inputData.addData((1, 2, 1))
+            inputData.addData((1, 2, 2))
+            stream.processAllAvailable()
+
+            val result0 = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result0.add(Row(0, a, b))
+              }
+            }
+            val result1 = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result1.add(Row(1, a, b))
+              }
+            }
+            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
+            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')"),
+              Row(true) :: Nil)
+
+            // test order sort
+            val result2 = new util.ArrayList[Row]()
+            result2.add(0, Row(0, 0, 0))
+            result2.add(1, Row(0, 0, 1))
+            result2.add(2, Row(0, 1, 0))
+            result2.add(3, Row(0, 1, 1))
+            result2.add(4, Row(0, 0, 2))
+            result2.add(5, Row(0, 1, 2))
+            result2.add(6, Row(0, 2, 0))
+            result2.add(7, Row(0, 2, 1))
+            result2.add(8, Row(0, 2, 2))
+
+            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'order', order_by => 'a,b')"),
+              Row(true) :: Nil)
+            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
+            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Paimon Procedure: compact for pk") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b INT)
+                       |TBLPROPERTIES ('primary-key'='a,b', 'bucket'='1')
+                       |""".stripMargin)
+          val location = loadTable("T").location().getPath
+
+          val inputData = MemoryStream[(Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query = () => spark.sql("SELECT * FROM T")
+
+          try {
+            // test zorder sort
+            inputData.addData((0, 0))
+            inputData.addData((0, 1))
+            inputData.addData((0, 2))
+            inputData.addData((1, 0))
+            inputData.addData((1, 1))
+            inputData.addData((1, 2))
+            inputData.addData((2, 0))
+            inputData.addData((2, 1))
+            inputData.addData((2, 2))
+            stream.processAllAvailable()
+
+            val result = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result.add(Row(a, b))
+              }
+            }
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
+            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
+  test("Piamon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
     val where = CompactProcedure.toWhere(conditions)

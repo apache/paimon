@@ -441,9 +441,9 @@ This section introduce all available spark procedures about paimon.
     <tbody style="font-size: 12px; ">
     <tr>
       <td>sort_compact</td>
-      <td>CALL sort_compact('&ltdatabase_name&gt.&lttable_name&gt','&ltsort_type&gt','&ltcolumn1&gt[,column2]...' [,'&ltconditions&gt'])</td>
-      <td>database_name: the target database name<br>table_name: the target table name<br>sort_type: 'order' or 'zorder'<br><nobr>conditions: "," means "AND" ";" means "OR"</nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
-      <td><nobr>SET spark.sql.shuffle.partitions=10;</nobr> <nobr>CALL sort_compact('my_db.Orders1',</nobr> 'zorder', 'f1,f2',  'f0=0,f1=1;f0=1,f1=1')</td>
+      <td><nobr>CALL compact('&ltidentifier&gt','&ltpartitions&gt','&ltsort_type&gt','&ltcolumns&gt')</nobr><br>CALL compact(table => '&ltidentifier&gt' [,partitions => '&ltpartitions&gt'] [, order_strategy =>'&ltsort_type&gt'] [,order_by => '&ltcolumns&gt'])</td>
+      <td>identifier: the target table identifier<br><br><nobr>partitions: partition filter<br> "," means "AND"<br>";" means "OR"</nobr><br><br>order_strategy: 'order' or 'zorder' or 'none' <br><br><nobr>order_columns: the columns need to be sort</nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
+      <td><nobr>SET spark.sql.shuffle.partitions=10; --set the sort parallelism</nobr> <nobr>CALL paimon.sys.compact('my_db.Orders1','f0=0,f1=1;f0=1,f1=1', 'zorder', 'f1,f2');</nobr><br><nobr>CALL paimon.sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')</nobr></td>
     </tr>
     </tbody>
 </table>

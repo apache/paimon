@@ -35,6 +35,7 @@ public class ZorderSorter extends TableSorter {
 
     public ZorderSorter(FileStoreTable table, List<String> zOrderColNames) {
         super(table, zOrderColNames);
+        checkNotEmpty();
     }
 
     public Dataset<Row> sort(Dataset<Row> df) {

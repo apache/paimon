@@ -37,19 +37,24 @@ public abstract class TableSorter {
         checkColNames();
     }
 
-    private void checkColNames() {
-        if (orderColNames.size() < 1) {
-            throw new IllegalArgumentException("order column names should not be empty.");
+    protected void checkNotEmpty() {
+        if (orderColNames.isEmpty()) {
+            throw new IllegalArgumentException("order column could not be empty");
         }
-        List<String> columnNames = table.rowType().getFieldNames();
-        for (String zColumn : orderColNames) {
-            if (!columnNames.contains(zColumn)) {
-                throw new RuntimeException(
-                        "Can't find column "
-                                + zColumn
-                                + " in table columns. Possible columns are ["
-                                + columnNames.stream().reduce((a, b) -> a + "," + b).get()
-                                + "]");
+    }
+
+    private void checkColNames() {
+        if (!orderColNames.isEmpty()) {
+            List<String> columnNames = table.rowType().getFieldNames();
+            for (String zColumn : orderColNames) {
+                if (!columnNames.contains(zColumn)) {
+                    throw new RuntimeException(
+                            "Can't find column "
+                                    + zColumn
+                                    + " in table columns. Possible columns are ["
+                                    + columnNames.stream().reduce((a, b) -> a + "," + b).get()
+                                    + "]");
+                }
             }
         }
     }

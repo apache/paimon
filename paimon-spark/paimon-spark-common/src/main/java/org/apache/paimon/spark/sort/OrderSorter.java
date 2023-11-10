@@ -31,6 +31,7 @@ public class OrderSorter extends TableSorter {
 
     public OrderSorter(FileStoreTable table, List<String> orderColNames) {
         super(table, orderColNames);
+        checkNotEmpty();
     }
 
     @Override

@@ -43,6 +43,7 @@ import org.apache.spark.sql.types.StructType;
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -55,9 +56,9 @@ public class CompactProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("partition", StringType),
-                ProcedureParameter.required("order-strategy", StringType),
-                ProcedureParameter.required("order-by", StringType),
+                ProcedureParameter.optional("partitions", StringType),
+                ProcedureParameter.optional("order_strategy", StringType),
+                ProcedureParameter.optional("order_by", StringType),
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -82,12 +83,18 @@ public class CompactProcedure extends BaseProcedure {
 
     @Override
     public InternalRow[] call(InternalRow args) {
-        Preconditions.checkArgument(args.numFields() >= 3);
+        Preconditions.checkArgument(args.numFields() >= 1);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String sortType = args.getString(2);
-        List<String> sortColumns = Arrays.asList(args.getString(3).split(","));
-
-        String partitionFilter = args.isNullAt(1) ? null : toWhere(args.getString(1));
+        String partitionFilter = blank(args, 1) ? null : toWhere(args.getString(1));
+        String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
+        List<String> sortColumns =
+                blank(args, 3)
+                        ? Collections.emptyList()
+                        : Arrays.asList(args.getString(3).split(","));
+        if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "order_strategy \"none\" cannot work with order_by columns.");
+        }
 
         return modifyPaimonTable(
                 tableIdent,
@@ -107,6 +114,10 @@ public class CompactProcedure extends BaseProcedure {
     @Override
     public String description() {
         return "This procedure execute sort compact action on unaware-bucket table.";
+    }
+
+    private boolean blank(InternalRow args, int index) {
+        return args.isNullAt(index) || StringUtils.isBlank(args.getString(index));
     }
 
     private boolean execute(
@@ -139,10 +150,6 @@ public class CompactProcedure extends BaseProcedure {
 
     @VisibleForTesting
     static String toWhere(String partitions) {
-        if (StringUtils.isBlank(partitions)) {
-            return null;
-        }
-
         List<Map<String, String>> maps = ParameterUtils.getPartitions(partitions.split(";"));
 
         return maps.stream()
