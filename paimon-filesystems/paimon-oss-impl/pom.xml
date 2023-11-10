@@ -105,6 +105,8 @@
                                         <exclude>.gitkeep</exclude>
                                         <exclude>mime.types</exclude>
                                         <exclude>mozilla/**</exclude>
+                                        <exclude>META-INF/maven/**</exclude>
+                                        <exclude>META-INF/LICENSE.txt</exclude>
                                     </excludes>
                                 </filter>
                             </filters>
