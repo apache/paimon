@@ -50,7 +50,7 @@ import java.util.Optional;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Sort compact procedure for sort unaware-bucket table. */
+/** Compact procedure for tables. */
 public class CompactProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
