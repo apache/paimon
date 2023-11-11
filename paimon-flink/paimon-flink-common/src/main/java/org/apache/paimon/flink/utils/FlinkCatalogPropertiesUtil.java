@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.utils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableSet;
+
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.catalog.Column;
@@ -29,6 +31,7 @@ import org.apache.flink.table.types.utils.TypeConversions;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -123,7 +126,21 @@ public class FlinkCatalogPropertiesUtil {
         return serializedWatermarkSpec;
     }
 
-    private static final Pattern SCHEMA_COLUMN_NAME_SUFFIX = Pattern.compile("\\d+\\.name");
+    private static final Pattern SCHEMA_COLUMN_NAME_SUFFIX = Pattern.compile("\\d+\\." + NAME);
+    private static final Pattern SCHEMA_COLUMN_METADATA_SUFFIX =
+            Pattern.compile("\\d+\\." + METADATA);
+    private static final Pattern SCHEMA_COLUMN_EXPR_SUFFIX = Pattern.compile("\\d+\\." + EXPR);
+    private static final Pattern SCHEMA_COLUMN_DATATYPE_SUFFIX =
+            Pattern.compile("\\d+\\." + DATA_TYPE);
+    private static final Pattern SCHEMA_COLUMN_VIRTUAL_SUFFIX =
+            Pattern.compile("\\d+\\." + VIRTUAL);
+    private static final Set<Pattern> NON_PHYSICAL_KEY_PATTERNS =
+            ImmutableSet.of(
+                    SCHEMA_COLUMN_NAME_SUFFIX,
+                    SCHEMA_COLUMN_METADATA_SUFFIX,
+                    SCHEMA_COLUMN_EXPR_SUFFIX,
+                    SCHEMA_COLUMN_DATATYPE_SUFFIX,
+                    SCHEMA_COLUMN_VIRTUAL_SUFFIX);
 
     public static int nonPhysicalColumnsCount(
             Map<String, String> tableOptions, List<String> physicalColumns) {
@@ -135,6 +152,19 @@ public class FlinkCatalogPropertiesUtil {
         }
 
         return count;
+    }
+
+    public static boolean isNonPhysicalColumnKey(String key) {
+        if (!key.startsWith(SCHEMA)) {
+            return false;
+        }
+        String suffix = key.substring(SCHEMA.length() + 1);
+        for (Pattern pattern : NON_PHYSICAL_KEY_PATTERNS) {
+            if (pattern.matcher(suffix).matches()) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static Map<String, Integer> nonPhysicalColumns(

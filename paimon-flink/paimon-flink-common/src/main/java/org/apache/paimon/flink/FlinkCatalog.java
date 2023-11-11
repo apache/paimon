@@ -540,7 +540,8 @@ public class FlinkCatalog extends AbstractCatalog {
         table.options()
                 .forEach(
                         (k, v) -> {
-                            if (k.startsWith(SCHEMA)) {
+                            if (FlinkCatalogPropertiesUtil.isNonPhysicalColumnKey(k)) {
+                                // drop non-physical column
                                 if (!schemaOptions.containsKey(k)) {
                                     changes.add(SchemaChange.removeOption(k));
                                 }
@@ -548,6 +549,7 @@ public class FlinkCatalog extends AbstractCatalog {
                         });
         schemaOptions.forEach(
                 (k, v) -> {
+                    // add/modify non-physical column
                     if (!table.options().containsKey(k) || !table.options().get(k).equals(v)) {
                         changes.add(SchemaChange.setOption(k, v));
                     }
