@@ -18,11 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 
-import java.util.Map;
+import org.apache.flink.api.java.utils.MultipleParameterTool;
+
 import java.util.Optional;
 
 /** Factory to create {@link PostgreSqlSyncDatabaseAction}. */
@@ -39,11 +39,12 @@ public class PostgreSqlSyncDatabaseActionFactory implements ActionFactory {
     public Optional<Action> create(MultipleParameterTool params) {
         checkRequiredArgument(params, "postgresql-conf");
 
-        PostgreSqlSyncDatabaseAction action = new PostgreSqlSyncDatabaseAction(
-                getRequiredValue(params, "warehouse"),
-                getRequiredValue(params, "database"),
-                optionalConfigMap(params, "catalog-conf"),
-                optionalConfigMap(params, "postgresql-conf"));
+        PostgreSqlSyncDatabaseAction action =
+                new PostgreSqlSyncDatabaseAction(
+                        getRequiredValue(params, "warehouse"),
+                        getRequiredValue(params, "database"),
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "postgresql-conf"));
 
         action.ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
                 .withTablePrefix(params.get("table-prefix"))

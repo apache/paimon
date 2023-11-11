@@ -18,17 +18,20 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import com.esri.core.geometry.ogc.OGCGeometry;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectWriter;
+
+import com.esri.core.geometry.ogc.OGCGeometry;
+
 import javax.annotation.Nullable;
+
 import java.nio.ByteBuffer;
 import java.util.HashMap;
 import java.util.Map;

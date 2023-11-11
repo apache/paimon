@@ -18,27 +18,31 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
+import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
-import java.sql.SQLException;
 import java.time.ZoneId;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -105,12 +109,13 @@ public class PostgreSqlSyncTableAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        PostgreSqlSchema postgreSqlSchema = getPostgreSqlSchemaList().stream()
-                .reduce(PostgreSqlSchema::merge)
-                .orElseThrow(
-                        () ->
-                                new RuntimeException(
-                                        "No table satisfies the given schema name and table name"));
+        PostgreSqlSchema postgreSqlSchema =
+                getPostgreSqlSchemaList().stream()
+                        .reduce(PostgreSqlSchema::merge)
+                        .orElseThrow(
+                                () ->
+                                        new RuntimeException(
+                                                "No table satisfies the given schema name and table name"));
 
         catalog.createDatabase(database, true);
 
@@ -120,13 +125,12 @@ public class PostgreSqlSyncTableAction extends ActionBase {
                 buildComputedColumns(computedColumnArgs, postgreSqlSchema.schema().fields());
 
         Schema fromPostgreSql =
-                PostgreSqlActionUtils.buildPaimonSchema(
-                        postgreSqlSchema,
+                CdcActionCommonUtils.buildPaimonSchema(
                         partitionKeys,
                         primaryKeys,
                         computedColumns,
                         tableConfig,
-                        catalog.caseSensitive());
+                        postgreSqlSchema.schema());
 
         try {
             table = (FileStoreTable) catalog.getTable(identifier);
@@ -181,7 +185,11 @@ public class PostgreSqlSyncTableAction extends ActionBase {
                                 if (tableMatcher.matches()) {
                                     postgreSqlSchemaList.add(
                                             new PostgreSqlSchema(
-                                                    metaData, databaseName, schemaName, tableName, tableComment));
+                                                    metaData,
+                                                    databaseName,
+                                                    schemaName,
+                                                    tableName,
+                                                    tableComment));
                                 }
                             }
                         }

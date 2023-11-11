@@ -18,16 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DateType;
 
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Objects;
 
 /** The PostgreSQL database schema. */
 public class PostgreSqlSchema {
@@ -41,7 +42,11 @@ public class PostgreSqlSchema {
     private Schema schema;
 
     public PostgreSqlSchema(
-            DatabaseMetaData metaData, String databaseName, String schemaName, String tableName, String tableComment)
+            DatabaseMetaData metaData,
+            String databaseName,
+            String schemaName,
+            String tableName,
+            String tableComment)
             throws Exception {
         this.databaseName = databaseName;
         this.schemaName = schemaName;

@@ -18,16 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.streaming.api.functions.ProcessFunction;
-import org.apache.flink.streaming.api.functions.source.SourceFunction;
-import org.apache.flink.util.Collector;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
@@ -39,10 +31,15 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
+
+import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
@@ -147,7 +144,9 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
         List<FileStoreTable> fileStoreTables = new ArrayList<>();
         List<String> monitoredTables = new ArrayList<>();
         for (PostgreSqlSchema postgreSqlSchema : postgreSqlSchemas) {
-            Identifier identifier = new Identifier(database, tableNameConverter.convert(postgreSqlSchema.tableName()));
+            Identifier identifier =
+                    new Identifier(
+                            database, tableNameConverter.convert(postgreSqlSchema.tableName()));
             Schema fromPostgreSql =
                     CdcActionCommonUtils.buildPaimonSchema(
                             Collections.emptyList(),
@@ -212,7 +211,8 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                         continue;
                     }
                     PostgreSqlSchema postgreSqlSchema =
-                            new PostgreSqlSchema(metaData, databaseName, schemaName, tableName, tableComment);
+                            new PostgreSqlSchema(
+                                    metaData, databaseName, schemaName, tableName, tableComment);
                     if (!postgreSqlSchema.schema().primaryKeys().isEmpty()) {
                         // only tables with primary keys will be considered
                         postgreSqlSchemaList.add(postgreSqlSchema);
@@ -225,9 +225,14 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
 
     private boolean shouldMonitorTable(String postgreSqlTableName) {
         Matcher includingMatcher = Pattern.compile(includingTables).matcher(postgreSqlTableName);
-        Matcher excludingMatcher = excludingTables == null ? null : Pattern.compile(excludingTables).matcher(postgreSqlTableName);
+        Matcher excludingMatcher =
+                excludingTables == null
+                        ? null
+                        : Pattern.compile(excludingTables).matcher(postgreSqlTableName);
 
-        boolean shouldMonitor = includingMatcher.matches() && (excludingMatcher == null || !excludingMatcher.matches());
+        boolean shouldMonitor =
+                includingMatcher.matches()
+                        && (excludingMatcher == null || !excludingMatcher.matches());
         LOG.debug("Source table {} is monitored? {}", postgreSqlTableName, shouldMonitor);
         return shouldMonitor;
     }
