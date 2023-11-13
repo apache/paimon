@@ -28,6 +28,8 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
+import org.apache.commons.lang3.StringUtils;
+
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
@@ -87,7 +89,7 @@ public class CpuMetric {
         }
         CpuMetric that = (CpuMetric) o;
         return Double.compare(that.cpu, cpu) == 0
-                && Objects.equals(host, that.host)
+                && StringUtils.equals(host, that.host)
                 && Objects.equals(pid, that.pid);
     }
 
