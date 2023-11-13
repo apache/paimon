@@ -81,7 +81,11 @@ public class TagAutoCreation {
     }
 
     public boolean forceCreatingSnapshot() {
-        return timeExtractor.forceCreatingSnapshot();
+        return timeExtractor.forceCreatingSnapshot()
+                && (nextTag == null
+                        || isAfterOrEqual(
+                                LocalDateTime.now().minus(delay),
+                                periodHandler.nextTagTime(nextTag)));
     }
 
     public void run() {

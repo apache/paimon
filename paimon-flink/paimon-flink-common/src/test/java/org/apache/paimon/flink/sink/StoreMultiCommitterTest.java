@@ -519,7 +519,7 @@ class StoreMultiCommitterTest {
         testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);
         assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).id())
-                .isEqualTo(2);
+                .isEqualTo(1);
         assertThat(Objects.requireNonNull(table2.snapshotManager().latestSnapshot()).id())
                 .isEqualTo(1);
 
