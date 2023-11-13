@@ -477,18 +477,21 @@ public class CoreOptions implements Serializable {
                                     + "Note: Scale-up this parameter will increase memory usage while scanning manifest files. "
                                     + "We can consider downsize it when we encounter an out of memory exception while scanning");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<LogConsistency> LOG_CONSISTENCY =
             key("log.consistency")
                     .enumType(LogConsistency.class)
                     .defaultValue(LogConsistency.TRANSACTIONAL)
                     .withDescription("Specify the log consistency mode for table.");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<LogChangelogMode> LOG_CHANGELOG_MODE =
             key("log.changelog-mode")
                     .enumType(LogChangelogMode.class)
                     .defaultValue(LogChangelogMode.AUTO)
                     .withDescription("Specify the log changelog mode for table.");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_KEY_FORMAT =
             key("log.key.format")
                     .stringType()
@@ -496,6 +499,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specify the key message format of log system with primary key.");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_FORMAT =
             key("log.format")
                     .stringType()
