@@ -22,9 +22,9 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 
+import com.aliyun.jindodata.oss.JindoOssFileSystem;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
-import org.apache.hadoop.fs.aliyun.oss.AliyunOSSFileSystem;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -66,7 +66,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
      * Cache AliyunOSSFileSystem, at present, there is no good mechanism to ensure that the file
      * system will be shut down, so here the fs cache is used to avoid resource leakage.
      */
-    private static final Map<CacheKey, AliyunOSSFileSystem> CACHE = new ConcurrentHashMap<>();
+    private static final Map<CacheKey, JindoOssFileSystem> CACHE = new ConcurrentHashMap<>();
 
     private Options hadoopOptions;
 
@@ -78,6 +78,10 @@ public class OSSFileIO extends HadoopCompliantFileIO {
     @Override
     public void configure(CatalogContext context) {
         hadoopOptions = new Options();
+        // https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.1/oss/hadoop/jindosdk_ide_hadoop.md
+        hadoopOptions.set("fs.oss.impl", "com.aliyun.jindodata.oss.JindoOssFileSystem");
+        hadoopOptions.set("fs.AbstractFileSystem.oss.impl", "com.aliyun.jindodata.oss.OSS");
+
         // read all configuration with prefix 'CONFIG_PREFIXES'
         for (String key : context.options().keySet()) {
             for (String prefix : CONFIG_PREFIXES) {
@@ -117,7 +121,7 @@ public class OSSFileIO extends HadoopCompliantFileIO {
                         }
                     }
 
-                    AliyunOSSFileSystem fs = new AliyunOSSFileSystem();
+                    JindoOssFileSystem fs = new JindoOssFileSystem();
                     try {
                         fs.initialize(fsUri, hadoopConf);
                     } catch (IOException e) {
