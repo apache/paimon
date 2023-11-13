@@ -77,6 +77,7 @@ public class FlinkCatalogPropertiesUtil {
         return serialized;
     }
 
+    // new Column api
     public static List<SchemaChange> serializeNonPhysicalColumns(
             Map<String, Integer> indexMap, Column c) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
