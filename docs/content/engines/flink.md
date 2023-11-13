@@ -181,7 +181,7 @@ CREATE TABLE word_count (
 {{< /tab >}}
 
 {{< tab "External-Catalog" >}}
-Unlike FlikGenericCatalog, FlinkExternalCatalog saves tables that using other connectors like jdbc to the Paimon 
+Unlike FlikGenericCatalog, FlinkExternalCatalog saves tables that use other connectors like jdbc to the Paimon 
 filesystem, eliminating the need to create temporary tables repeatedly.
 ```sql
 CREATE CATALOG my_catalog WITH (
