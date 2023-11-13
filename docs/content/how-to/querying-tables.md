@@ -332,15 +332,16 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
-You can set `consumer.use-legacy-mode` to `false` to use the consumer function implemented based on 
-[flip-27](https://cwiki.apache.org/confluence/display/FLINK/FLIP-27%3A+Refactor+Source+Interface), which can provide 
-more capabilities, such as watermark alignment.
+By default, the consumer uses `exactly-once` mode to record consumption progress, which strictly ensures that what is 
+recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed. You can set `consumer.mode` to 
+`at-least-once` to allow readers consume snapshots at different rates and record the slowest snapshot-id among all 
+readers into the consumer. This mode can provide more capabilities, such as watermark alignment.
 
 {{< hint warning >}}
-1. When there is no watermark definition, the consumer in non-legacy mode cannot provide the ability to pass the 
+1. When there is no watermark definition, the consumer in `at-least-once` mode cannot provide the ability to pass the 
 watermark in the snapshot to the downstream. 
-2. Since the implementation of legacy mode and non-legacy mode are completely different, the state of flink is 
-incompatible and cannot be restored from the state when switching modes.
+2. Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
+flink is incompatible and cannot be restored from the state when switching modes.
 {{< /hint >}}
 
 You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.

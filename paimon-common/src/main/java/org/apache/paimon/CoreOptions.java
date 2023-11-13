@@ -709,12 +709,11 @@ public class CoreOptions implements Serializable {
                             "The expiration interval of consumer files. A consumer file will be expired if "
                                     + "it's lifetime after last modification is over this value.");
 
-    public static final ConfigOption<Boolean> CONSUMER_WITH_LEGACY_MODE =
-            key("consumer.use-legacy-mode")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Whether to use legacy mode when setting consumer-id. Legacy mode is implemented through the flink legacy source interface and will not have flip-27 related features. To maintain compatibility with the previous state, the default value is set to true.");
+    public static final ConfigOption<ConsumerMode> CONSUMER_CONSISTENCY_MODE =
+            key("consumer.mode")
+                    .enumType(ConsumerMode.class)
+                    .defaultValue(ConsumerMode.EXACTLY_ONCE)
+                    .withDescription("Specify the consumer consistency mode for table.");
 
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
@@ -1314,8 +1313,8 @@ public class CoreOptions implements Serializable {
         return options.get(CONSUMER_EXPIRATION_TIME);
     }
 
-    public boolean consumerWithLegacyMode() {
-        return options.get(CONSUMER_WITH_LEGACY_MODE);
+    public ConsumerMode consumerWithLegacyMode() {
+        return options.get(CONSUMER_CONSISTENCY_MODE);
     }
 
     public boolean partitionedTableInMetastore() {
@@ -1948,6 +1947,35 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         ExpireExecutionMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** Specifies the log consistency mode for table. */
+    public enum ConsumerMode implements DescribedEnum {
+        EXACTLY_ONCE(
+                "exactly-once",
+                "Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed."),
+
+        AT_LEAST_ONCE(
+                "at-least-once",
+                "Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.");
+
+        private final String value;
+        private final String description;
+
+        ConsumerMode(String value, String description) {
             this.value = value;
             this.description = description;
         }
