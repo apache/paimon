@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -45,6 +46,7 @@ import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.data.RowData;
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -54,6 +56,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Random;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -132,6 +135,36 @@ public class CompactorSinkITCase extends AbstractTestBase {
                 assertThat(dataSplit.dataFiles().size()).isEqualTo(2);
             }
         }
+    }
+
+    @Test
+    public void testCompactParallelism() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        CompactorSourceBuilder sourceBuilder =
+                new CompactorSourceBuilder(tablePath.toString(), table);
+        DataStreamSource<RowData> source =
+                sourceBuilder
+                        .withEnv(env)
+                        .withContinuousMode(false)
+                        .withPartitions(getSpecifiedPartitions())
+                        .build();
+        Integer sinkParalellism = new Random().nextInt(100);
+        new CompactorSinkBuilder(
+                        table.copy(
+                                new HashMap<String, String>() {
+                                    {
+                                        put(
+                                                FlinkConnectorOptions.SINK_PARALLELISM.key(),
+                                                String.valueOf(sinkParalellism));
+                                    }
+                                }))
+                .withInput(source)
+                .build();
+
+        Assertions.assertThat(env.getTransformations().get(0).getParallelism())
+                .isEqualTo(sinkParalellism);
     }
 
     private List<Map<String, String>> getSpecifiedPartitions() {
