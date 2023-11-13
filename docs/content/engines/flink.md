@@ -180,6 +180,35 @@ CREATE TABLE word_count (
 
 {{< /tab >}}
 
+{{< tab "External-Catalog" >}}
+Unlike FlikGenericCatalog, FlinkExternalCatalog saves tables that using other connectors like jdbc to the Paimon 
+filesystem, eliminating the need to create temporary tables repeatedly.
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type'='paimon-external',
+    'warehouse'='file:/tmp/paimon'
+);
+
+USE CATALOG my_catalog;
+
+-- create a word count table
+CREATE TABLE word_count (
+    word STRING PRIMARY KEY NOT ENFORCED,
+    cnt BIGINT
+) WITH (
+    'connector'='paimon'
+);
+
+-- create a word count table with jdbc connector
+CREATE TABLE word_count (
+    word STRING PRIMARY KEY NOT ENFORCED,
+    cnt BIGINT
+) WITH (
+   'connector'='jdbc',
+   ...
+);
+```
+{{< /tab >}}
 {{< /tabs >}}
 
 **Step 6: Write Data**

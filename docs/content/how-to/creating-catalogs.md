@@ -52,11 +52,23 @@ USE CATALOG my_catalog;
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
+Additionally, you can also use FlinkExternalCatalog to save tables using other connectors to paimon.
+
+```sql
+CREATE CATALOG my_catalog WITH (
+    'type' = 'paimon-external',
+    'warehouse' = 'hdfs:///path/to/warehouse'
+);
+
+USE CATALOG my_catalog;
+```
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}
 
 The following shell command registers a paimon catalog named `paimon`. Metadata and table files are stored under `hdfs:///path/to/warehouse`.
+
 
 ```bash
 spark-sql ... \
