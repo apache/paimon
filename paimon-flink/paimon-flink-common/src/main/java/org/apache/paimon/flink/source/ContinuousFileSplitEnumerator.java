@@ -71,7 +71,7 @@ public class ContinuousFileSplitEnumerator
 
     protected final SplitAssigner splitAssigner;
 
-    private final ConsumerProgressCalculator consumerProgressCalculator;
+    protected final ConsumerProgressCalculator consumerProgressCalculator;
 
     @Nullable protected Long nextSnapshotId;
 
