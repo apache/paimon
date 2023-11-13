@@ -18,12 +18,16 @@
 
 package org.apache.paimon.flink.utils;
 
+import org.apache.paimon.schema.SchemaChange;
+
 import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.WatermarkSpec;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.types.DataType;
 import org.apache.flink.table.types.logical.utils.LogicalTypeParser;
 import org.apache.flink.table.types.utils.TypeConversions;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -71,6 +75,35 @@ public class FlinkCatalogPropertiesUtil {
             }
         }
         return serialized;
+    }
+
+    public static List<SchemaChange> serializeNonPhysicalColumns(
+            Map<String, Integer> indexMap, Column c) {
+        List<SchemaChange> schemaChanges = new ArrayList<>();
+        int index = indexMap.get(c.getName());
+        schemaChanges.add(SchemaChange.setOption(compoundKey(SCHEMA, index, NAME), c.getName()));
+        schemaChanges.add(
+                SchemaChange.setOption(
+                        compoundKey(SCHEMA, index, DATA_TYPE),
+                        c.getDataType().getLogicalType().asSerializableString()));
+        if (c instanceof Column.ComputedColumn) {
+            Column.ComputedColumn computedColumn = (Column.ComputedColumn) c;
+            schemaChanges.add(
+                    SchemaChange.setOption(
+                            compoundKey(SCHEMA, index, EXPR),
+                            computedColumn.getExpression().asSerializableString()));
+        } else {
+            Column.MetadataColumn metadataColumn = (Column.MetadataColumn) c;
+            schemaChanges.add(
+                    SchemaChange.setOption(
+                            compoundKey(SCHEMA, index, METADATA),
+                            metadataColumn.getMetadataKey().orElse(metadataColumn.getName())));
+            schemaChanges.add(
+                    SchemaChange.setOption(
+                            compoundKey(SCHEMA, index, VIRTUAL),
+                            Boolean.toString(metadataColumn.isVirtual())));
+        }
+        return schemaChanges;
     }
 
     public static Map<String, String> serializeWatermarkSpec(WatermarkSpec watermarkSpec) {

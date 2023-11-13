@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.procedure.ProcedureUtil;
+import org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -353,22 +354,27 @@ public class FlinkCatalog extends AbstractCatalog {
         return fromCatalogTable(catalogTable);
     }
 
-    private List<SchemaChange> toSchemaChange(TableChange change) {
+    private List<SchemaChange> toSchemaChange(
+            Map<String, Integer> positionMap, TableChange change) {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             AddColumn add = (AddColumn) change;
             Column column = add.getColumn();
             SchemaChange.Move move = getMove(add.getPosition(), column.getName());
-            schemaChanges.add(
-                    SchemaChange.addColumn(
-                            column.getName(),
-                            LogicalTypeConversion.toDataType(
-                                    // Computed Column should be nullable
-                                    column instanceof Column.ComputedColumn
-                                            ? column.getDataType().getLogicalType().copy(true)
-                                            : column.getDataType().getLogicalType()),
-                            column.getComment().orElse(null),
-                            move));
+            if (column.isPhysical()) {
+                schemaChanges.add(
+                        SchemaChange.addColumn(
+                                column.getName(),
+                                LogicalTypeConversion.toDataType(
+                                        column.getDataType().getLogicalType()),
+                                column.getComment().orElse(null),
+                                move));
+            } else {
+                schemaChanges.addAll(
+                        FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns(
+                                positionMap, column));
+            }
+
             return schemaChanges;
         } else if (change instanceof AddWatermark) {
             AddWatermark add = (AddWatermark) change;
@@ -507,11 +513,27 @@ public class FlinkCatalog extends AbstractCatalog {
 
         validateAlterTable(table, (CatalogTable) newTable);
 
+        Map<String, Integer> stringIntegerMap = new HashMap<>();
+        int i = 0;
+        for (org.apache.flink.table.api.Schema.UnresolvedColumn column :
+                table.getUnresolvedSchema().getColumns()) {
+            stringIntegerMap.put(column.getName(), i++);
+        }
+        for (AddColumn addColumn :
+                tableChanges.stream()
+                        .filter(s -> s instanceof AddColumn)
+                        .map(s -> (AddColumn) s)
+                        .collect(Collectors.toList())) {
+            stringIntegerMap.put(addColumn.getColumn().getName(), i++);
+        }
+
         List<SchemaChange> changes = new ArrayList<>();
         if (null != tableChanges) {
             List<SchemaChange> schemaChanges =
                     tableChanges.stream()
-                            .flatMap(tableChange -> toSchemaChange(tableChange).stream())
+                            .flatMap(
+                                    tableChange ->
+                                            toSchemaChange(stringIntegerMap, tableChange).stream())
                             .collect(Collectors.toList());
             changes.addAll(schemaChanges);
         }
