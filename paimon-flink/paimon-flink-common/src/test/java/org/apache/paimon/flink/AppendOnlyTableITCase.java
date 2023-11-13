@@ -268,8 +268,10 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(sql("SHOW CREATE TABLE T").get(0).toString())
                 .contains("`__proc_time` AS PROCTIME()");
         sql("INSERT INTO T VALUES(1)");
-        assertThatCode(() -> sql("SELECT * FROM T").get(0).getField(1).toString())
-                .doesNotThrowAnyException();
+        List<Row> rows =
+                sql(
+                        "SELECT * FROM T WHERE __proc_time = PROCTIME() UNION ALL SELECT 1, PROCTIME()");
+        assertThat(rows.get(0)).isEqualTo(rows.get(1));
     }
 
     @Override
