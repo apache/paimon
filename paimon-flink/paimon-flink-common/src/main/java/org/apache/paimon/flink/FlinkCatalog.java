@@ -48,6 +48,7 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.TableChange.AddColumn;
@@ -356,14 +357,17 @@ public class FlinkCatalog extends AbstractCatalog {
         List<SchemaChange> schemaChanges = new ArrayList<>();
         if (change instanceof AddColumn) {
             AddColumn add = (AddColumn) change;
-            String comment = add.getColumn().getComment().orElse(null);
-            SchemaChange.Move move = getMove(add.getPosition(), add.getColumn().getName());
+            Column column = add.getColumn();
+            SchemaChange.Move move = getMove(add.getPosition(), column.getName());
             schemaChanges.add(
                     SchemaChange.addColumn(
-                            add.getColumn().getName(),
+                            column.getName(),
                             LogicalTypeConversion.toDataType(
-                                    add.getColumn().getDataType().getLogicalType()),
-                            comment,
+                                    // Computed Column should be nullable
+                                    column instanceof Column.ComputedColumn
+                                            ? column.getDataType().getLogicalType().copy(true)
+                                            : column.getDataType().getLogicalType()),
+                            column.getComment().orElse(null),
                             move));
             return schemaChanges;
         } else if (change instanceof AddWatermark) {
