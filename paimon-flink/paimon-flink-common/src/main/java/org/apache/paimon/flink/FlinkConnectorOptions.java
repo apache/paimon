@@ -45,6 +45,7 @@ public class FlinkConnectorOptions {
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
@@ -70,6 +71,7 @@ public class FlinkConnectorOptions {
                                                             + "."))
                                     .build());
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<Integer> LOG_SYSTEM_PARTITIONS =
             ConfigOptions.key("log.system.partitions")
                     .intType()
@@ -77,6 +79,7 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "The number of partitions of the log system. If log system is kafka, this is kafka partitions.");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<Integer> LOG_SYSTEM_REPLICATION =
             ConfigOptions.key("log.system.replication")
                     .intType()
