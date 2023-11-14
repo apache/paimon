@@ -23,6 +23,7 @@ import org.apache.paimon.benchmark.utils.AutoClosableProcess;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
 
+import org.apache.commons.collections.CollectionUtils;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.runtime.net.ConnectionUtils;
 import org.slf4j.Logger;
@@ -66,7 +67,7 @@ public class CpuMetricSender implements AutoCloseable {
 
     public void startClient() throws Exception {
         List<Integer> taskmanagers = getTaskManagerPidList();
-        if (taskmanagers.isEmpty()) {
+        if (CollectionUtils.isEmpty(taskmanagers)) {
             throw new RuntimeException("There is no Flink TaskManager is running.");
         }
         this.serverAddress = InetAddress.getByName(serverHostIp);
