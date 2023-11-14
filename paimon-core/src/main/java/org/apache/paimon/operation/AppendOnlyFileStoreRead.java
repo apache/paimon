@@ -151,6 +151,10 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                             dataSchema.partitionKeys()));
                                 }
 
+                                RowType projectedRowType =
+                                        Projection.of(dataProjection)
+                                                .project(dataSchema.logicalRowType());
+
                                 return new BulkFormatMapping(
                                         indexCastMapping.getIndexMapping(),
                                         indexCastMapping.getCastMapping(),
@@ -158,11 +162,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                         formatDiscover
                                                 .discover(formatIdentifier)
                                                 .createReaderFactory(
-                                                        Projection.of(dataProjection)
-                                                                .project(
-                                                                        dataSchema
-                                                                                .logicalRowType()),
-                                                        dataFilters));
+                                                        projectedRowType, dataFilters));
                             });
 
             final BinaryRow partition = split.partition();

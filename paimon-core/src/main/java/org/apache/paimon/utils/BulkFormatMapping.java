@@ -175,15 +175,14 @@ public class BulkFormatMapping {
                                 partitionMappping.getLeft(),
                                 dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
             }
+            RowType projectedRowType = Projection.of(dataProjection).project(dataRecordType);
             return new BulkFormatMapping(
                     indexCastMapping.getIndexMapping(),
                     indexCastMapping.getCastMapping(),
                     partitionPair,
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(
-                                    Projection.of(dataProjection).project(dataRecordType),
-                                    dataFilters));
+                            .createReaderFactory(projectedRowType, dataFilters));
         }
     }
 }
