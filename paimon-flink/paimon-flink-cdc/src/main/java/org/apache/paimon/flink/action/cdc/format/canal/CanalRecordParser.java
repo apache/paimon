@@ -42,6 +42,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -185,12 +186,14 @@ public class CanalRecordParser extends RecordParser {
             for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
                 String fieldName = entry.getKey();
                 String originalType = originalFieldTypes.get(fieldName);
-                rowData.put(fieldName, transformValue(entry.getValue().toString(), originalType));
+                String newValue =
+                        transformValue(Objects.toString(entry.getValue(), null), originalType);
+                rowData.put(fieldName, newValue);
             }
         } else {
             paimonFieldTypes.putAll(fillDefaultStringTypes(record));
             for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
-                rowData.put(entry.getKey(), entry.getValue().toString());
+                rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
             }
         }
 
@@ -209,7 +212,11 @@ public class CanalRecordParser extends RecordParser {
                 .collect(Collectors.toMap(newData::get, oldData::get));
     }
 
-    private String transformValue(String oldValue, String mySqlType) {
+    private String transformValue(@Nullable String oldValue, String mySqlType) {
+        if (oldValue == null) {
+            return null;
+        }
+
         String shortType = MySqlTypeUtils.getShortType(mySqlType);
 
         if (MySqlTypeUtils.isSetType(shortType)) {
