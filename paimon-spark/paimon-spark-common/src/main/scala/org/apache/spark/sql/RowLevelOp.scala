@@ -15,22 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.schema
+package org.apache.spark.sql
 
-import org.apache.spark.sql.types.StructType
+import org.apache.paimon.CoreOptions.MergeEngine
 
-/** System columns for paimon spark. */
-object SparkSystemColumns {
+sealed trait RowLevelOp {
+  val supportedMergeEngine: Seq[MergeEngine]
+}
 
-  // for assigning bucket when writing
-  val BUCKET_COL = "_bucket_"
+case object Delete extends RowLevelOp {
+  override def toString: String = "delete"
 
-  // for row level operation
-  val ROW_KIND_COL = "_row_kind_"
+  override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
+}
 
-  val SPARK_SYSTEM_COLUMNS_NAME: Seq[String] = Seq(BUCKET_COL, ROW_KIND_COL)
+case object Update extends RowLevelOp {
+  override def toString: String = "update"
 
-  def filterSparkSystemColumns(schema: StructType): StructType = {
-    StructType(schema.fields.filterNot(field => SPARK_SYSTEM_COLUMNS_NAME.contains(field.name)))
-  }
+  override val supportedMergeEngine: Seq[MergeEngine] =
+    Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
 }

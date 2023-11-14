@@ -28,6 +28,7 @@ import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
@@ -196,6 +197,17 @@ public interface Catalog extends AutoCloseable {
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException;
 
     /**
+     * Drop the partition of the specify table.
+     *
+     * @param identifier path of the table to drop partition
+     * @param partitions the partition to be deleted
+     * @throws TableNotExistException if the table does not exist
+     * @throws PartitionNotExistException if the partition does not exist
+     */
+    void dropPartition(Identifier identifier, Map<String, String> partitions)
+            throws TableNotExistException, PartitionNotExistException;
+
+    /**
      * Modify an existing table from a {@link SchemaChange}.
      *
      * <p>NOTE: System tables can not be altered.
@@ -341,6 +353,36 @@ public interface Catalog extends AutoCloseable {
 
         public Identifier identifier() {
             return identifier;
+        }
+    }
+
+    /** Exception for trying to operate on a partition that doesn't exist. */
+    class PartitionNotExistException extends Exception {
+
+        private static final String MSG = "Partition %s do not exist in the table %s.";
+
+        private final Identifier identifier;
+
+        private final Map<String, String> partitionSpec;
+
+        public PartitionNotExistException(
+                Identifier identifier, Map<String, String> partitionSpec) {
+            this(identifier, partitionSpec, null);
+        }
+
+        public PartitionNotExistException(
+                Identifier identifier, Map<String, String> partitionSpec, Throwable cause) {
+            super(String.format(MSG, partitionSpec, identifier.getFullName()), cause);
+            this.identifier = identifier;
+            this.partitionSpec = partitionSpec;
+        }
+
+        public Identifier identifier() {
+            return identifier;
+        }
+
+        public Map<String, String> partitionSpec() {
+            return partitionSpec;
         }
     }
 

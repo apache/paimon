@@ -37,6 +37,7 @@ import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
@@ -681,6 +682,86 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         assertThat(toDataSplits(state.splits())).containsExactlyElementsOf(expectedResults.get(2L));
     }
 
+    @Test
+    public void testEnumeratorWithConsumer() throws Exception {
+        final TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingAsyncSplitEnumeratorContext<>(3);
+        for (int i = 0; i < 3; i++) {
+            context.registerReader(i, "test-host");
+        }
+
+        // prepare test data
+        TreeMap<Long, TableScan.Plan> dataSplits = new TreeMap<>();
+        for (int i = 1; i <= 2; i++) {
+            dataSplits.put(
+                    (long) i,
+                    new DataFilePlan(
+                            Arrays.asList(
+                                    createDataSplit(i, 0, Collections.emptyList()),
+                                    createDataSplit(i, 2, Collections.emptyList()))));
+        }
+        MockScan scan = new MockScan(dataSplits);
+
+        final ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .build();
+        enumerator.start();
+
+        long checkpointId = 1L;
+
+        // request for splits
+        for (int i = 0; i < 3; i++) {
+            enumerator.handleSplitRequest(i, "test-host");
+        }
+
+        // checkpoint is triggered for the first time and no snapshot is found
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isNull();
+
+        // find a new snapshot and trigger for the second checkpoint, but no snapshot is consumed
+        scanNextSnapshot(context);
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-0 has consumed the snapshot-1 and trigger for the next checkpoint
+        enumerator.handleSourceEvent(0, new ReaderConsumeProgressEvent(1L));
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-2 has consumed the snapshot-1 and trigger for the next checkpoint
+        enumerator.handleSourceEvent(2, new ReaderConsumeProgressEvent(1L));
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-0 and subtask-2 request for the next splits but there are no new snapshot
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(2, "test-host");
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(2L);
+
+        // find next snapshot and trigger for the next checkpoint, subtask-0 and subtask-2 has been
+        // assigned new snapshot
+        scanNextSnapshot(context);
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(2L);
+    }
+
+    private void triggerCheckpointAndComplete(
+            ContinuousFileSplitEnumerator enumerator, long checkpointId) throws Exception {
+        enumerator.snapshotState(checkpointId);
+        enumerator.notifyCheckpointComplete(checkpointId);
+    }
+
+    private void scanNextSnapshot(
+            TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context) {
+        context.workerExecutor.triggerPeriodicScheduledTasks();
+        context.triggerAlCoordinatorAction();
+    }
+
     private static PendingSplitsCheckpoint checkpointWithoutException(
             ContinuousFileSplitEnumerator enumerator, long checkpointId) {
         try {
@@ -753,10 +834,12 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         private final TreeMap<Long, Plan> results;
         private @Nullable Long nextSnapshotId;
         private boolean allowEnd = true;
+        private Long nextSnapshotIdForConsumer;
 
         public MockScan(TreeMap<Long, Plan> results) {
             this.results = results;
             this.nextSnapshotId = null;
+            this.nextSnapshotIdForConsumer = null;
         }
 
         @Override
@@ -784,7 +867,9 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         }
 
         @Override
-        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {}
+        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
+            nextSnapshotIdForConsumer = nextSnapshot;
+        }
 
         @Nullable
         @Override
@@ -797,6 +882,10 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
 
         public void allowEnd(boolean allowEnd) {
             this.allowEnd = allowEnd;
+        }
+
+        public Long getNextSnapshotIdForConsumer() {
+            return nextSnapshotIdForConsumer;
         }
     }
 

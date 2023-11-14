@@ -25,6 +25,7 @@ import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Objects;
 
 /** Implementation for {@link ReadBuilder}. */
@@ -36,6 +37,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Predicate filter;
     private int[][] projection;
+    private Map<String, String> partitionSpec;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
@@ -61,6 +63,12 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
+        this.partitionSpec = partitionSpec;
+        return this;
+    }
+
+    @Override
     public ReadBuilder withProjection(int[][] projection) {
         this.projection = projection;
         return this;
@@ -68,7 +76,7 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public TableScan newScan() {
-        return table.newScan().withFilter(filter);
+        return table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
     }
 
     @Override

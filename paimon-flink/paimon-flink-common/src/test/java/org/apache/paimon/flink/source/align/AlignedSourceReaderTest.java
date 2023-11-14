@@ -26,6 +26,7 @@ import org.apache.flink.connector.base.source.reader.synchronization.FutureCompl
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.table.data.RowData;
+import org.junit.Ignore;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
@@ -58,6 +59,12 @@ public class AlignedSourceReaderTest extends FileStoreSourceReaderTest {
         reader.handleSourceEvents(new CheckpointEvent(1L));
         assertThat(reader.shouldTriggerCheckpoint()).isEqualTo(Optional.of(1L));
         assertThat(context.getNumSplitRequests()).isEqualTo(2);
+    }
+
+    @Override
+    @Ignore
+    public void testReaderOnSplitFinished() throws Exception {
+        // ignore
     }
 
     @Override

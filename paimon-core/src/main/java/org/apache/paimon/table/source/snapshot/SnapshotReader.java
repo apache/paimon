@@ -34,6 +34,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import javax.annotation.Nullable;
 
 import java.util.List;
+import java.util.Map;
 
 /** Read splits from specified {@link Snapshot} with given configuration. */
 public interface SnapshotReader {
@@ -49,6 +50,8 @@ public interface SnapshotReader {
     SnapshotReader withSnapshot(Snapshot snapshot);
 
     SnapshotReader withFilter(Predicate predicate);
+
+    SnapshotReader withPartitionFilter(Map<String, String> partitionSpec);
 
     SnapshotReader withMode(ScanMode scanMode);
 
