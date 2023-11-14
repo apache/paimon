@@ -51,8 +51,8 @@ public class WriterMetrics {
 
     private MetricGroup metricGroup;
 
-    public WriterMetrics(MetricRegistry registry, String tableName, String commitUser) {
-        metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName, commitUser);
+    public WriterMetrics(MetricRegistry registry, String tableName) {
+        metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
         writeRecordNumCounter = metricGroup.counter(WRITE_RECORD_NUM);
 
         // cost

@@ -376,7 +376,7 @@ public abstract class AbstractFileStoreWrite<T>
     @Nullable
     public WriterMetrics getWriterMetrics() {
         if (metricRegistry != null && writerMetrics == null) {
-            writerMetrics = new WriterMetrics(metricRegistry, tableName, commitUser);
+            writerMetrics = new WriterMetrics(metricRegistry, tableName);
         }
         return writerMetrics;
     }
