@@ -513,7 +513,7 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
             this.fieldReaders = new FieldReader[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
-                if (mappingBack[i] > 0) {
+                if (mappingBack[i] >= 0) {
                     DataType type = fields.get(mappingBack[i]).type();
                     fieldReaders[i] = visit(field.schema(), type);
                 } else {

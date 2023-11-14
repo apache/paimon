@@ -78,7 +78,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
                 ? null
                 : iterator instanceof ColumnarRowIterator
                         ? new KeyValueDataFileRecordIterator(
-                                VectorMappingUtils.wrapperColumnarRowInterator(
+                                VectorMappingUtils.mappingColumnarRowInterator(
                                         (ColumnarRowIterator) iterator,
                                         indexMapping,
                                         partitionInfo),

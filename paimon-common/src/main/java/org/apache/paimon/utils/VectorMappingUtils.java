@@ -76,7 +76,7 @@ import javax.annotation.Nullable;
  */
 public class VectorMappingUtils {
 
-    public static RecordReader.RecordIterator<InternalRow> wrapperColumnarRowInterator(
+    public static RecordReader.RecordIterator<InternalRow> mappingColumnarRowInterator(
             ColumnarRowIterator columnarRowIterator,
             @Nullable int[] indexMapping,
             @Nullable PartitionInfo partitionInfo) {

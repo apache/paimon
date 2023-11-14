@@ -63,7 +63,7 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
                 ? null
                 : iterator instanceof ColumnarRowIterator
                         ? new RowDataFileRecordIterator(
-                                VectorMappingUtils.wrapperColumnarRowInterator(
+                                VectorMappingUtils.mappingColumnarRowInterator(
                                         (ColumnarRowIterator) iterator,
                                         indexMapping,
                                         partitionInfo),
