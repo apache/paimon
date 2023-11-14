@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastNonNullValueAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
@@ -46,10 +47,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
-import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.AGG_FUNCTION;
-import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.IGNORE_RETRACT;
-import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.RETRACT_STRATEGY;
-import static org.apache.paimon.options.ConfigOptions.key;
+import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.getFiledAggregation;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
@@ -335,38 +333,28 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                String strAggFunc =
-                        options.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
-                                        .stringType()
-                                        .noDefaultValue());
-                RetractStrategy retractStrategy =
-                        options.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + RETRACT_STRATEGY)
-                                        .enumType(RetractStrategy.class)
-                                        .noDefaultValue());
-                boolean ignoreRetract =
-                        options.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
-                                        .booleanType()
-                                        .defaultValue(false));
+                AggregateMergeFunction.FieldAggregationConfig aggConfig =
+                        getFiledAggregation(options, fieldName);
 
+                RetractStrategy retractStrategy = aggConfig.retractStrategy;
                 if (retractStrategy == null) {
-                    // for not agg field, we use set null for compatibility
-                    if (strAggFunc == null) {
+                    // For not agg field, we use set null for compatibility
+                    if (aggConfig.strAggFunc == null) {
                         retractStrategy = RetractStrategy.SET_NULL;
                     } else {
                         retractStrategy =
-                                ignoreRetract ? RetractStrategy.IGNORE : RetractStrategy.DEFAULT;
+                                aggConfig.ignoreRetract
+                                        ? RetractStrategy.IGNORE
+                                        : RetractStrategy.DEFAULT;
                     }
                 }
 
-                if (strAggFunc != null) {
+                if (aggConfig.strAggFunc != null) {
                     fieldAggregators.put(
                             i,
                             FieldAggregator.createFieldAggregator(
                                     fieldType,
-                                    strAggFunc,
+                                    aggConfig.strAggFunc,
                                     retractStrategy,
                                     isPrimaryKey,
                                     () -> {

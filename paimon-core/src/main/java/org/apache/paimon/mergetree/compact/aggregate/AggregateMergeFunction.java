@@ -141,31 +141,18 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                String strAggFunc =
-                        conf.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
-                                        .stringType()
-                                        .noDefaultValue());
+                FieldAggregationConfig aggConfig = getFiledAggregation(conf, fieldName);
+
                 RetractStrategy retractStrategy =
-                        conf.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + RETRACT_STRATEGY)
-                                        .enumType(RetractStrategy.class)
-                                        .noDefaultValue());
-                boolean ignoreRetract =
-                        conf.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
-                                        .booleanType()
-                                        .defaultValue(false));
-                retractStrategy =
-                        retractStrategy != null
-                                ? retractStrategy
-                                : (ignoreRetract
+                        aggConfig.retractStrategy != null
+                                ? aggConfig.retractStrategy
+                                : (aggConfig.ignoreRetract
                                         ? RetractStrategy.IGNORE
                                         : RetractStrategy.DEFAULT);
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(
                                 fieldType,
-                                strAggFunc,
+                                aggConfig.strAggFunc,
                                 retractStrategy,
                                 isPrimaryKey,
                                 () -> new FieldLastNonNullValueAgg(fieldType));
@@ -173,5 +160,40 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
             return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);
         }
+    }
+
+    /** Config of a filed aggregation. */
+    public static class FieldAggregationConfig {
+        public final String strAggFunc;
+        public final RetractStrategy retractStrategy;
+
+        public final boolean ignoreRetract;
+
+        public FieldAggregationConfig(
+                String strAggFunc, RetractStrategy retractStrategy, boolean ignoreRetract) {
+            this.strAggFunc = strAggFunc;
+            this.retractStrategy = retractStrategy;
+            this.ignoreRetract = ignoreRetract;
+        }
+    }
+
+    /** Parse field aggregation config. */
+    public static FieldAggregationConfig getFiledAggregation(Options conf, String fieldName) {
+        String strAggFunc =
+                conf.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
+                                .stringType()
+                                .noDefaultValue());
+        RetractStrategy retractStrategy =
+                conf.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + RETRACT_STRATEGY)
+                                .enumType(RetractStrategy.class)
+                                .noDefaultValue());
+        boolean ignoreRetract =
+                conf.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
+                                .booleanType()
+                                .defaultValue(false));
+        return new FieldAggregationConfig(strAggFunc, retractStrategy, ignoreRetract);
     }
 }
