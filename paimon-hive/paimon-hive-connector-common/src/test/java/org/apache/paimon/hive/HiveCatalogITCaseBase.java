@@ -743,7 +743,7 @@ public abstract class HiveCatalogITCaseBase {
                                         .await())
                 .hasRootCauseMessage(
                         String.format(
-                                "Table name[%s] cannot contain upper case in hive catalog", "T"));
+                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
 
         assertThatThrownBy(
                         () ->
@@ -752,7 +752,7 @@ public abstract class HiveCatalogITCaseBase {
                                         .await())
                 .hasRootCauseMessage(
                         String.format(
-                                "Field names %s cannot contain upper case in hive catalog",
+                                "Field name %s cannot contain upper case in the catalog.",
                                 "[A, C]"));
     }
 
