@@ -292,6 +292,13 @@ under the License.
 
         <dependency>
             <groupId>org.testcontainers</groupId>
+            <artifactId>rabbitmq</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
             <artifactId>mongodb</artifactId>
             <version>${mongodb.testcontainers.version}</version>
             <scope>test</scope>
