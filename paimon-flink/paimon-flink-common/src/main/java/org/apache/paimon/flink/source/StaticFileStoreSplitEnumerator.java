@@ -27,8 +27,6 @@ import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.api.connector.source.SplitsAssignment;
-import org.apache.flink.table.connector.source.DynamicFilteringData;
-import org.apache.flink.table.connector.source.DynamicFilteringEvent;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -120,25 +118,17 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
-        if (sourceEvent instanceof DynamicFilteringEvent) {
-            DynamicFilteringData dynamicFilteringData =
-                    ((DynamicFilteringEvent) sourceEvent).getData();
-            LOG.info(
-                    "Received DynamicFilteringEvent: {}, is filtering: {}.",
-                    subtaskId,
-                    dynamicFilteringData.isFiltering());
-
+        if (sourceEvent.getClass().getSimpleName().equals("DynamicFilteringEvent")) {
             checkNotNull(
                     dynamicPartitionFilteringInfo,
                     "Cannot apply dynamic filtering because dynamicPartitionFilteringInfo hasn't been set.");
-
-            if (dynamicFilteringData.isFiltering()) {
-                this.splitAssigner =
-                        new DynamicPartitionPruningAssigner(
-                                splitAssigner,
-                                dynamicPartitionFilteringInfo.getPartitionRowProjection(),
-                                dynamicFilteringData);
-            }
+            this.splitAssigner =
+                    DynamicPartitionPruningAssigner.createDynamicPartitionPruningAssignerIfNeeded(
+                            subtaskId,
+                            splitAssigner,
+                            dynamicPartitionFilteringInfo.getPartitionRowProjection(),
+                            sourceEvent,
+                            LOG);
         } else {
             LOG.error("Received unrecognized event: {}", sourceEvent);
         }
