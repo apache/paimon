@@ -24,11 +24,13 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 
+import org.apache.spark.sql.connector.expressions.aggregate.Aggregation;
 import org.apache.spark.sql.connector.read.Batch;
 import org.apache.spark.sql.connector.read.InputPartition;
 import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 import org.apache.spark.sql.connector.read.Scan;
 import org.apache.spark.sql.connector.read.Statistics;
+import org.apache.spark.sql.connector.read.SupportsPushDownAggregates;
 import org.apache.spark.sql.connector.read.SupportsReportStatistics;
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream;
 import org.apache.spark.sql.types.StructType;
@@ -41,7 +43,7 @@ import java.util.OptionalLong;
  *
  * <p>TODO Introduce a SparkRFScan to implement SupportsRuntimeFiltering.
  */
-public class SparkScan implements Scan, SupportsReportStatistics {
+public class SparkScan implements Scan, SupportsReportStatistics, SupportsPushDownAggregates {
 
     private final Table table;
     private final ReadBuilder readBuilder;
@@ -134,5 +136,15 @@ public class SparkScan implements Scan, SupportsReportStatistics {
     @Override
     public int hashCode() {
         return readBuilder.hashCode();
+    }
+
+    @Override
+    public boolean pushAggregation(Aggregation aggregation) {
+        return true;
+    }
+
+    @Override
+    public Scan build() {
+        return this;
     }
 }

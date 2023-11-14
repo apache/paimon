@@ -30,6 +30,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
+import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
@@ -65,10 +66,12 @@ public class SparkTable
                 PaimonPartitionManagement {
 
     private final Table table;
+    private final Identifier identifier;
     @Nullable protected Predicate deletePredicate;
 
-    public SparkTable(Table table) {
+    public SparkTable(Table table, Identifier identifier) {
         this.table = table;
+        this.identifier = identifier;
     }
 
     public Table getTable() {
@@ -83,7 +86,11 @@ public class SparkTable
 
     @Override
     public String name() {
-        return table.name();
+        if (identifier != null) {
+            return identifier.namespace()[0] + "." + identifier.name();
+        } else {
+            return table.name();
+        }
     }
 
     @Override

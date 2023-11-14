@@ -207,7 +207,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(load(ident));
+            return new SparkTable(load(ident), ident);
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
@@ -229,7 +229,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
             dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
         }
 
-        return new SparkTable(table.copy(dynamicOptions.toMap()));
+        return new SparkTable(table.copy(dynamicOptions.toMap()), ident);
     }
 
     /**
@@ -246,7 +246,7 @@ public class SparkCatalog implements TableCatalog, ProcedureCatalog, SupportsNam
         LOG.info("Time travel target timestamp is {} milliseconds.", timestamp);
 
         Options option = new Options().set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
-        return new SparkTable(table.copy(option.toMap()));
+        return new SparkTable(table.copy(option.toMap()), ident);
     }
 
     private Table loadPaimonTable(Identifier ident) throws NoSuchTableException {

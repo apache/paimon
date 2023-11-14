@@ -37,6 +37,7 @@ import org.apache.spark.sql.catalyst.analysis.TableAlreadyExistsException;
 import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
+import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
@@ -68,7 +69,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * @param <T> CatalogPlugin class to avoid casting to TableCatalog and SupportsNamespaces.
  */
-public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
+public class SparkGenericCatalog<T extends TableCatalog & FunctionCatalog & SupportsNamespaces>
         implements CatalogExtension {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
@@ -264,7 +265,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
     @SuppressWarnings("unchecked")
     public void setDelegateCatalog(CatalogPlugin sparkSessionCatalog) {
         if (sparkSessionCatalog instanceof TableCatalog
-                && sparkSessionCatalog instanceof SupportsNamespaces) {
+                && sparkSessionCatalog instanceof SupportsNamespaces
+                && sparkSessionCatalog instanceof FunctionCatalog) {
             this.sessionCatalog = (T) sparkSessionCatalog;
         } else {
             throw new IllegalArgumentException("Invalid session catalog: " + sparkSessionCatalog);
@@ -294,12 +296,12 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             return new Identifier[0];
         }
 
-        throw new NoSuchNamespaceException(namespace);
+        return getSessionCatalog().listFunctions(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        throw new NoSuchFunctionException(ident);
+        return getSessionCatalog().loadFunction(ident);
     }
 
     private static boolean isSystemNamespace(String[] namespace) {
