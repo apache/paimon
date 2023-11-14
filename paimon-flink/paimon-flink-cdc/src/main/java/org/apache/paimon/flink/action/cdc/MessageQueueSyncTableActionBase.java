@@ -35,6 +35,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -137,7 +139,7 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
         return this;
     }
 
-    protected abstract Source<String, ?, ?> buildSource();
+    protected abstract Object buildSource();
 
     protected abstract String topic();
 
@@ -149,7 +151,7 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
 
     @Override
     public void build() throws Exception {
-        Source<String, ?, ?> source = buildSource();
+        Object source = buildSource();
 
         catalog.createDatabase(database, true);
         boolean caseSensitive = catalog.caseSensitive();
@@ -210,13 +212,7 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
 
         CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
                 new CdcSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(
-                                env.fromSource(
-                                                source,
-                                                WatermarkStrategy.noWatermarks(),
-                                                sourceName())
-                                        .flatMap(recordParser)
-                                        .name("Parse"))
+                        .withInput(fromSource(source).flatMap(recordParser).name("Parse"))
                         .withParserFactory(parserFactory)
                         .withTable(fileStoreTable)
                         .withIdentifier(identifier)
@@ -226,6 +222,17 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
+    }
+
+    private DataStreamSource<String> fromSource(Object s) {
+        if (s instanceof Source) {
+            return env.fromSource(
+                    (Source<String, ?, ?>) s, WatermarkStrategy.noWatermarks(), sourceName());
+        }
+        if (s instanceof SourceFunction) {
+            return env.addSource((SourceFunction<String>) s, sourceName());
+        }
+        throw new UnsupportedOperationException("Unsupported source type");
     }
 
     private Schema retrieveSchema() throws Exception {
