@@ -35,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -167,6 +168,12 @@ public class SchemaValidation {
                         checkArgument(
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
+                                field));
+        sequenceField.ifPresent(
+                field ->
+                        checkArgument(
+                                options.fieldAggFunc(field) == null,
+                                "Should not define aggregation on sequence field: '%s'",
                                 field));
 
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
@@ -338,7 +345,7 @@ public class SchemaValidation {
                                 String.format("Field %s can not be found in table schema.", field));
                     }
                     Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    if (group.add(k) && group.size() > 1) {
+                    if (group.add(sequenceFieldName) && group.size() > 1) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Field %s is defined repeatedly by multiple groups: %s.",
@@ -346,6 +353,17 @@ public class SchemaValidation {
                     }
                 }
             }
+        }
+        Set<String> illegalGroup =
+                fields2Group.values().stream()
+                        .flatMap(Collection::stream)
+                        .filter(g -> options.fieldAggFunc(g) != null)
+                        .collect(Collectors.toSet());
+        if (!illegalGroup.isEmpty()) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "Should not defined aggregation function on sequence group: "
+                                    + illegalGroup));
         }
     }
 

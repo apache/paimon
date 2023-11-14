@@ -22,11 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
-import org.apache.paimon.mergetree.compact.aggregate.FieldLastNonNullValueAgg;
-import org.apache.paimon.mergetree.compact.aggregate.FieldLastValueAgg;
-import org.apache.paimon.mergetree.compact.aggregate.RetractStrategy;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataType;
@@ -47,7 +43,6 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
-import static org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction.getFiledAggregation;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 
 /**
@@ -126,14 +121,19 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             FieldAggregator aggregator = fieldAggregators.get(i);
             Object accumulator = getters[i].getFieldOrNull(row);
             if (sequenceGen == null) {
-                row.setField(i, aggregator.agg(accumulator, field));
+                if (aggregator != null) {
+                    row.setField(i, aggregator.agg(accumulator, field));
+                } else if (field != null) {
+                    row.setField(i, field);
+                }
             } else {
                 Long currentSeq = sequenceGen.generateNullable(kv.value());
                 if (currentSeq != null) {
                     Long previousSeq = sequenceGen.generateNullable(row);
                     if (previousSeq == null || currentSeq >= previousSeq) {
-                        row.setField(i, aggregator.agg(accumulator, field));
-                    } else {
+                        row.setField(
+                                i, aggregator == null ? field : aggregator.agg(accumulator, field));
+                    } else if (aggregator != null) {
                         row.setField(i, aggregator.aggForOldSequence(accumulator, field));
                     }
                 }
@@ -148,19 +148,32 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 Long currentSeq = sequenceGen.generateNullable(kv.value());
                 if (currentSeq != null) {
                     Long previousSeq = sequenceGen.generateNullable(row);
+                    FieldAggregator aggregator = fieldAggregators.get(i);
                     if (previousSeq == null || currentSeq >= previousSeq) {
                         if (sequenceGen.index() == i) {
                             // update sequence field
                             row.setField(i, getters[i].getFieldOrNull(kv.value()));
                         } else {
                             // retract normal field
-                            FieldAggregator aggregator = fieldAggregators.get(i);
-                            Object accumulator = getters[i].getFieldOrNull(row);
-                            row.setField(
-                                    i,
-                                    aggregator.retract(
-                                            accumulator, getters[i].getFieldOrNull(kv.value())));
+                            if (aggregator == null) {
+                                row.setField(i, null);
+                            } else {
+                                // retract agg field
+                                Object accumulator = getters[i].getFieldOrNull(row);
+                                row.setField(
+                                        i,
+                                        aggregator.retract(
+                                                accumulator,
+                                                getters[i].getFieldOrNull(kv.value())));
+                            }
                         }
+                    } else if (aggregator != null) {
+                        // retract agg field for old sequence
+                        Object accumulator = getters[i].getFieldOrNull(row);
+                        row.setField(
+                                i,
+                                aggregator.retract(
+                                        accumulator, getters[i].getFieldOrNull(kv.value())));
                     }
                 }
             }
@@ -238,7 +251,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     fieldSequences.put(sequenceGen.index(), sequenceGen);
                 }
             }
-            this.fieldAggregators = createFieldAggregators(rowType, primaryKeys, options);
+            this.fieldAggregators =
+                    createFieldAggregators(rowType, primaryKeys, new CoreOptions(options));
         }
 
         @Override
@@ -324,7 +338,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
          * @return The aggregators for each column.
          */
         private Map<Integer, FieldAggregator> createFieldAggregators(
-                RowType rowType, List<String> primaryKeys, Options options) {
+                RowType rowType, List<String> primaryKeys, CoreOptions options) {
+
             List<String> fieldNames = rowType.getFieldNames();
             List<DataType> fieldTypes = rowType.getFieldTypes();
             Map<Integer, FieldAggregator> fieldAggregators = new HashMap<>();
@@ -333,55 +348,14 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                AggregateMergeFunction.FieldAggregationConfig aggConfig =
-                        getFiledAggregation(options, fieldName);
+                String strAggFunc = options.fieldAggFunc(fieldName);
+                boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
 
-                RetractStrategy retractStrategy = aggConfig.retractStrategy;
-                if (retractStrategy == null) {
-                    // For not agg field, we use set null for compatibility
-                    if (aggConfig.strAggFunc == null) {
-                        retractStrategy = RetractStrategy.SET_NULL;
-                    } else {
-                        retractStrategy =
-                                aggConfig.ignoreRetract
-                                        ? RetractStrategy.IGNORE
-                                        : RetractStrategy.DEFAULT;
-                    }
-                }
-
-                if (aggConfig.strAggFunc != null) {
+                if (strAggFunc != null) {
                     fieldAggregators.put(
                             i,
                             FieldAggregator.createFieldAggregator(
-                                    fieldType,
-                                    aggConfig.strAggFunc,
-                                    retractStrategy,
-                                    isPrimaryKey,
-                                    () -> {
-                                        throw new RuntimeException("Unexpected usage!");
-                                    }));
-                } else {
-                    if (fieldSequences.containsKey(i)) {
-                        // for the column in sequence group, the default aggregation strategy is
-                        // last_value
-                        fieldAggregators.put(
-                                i,
-                                FieldAggregator.createFieldAggregator(
-                                        fieldType,
-                                        null,
-                                        retractStrategy,
-                                        isPrimaryKey,
-                                        () -> new FieldLastValueAgg(fieldType)));
-                    } else {
-                        fieldAggregators.put(
-                                i,
-                                FieldAggregator.createFieldAggregator(
-                                        fieldType,
-                                        null,
-                                        retractStrategy,
-                                        isPrimaryKey,
-                                        () -> new FieldLastNonNullValueAgg(fieldType)));
-                    }
+                                    fieldType, strAggFunc, ignoreRetract, isPrimaryKey));
                 }
             }
             return fieldAggregators;

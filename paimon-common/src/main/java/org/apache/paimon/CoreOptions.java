@@ -60,6 +60,10 @@ public class CoreOptions implements Serializable {
 
     public static final String FIELDS_PREFIX = "fields";
 
+    public static final String AGG_FUNCTION = "aggregate-function";
+
+    public static final String IGNORE_RETRACT = "ignore-retract";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -1019,6 +1023,20 @@ public class CoreOptions implements Serializable {
         Map<String, String> levelFormats = options.get(FILE_FORMAT_PER_LEVEL);
         return levelFormats.entrySet().stream()
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
+    }
+
+    public String fieldAggFunc(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
+                        .stringType()
+                        .noDefaultValue());
+    }
+
+    public boolean fieldAggIgnoreRetract(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
+                        .booleanType()
+                        .defaultValue(false));
     }
 
     public String fileCompression() {

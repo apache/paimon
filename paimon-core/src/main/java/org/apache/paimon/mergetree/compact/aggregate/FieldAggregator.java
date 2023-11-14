@@ -23,7 +23,6 @@ import org.apache.paimon.types.DataType;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.function.Supplier;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
@@ -36,16 +35,15 @@ public abstract class FieldAggregator implements Serializable {
     public static FieldAggregator createFieldAggregator(
             DataType fieldType,
             @Nullable String strAgg,
-            RetractStrategy retractStrategy,
-            boolean isPrimaryKey,
-            Supplier<FieldAggregator> defaultAggregator) {
+            boolean ignoreRetract,
+            boolean isPrimaryKey) {
         FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
         } else {
             // If the field has no aggregate function, use last_non_null_value.
             if (strAgg == null) {
-                fieldAggregator = defaultAggregator.get();
+                fieldAggregator = new FieldLastNonNullValueAgg(fieldType);
             } else {
                 // ordered by type root definition
                 switch (strAgg) {
@@ -80,14 +78,10 @@ public abstract class FieldAggregator implements Serializable {
             }
         }
 
-        switch (retractStrategy) {
-            case IGNORE:
-                fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
-                break;
-            case SET_NULL:
-                fieldAggregator = new FieldSetNullRetractAgg(fieldAggregator);
-                break;
+        if (ignoreRetract) {
+            fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
         }
+
         return fieldAggregator;
     }
 

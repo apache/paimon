@@ -238,7 +238,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'fields.g_1.sequence-group'='a,b', "
                                                 + "'fields.g_2.sequence-group'='a,d');"))
                 .hasRootCauseMessage(
-                        "Field a is defined repeatedly by multiple groups: [fields.g_1.sequence-group, fields.g_2.sequence-group].");
+                        "Field a is defined repeatedly by multiple groups: [g_1, g_2].");
     }
 
     @Test
