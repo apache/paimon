@@ -19,6 +19,7 @@
 package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RecyclableIterator;
 
@@ -31,6 +32,7 @@ import javax.annotation.Nullable;
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
 
     private final ColumnarRow rowData;
+    private boolean mapped = false;
 
     private int num;
     private int pos;
@@ -54,5 +56,14 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
         } else {
             return null;
         }
+    }
+
+    public ColumnarRowIterator mapping(
+            @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
+        if (!mapped) {
+            rowData.mapping(partitionInfo, indexMapping);
+            mapped = true;
+        }
+        return this;
     }
 }

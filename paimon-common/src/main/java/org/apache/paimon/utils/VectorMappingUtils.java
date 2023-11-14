@@ -30,6 +30,7 @@ import org.apache.paimon.data.columnar.BooleanColumnVector;
 import org.apache.paimon.data.columnar.ByteColumnVector;
 import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.DoubleColumnVector;
 import org.apache.paimon.data.columnar.FloatColumnVector;
@@ -39,6 +40,7 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -62,6 +64,8 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
+import javax.annotation.Nullable;
+
 /**
  * This is a util about how to expand the {@link ColumnVector}s with the partition row and index
  * mapping. For example, we fetch the column of a, b, c from orc file, but the schema of table is a,
@@ -72,12 +76,19 @@ import org.apache.paimon.types.VarCharType;
  */
 public class VectorMappingUtils {
 
+    public static RecordReader.RecordIterator<InternalRow> wrapperColumnarRowInterator(
+            ColumnarRowIterator columnarRowIterator,
+            @Nullable int[] indexMapping,
+            @Nullable PartitionInfo partitionInfo) {
+        return columnarRowIterator.mapping(partitionInfo, indexMapping);
+    }
+
     public static ColumnVector[] createPartitionMappedVectors(
             PartitionInfo partitionInfo, ColumnVector[] vectors) {
         int length = partitionInfo.size();
         ColumnVector[] newVectors = new ColumnVector[length];
         for (int i = 0; i < length; i++) {
-            if (partitionInfo.isPartitionRow(i)) {
+            if (partitionInfo.inPartitionRow(i)) {
                 newVectors[i] =
                         createFixedVector(
                                 partitionInfo.getType(i),
@@ -108,6 +119,14 @@ public class VectorMappingUtils {
             }
         }
         return newVectors;
+    }
+
+    public static Object[] mappingObjects(Object[] input, int[] mapping) {
+        Object[] output = new Object[mapping.length];
+        for (int i = 0; i < output.length; i++) {
+            output[i] = mapping[i] >= 0 ? input[mapping[i]] : null;
+        }
+        return output;
     }
 
     private static class Visitor implements DataTypeVisitor<ColumnVector> {

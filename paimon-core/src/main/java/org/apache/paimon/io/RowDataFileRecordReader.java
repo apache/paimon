@@ -21,11 +21,13 @@ package org.apache.paimon.io;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.VectorMappingUtils;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +37,8 @@ import java.io.IOException;
 public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
+    @Nullable private final int[] indexMapping;
+    @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public RowDataFileRecordReader(
@@ -45,9 +49,9 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             @Nullable CastFieldGetter[] castMapping,
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
-        this.reader =
-                FileUtils.createFormatReader(
-                        fileIO, readerFactory, path, partitionInfo, indexMapping);
+        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
+        this.indexMapping = indexMapping;
+        this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
     }
 
@@ -55,7 +59,17 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
         RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null ? null : new RowDataFileRecordIterator(iterator, castMapping);
+        return iterator == null
+                ? null
+                : iterator instanceof ColumnarRowIterator
+                        ? new RowDataFileRecordIterator(
+                                VectorMappingUtils.wrapperColumnarRowInterator(
+                                        (ColumnarRowIterator) iterator,
+                                        indexMapping,
+                                        partitionInfo),
+                                castMapping)
+                        : new RowDataFileRecordIterator(
+                                iterator, indexMapping, partitionInfo, castMapping);
     }
 
     @Override
@@ -69,7 +83,16 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
         private RowDataFileRecordIterator(
                 RecordIterator<InternalRow> iterator, @Nullable CastFieldGetter[] castMapping) {
-            super(castMapping);
+            super(null, null, castMapping);
+            this.iterator = iterator;
+        }
+
+        private RowDataFileRecordIterator(
+                RecordIterator<InternalRow> iterator,
+                @Nullable int[] indexMapping,
+                @Nullable PartitionInfo partitionInfo,
+                @Nullable CastFieldGetter[] castMapping) {
+            super(indexMapping, partitionInfo, castMapping);
             this.iterator = iterator;
         }
 

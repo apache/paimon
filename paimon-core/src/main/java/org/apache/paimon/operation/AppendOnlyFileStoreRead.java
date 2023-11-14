@@ -139,7 +139,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                         filters);
 
                                 Pair<int[], RowType> partitionPair = null;
-                                if (dataSchema.partitionKeys().size() != 0) {
+                                if (!dataSchema.partitionKeys().isEmpty()) {
                                     Pair<int[], int[][]> partitionMappping =
                                             PartitionUtils.constructPartitionMapping(
                                                     dataSchema, dataProjection);
@@ -158,8 +158,10 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                         formatDiscover
                                                 .discover(formatIdentifier)
                                                 .createReaderFactory(
-                                                        dataSchema.logicalRowType(),
-                                                        dataProjection,
+                                                        Projection.of(dataProjection)
+                                                                .project(
+                                                                        dataSchema
+                                                                                .logicalRowType()),
                                                         dataFilters));
                             });
 

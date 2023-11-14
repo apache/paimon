@@ -18,10 +18,13 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -31,15 +34,30 @@ import javax.annotation.Nullable;
  * @param <V> the row type.
  */
 public abstract class AbstractFileRecordIterator<V> implements RecordReader.RecordIterator<V> {
+
+    @Nullable private final PartitionSettedRow partitionSettedRow;
+    @Nullable private final ProjectedRow projectedRow;
     @Nullable private final CastedRow castedRow;
 
-    protected AbstractFileRecordIterator(@Nullable CastFieldGetter[] castMapping) {
+    protected AbstractFileRecordIterator(
+            @Nullable int[] indexMapping,
+            @Nullable PartitionInfo partitionInfo,
+            @Nullable CastFieldGetter[] castMapping) {
+        this.partitionSettedRow =
+                partitionInfo == null ? null : PartitionSettedRow.from(partitionInfo);
+        this.projectedRow = indexMapping == null ? null : ProjectedRow.from(indexMapping);
         this.castedRow = castMapping == null ? null : CastedRow.from(castMapping);
     }
 
     protected InternalRow mappingRowData(InternalRow rowData) {
         if (rowData == null) {
             return null;
+        }
+        if (partitionSettedRow != null) {
+            rowData = partitionSettedRow.replaceRow(rowData);
+        }
+        if (projectedRow != null) {
+            rowData = projectedRow.replaceRow(rowData);
         }
         if (castedRow != null) {
             rowData = castedRow.replaceRow(rowData);

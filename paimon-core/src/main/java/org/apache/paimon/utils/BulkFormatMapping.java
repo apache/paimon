@@ -165,7 +165,7 @@ public class BulkFormatMapping {
                                     tableSchema.fields(), dataSchema.fields(), filters);
 
             Pair<int[], RowType> partitionPair = null;
-            if (dataSchema.partitionKeys().size() != 0) {
+            if (!dataSchema.partitionKeys().isEmpty()) {
                 Pair<int[], int[][]> partitionMappping =
                         PartitionUtils.constructPartitionMapping(
                                 dataRecordType, dataSchema.partitionKeys(), dataProjection);
@@ -181,7 +181,9 @@ public class BulkFormatMapping {
                     partitionPair,
                     formatDiscover
                             .discover(formatIdentifier)
-                            .createReaderFactory(dataRecordType, dataProjection, dataFilters));
+                            .createReaderFactory(
+                                    Projection.of(dataProjection).project(dataRecordType),
+                                    dataFilters));
         }
     }
 }

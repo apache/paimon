@@ -23,6 +23,7 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
 import org.apache.avro.Schema;
@@ -169,8 +170,8 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
-    public FieldWriter visitRecord(Schema schema, List<DataType> fieldTypes) {
-        return new RowWriter(schema, fieldTypes);
+    public FieldWriter visitRecord(Schema schema, List<DataField> fields) {
+        return new RowWriter(schema, fields);
     }
 
     private static class NullableWriter implements FieldWriter {
@@ -197,12 +198,12 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
         private final FieldWriter[] fieldWriters;
 
-        private RowWriter(Schema schema, List<DataType> fieldTypes) {
+        private RowWriter(Schema schema, List<DataField> fields) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldWriters = new FieldWriter[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
-                DataType type = fieldTypes.get(i);
+                DataType type = fields.get(i).type();
                 fieldWriters[i] = visit(field.schema(), type);
             }
         }
@@ -220,7 +221,7 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         }
     }
 
-    public RowWriter createRowWriter(Schema schema, List<DataType> fieldTypes) {
-        return new RowWriter(schema, fieldTypes);
+    public RowWriter createRowWriter(Schema schema, List<DataField> fields) {
+        return new RowWriter(schema, fields);
     }
 }

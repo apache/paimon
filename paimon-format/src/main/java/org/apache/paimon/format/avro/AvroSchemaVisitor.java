@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
@@ -38,7 +39,7 @@ public interface AvroSchemaVisitor<T> {
     default T visit(Schema schema, DataType type) {
         switch (schema.getType()) {
             case RECORD:
-                return visitRecord(schema, ((RowType) type).getFieldTypes());
+                return visitRecord(schema, ((RowType) type).getFields());
 
             case UNION:
                 return visitUnion(schema, type);
@@ -138,5 +139,5 @@ public interface AvroSchemaVisitor<T> {
 
     T visitMap(Schema schema, DataType valueType);
 
-    T visitRecord(Schema schema, List<DataType> fieldTypes);
+    T visitRecord(Schema schema, List<DataField> fields);
 }

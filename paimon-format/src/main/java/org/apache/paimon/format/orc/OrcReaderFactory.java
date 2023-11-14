@@ -19,7 +19,6 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
@@ -35,7 +34,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Pool;
-import org.apache.paimon.utils.VectorMappingUtils;
 
 import org.apache.hadoop.hive.ql.exec.vector.VectorizedRowBatch;
 import org.apache.hadoop.hive.ql.io.sarg.SearchArgument;
@@ -95,28 +93,9 @@ public class OrcReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public OrcVectorizedReader createReader(FileIO fileIO, Path file, int pooSize)
+    public OrcVectorizedReader createReader(FileIO fileIO, Path file, int poolSize)
             throws IOException {
-        return createReader(fileIO, file, pooSize, null, null);
-    }
-
-    @Override
-    public OrcVectorizedReader createReader(
-            FileIO fileIO, Path file, @Nullable PartitionInfo partitionInfo, int[] indexMapping)
-            throws IOException {
-        return createReader(fileIO, file, 1, partitionInfo, indexMapping);
-    }
-
-    @Override
-    public OrcVectorizedReader createReader(
-            FileIO fileIO,
-            Path file,
-            int poolSize,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping)
-            throws IOException {
-        Pool<OrcReaderBatch> poolOfBatches =
-                createPoolOfBatches(poolSize, partitionInfo, indexMapping);
+        Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(poolSize);
         RecordReader orcReader =
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
@@ -126,7 +105,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
                         file,
                         0,
                         fileIO.getFileSize(file));
-
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
@@ -136,10 +114,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
      * conversion from the ORC representation to the result format.
      */
     public OrcReaderBatch createReaderBatch(
-            VectorizedRowBatch orcBatch,
-            Pool.Recycler<OrcReaderBatch> recycler,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping) {
+            VectorizedRowBatch orcBatch, Pool.Recycler<OrcReaderBatch> recycler) {
         List<String> tableFieldNames = tableType.getFieldNames();
         List<DataType> tableFieldTypes = tableType.getFieldTypes();
 
@@ -150,26 +125,17 @@ public class OrcReaderFactory implements FormatReaderFactory {
             DataType type = tableFieldTypes.get(i);
             vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
         }
-
-        if (partitionInfo != null) {
-            vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
-        }
-        if (indexMapping != null) {
-            vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
-        }
         return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
 
     // ------------------------------------------------------------------------
 
-    private Pool<OrcReaderBatch> createPoolOfBatches(
-            int numBatches, PartitionInfo partitionInfo, int[] indexMapping) {
+    private Pool<OrcReaderBatch> createPoolOfBatches(int numBatches) {
         final Pool<OrcReaderBatch> pool = new Pool<>(numBatches);
 
         for (int i = 0; i < numBatches; i++) {
             final VectorizedRowBatch orcBatch = createBatchWrapper(schema, batchSize / numBatches);
-            final OrcReaderBatch batch =
-                    createReaderBatch(orcBatch, pool.recycler(), partitionInfo, indexMapping);
+            final OrcReaderBatch batch = createReaderBatch(orcBatch, pool.recycler());
             pool.add(batch);
         }
 

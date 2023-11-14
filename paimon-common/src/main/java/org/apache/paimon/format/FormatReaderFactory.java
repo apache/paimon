@@ -19,12 +19,9 @@
 package org.apache.paimon.format;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.Serializable;
@@ -35,20 +32,5 @@ public interface FormatReaderFactory extends Serializable {
     RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException;
 
     RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException;
-
-    RecordReader<InternalRow> createReader(
-            FileIO fileIO,
-            Path file,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping)
-            throws IOException;
-
-    RecordReader<InternalRow> createReader(
-            FileIO fileIO,
-            Path file,
-            int poolSize,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping)
             throws IOException;
 }

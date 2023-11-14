@@ -55,7 +55,7 @@ public class VectorMappingUtilsTest {
                 VectorMappingUtils.createPartitionMappedVectors(partitionInfo, columnVectors);
 
         for (int i = 0; i < partitionInfo.size(); i++) {
-            if (!partitionInfo.isPartitionRow(i)) {
+            if (!partitionInfo.inPartitionRow(i)) {
                 Assertions.assertThat(newColumnVectors[i])
                         .isEqualTo(columnVectors[partitionInfo.getRealIndex(i)]);
             }

@@ -19,7 +19,6 @@
 package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnVector;
 import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
@@ -37,7 +36,6 @@ import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
-import org.apache.paimon.utils.VectorMappingUtils;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
@@ -90,22 +88,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     @Override
     public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
-        return createReader(fileIO, filePath, null, null);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
-    public ParquetReader createReader(
-            FileIO fileIO,
-            Path filePath,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping)
-            throws IOException {
         final long splitOffset = 0;
         final long splitLength = fileIO.getFileSize(filePath);
 
@@ -121,19 +103,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         checkSchema(fileSchema, requestedSchema);
 
-        Pool<ParquetReaderBatch> poolOfBatches =
-                createPoolOfBatches(requestedSchema, partitionInfo, indexMapping);
+        Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
 
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(
-            FileIO fileIO,
-            Path file,
-            int poolSize,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping)
+    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
             throws IOException {
         throw new UnsupportedOperationException();
     }
@@ -207,27 +183,20 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
     }
 
-    private Pool<ParquetReaderBatch> createPoolOfBatches(
-            MessageType requestedSchema,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping) {
+    private Pool<ParquetReaderBatch> createPoolOfBatches(MessageType requestedSchema) {
         // In a VectorizedColumnBatch, the dictionary will be lazied deserialized.
         // If there are multiple batches at the same time, there may be thread safety problems,
         // because the deserialization of the dictionary depends on some internal structures.
         // We need set poolCapacity to 1.
         Pool<ParquetReaderBatch> pool = new Pool<>(1);
-        pool.add(createReaderBatch(requestedSchema, pool.recycler(), partitionInfo, indexMapping));
+        pool.add(createReaderBatch(requestedSchema, pool.recycler()));
         return pool;
     }
 
     private ParquetReaderBatch createReaderBatch(
-            MessageType requestedSchema,
-            Pool.Recycler<ParquetReaderBatch> recycler,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping) {
+            MessageType requestedSchema, Pool.Recycler<ParquetReaderBatch> recycler) {
         WritableColumnVector[] writableVectors = createWritableVectors(requestedSchema);
-        VectorizedColumnBatch columnarBatch =
-                createVectorizedColumnBatch(writableVectors, partitionInfo, indexMapping);
+        VectorizedColumnBatch columnarBatch = createVectorizedColumnBatch(writableVectors);
         return createReaderBatch(writableVectors, columnarBatch, recycler);
     }
 
@@ -251,9 +220,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
      * ParquetDecimalVector}.
      */
     private VectorizedColumnBatch createVectorizedColumnBatch(
-            WritableColumnVector[] writableVectors,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping) {
+            WritableColumnVector[] writableVectors) {
         ColumnVector[] vectors = new ColumnVector[writableVectors.length];
         for (int i = 0; i < writableVectors.length; i++) {
             switch (projectedTypes[i].getTypeRoot()) {
@@ -267,12 +234,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 default:
                     vectors[i] = writableVectors[i];
             }
-        }
-        if (partitionInfo != null) {
-            vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
-        }
-        if (indexMapping != null) {
-            vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
         }
 
         return new VectorizedColumnBatch(vectors);

@@ -19,7 +19,6 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.format.avro.FieldReaderFactory.RowReader;
 import org.apache.paimon.types.RowType;
 
@@ -27,31 +26,18 @@ import org.apache.avro.Schema;
 import org.apache.avro.io.DatumReader;
 import org.apache.avro.io.Decoder;
 
-import javax.annotation.Nullable;
-
 import java.io.IOException;
 
 /** A {@link DatumReader} for reading {@link InternalRow}. */
 public class AvroRowDatumReader implements DatumReader<InternalRow> {
 
-    private final RowType rowType;
-    private final int[] projection;
-    private final @Nullable PartitionInfo partitionInfo;
-    private final @Nullable int[] indexMapping;
+    private final RowType projectedRowType;
 
     private RowReader reader;
     private boolean isUnion;
 
-    public AvroRowDatumReader(
-            RowType rowType,
-            int[] projection,
-            @Nullable PartitionInfo partitionInfo,
-            @Nullable int[] indexMapping) {
-        this.rowType = rowType;
-        this.projection = projection;
-
-        this.partitionInfo = partitionInfo;
-        this.indexMapping = indexMapping;
+    public AvroRowDatumReader(RowType projectedRowType) {
+        this.projectedRowType = projectedRowType;
     }
 
     @Override
@@ -62,13 +48,7 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
             schema = schema.getTypes().get(1);
         }
         this.reader =
-                new FieldReaderFactory()
-                        .createRowReader(
-                                schema,
-                                rowType.getFieldTypes(),
-                                projection,
-                                partitionInfo,
-                                indexMapping);
+                new FieldReaderFactory().createRowReader(schema, projectedRowType.getFields());
     }
 
     @Override

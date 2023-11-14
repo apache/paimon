@@ -34,6 +34,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
@@ -257,6 +258,35 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO T VALUES (2)");
         // Only fetch latest snapshot is, dynamic option worked
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(2));
+    }
+
+    @Test
+    public void testAlterTable() {
+        sql("CREATE TABLE T (id INT) WITH ('write-mode'='append-only')");
+        assertThatCode(() -> sql("ALTER TABLE T add (__proc_time AS PROCTIME())"))
+                .doesNotThrowAnyException();
+        assertThat(sql("SHOW CREATE TABLE T").get(0).toString())
+                .contains("`__proc_time` AS PROCTIME()");
+        sql("INSERT INTO T VALUES(1)");
+        List<Row> rows =
+                sql(
+                        "SELECT * FROM T WHERE __proc_time = PROCTIME() UNION ALL SELECT 1, PROCTIME()");
+        assertThat(rows.get(0)).isEqualTo(rows.get(1));
+    }
+
+    @Test
+    public void testAlterTable2() {
+        sql("CREATE TABLE T (id INT, id2 INT, id3 INT) WITH ('write-mode'='append-only')");
+        assertThatCode(() -> sql("ALTER TABLE T add (__proc_time AS PROCTIME())"))
+                .doesNotThrowAnyException();
+        assertThatCode(() -> sql("ALTER TABLE T add (id4 INT)")).doesNotThrowAnyException();
+        assertThat(sql("SHOW CREATE TABLE T").get(0).toString())
+                .contains("`__proc_time` AS PROCTIME()");
+        sql("INSERT INTO T VALUES(1, 2, 3, 4)");
+        List<Row> rows =
+                sql(
+                        "SELECT id, id2, id3, id4 FROM T WHERE __proc_time = PROCTIME() UNION ALL SELECT 1, 2, 3, 4");
+        assertThat(rows.get(0)).isEqualTo(rows.get(1));
     }
 
     @Override

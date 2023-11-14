@@ -51,7 +51,7 @@ public class PartitionInfo {
         return partition;
     }
 
-    public boolean isPartitionRow(int i) {
+    public boolean inPartitionRow(int i) {
         return map[i] < 0;
     }
 
