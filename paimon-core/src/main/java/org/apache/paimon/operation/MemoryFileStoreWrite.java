@@ -52,7 +52,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
 
     private final CoreOptions options;
     protected final CacheManager cacheManager;
-    protected MemoryPoolFactory writeBufferPool;
+    private MemoryPoolFactory writeBufferPool;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -118,10 +118,9 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
 
     protected void registerMemoryPoolMetric(WriterMetrics writerMetrics) {
         if (writeBufferPool != null && writerMetrics != null) {
-            MemoryPoolFactory.BufferStat bufferStat = writeBufferPool.bufferStat();
-            writerMetrics.setMemoryPreemptCount(bufferStat::bufferPreemptCount);
-            writerMetrics.setUsedWriteBufferSize(bufferStat::usedBufferSize);
-            writerMetrics.setTotaldWriteBufferSize(bufferStat::totalBufferSize);
+            writerMetrics.setMemoryPreemptCount(writeBufferPool::bufferPreemptCount);
+            writerMetrics.setUsedWriteBufferSize(writeBufferPool::usedBufferSize);
+            writerMetrics.setTotaldWriteBufferSize(writeBufferPool::totalBufferSize);
         }
     }
 }

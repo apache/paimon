@@ -144,7 +144,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long start = System.currentTimeMillis();
         long sequenceNumber =
                 kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
                         ? newSequenceNumber()
@@ -161,7 +160,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
         if (writerMetrics != null) {
             writerMetrics.incWriteRecordNum();
-            writerMetrics.updateWriteCostMS(System.currentTimeMillis() - start);
         }
     }
 
@@ -304,10 +302,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     private void trySyncLatestCompaction(boolean blocking) throws Exception {
-        long start = System.currentTimeMillis();
         Optional<CompactResult> result = compactManager.getCompactionResult(blocking);
         result.ifPresent(this::updateCompactResult);
-        writerMetrics.updateSyncLastestCompactionCostMS(System.currentTimeMillis() - start);
     }
 
     @Override

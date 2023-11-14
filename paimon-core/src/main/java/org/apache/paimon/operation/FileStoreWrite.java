@@ -25,7 +25,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.utils.RecordWriter;
@@ -126,6 +125,4 @@ public interface FileStoreWrite<T> {
 
     /** With metrics to measure compaction. */
     FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
-
-    WriterMetrics getWriterMetrics();
 }

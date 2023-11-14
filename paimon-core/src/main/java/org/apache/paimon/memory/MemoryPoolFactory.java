@@ -92,29 +92,22 @@ public class MemoryPoolFactory {
         }
     }
 
-    public BufferStat bufferStat() {
-        return new BufferStat();
+    public long bufferPreemptCount() {
+        return bufferPreemptCount;
     }
 
-    /** stat for buffer metric. */
-    public class BufferStat {
-        public long bufferPreemptCount() {
-            return bufferPreemptCount;
-        }
-
-        public long usedBufferSize() {
-            long usedBufferSize = 0L;
-            if (owners != null) {
-                for (MemoryOwner owner : owners) {
-                    usedBufferSize += owner.memoryOccupancy();
-                }
+    public long usedBufferSize() {
+        long usedBufferSize = 0L;
+        if (owners != null) {
+            for (MemoryOwner owner : owners) {
+                usedBufferSize += owner.memoryOccupancy();
             }
-            return usedBufferSize;
         }
+        return usedBufferSize;
+    }
 
-        public long totalBufferSize() {
-            return totalBufferSize;
-        }
+    public long totalBufferSize() {
+        return totalBufferSize;
     }
 
     private class OwnerMemoryPool implements MemorySegmentPool {

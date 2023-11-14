@@ -123,7 +123,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void write(InternalRow rowData) throws Exception {
-        long start = System.currentTimeMillis();
         Preconditions.checkArgument(
                 rowData.getRowKind() == RowKind.INSERT,
                 "Append-only writer can only accept insert row kind, but current row kind is: %s",
@@ -142,7 +141,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
         if (writerMetrics != null) {
             writerMetrics.incWriteRecordNum();
-            writerMetrics.updateWriteCostMS(System.currentTimeMillis() - start);
         }
     }
 
@@ -224,7 +222,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     private void trySyncLatestCompaction(boolean blocking)
             throws ExecutionException, InterruptedException {
-        long start = System.currentTimeMillis();
         compactManager
                 .getCompactionResult(blocking)
                 .ifPresent(
@@ -232,7 +229,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                             compactBefore.addAll(result.before());
                             compactAfter.addAll(result.after());
                         });
-        writerMetrics.updateSyncLastestCompactionCostMS(System.currentTimeMillis() - start);
     }
 
     private CommitIncrement drainIncrement() {

@@ -102,19 +102,12 @@ public abstract class WriterOperatorTestBase {
         Assertions.assertThat(writeRecordCount.getCount()).isEqualTo(size);
 
         // test histogram has sample
-        Histogram writeCostMS = MetricUtils.getHistogram(metricGroup, "writeCostMS");
-        Assertions.assertThat(writeCostMS.getCount()).isEqualTo(size);
-
-        Histogram flushCostMS = MetricUtils.getHistogram(metricGroup, "flushCostMS");
+        Histogram flushCostMS = MetricUtils.getHistogram(metricGroup, "flushCostMillis");
         Assertions.assertThat(flushCostMS.getCount()).isGreaterThan(0);
 
         Histogram prepareCommitCostMS =
-                MetricUtils.getHistogram(metricGroup, "prepareCommitCostMS");
+                MetricUtils.getHistogram(metricGroup, "prepareCommitCostMillis");
         Assertions.assertThat(prepareCommitCostMS.getCount()).isGreaterThan(0);
-
-        Histogram syncLastestCompactionCostMS =
-                MetricUtils.getHistogram(metricGroup, "syncLastestCompactionCostMS");
-        Assertions.assertThat(syncLastestCompactionCostMS.getCount()).isGreaterThan(0);
 
         Gauge<Long> bufferPreemptCount = MetricUtils.getGauge(metricGroup, "bufferPreemptCount");
         Assertions.assertThat(bufferPreemptCount.getValue()).isEqualTo(0);
