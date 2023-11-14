@@ -39,8 +39,10 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TypeUtils;
 
 import javax.annotation.Nullable;
 
@@ -121,6 +123,30 @@ public class SnapshotReaderImpl implements SnapshotReader {
     @Override
     public SnapshotReader withSnapshot(Snapshot snapshot) {
         scan.withSnapshot(snapshot);
+        return this;
+    }
+
+    @Override
+    public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
+        if (partitionSpec != null) {
+            List<String> partitionKeys = tableSchema.partitionKeys();
+            RowType rowType = tableSchema.logicalPartitionType();
+            PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+            List<Predicate> partitionFilters =
+                    partitionSpec.entrySet().stream()
+                            .map(
+                                    m -> {
+                                        int index = partitionKeys.indexOf(m.getKey());
+                                        Object value =
+                                                TypeUtils.castFromStringInternal(
+                                                        m.getValue(),
+                                                        rowType.getTypeAt(index),
+                                                        false);
+                                        return predicateBuilder.equal(index, value);
+                                    })
+                            .collect(Collectors.toList());
+            scan.withPartitionFilter(PredicateBuilder.and(partitionFilters));
+        }
         return this;
     }
 

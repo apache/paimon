@@ -79,7 +79,7 @@ public class TypeUtils {
         return castFromStringInternal(s, type, true);
     }
 
-    private static Object castFromStringInternal(String s, DataType type, boolean isCdcValue) {
+    public static Object castFromStringInternal(String s, DataType type, boolean isCdcValue) {
         BinaryString str = BinaryString.fromString(s);
         switch (type.getTypeRoot()) {
             case CHAR:

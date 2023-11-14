@@ -31,6 +31,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
@@ -827,7 +828,19 @@ public class FlinkCatalog extends AbstractCatalog {
                 throw new TableNotPartitionedException(getName(), tablePath);
             }
 
-            List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+            ReadBuilder readBuilder = table.newReadBuilder();
+            List<Split> splits;
+            if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
+                splits =
+                        readBuilder
+                                .withPartitionFilter(partitionSpec.getPartitionSpec())
+                                .newScan()
+                                .plan()
+                                .splits();
+            } else {
+                splits = readBuilder.newScan().plan().splits();
+            }
+
             List<BinaryRow> partitions =
                     splits.stream()
                             .map(m -> ((DataSplit) m).partition())
@@ -848,28 +861,8 @@ public class FlinkCatalog extends AbstractCatalog {
                                                 Preconditions.checkNotNull(
                                                         m,
                                                         "Partition row data is null. This is unexpected."));
-                                if (partitionSpec != null
-                                        && partitionSpec.getPartitionSpec() != null) {
-                                    boolean match = true;
-                                    for (Map.Entry<String, String> specMapEntry :
-                                            partitionSpec.getPartitionSpec().entrySet()) {
-                                        String key = specMapEntry.getKey();
-                                        match =
-                                                match & partValues.containsKey(key)
-                                                        && partValues
-                                                                .get(key)
-                                                                .contains(specMapEntry.getValue());
-                                    }
-                                    if (match) {
-                                        return new CatalogPartitionSpec(partValues);
-                                    }
-
-                                    return null;
-                                } else {
-                                    return new CatalogPartitionSpec(partValues);
-                                }
+                                return new CatalogPartitionSpec(partValues);
                             })
-                    .filter(Objects::nonNull)
                     .collect(Collectors.toList());
         } catch (Catalog.TableNotExistException e) {
             throw new TableNotExistException(getName(), tablePath);
@@ -899,7 +892,12 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final boolean partitionExists(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws CatalogException {
-        return false;
+        try {
+            List<CatalogPartitionSpec> partitionSpecs = getPartitionSpecs(tablePath, partitionSpec);
+            return partitionSpecs.size() > 0;
+        } catch (TableNotPartitionedException | TableNotExistException e) {
+            throw new CatalogException(e);
+        }
     }
 
     @Override
@@ -915,8 +913,20 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public final void dropPartition(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec, boolean ignoreIfNotExists)
-            throws CatalogException {
-        throw new UnsupportedOperationException();
+            throws PartitionNotExistException, CatalogException {
+
+        if (!partitionExists(tablePath, partitionSpec)) {
+            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+        }
+
+        try {
+            Identifier identifier = toIdentifier(tablePath);
+            catalog.dropPartition(identifier, partitionSpec.getPartitionSpec());
+        } catch (Catalog.TableNotExistException e) {
+            throw new CatalogException(e);
+        } catch (Catalog.PartitionNotExistException e) {
+            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+        }
     }
 
     @Override
