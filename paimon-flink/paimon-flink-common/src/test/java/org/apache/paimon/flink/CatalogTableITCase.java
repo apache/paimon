@@ -708,4 +708,24 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));
     }
+
+    @Test
+    public void testAlterTableNonPhysicalColumn() {
+        sql(
+                "CREATE TABLE T (a INT,  c ROW < a INT, d INT> METADATA, b INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts)");
+        sql("ALTER TABLE T ADD e VARCHAR METADATA");
+        sql("ALTER TABLE T DROP c ");
+        sql("ALTER TABLE T RENAME e TO ee");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `b` INT,\n"
+                                + "  `ts` TIMESTAMP(3),\n"
+                                + "  `ee` VARCHAR(2147483647) METADATA,\n"
+                                + "  WATERMARK FOR `ts` AS `ts`\n"
+                                + ") ")
+                .doesNotContain("schema");
+    }
 }
