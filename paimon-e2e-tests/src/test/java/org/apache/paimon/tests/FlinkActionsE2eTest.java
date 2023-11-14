@@ -31,10 +31,6 @@ public class FlinkActionsE2eTest extends E2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkActionsE2eTest.class);
 
-    public FlinkActionsE2eTest() {
-        super(true, false);
-    }
-
     private String warehousePath;
     private String catalogDdl;
     private String useCatalogCmd;
@@ -55,6 +51,7 @@ public class FlinkActionsE2eTest extends E2eTestBase {
 
     @Test
     public void testCompact() throws Exception {
+        withKafka = true;
         String topicName = "ts-topic-" + UUID.randomUUID();
         createKafkaTopic(topicName, 1);
         // prepare first part of test data

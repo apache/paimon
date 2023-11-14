@@ -55,9 +55,9 @@ public abstract class E2eTestBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(E2eTestBase.class);
 
-    private final boolean withKafka;
-    private final boolean withHive;
-    private final boolean withSpark;
+    protected boolean withKafka;
+    protected boolean withHive;
+    protected boolean withSpark;
 
     protected E2eTestBase() {
         this(false, false);
