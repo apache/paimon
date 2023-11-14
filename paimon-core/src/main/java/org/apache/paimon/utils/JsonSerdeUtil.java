@@ -39,12 +39,13 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.Arra
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** A utility class that provide abilities for JSON serialization and deserialization. */
@@ -101,22 +102,25 @@ public class JsonSerdeUtil {
      * @param root The root node from which the specific node is to be retrieved.
      * @param fieldName The name of the field to retrieve.
      * @param clazz The class of the node to be returned.
-     * @return The node cast to the specified type.
-     * @throws IllegalArgumentException if the node is not present or if it's not of the expected
-     *     type.
+     * @return The node cast to the specified type or null if not present.
+     * @throws IllegalArgumentException if the node is not of the expected type.
      */
+    @Nullable
     public static <T extends JsonNode> T getNodeAs(
             JsonNode root, String fieldName, Class<T> clazz) {
-        return Optional.ofNullable(root)
-                .map(r -> r.get(fieldName))
-                .filter(clazz::isInstance)
-                .map(clazz::cast)
-                .orElseThrow(
-                        () ->
-                                new IllegalArgumentException(
-                                        String.format(
-                                                "Expected node '%s' to be of type %s but was either not found or of a different type.",
-                                                fieldName, clazz.getName())));
+        JsonNode node = root.get(fieldName);
+        if (node == null) {
+            return null;
+        }
+
+        if (clazz.isInstance(node)) {
+            return clazz.cast(node);
+        }
+
+        throw new IllegalArgumentException(
+                String.format(
+                        "Expected node '%s' to be of type %s but was %s.",
+                        fieldName, clazz.getName(), node.getClass().getName()));
     }
 
     public static <T> T fromJson(String json, Class<T> clazz) {

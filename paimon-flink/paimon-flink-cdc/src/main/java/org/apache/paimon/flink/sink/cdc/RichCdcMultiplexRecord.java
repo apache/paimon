@@ -20,6 +20,8 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.types.DataType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,15 +32,15 @@ public class RichCdcMultiplexRecord implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    private final String databaseName;
-    private final String tableName;
+    @Nullable private final String databaseName;
+    @Nullable private final String tableName;
     private final LinkedHashMap<String, DataType> fieldTypes;
     private final List<String> primaryKeys;
     private final CdcRecord cdcRecord;
 
     public RichCdcMultiplexRecord(
-            String databaseName,
-            String tableName,
+            @Nullable String databaseName,
+            @Nullable String tableName,
             LinkedHashMap<String, DataType> fieldTypes,
             List<String> primaryKeys,
             CdcRecord cdcRecord) {
@@ -49,10 +51,12 @@ public class RichCdcMultiplexRecord implements Serializable {
         this.cdcRecord = cdcRecord;
     }
 
+    @Nullable
     public String databaseName() {
         return databaseName;
     }
 
+    @Nullable
     public String tableName() {
         return tableName;
     }
@@ -83,8 +87,8 @@ public class RichCdcMultiplexRecord implements Serializable {
             return false;
         }
         RichCdcMultiplexRecord that = (RichCdcMultiplexRecord) o;
-        return databaseName.equals(that.databaseName)
-                && tableName.equals(that.tableName)
+        return Objects.equals(databaseName, that.databaseName)
+                && Objects.equals(tableName, that.tableName)
                 && Objects.equals(fieldTypes, that.fieldTypes)
                 && Objects.equals(primaryKeys, that.primaryKeys)
                 && Objects.equals(cdcRecord, that.cdcRecord);
