@@ -329,8 +329,6 @@ For more information of drop-partition, see
 
 ## Updating tables
 
-Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
-
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
@@ -344,6 +342,8 @@ Warning: we do not support updating primary keys.
 {{< tabs "update-table-syntax" >}}
 
 {{< tab "Flink" >}}
+
+Currently, Paimon supports updating records by using `UPDATE` in Flink 1.17 and later versions. You can perform `UPDATE` in Flink's `batch` mode.
 
 ```sql
 -- Syntax
@@ -362,6 +362,37 @@ CREATE TABLE MyTable (
 
 -- you can use
 UPDATE MyTable SET b = 1, c = 2 WHERE a = 'myTable';
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+
+To enable update needs these configs below:
+
+```text
+--conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
+--conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
+```
+
+spark supports update PrimitiveType and StructType, for example:
+
+```sql
+-- Syntax
+UPDATE table_identifier SET column1 = value1, column2 = value2, ... WHERE condition;
+
+CREATE TABLE T (
+  id INT, 
+  s STRUCT<c1: INT, c2: STRING>, 
+  name STRING)
+TBLPROPERTIES (
+  'primary-key' = 'id', 
+  'merge-engine' = 'deduplicate'
+);
+
+-- you can use
+UPDATE T SET name = 'a_new' WHERE id = 1;
+UPDATE T SET s.c2 = 'a_new' WHERE s.c1 = 1;
 ```
 
 {{< /tab >}}

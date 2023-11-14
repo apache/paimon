@@ -221,18 +221,18 @@ dataset.show()
 
 ## Update Table
 
-For now, Paimon does not support `UPDATE` syntax. But we can use `INSERT INTO` syntax instead for changelog tables.
+{{< hint info >}}
+Important table properties setting:
+1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+   {{< /hint >}}
+
+{{< hint warning >}}
+Warning: we do not support updating primary keys.
+{{< /hint >}}
 
 ```sql
-INSERT INTO my_table VALUES (1, 'Hi Again'), (3, 'Test');
-
-SELECT * FROM my_table;
-
-/*
-1	Hi Again
-2	Hello
-3	Test
-*/
+UPDATE my_table SET v = 'new_value' WHERE id = 1;
 ```
 
 ## Streaming Write

@@ -25,26 +25,31 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Dataset, Row, SparkSession}
-import org.apache.spark.sql.catalyst.analysis.EliminateSubqueryAliases
+import org.apache.spark.sql.catalyst.analysis.{AssignmentAlignmentHelper, EliminateSubqueryAliases}
+import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
+import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
-case class DeleteFromPaimonTableCommand(d: DeleteFromTable) extends LeafRunnableCommand {
+case class UpdatePaimonTableCommand(u: UpdateTable)
+  extends LeafRunnableCommand
+  with AssignmentAlignmentHelper {
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
-    val relation = EliminateSubqueryAliases(d.table).asInstanceOf[DataSourceV2Relation]
-    val condition = d.condition
 
-    val filteredPlan = if (condition != null) {
-      Filter(condition, relation)
-    } else {
-      relation
-    }
+    val relation = EliminateSubqueryAliases(u.table).asInstanceOf[DataSourceV2Relation]
+
+    val updatedExprs: Seq[Alias] =
+      alignUpdateAssignments(relation.output, u.assignments).zip(relation.output).map {
+        case (expr, attr) => Alias(expr, attr.name)()
+      }
+
+    val updatedPlan = Project(updatedExprs, Filter(u.condition.getOrElse(TrueLiteral), relation))
 
     val df = Dataset
-      .ofRows(sparkSession, filteredPlan)
-      .withColumn(ROW_KIND_COL, lit(RowKind.DELETE.toByteValue))
+      .ofRows(sparkSession, updatedPlan)
+      .withColumn(ROW_KIND_COL, lit(RowKind.UPDATE_AFTER.toByteValue))
 
     WriteIntoPaimonTable(
       relation.table.asInstanceOf[SparkTable].getTable.asInstanceOf[FileStoreTable],
