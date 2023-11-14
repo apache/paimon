@@ -34,6 +34,7 @@ import javax.annotation.Nullable;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /** Assigner to perform dynamic partition pruning by given {@link DynamicFilteringData}. */
@@ -101,6 +102,11 @@ public class DynamicPartitionPruningAssigner implements SplitAssigner {
                 ? new DynamicPartitionPruningAssigner(
                         oriAssigner, partitionRowProjection, dynamicFilteringData)
                 : oriAssigner;
+    }
+
+    @Override
+    public Optional<Long> getNextSnapshotId(int subtask) {
+        return innerAssigner.getNextSnapshotId(subtask);
     }
 
     private boolean filter(FileStoreSourceSplit sourceSplit) {

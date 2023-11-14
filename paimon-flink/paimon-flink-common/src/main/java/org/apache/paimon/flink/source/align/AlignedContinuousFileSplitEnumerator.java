@@ -164,7 +164,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             assignSplits();
         }
         Preconditions.checkArgument(alignedAssigner.isAligned());
-        lastConsumedSnapshotId = alignedAssigner.minRemainingSnapshotId();
+        lastConsumedSnapshotId = alignedAssigner.getNextSnapshotId(0).orElse(null);
         alignedAssigner.removeFirst();
         currentCheckpointId = checkpointId;
 

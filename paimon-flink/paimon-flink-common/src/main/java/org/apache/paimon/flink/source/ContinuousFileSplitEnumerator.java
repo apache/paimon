@@ -71,6 +71,8 @@ public class ContinuousFileSplitEnumerator
 
     protected final SplitAssigner splitAssigner;
 
+    protected final ConsumerProgressCalculator consumerProgressCalculator;
+
     @Nullable protected Long nextSnapshotId;
 
     protected boolean finished = false;
@@ -93,6 +95,9 @@ public class ContinuousFileSplitEnumerator
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
         addSplits(remainSplits);
+
+        this.consumerProgressCalculator =
+                new ConsumerProgressCalculator(context.currentParallelism());
     }
 
     @VisibleForTesting
@@ -140,7 +145,12 @@ public class ContinuousFileSplitEnumerator
 
     @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
-        LOG.error("Received unrecognized event: {}", sourceEvent);
+        if (sourceEvent instanceof ReaderConsumeProgressEvent) {
+            consumerProgressCalculator.updateConsumeProgress(
+                    subtaskId, (ReaderConsumeProgressEvent) sourceEvent);
+        } else {
+            LOG.error("Received unrecognized event: {}", sourceEvent);
+        }
     }
 
     @Override
@@ -155,8 +165,21 @@ public class ContinuousFileSplitEnumerator
         final PendingSplitsCheckpoint checkpoint =
                 new PendingSplitsCheckpoint(splits, nextSnapshotId);
 
+        consumerProgressCalculator.notifySnapshotState(
+                checkpointId,
+                readersAwaitingSplit,
+                subtask -> splitAssigner.getNextSnapshotId(subtask).orElse(nextSnapshotId),
+                context.currentParallelism());
+
         LOG.debug("Source Checkpoint is {}", checkpoint);
         return checkpoint;
+    }
+
+    @Override
+    public void notifyCheckpointComplete(long checkpointId) throws Exception {
+        consumerProgressCalculator
+                .notifyCheckpointComplete(checkpointId)
+                .ifPresent(scan::notifyCheckpointComplete);
     }
 
     // ------------------------------------------------------------------------
@@ -218,6 +241,7 @@ public class ContinuousFileSplitEnumerator
             List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
             if (splits.size() > 0) {
                 assignment.put(task, splits);
+                consumerProgressCalculator.updateAssignInformation(task, splits.get(0));
             }
         }
 
