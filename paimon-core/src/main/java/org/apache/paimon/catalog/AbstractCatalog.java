@@ -37,6 +37,7 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -165,6 +166,9 @@ public abstract class AbstractCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
+        validateCaseInsensitive(identifier);
+        validateCaseInsensitive(schema.rowType().getFieldNames());
+
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         }
@@ -188,6 +192,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
+        validateCaseInsensitive(toTable);
 
         if (!tableExists(fromTable)) {
             if (ignoreIfNotExists) {
@@ -210,6 +215,9 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
+        validateCaseInsensitive(identifier);
+        validateCaseInsensitiveInSchemaChange(changes);
+
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -361,5 +369,30 @@ public abstract class AbstractCatalog implements Catalog {
 
     private boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    private void validateCaseInsensitive(Identifier identifier) {
+        validateCaseInsensitive("Database", identifier.getDatabaseName());
+        validateCaseInsensitive("Table", identifier.getObjectName());
+    }
+
+    private void validateCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
+        List<String> fieldNames = new ArrayList<>();
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.AddColumn) {
+                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
+                fieldNames.add(addColumn.fieldName());
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
+                fieldNames.add(rename.newName());
+            } else {
+                // do nothing
+            }
+        }
+        validateCaseInsensitive(fieldNames);
+    }
+
+    private void validateCaseInsensitive(List<String> fieldNames) {
+        validateCaseInsensitive("Field", fieldNames.toArray(new String[0]));
     }
 }

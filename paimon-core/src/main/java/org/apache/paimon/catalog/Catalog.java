@@ -25,9 +25,13 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * This interface is responsible for reading and writing metadata such as database/table from a
@@ -210,6 +214,23 @@ public interface Catalog extends AutoCloseable {
     /** Return a boolean that indicates whether this catalog is case-sensitive. */
     default boolean caseSensitive() {
         return true;
+    }
+
+    /** Validate whether table or field names are valid when case-insensitive. */
+    default void validateCaseInsensitive(String type, String... names) {
+        if (caseSensitive()) {
+            return;
+        }
+
+        List<String> illegalNames =
+                Arrays.stream(names)
+                        .filter(f -> !f.equals(f.toLowerCase()))
+                        .collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
     }
 
     /** Exception for trying to drop on a database that is not empty. */

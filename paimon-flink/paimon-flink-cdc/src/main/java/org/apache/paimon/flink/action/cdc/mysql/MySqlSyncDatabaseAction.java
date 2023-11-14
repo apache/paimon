@@ -200,9 +200,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "use mysql-sync-table instead.");
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive();
 
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
@@ -319,21 +317,9 @@ public class MySqlSyncDatabaseAction extends ActionBase {
     }
 
     private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                tablePrefix.equals(tablePrefix.toLowerCase()),
-                String.format(
-                        "Table prefix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
-        checkArgument(
-                tableSuffix.equals(tableSuffix.toLowerCase()),
-                String.format(
-                        "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tableSuffix));
+        catalog.validateCaseInsensitive("Database", database);
+        catalog.validateCaseInsensitive("Table prefix", tablePrefix);
+        catalog.validateCaseInsensitive("Table suffix", tableSuffix);
     }
 
     private void logNonPkTables(List<Identifier> nonPkTables) {

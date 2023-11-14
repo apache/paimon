@@ -163,9 +163,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive();
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
@@ -263,30 +261,10 @@ public class MySqlSyncTableAction extends ActionBase {
     }
 
     private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                table.equals(table.toLowerCase()),
-                String.format(
-                        "Table name [%s] cannot contain upper case in case-insensitive catalog.",
-                        table));
-        for (String part : partitionKeys) {
-            checkArgument(
-                    part.equals(part.toLowerCase()),
-                    String.format(
-                            "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            partitionKeys));
-        }
-        for (String pk : primaryKeys) {
-            checkArgument(
-                    pk.equals(pk.toLowerCase()),
-                    String.format(
-                            "Primary keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            primaryKeys));
-        }
+        catalog.validateCaseInsensitive("Database", database);
+        catalog.validateCaseInsensitive("Table", table);
+        catalog.validateCaseInsensitive("Partition keys", partitionKeys.toArray(new String[0]));
+        catalog.validateCaseInsensitive("Primary keys", primaryKeys.toArray(new String[0]));
     }
 
     private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {

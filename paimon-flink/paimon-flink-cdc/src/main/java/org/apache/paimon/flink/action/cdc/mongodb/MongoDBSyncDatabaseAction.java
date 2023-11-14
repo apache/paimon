@@ -43,8 +43,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.regex.Pattern;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * An action class responsible for synchronizing MongoDB databases with a target system.
  *
@@ -119,9 +117,7 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     public void build() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive();
 
         catalog.createDatabase(database, true);
 
@@ -163,21 +159,9 @@ public class MongoDBSyncDatabaseAction extends ActionBase {
     }
 
     private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                tablePrefix.equals(tablePrefix.toLowerCase()),
-                String.format(
-                        "Table prefix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
-        checkArgument(
-                tableSuffix.equals(tableSuffix.toLowerCase()),
-                String.format(
-                        "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tableSuffix));
+        catalog.validateCaseInsensitive("Database", database);
+        catalog.validateCaseInsensitive("Table prefix", tablePrefix);
+        catalog.validateCaseInsensitive("Table suffix", tableSuffix);
     }
 
     @VisibleForTesting
