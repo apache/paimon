@@ -18,6 +18,8 @@
 
 package org.apache.paimon.benchmark.utils;
 
+import org.apache.paimon.utils.StringUtils;
+
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.IllegalConfigurationException;
 import org.slf4j.Logger;
@@ -69,7 +71,7 @@ public final class BenchmarkGlobalConfiguration {
      */
     public static Configuration loadConfiguration(Configuration dynamicProperties) {
         final String configDir = System.getenv(BENCHMARK_CONF_DIR_ENV_NAME);
-        if (configDir == null) {
+        if (StringUtils.isBlank(configDir)) {
             return new Configuration(dynamicProperties);
         }
 
@@ -98,7 +100,7 @@ public final class BenchmarkGlobalConfiguration {
     public static Configuration loadConfiguration(
             final String configDir, @Nullable final Configuration dynamicProperties) {
 
-        if (configDir == null) {
+        if (StringUtils.isBlank(configDir)) {
             throw new IllegalArgumentException(
                     "Given configuration directory is null, cannot load configuration");
         }
