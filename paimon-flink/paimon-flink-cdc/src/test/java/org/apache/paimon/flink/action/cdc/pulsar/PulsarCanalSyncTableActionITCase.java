@@ -35,7 +35,7 @@ import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC;
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_FORMAT;
 
 /** IT cases for {@link PulsarSyncTableAction}. */
-public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
+public class PulsarCanalSyncTableActionITCase extends PulsarActionITCaseBase {
 
     @Test
     @Timeout(120)

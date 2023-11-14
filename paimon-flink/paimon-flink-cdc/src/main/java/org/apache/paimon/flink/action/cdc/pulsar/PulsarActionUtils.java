@@ -359,7 +359,6 @@ public class PulsarActionUtils {
     }
 
     private static class PulsarConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
-
         private final Consumer<String> consumer;
 
         PulsarConsumerWrapper(Consumer<String> consumer) {
