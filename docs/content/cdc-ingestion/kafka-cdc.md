@@ -49,7 +49,7 @@ If a message in a Kafka topic is a change event captured from another database u
         </tr>
         <tr>
          <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/debezium/">Debezium CDC</a></td>
-         <td>False</td>
+         <td>True</td>
         </tr>
         <tr>
          <td><a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/formats/maxwell/ >}}">Maxwell CDC</a></td>
