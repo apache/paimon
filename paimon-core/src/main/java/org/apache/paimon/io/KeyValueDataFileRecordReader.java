@@ -30,7 +30,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
-import org.apache.paimon.utils.VectorMappingUtils;
 
 import javax.annotation.Nullable;
 
@@ -78,10 +77,8 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
                 ? null
                 : iterator instanceof ColumnarRowIterator
                         ? new KeyValueDataFileRecordIterator(
-                                VectorMappingUtils.mappingColumnarRowInterator(
-                                        (ColumnarRowIterator) iterator,
-                                        indexMapping,
-                                        partitionInfo),
+                                ((ColumnarRowIterator) iterator)
+                                        .mapping(partitionInfo, indexMapping),
                                 castMapping)
                         : new KeyValueDataFileRecordIterator(
                                 iterator, indexMapping, partitionInfo, castMapping);

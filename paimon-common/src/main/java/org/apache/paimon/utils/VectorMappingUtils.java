@@ -30,7 +30,6 @@ import org.apache.paimon.data.columnar.BooleanColumnVector;
 import org.apache.paimon.data.columnar.ByteColumnVector;
 import org.apache.paimon.data.columnar.BytesColumnVector;
 import org.apache.paimon.data.columnar.ColumnVector;
-import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.DecimalColumnVector;
 import org.apache.paimon.data.columnar.DoubleColumnVector;
 import org.apache.paimon.data.columnar.FloatColumnVector;
@@ -40,7 +39,6 @@ import org.apache.paimon.data.columnar.MapColumnVector;
 import org.apache.paimon.data.columnar.RowColumnVector;
 import org.apache.paimon.data.columnar.ShortColumnVector;
 import org.apache.paimon.data.columnar.TimestampColumnVector;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -64,8 +62,6 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
-import javax.annotation.Nullable;
-
 /**
  * This is a util about how to expand the {@link ColumnVector}s with the partition row and index
  * mapping. For example, we fetch the column of a, b, c from orc file, but the schema of table is a,
@@ -75,13 +71,6 @@ import javax.annotation.Nullable;
  * perform a per-record replace action.
  */
 public class VectorMappingUtils {
-
-    public static RecordReader.RecordIterator<InternalRow> mappingColumnarRowInterator(
-            ColumnarRowIterator columnarRowIterator,
-            @Nullable int[] indexMapping,
-            @Nullable PartitionInfo partitionInfo) {
-        return columnarRowIterator.mapping(partitionInfo, indexMapping);
-    }
 
     public static ColumnVector[] createPartitionMappedVectors(
             PartitionInfo partitionInfo, ColumnVector[] vectors) {

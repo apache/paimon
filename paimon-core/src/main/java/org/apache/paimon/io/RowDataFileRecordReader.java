@@ -27,7 +27,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.FileUtils;
-import org.apache.paimon.utils.VectorMappingUtils;
 
 import javax.annotation.Nullable;
 
@@ -63,10 +62,8 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
                 ? null
                 : iterator instanceof ColumnarRowIterator
                         ? new RowDataFileRecordIterator(
-                                VectorMappingUtils.mappingColumnarRowInterator(
-                                        (ColumnarRowIterator) iterator,
-                                        indexMapping,
-                                        partitionInfo),
+                                ((ColumnarRowIterator) iterator)
+                                        .mapping(partitionInfo, indexMapping),
                                 castMapping)
                         : new RowDataFileRecordIterator(
                                 iterator, indexMapping, partitionInfo, castMapping);
