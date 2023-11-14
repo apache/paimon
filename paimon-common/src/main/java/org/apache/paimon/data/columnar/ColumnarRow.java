@@ -235,6 +235,8 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
             vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
         }
 
-        this.vectorizedColumnBatch = new VectorizedColumnBatch(vectors);
+        if (vectors != vectorizedColumnBatch.columns) {
+            this.vectorizedColumnBatch = new VectorizedColumnBatch(vectors);
+        }
     }
 }
