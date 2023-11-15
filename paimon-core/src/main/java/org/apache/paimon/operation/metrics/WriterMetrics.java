@@ -30,7 +30,7 @@ public class WriterMetrics {
 
     private static final String GROUP_NAME = "writer";
 
-    private static final int WINDOW_SAMPLE_SIZE = 10000;
+    private static final int WINDOW_SAMPLE_SIZE = 100;
     private static final String WRITE_RECORD_NUM = "writeRecordCount";
 
     private static final String BUFFER_PREEMPT_COUNT = "bufferPreemptCount";
