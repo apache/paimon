@@ -23,13 +23,10 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 /** Metrics to measure a compaction. */
 public class CompactionMetrics {
-    private static final Logger LOG = LoggerFactory.getLogger(CompactionMetrics.class);
-    private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
+
+    private static final int HISTOGRAM_WINDOW_SIZE = 100;
     private static final String GROUP_NAME = "compaction";
 
     private final MetricGroup metricGroup;
@@ -106,5 +103,9 @@ public class CompactionMetrics {
     public void reportCompaction(CompactionStats compactionStats) {
         latestCompaction = compactionStats;
         durationHistogram.update(compactionStats.getDuration());
+    }
+
+    public void close() {
+        metricGroup.close();
     }
 }

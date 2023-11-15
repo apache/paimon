@@ -195,7 +195,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        if (metrics != null) {
+            metrics.close();
+        }
+    }
 
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {

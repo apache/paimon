@@ -210,5 +210,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void close() throws IOException {
         rewriter.close();
+        if (metrics != null) {
+            metrics.close();
+        }
     }
 }
