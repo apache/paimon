@@ -191,7 +191,6 @@ public class FlinkExternalCatalog extends AbstractCatalog {
             throws TableNotExistException, CatalogException {
         try {
             CatalogTable table = paimon.getTable(tablePath);
-            Map<String, String> options = table.getOptions();
             if (!(table instanceof SystemCatalogTable)) {
                 table.getOptions().put("connector", "paimon");
             }
