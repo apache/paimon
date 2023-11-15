@@ -580,8 +580,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // the target table name has upper case.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage(
-                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
+                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
 
