@@ -22,9 +22,6 @@ package org.apache.paimon.flink.action.cdc.format.canal;
 public class CanalFieldParser {
 
     protected static byte[] convertGeoType2WkbArray(byte[] mysqlGeomBytes) {
-        if (mysqlGeomBytes == null) {
-            return null;
-        }
         int sridLength = 4;
         boolean hasSrid = false;
         for (int i = 0; i < sridLength; ++i) {
@@ -58,9 +55,6 @@ public class CanalFieldParser {
     }
 
     protected static String convertSet(String value, String mysqlType) {
-        if (value == null) {
-            return null;
-        }
         // mysql set type value can be filled with more than one, value is a bit string conversion
         // from the long
         int indexes = Integer.parseInt(value);
@@ -68,9 +62,6 @@ public class CanalFieldParser {
     }
 
     protected static String convertEnum(String value, String mysqlType) {
-        if (value == null) {
-            return null;
-        }
         int elementIndex = Integer.parseInt(value);
         // enum('a','b','c')
         return getEnumValueByIndex(mysqlType, elementIndex);

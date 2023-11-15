@@ -24,10 +24,13 @@ import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.flink.shaded.guava30.com.google.common.base.Preconditions.checkArgument;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
@@ -67,22 +70,20 @@ public class DebeziumRecordParser extends RecordParser {
 
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
-        String operation = extractStringFromRootJson(FIELD_TYPE);
+        String operation = getAndCheck(FIELD_TYPE).asText();
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         switch (operation) {
             case OP_INSERT:
             case OP_READE:
-                processRecord(root.get(dataField()), RowKind.INSERT, records);
+                processRecord(getData(), RowKind.INSERT, records);
                 break;
             case OP_UPDATE:
                 processRecord(
-                        mergeOldRecord(root.get(dataField()), root.get(FIELD_BEFORE)),
-                        RowKind.DELETE,
-                        records);
-                processRecord(root.get(dataField()), RowKind.INSERT, records);
+                        mergeOldRecord(getData(), getBefore(operation)), RowKind.DELETE, records);
+                processRecord(getData(), RowKind.INSERT, records);
                 break;
             case OP_DELETE:
-                processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
+                processRecord(getBefore(operation), RowKind.DELETE, records);
                 break;
             default:
                 throw new UnsupportedOperationException("Unknown record operation: " + operation);
@@ -90,33 +91,12 @@ public class DebeziumRecordParser extends RecordParser {
         return records;
     }
 
-    @Override
-    protected void validateFormat() {
-        String errorMessageTemplate =
-                "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
-        checkArgument(
-                !isNull(root.get(FIELD_SOURCE).get(FIELD_TABLE)),
-                errorMessageTemplate,
-                FIELD_TABLE);
-        checkArgument(
-                !isNull(root.get(FIELD_SOURCE).get(FIELD_DB)),
-                errorMessageTemplate,
-                FIELD_DATABASE);
-        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
-        String operation = root.get(FIELD_TYPE).asText();
-        switch (operation) {
-            case OP_INSERT:
-            case OP_READE:
-                checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
-                break;
-            case OP_UPDATE:
-            case OP_DELETE:
-                checkArgument(!isNull(root.get(FIELD_BEFORE)), errorMessageTemplate, FIELD_BEFORE);
-                break;
-            default:
-                throw new IllegalArgumentException("Unsupported operation type: " + operation);
-        }
-        checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
+    private JsonNode getData() {
+        return getAndCheck(dataField());
+    }
+
+    private JsonNode getBefore(String op) {
+        return getAndCheck(FIELD_BEFORE, FIELD_TYPE, op);
     }
 
     @Override
@@ -129,15 +109,31 @@ public class DebeziumRecordParser extends RecordParser {
         return FIELD_AFTER;
     }
 
+    @Nullable
     @Override
-    protected String extractStringFromRootJson(String key) {
-        if (key.equals(FIELD_TABLE)) {
-            tableName = root.get(FIELD_SOURCE).get(FIELD_TABLE).asText();
-            return tableName;
-        } else if (key.equals(FIELD_DATABASE)) {
-            databaseName = root.get(FIELD_SOURCE).get(FIELD_DB).asText();
-            return databaseName;
+    protected String getTableName() {
+        return getFromSourceField(FIELD_TABLE);
+    }
+
+    @Nullable
+    @Override
+    protected String getDatabaseName() {
+        return getFromSourceField(FIELD_DB);
+    }
+
+    @Override
+    protected String format() {
+        return "debezium-json";
+    }
+
+    @Nullable
+    private String getFromSourceField(String key) {
+        JsonNode node = root.get(FIELD_SOURCE);
+        if (isNull(node)) {
+            return null;
         }
-        return root.get(key) != null ? root.get(key).asText() : null;
+
+        node = node.get(key);
+        return isNull(node) ? null : node.asText();
     }
 }
