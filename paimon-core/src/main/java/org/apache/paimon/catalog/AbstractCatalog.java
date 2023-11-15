@@ -40,7 +40,13 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
@@ -55,7 +61,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
-    protected final Map<String, String> catalogOptions;
+    protected final Options catalogOptions;
 
     @Nullable protected final LineageMetaFactory lineageMetaFactory;
 
@@ -63,16 +69,15 @@ public abstract class AbstractCatalog implements Catalog {
         this.fileIO = fileIO;
         this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
-        this.catalogOptions = new HashMap<>();
+        this.catalogOptions = new Options();
     }
 
-    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
+    protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
         this.lineageMetaFactory =
-                findAndCreateLineageMeta(
-                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
+                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions =
-                convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+                convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
     }
 
@@ -315,7 +320,7 @@ public abstract class AbstractCatalog implements Catalog {
     public abstract String warehouse();
 
     public Map<String, String> options() {
-        return catalogOptions;
+        return catalogOptions.toMap();
     }
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)

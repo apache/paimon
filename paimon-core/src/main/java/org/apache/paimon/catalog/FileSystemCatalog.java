@@ -29,7 +29,6 @@ import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
@@ -45,7 +44,7 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, options);
         this.warehouse = warehouse;
     }
@@ -166,6 +165,6 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public boolean caseSensitive() {
-        return Options.fromMap(options()).get(CASE_SENSITIVE);
+        return catalogOptions.get(CASE_SENSITIVE);
     }
 }

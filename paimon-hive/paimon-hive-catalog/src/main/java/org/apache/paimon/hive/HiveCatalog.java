@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -109,14 +110,14 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse);
+        this(fileIO, hiveConf, clientClassName, new Options(), warehouse);
     }
 
     public HiveCatalog(
             FileIO fileIO,
             HiveConf hiveConf,
             String clientClassName,
-            Map<String, String> options,
+            Options options,
             String warehouse) {
         super(fileIO, options);
         this.hiveConf = hiveConf;
