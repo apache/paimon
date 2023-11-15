@@ -63,7 +63,12 @@ If a message in a Kafka topic is a change event captured from another database u
 </table>
 
 {{< hint info >}}
-In Oracle GoldenGate and Maxwell, the data format synchronized to Kafka does not include field data type information. As a result, Paimon sets the data type for all fields to "String" by default.
+The JSON sources possibly missing some information. For example, Ogg and Maxwell format don't contain field types; When 
+you write JSON sources into Flink Kafka sink, it will only reserve data and row type and drop other information. The 
+synchronization will try best to handle the problem as follows:
+1. If missing field types, Paimon will use 'STRING' type as default. Note that the Ogg and Maxwell standard implementation 
+don't contain field types.
+2. If missing database name or table name, you cannot database synchronization. But you can still do table synchronization.
 {{< /hint >}}
 
 ## Synchronizing Tables

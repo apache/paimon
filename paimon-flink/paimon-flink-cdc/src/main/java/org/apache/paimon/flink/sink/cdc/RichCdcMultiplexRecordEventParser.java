@@ -85,6 +85,13 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     @Override
     public String parseTableName() {
+        // database synchronization needs this, so we validate the record here
+        if (record.databaseName() == null || record.tableName() == null) {
+            throw new IllegalArgumentException(
+                    "Cannot synchronize record when database name or table name is unknown. "
+                            + "Invalid record is:\n"
+                            + record);
+        }
         return tableNameConverter.convert(Identifier.create(record.databaseName(), currentTable));
     }
 
@@ -112,6 +119,12 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldSynchronizeCurrentTable() {
+        // In case the record is incomplete, we let the null value pass validation
+        // and handle the null value when we really need it
+        if (currentTable == null) {
+            return true;
+        }
+
         if (includedTables.contains(currentTable)) {
             return true;
         }

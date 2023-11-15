@@ -209,6 +209,7 @@ public class CdcActionCommonUtils {
         } else if (!sourceSchema.primaryKeys().isEmpty()) {
             builder.primaryKey(sourceSchema.primaryKeys());
         } else {
+            // TODO kafka cdc doesn't need to check
             throw new IllegalArgumentException(
                     "Primary keys are not specified. "
                             + "Also, can't infer primary keys from source table schemas because "
