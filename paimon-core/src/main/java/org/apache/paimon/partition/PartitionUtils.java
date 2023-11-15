@@ -59,6 +59,11 @@ public class PartitionUtils {
             }
         }
 
+        // partition field is not selected, we just return null back
+        if (pCount == 0) {
+            return null;
+        }
+
         int[][] projectionReturn = new int[dataProjection.length - pCount][];
         int count = 0;
         for (int i = 0; i < dataProjection.length; i++) {

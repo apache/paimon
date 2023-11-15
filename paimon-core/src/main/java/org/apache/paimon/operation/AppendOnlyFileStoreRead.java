@@ -143,12 +143,15 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     Pair<int[], int[][]> partitionMappping =
                                             PartitionUtils.constructPartitionMapping(
                                                     dataSchema, dataProjection);
-                                    dataProjection = partitionMappping.getRight();
-                                    partitionPair =
-                                            Pair.of(
-                                                    partitionMappping.getLeft(),
-                                                    dataSchema.projectedLogicalRowType(
-                                                            dataSchema.partitionKeys()));
+                                    // if partition fields are not selected, we just do nothing
+                                    if (partitionMappping != null) {
+                                        dataProjection = partitionMappping.getRight();
+                                        partitionPair =
+                                                Pair.of(
+                                                        partitionMappping.getLeft(),
+                                                        dataSchema.projectedLogicalRowType(
+                                                                dataSchema.partitionKeys()));
+                                    }
                                 }
 
                                 RowType projectedRowType =

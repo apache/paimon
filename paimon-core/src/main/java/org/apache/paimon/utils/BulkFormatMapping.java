@@ -169,11 +169,14 @@ public class BulkFormatMapping {
                 Pair<int[], int[][]> partitionMappping =
                         PartitionUtils.constructPartitionMapping(
                                 dataRecordType, dataSchema.partitionKeys(), dataProjection);
-                dataProjection = partitionMappping.getRight();
-                partitionPair =
-                        Pair.of(
-                                partitionMappping.getLeft(),
-                                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+                // is partition fields are not selected, we just do nothing.
+                if (partitionMappping != null) {
+                    dataProjection = partitionMappping.getRight();
+                    partitionPair =
+                            Pair.of(
+                                    partitionMappping.getLeft(),
+                                    dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+                }
             }
             RowType projectedRowType = Projection.of(dataProjection).project(dataRecordType);
             return new BulkFormatMapping(
