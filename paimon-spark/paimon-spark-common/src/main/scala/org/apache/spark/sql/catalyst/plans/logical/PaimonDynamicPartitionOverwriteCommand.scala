@@ -67,5 +67,6 @@ case class PaimonDynamicPartitionOverwriteCommand(
     ).run(sparkSession)
   }
 
-  override def storeAnalyzedQuery(): Command = copy(query = query)
+  // Do not annotate with override here to maintain compatibility with Spark 3.3-.
+  def storeAnalyzedQuery(): Command = copy(query = query)
 }

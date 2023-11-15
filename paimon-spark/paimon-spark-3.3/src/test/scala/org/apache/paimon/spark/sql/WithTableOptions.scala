@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -15,15 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark.sql
 
-package org.apache.paimon.spark.analysis;
+trait WithTableOptions {
 
-import org.apache.spark.sql.connector.catalog.Identifier;
+  // 3: fixed bucket, -1: dynamic bucket
+  protected val bucketModes: Seq[Int] = Seq(3, -1)
 
-/** Thrown by a catalog when a stored procedure cannot be found. */
-public class NoSuchProcedureException extends RuntimeException {
+  protected val withPk: Seq[Boolean] = Seq(true, false)
 
-    public NoSuchProcedureException(Identifier identifier) {
-        super("Procedure " + identifier + " is not found");
-    }
 }
