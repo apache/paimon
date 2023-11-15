@@ -19,13 +19,44 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
+import java.util.LinkedHashMap;
+import java.util.Map;
 import java.util.Optional;
 
-/** Build table schema for newly added table in CDC ingestion. */
-@FunctionalInterface
-public interface NewTableSchemaBuilder<T> extends Serializable {
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 
-    Optional<Schema> build(T source);
+/** Build schema for new table found in database synchronization. */
+public class NewTableSchemaBuilder implements Serializable {
+
+    private final Map<String, String> tableConfig;
+    private final boolean caseSensitive;
+
+    public NewTableSchemaBuilder(Map<String, String> tableConfig, boolean caseSensitive) {
+        this.tableConfig = tableConfig;
+        this.caseSensitive = caseSensitive;
+    }
+
+    public Optional<Schema> build(RichCdcMultiplexRecord record) {
+        Schema.Builder builder = Schema.newBuilder();
+        builder.options(tableConfig);
+
+        String tableName = record.tableName();
+        tableName = tableName == null ? "UNKNOWN" : tableName;
+        LinkedHashMap<String, DataType> fieldTypes =
+                mapKeyCaseConvert(
+                        record.fieldTypes(), caseSensitive, columnDuplicateErrMsg(tableName));
+
+        for (Map.Entry<String, DataType> entry : fieldTypes.entrySet()) {
+            builder.column(entry.getKey(), entry.getValue());
+        }
+
+        builder.primaryKey(listCaseConvert(record.primaryKeys(), caseSensitive));
+
+        return Optional.of(builder.build());
+    }
 }
