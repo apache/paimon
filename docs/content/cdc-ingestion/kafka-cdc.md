@@ -68,6 +68,8 @@ types; When you write JSON sources into Flink Kafka sink, it will only reserve d
 The synchronization job will try best to handle the problem as follows:
 1. If missing field types, Paimon will use 'STRING' type as default. 
 2. If missing database name or table name, you cannot do database synchronization, but you can still do table synchronization.
+3. If missing primary keys, the job might create non primary key table. You can set primary keys when submit job in table 
+synchronization.
 {{< /hint >}}
 
 ## Synchronizing Tables
