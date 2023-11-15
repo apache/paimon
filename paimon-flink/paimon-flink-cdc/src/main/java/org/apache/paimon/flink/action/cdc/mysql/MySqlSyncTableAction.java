@@ -51,7 +51,6 @@ import java.util.Map;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -99,7 +98,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
     private Map<String, String> tableConfig = new HashMap<>();
     private List<String> computedColumnArgs = new ArrayList<>();
-    private List<String> metadataColumn = new ArrayList<>();
+    private List<String> metadataColumns = new ArrayList<>();
     private TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     public MySqlSyncTableAction(
@@ -149,8 +148,8 @@ public class MySqlSyncTableAction extends ActionBase {
         return this;
     }
 
-    public MySqlSyncTableAction withMetadataKeys(List<String> metadataKeys) {
-        this.metadataColumn = metadataKeys;
+    public MySqlSyncTableAction withMetadataColumns(List<String> metadataColumns) {
+        this.metadataColumns = metadataColumns;
         return this;
     }
 
@@ -183,15 +182,9 @@ public class MySqlSyncTableAction extends ActionBase {
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, tableInfo.schema().fields());
 
-        CdcMetadataConverter[] metadataConverters =
-                metadataColumn.stream()
-                        .map(
-                                key ->
-                                        Stream.of(MySqlMetadataProcessor.values())
-                                                .filter(m -> m.getKey().equals(key))
-                                                .findFirst()
-                                                .orElseThrow(IllegalStateException::new))
-                        .map(MySqlMetadataProcessor::getConverter)
+        CdcMetadataConverter<?>[] metadataConverters =
+                metadataColumns.stream()
+                        .map(MySqlMetadataProcessor::converter)
                         .toArray(CdcMetadataConverter[]::new);
 
         Schema fromMySql =
