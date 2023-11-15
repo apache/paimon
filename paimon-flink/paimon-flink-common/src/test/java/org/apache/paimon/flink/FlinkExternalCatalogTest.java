@@ -192,7 +192,6 @@ public class FlinkExternalCatalogTest {
                         .getDataTableLocation(FlinkCatalog.toIdentifier(path));
         Map<String, String> options = new HashMap<>(t1.getOptions());
         options.put("path", tablePath.toString());
-        options.put("connector", "paimon");
         t1 = ((ResolvedCatalogTable) t1).copy(options);
         checkEquals(t1, t2);
     }

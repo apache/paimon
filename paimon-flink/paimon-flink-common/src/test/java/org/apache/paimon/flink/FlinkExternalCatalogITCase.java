@@ -87,4 +87,28 @@ public class FlinkExternalCatalogITCase {
                         path2.toUri().getPath()));
         tEnv.executeSql("insert into file select * from `word_count`");
     }
+
+    @Test
+    public void testUseSystemTable() {
+        tEnv.executeSql(
+                "CREATE TABLE word_count (\n"
+                        + "    word STRING PRIMARY KEY NOT ENFORCED,\n"
+                        + "    cnt BIGINT\n"
+                        + ") with (\n"
+                        + "\t'connector'='paimon'\n"
+                        + ")");
+        tEnv.executeSql(
+                String.format(
+                        "CREATE TABLE file (\n"
+                                + "    word STRING PRIMARY KEY NOT ENFORCED,\n"
+                                + "    rowkind String,\n"
+                                + "    cnt BIGINT\n"
+                                + ") with (\n"
+                                + "    'connector'='filesystem',\n"
+                                + "    'path'='file://%s', \n"
+                                + "    'format'='json' \n"
+                                + ")",
+                        path2.toUri().getPath()));
+        tEnv.executeSql("insert into file select * from word_count$audit_log");
+    }
 }

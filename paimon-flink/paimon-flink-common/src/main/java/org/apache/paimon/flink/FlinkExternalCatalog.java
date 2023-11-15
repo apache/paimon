@@ -57,6 +57,7 @@ import org.apache.flink.table.catalog.stats.CatalogColumnStatistics;
 import org.apache.flink.table.catalog.stats.CatalogTableStatistics;
 import org.apache.flink.table.descriptors.DescriptorProperties;
 import org.apache.flink.table.expressions.Expression;
+import org.apache.flink.table.factories.Factory;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -64,6 +65,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
@@ -125,6 +127,11 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     @Override
     public void close() throws CatalogException {
         paimon.close();
+    }
+
+    @Override
+    public Optional<Factory> getFactory() {
+        return Optional.of(new FlinkTableFactory());
     }
 
     @Override
@@ -190,11 +197,7 @@ public class FlinkExternalCatalog extends AbstractCatalog {
     public CatalogBaseTable getTable(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
         try {
-            CatalogTable table = paimon.getTable(tablePath);
-            if (!(table instanceof SystemCatalogTable)) {
-                table.getOptions().put("connector", "paimon");
-            }
-            return table;
+            return paimon.getTable(tablePath);
         } catch (TableNotExistException | CatalogException e) {
             Path tableSchemaPath = new Path(externalTableSchemaDir(tablePath) + "schema");
             try {
