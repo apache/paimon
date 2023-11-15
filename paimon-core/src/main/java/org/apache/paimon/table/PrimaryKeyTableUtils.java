@@ -66,7 +66,7 @@ public class PrimaryKeyTableUtils {
             case DEDUPLICATE:
                 return DeduplicateMergeFunction.factory();
             case PARTIAL_UPDATE:
-                return PartialUpdateMergeFunction.factory(conf, rowType);
+                return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case AGGREGATE:
                 return AggregateMergeFunction.factory(
                         conf,

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -30,10 +31,9 @@ import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
+import java.util.Arrays;
 import java.util.List;
 
-import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
-import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -42,9 +42,6 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * pre-aggregate non-null fields on merge.
  */
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
-
-    public static final String AGG_FUNCTION = "aggregate-function";
-    public static final String IGNORE_RETRACT = "ignore-retract";
 
     private final InternalRow.FieldGetter[] getters;
     private final FieldAggregator[] aggregators;
@@ -63,6 +60,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     public void reset() {
         this.latestKv = null;
         this.row = new GenericRow(getters.length);
+        Arrays.stream(aggregators).forEach(FieldAggregator::reset);
     }
 
     @Override
@@ -107,7 +105,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
-        private final Options conf;
+        private final CoreOptions options;
         private final List<String> tableNames;
         private final List<DataType> tableTypes;
         private final List<String> primaryKeys;
@@ -117,7 +115,7 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 List<String> tableNames,
                 List<DataType> tableTypes,
                 List<String> primaryKeys) {
-            this.conf = conf;
+            this.options = new CoreOptions(conf);
             this.tableNames = tableNames;
             this.tableTypes = tableTypes;
             this.primaryKeys = primaryKeys;
@@ -139,16 +137,9 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 DataType fieldType = fieldTypes.get(i);
                 // aggregate by primary keys, so they do not aggregate
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
-                String strAggFunc =
-                        conf.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
-                                        .stringType()
-                                        .noDefaultValue());
-                boolean ignoreRetract =
-                        conf.get(
-                                key(FIELDS_PREFIX + "." + fieldName + "." + IGNORE_RETRACT)
-                                        .booleanType()
-                                        .defaultValue(false));
+                String strAggFunc = options.fieldAggFunc(fieldName);
+                boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
+
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(
                                 fieldType, strAggFunc, ignoreRetract, isPrimaryKey);

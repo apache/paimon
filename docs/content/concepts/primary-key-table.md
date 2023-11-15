@@ -171,6 +171,36 @@ SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 
 For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
+#### Aggregation
+
+You can specify aggregation function for the input field, all the functions in the [Aggregation]({{< ref "concepts/primary-key-table#aggregation-1" >}}) are supported. 
+
+See example:
+
+```sql
+CREATE TABLE T (
+          k INT,
+          a INT,
+          b INT,
+          c INT,
+          d INT,
+          PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+     'merge-engine'='partial-update',
+     'fields.a.sequence-group' = 'b',
+     'fields.b.aggregate-function' = 'first_value',
+     'fields.c.sequence-group' = 'd',
+     'fields.d.aggregate-function' = 'sum',
+ );
+INSERT INTO T VALUES (1, 1, 1, null, null);
+INSERT INTO T VALUES (1, null, null, 1, 1);
+INSERT INTO T VALUES (1, 2, 2, null, null);
+INSERT INTO T VALUES (1, null, null, 2, 2);
+
+
+SELECT * FROM T; -- output 1, 2, 1, 2, 3
+```
+
 #### Default Value
 If the order of the data cannot be guaranteed and field is written only by overwriting null values,
 fields that have not been overwritten will be displayed as null when reading table.
@@ -250,6 +280,7 @@ Current supported aggregate functions and data types are:
 * `last_value` / `last_non_null_value`: support all data types.
 * `listagg`: supports STRING data type.
 * `bool_and` / `bool_or`: support BOOLEAN data type.
+* `first_value`: support all data types.
 
 Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:

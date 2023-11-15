@@ -89,6 +89,16 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldFirstValueAgg() {
+        FieldFirstValueAgg fieldFirstValueAgg = new FieldFirstValueAgg(new IntType());
+        assertThat(fieldFirstValueAgg.agg(null, 1)).isEqualTo(1);
+        assertThat(fieldFirstValueAgg.agg(1, 2)).isEqualTo(1);
+
+        fieldFirstValueAgg.reset();
+        assertThat(fieldFirstValueAgg.agg(1, 3)).isEqualTo(3);
+    }
+
+    @Test
     public void testFieldListaggAgg() {
         FieldListaggAgg fieldListaggAgg = new FieldListaggAgg(new VarCharType());
         BinaryString accumulator = BinaryString.fromString("user1");

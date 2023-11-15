@@ -40,6 +40,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
 import org.apache.paimon.utils.ReusingTestData;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.assertj.core.util.Lists;
 import org.junit.jupiter.api.Test;
 
@@ -174,7 +176,8 @@ public abstract class SortBufferWriteBufferTestBase {
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
             options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
-            return PartialUpdateMergeFunction.factory(options, RowType.of(DataTypes.BIGINT()))
+            return PartialUpdateMergeFunction.factory(
+                            options, RowType.of(DataTypes.BIGINT()), ImmutableList.of("key"))
                     .create();
         }
     }

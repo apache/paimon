@@ -35,7 +35,7 @@ public class FieldBoolOrAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         Object boolOr;
 
         if (accumulator == null || inputField == null) {
