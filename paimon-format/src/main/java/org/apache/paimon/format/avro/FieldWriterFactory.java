@@ -26,9 +26,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
+import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.util.Utf8;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.util.List;
@@ -115,19 +117,28 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
-    public FieldWriter visitTimestampMillis(int precision) {
+    public FieldWriter visitTimestampMillis(Integer precision) {
+        if (precision == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, i, encoder) ->
                 encoder.writeLong(container.getTimestamp(i, precision).getMillisecond());
     }
 
     @Override
-    public FieldWriter visitTimestampMicros(int precision) {
+    public FieldWriter visitTimestampMicros(Integer precision) {
+        if (precision == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, i, encoder) ->
                 encoder.writeLong(container.getTimestamp(i, precision).toMicros());
     }
 
     @Override
-    public FieldWriter visitDecimal(int precision, int scale) {
+    public FieldWriter visitDecimal(Integer precision, Integer scale) {
+        if (precision == null || scale == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, index, encoder) -> {
             Decimal decimal = container.getDecimal(index, precision, scale);
             encoder.writeBytes(decimal.toUnscaledBytes());
@@ -170,7 +181,7 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
-    public FieldWriter visitRecord(Schema schema, List<DataField> fields) {
+    public FieldWriter visitRecord(Schema schema, @NotNull List<DataField> fields) {
         return new RowWriter(schema, fields);
     }
 

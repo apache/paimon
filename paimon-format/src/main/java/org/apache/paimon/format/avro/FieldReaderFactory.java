@@ -32,19 +32,21 @@ import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.util.Utf8;
+import org.jetbrains.annotations.NotNull;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Factory to create {@link FieldReader}. */
-public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader> {
+public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     private static final FieldReader STRING_READER = new StringReader();
 
@@ -69,13 +71,8 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
     private static final FieldReader TIMESTAMP_MICROS_READER = new TimestampMicrosReader();
 
     @Override
-    public FieldReader visitUnion(Schema schema, DataType type) {
+    public FieldReader visitUnion(Schema schema, @Nullable DataType type) {
         return new NullableReader(visit(schema.getTypes().get(1), type));
-    }
-
-    @Override
-    public FieldReader visitUnion(Schema schema) {
-        return new NullableReader(visit(schema.getTypes().get(1)));
     }
 
     @Override
@@ -124,67 +121,35 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
     }
 
     @Override
-    public FieldReader visitTimestampMillis(int precision) {
+    public FieldReader visitTimestampMillis(@Nullable Integer precision) {
         return TIMESTAMP_MILLS_READER;
     }
 
     @Override
-    public FieldReader visitTimestampMillis() {
-        return TIMESTAMP_MILLS_READER;
-    }
-
-    @Override
-    public FieldReader visitTimestampMicros(int precision) {
+    public FieldReader visitTimestampMicros(@Nullable Integer precision) {
         return TIMESTAMP_MICROS_READER;
     }
 
     @Override
-    public FieldReader visitTimestampMicros() {
-        return TIMESTAMP_MICROS_READER;
-    }
-
-    @Override
-    public FieldReader visitDecimal(int precision, int scale) {
+    public FieldReader visitDecimal(@Nullable Integer precision, @Nullable Integer scale) {
         return new DecimalReader(precision, scale);
     }
 
     @Override
-    public FieldReader visitDecimal() {
-        return new DecimalReader();
-    }
-
-    @Override
-    public FieldReader visitArray(Schema schema, DataType elementType) {
+    public FieldReader visitArray(Schema schema, @Nullable DataType elementType) {
         FieldReader elementReader = visit(schema.getElementType(), elementType);
         return new ArrayReader(elementReader);
     }
 
     @Override
-    public FieldReader visitArray(Schema schema) {
-        FieldReader elementReader = visit(schema.getElementType());
-        return new ArrayReader(elementReader);
-    }
-
-    @Override
-    public FieldReader visitMap(Schema schema, DataType valueType) {
+    public FieldReader visitMap(Schema schema, @Nullable DataType valueType) {
         FieldReader valueReader = visit(schema.getValueType(), valueType);
         return new MapReader(valueReader);
     }
 
     @Override
-    public FieldReader visitMap(Schema schema) {
-        FieldReader valueReader = visit(schema.getValueType());
-        return new MapReader(valueReader);
-    }
-
-    @Override
-    public FieldReader visitRecord(Schema schema, List<DataField> fields) {
+    public FieldReader visitRecord(Schema schema, @NotNull List<DataField> fields) {
         return new RowReader(schema, fields);
-    }
-
-    @Override
-    public FieldReader visitRecord(Schema schema) {
-        return new RowReader(schema, Collections.emptyList());
     }
 
     private static class NullableReader implements FieldReader {
@@ -335,24 +300,19 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
 
     private static class DecimalReader implements FieldReader {
 
-        private final int precision;
-        private final int scale;
-        private boolean skipper;
+        private final Integer precision;
+        private final Integer scale;
 
-        private DecimalReader() {
-            this(-1, -1);
-            this.skipper = true;
-        }
-
-        private DecimalReader(int precision, int scale) {
+        private DecimalReader(Integer precision, Integer scale) {
             this.precision = precision;
             this.scale = scale;
         }
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
-            if (skipper) {
-                throw new AvroRuntimeException("Can't reader record from skipper.");
+            if (precision == null || scale == null) {
+                throw new AvroRuntimeException(
+                        "Can't reader record when precision or scale is null.");
             }
             byte[] bytes = (byte[]) BYTES_READER.read(decoder, null);
             return Decimal.fromBigDecimal(
@@ -516,7 +476,7 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
                     DataType type = fields.get(mappingBack[i]).type();
                     fieldReaders[i] = visit(field.schema(), type);
                 } else {
-                    fieldReaders[i] = visit(field.schema());
+                    fieldReaders[i] = visit(field.schema(), null);
                 }
             }
         }
