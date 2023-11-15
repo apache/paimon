@@ -201,7 +201,8 @@ public class MySqlSyncTableAction extends ActionBase {
                         computedColumns,
                         tableConfig,
                         tableInfo.schema(),
-                        metadataConverters);
+                        metadataConverters,
+                        true);
         try {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
             fileStoreTable = fileStoreTable.copy(tableConfig);

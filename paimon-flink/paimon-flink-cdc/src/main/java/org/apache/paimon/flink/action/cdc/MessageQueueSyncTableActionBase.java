@@ -169,7 +169,9 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
                                 primaryKeys,
                                 computedColumns,
                                 tableConfig,
-                                retrievedSchema);
+                                retrievedSchema,
+                                new CdcMetadataConverter[] {},
+                                false);
                 assertSchemaCompatible(fileStoreTable.schema(), fromMq.fields());
             } catch (MessageQueueSchemaUtils.SchemaRetrievalException e) {
                 LOG.info(
@@ -191,7 +193,9 @@ public abstract class MessageQueueSyncTableActionBase extends ActionBase {
                             primaryKeys,
                             computedColumns,
                             tableConfig,
-                            retrievedSchema);
+                            retrievedSchema,
+                            new CdcMetadataConverter[] {},
+                            false);
 
             catalog.createTable(identifier, fromMq, false);
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier).copy(tableConfig);

@@ -1104,4 +1104,33 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 rowType,
                 Collections.singletonList("k"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testSynchronizeNonPkTable() throws Exception {
+        String topic = "non_pk";
+        createTestTopic(topic, 1, 1);
+        List<String> lines = readLines("kafka/canal/table/nonpk/canal-data-1.txt");
+        writeRecordsToKafka(topic, lines);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.VARCHAR(10), DataTypes.INT(),
+                        },
+                        new String[] {"v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[five, 50]", "+I[five, 50]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.emptyList());
+    }
 }
