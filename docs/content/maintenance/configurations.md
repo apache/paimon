@@ -42,7 +42,7 @@ Options for paimon catalog.
 
 Options for Filesystem catalog.
 
-{{< generated/filesystem_catalog_configuration >}}
+{{< generated/file_system_catalog_configuration >}}
 
 ### HiveCatalogOptions
 

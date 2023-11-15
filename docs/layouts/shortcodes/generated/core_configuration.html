@@ -111,6 +111,12 @@ under the License.
             <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
         </tr>
         <tr>
+            <td><h5>consumer.mode</h5></td>
+            <td style="word-wrap: break-word;">exactly-once</td>
+            <td><p>Enum</p></td>
+            <td>Specify the consumer consistency mode for table.<br /><br />Possible values:<ul><li>"exactly-once": Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed.</li><li>"at-least-once": Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>
@@ -212,30 +218,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">128</td>
             <td>Integer</td>
             <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
-        </tr>
-        <tr>
-            <td><h5>log.changelog-mode</h5></td>
-            <td style="word-wrap: break-word;">auto</td>
-            <td><p>Enum</p></td>
-            <td>Specify the log changelog mode for table.<br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key.</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>log.consistency</h5></td>
-            <td style="word-wrap: break-word;">transactional</td>
-            <td><p>Enum</p></td>
-            <td>Specify the log consistency mode for table.<br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>log.format</h5></td>
-            <td style="word-wrap: break-word;">"debezium-json"</td>
-            <td>String</td>
-            <td>Specify the message format of log system.</td>
-        </tr>
-        <tr>
-            <td><h5>log.key.format</h5></td>
-            <td style="word-wrap: break-word;">"json"</td>
-            <td>String</td>
-            <td>Specify the key message format of log system with primary key.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
