@@ -863,6 +863,61 @@ public class PreAggregationITCase {
         }
     }
 
+    /** ITCase for first_value aggregate function. */
+    public static class FirstValueAggregation extends CatalogITCaseBase {
+        @Override
+        protected List<String> ddl() {
+            return Collections.singletonList(
+                    "CREATE TABLE T ("
+                            + "k INT,"
+                            + "a INT,"
+                            + "b VARCHAR,"
+                            + "PRIMARY KEY (k) NOT ENFORCED)"
+                            + " WITH ('merge-engine'='aggregation', "
+                            + "'changelog-producer' = 'full-compaction',"
+                            + "'fields.b.aggregate-function'='first_value',"
+                            + "'sequence.field'='a'"
+                            + ");");
+        }
+
+        @Test
+        public void tesInMemoryMerge() {
+            batchSql(
+                    "INSERT INTO T VALUES "
+                            + "(1, 0, CAST(NULL AS VARCHAR)),"
+                            + "(1, 1, '1'), "
+                            + "(2, 2, '2'),"
+                            + "(2, 3, '22')");
+            List<Row> result = batchSql("SELECT * FROM T");
+            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1, null), Row.of(2, 3, "2"));
+        }
+
+        @Test
+        public void tesUnOrderInput() {
+            batchSql(
+                    "INSERT INTO T VALUES "
+                            + "(1, 0, CAST(NULL AS VARCHAR)),"
+                            + "(1, 1, '1'), "
+                            + "(2, 3, '2'),"
+                            + "(2, 2, '22')");
+            List<Row> result = batchSql("SELECT * FROM T");
+            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1, null), Row.of(2, 3, "22"));
+            batchSql("INSERT INTO T VALUES (2, 1, '1')");
+            result = batchSql("SELECT * FROM T");
+            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 1, null), Row.of(2, 3, "1"));
+        }
+
+        @Test
+        public void testMergeRead() {
+            batchSql("INSERT INTO T VALUES (1, 1, CAST(NULL AS VARCHAR))");
+            batchSql("INSERT INTO T VALUES (1, 2, '1')");
+            batchSql("INSERT INTO T VALUES (2, 1, '2')");
+            batchSql("INSERT INTO T VALUES (2, 2, '22')");
+            List<Row> result = batchSql("SELECT * FROM T");
+            assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2, null), Row.of(2, 2, "2"));
+        }
+    }
+
     /** IT Test for aggregation merge engine. */
     public static class BasicAggregateITCase extends CatalogITCaseBase {
 

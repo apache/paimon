@@ -71,6 +71,9 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldBoolAndAgg.NAME:
                         fieldAggregator = new FieldBoolAndAgg(fieldType);
                         break;
+                    case FieldFirstValueAgg.NAME:
+                        fieldAggregator = new FieldFirstValueAgg(fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
                                 "Use unsupported aggregation or spell aggregate function incorrectly!");
@@ -88,6 +91,9 @@ public abstract class FieldAggregator implements Serializable {
     abstract String name();
 
     public abstract Object agg(Object accumulator, Object inputField);
+
+    /** reset the aggregator to a clean start state. */
+    public void reset() {}
 
     public Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(

@@ -307,4 +307,24 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // c updated to null
         assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, null));
     }
+
+    @Test
+    public void testFirstValuePartialUpdate() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a INT, g_1 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.a.aggregate-function'='first_value');");
+
+        sql("INSERT INTO AGG VALUES (1, 1, 1), (1, 2, 2)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 1, 2));
+
+        // old sequence
+        sql("INSERT INTO AGG VALUES (1, 0, 0)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 0, 2));
+    }
 }

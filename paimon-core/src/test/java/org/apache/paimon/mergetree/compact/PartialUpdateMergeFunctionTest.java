@@ -322,6 +322,28 @@ public class PartialUpdateMergeFunctionTest {
     }
 
     @Test
+    public void testFirstValue() {
+        Options options = new Options();
+        options.set("fields.f1.sequence-group", "f2,f3");
+        options.set("fields.f2.aggregate-function", "first_value");
+        options.set("fields.f3.aggregate-function", "last_value");
+        RowType rowType =
+                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+        MergeFunction<KeyValue> func =
+                PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
+                        .create();
+
+        func.reset();
+
+        // f7 sequence group 2
+        add(func, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2);
+        validate(func, 1, 2, 1, 2);
+        add(func, 1, 0, 3, 3);
+        validate(func, 1, 2, 3, 2);
+    }
+
+    @Test
     public void testPartialUpdateWithAggregation() {
         Options options = new Options();
         options.set("fields.f1.sequence-group", "f2,f3,f4");

@@ -80,6 +80,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public void reset() {
         this.currentKey = null;
         this.row = new GenericRow(getters.length);
+        fieldAggregators.values().forEach(FieldAggregator::reset);
         this.isEmpty = true;
     }
 
@@ -276,7 +277,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             if (projection != null) {
                 Map<Integer, SequenceGenerator> projectedSequences = new HashMap<>();
-                Map<Integer, FieldAggregator> projectedAggregator = new HashMap<>();
+                Map<Integer, FieldAggregator> projectedAggregators = new HashMap<>();
                 int[] projects = Projection.of(projection).toTopLevelIndexes();
                 Map<Integer, Integer> indexMap = new HashMap<>();
                 for (int i = 0; i < projects.length; i++) {
@@ -301,14 +302,16 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             }
                         });
                 for (int i = 0; i < projects.length; i++) {
-                    projectedAggregator.put(i, fieldAggregators.get(projects[i]));
+                    if (fieldAggregators.containsKey(projects[i])) {
+                        projectedAggregators.put(i, fieldAggregators.get(projects[i]));
+                    }
                 }
 
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(Projection.of(projection).project(tableTypes)),
                         ignoreDelete,
                         projectedSequences,
-                        projectedAggregator);
+                        projectedAggregators);
             } else {
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(tableTypes),
