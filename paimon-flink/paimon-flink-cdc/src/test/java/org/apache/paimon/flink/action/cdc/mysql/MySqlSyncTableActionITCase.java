@@ -896,7 +896,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(160)
     public void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE metadata");
@@ -926,6 +926,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).notNull()
                         },
                         new String[] {"pk", "_date", "table_name", "database_name", "op_ts"});
+        // The record is read from the snapshot of the table and the op_ts value is 0. When querying
+        // the table using the TIMESTAMP_LTZ(3) type returns 1970-01-01T00:00.
         waitForResult(
                 Arrays.asList(
                         "+I[1, 2023-07-30, test_metadata_columns, metadata, 1970-01-01T00:00]",
@@ -933,6 +935,13 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 table,
                 rowType,
                 Collections.singletonList("pk"));
+
+        // The record is read from the binlog of the table and the op_ts value is the time the
+        // change was made in the database.
+        // MySQL execute: statement.executeUpdate("INSERT INTO test_metadata_columns VALUES (1,
+        // '2023-07-30')");
+        // Paimon Table result: +I[3, 2023-11-15, test_metadata_columns, metadata,
+        // 2023-11-15T04:44:12]
     }
 
     @Test

@@ -43,6 +43,10 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * <p>The provided converters, which are of type {@link CdcMetadataConverter}, define how the raw
  * metadata is transformed or processed for each specific metadata key.
+ *
+ * <p>See <a
+ * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#available-metadata">document</a>
+ * for a complete list of available metadata.
  */
 public enum MySqlMetadataProcessor {
     /** Name of the table that contain the row. */
