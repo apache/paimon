@@ -40,16 +40,12 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -175,8 +171,8 @@ public abstract class AbstractCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
-        validateCaseInsensitive(identifier);
-        validateCaseInsensitive(schema.rowType().getFieldNames());
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
 
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
@@ -201,7 +197,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
-        validateCaseInsensitive(toTable);
+        validateIdentifierNameCaseInsensitive(toTable);
 
         if (!tableExists(fromTable)) {
             if (ignoreIfNotExists) {
@@ -224,8 +220,8 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
-        validateCaseInsensitive(identifier);
-        validateCaseInsensitiveInSchemaChange(changes);
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitiveInSchemaChange(changes);
 
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
@@ -380,12 +376,33 @@ public abstract class AbstractCatalog implements Catalog {
         return SYSTEM_DATABASE_NAME.equals(database);
     }
 
-    private void validateCaseInsensitive(Identifier identifier) {
-        validateCaseInsensitive("Database", identifier.getDatabaseName());
-        validateCaseInsensitive("Table", identifier.getObjectName());
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, String... names) {
+        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
     }
 
-    private void validateCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, List<String> names) {
+        if (caseSensitive) {
+            return;
+        }
+        List<String> illegalNames =
+                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
+    }
+
+    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
+        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
+    }
+
+    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
         List<String> fieldNames = new ArrayList<>();
         for (SchemaChange change : changes) {
             if (change instanceof SchemaChange.AddColumn) {
@@ -398,10 +415,10 @@ public abstract class AbstractCatalog implements Catalog {
                 // do nothing
             }
         }
-        validateCaseInsensitive(fieldNames);
+        validateFieldNameCaseInsensitive(fieldNames);
     }
 
-    private void validateCaseInsensitive(List<String> fieldNames) {
-        validateCaseInsensitive("Field", fieldNames.toArray(new String[0]));
+    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+        validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 }

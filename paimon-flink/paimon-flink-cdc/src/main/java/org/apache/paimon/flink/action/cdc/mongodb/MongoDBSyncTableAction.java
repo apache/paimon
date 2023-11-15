@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
@@ -124,7 +125,7 @@ public class MongoDBSyncTableAction extends ActionBase {
 
         boolean caseSensitive = catalog.caseSensitive();
 
-        validateCaseInsensitive();
+        validateCaseInsensitive(caseSensitive);
 
         Schema mongodbSchema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, caseSensitive);
         catalog.createDatabase(database, true);
@@ -176,10 +177,10 @@ public class MongoDBSyncTableAction extends ActionBase {
         sinkBuilder.build();
     }
 
-    private void validateCaseInsensitive() {
-        catalog.validateCaseInsensitive("Database", database);
-        catalog.validateCaseInsensitive("Table", table);
-        catalog.validateCaseInsensitive("Partition keys", partitionKeys.toArray(new String[0]));
+    private void validateCaseInsensitive(boolean caseSensitive) {
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
     }
 
     @VisibleForTesting

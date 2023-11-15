@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
@@ -200,7 +201,7 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                         + "use mysql-sync-table instead.");
         boolean caseSensitive = catalog.caseSensitive();
 
-        validateCaseInsensitive();
+        validateCaseInsensitive(caseSensitive);
 
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
@@ -316,10 +317,10 @@ public class MySqlSyncDatabaseAction extends ActionBase {
                 .build();
     }
 
-    private void validateCaseInsensitive() {
-        catalog.validateCaseInsensitive("Database", database);
-        catalog.validateCaseInsensitive("Table prefix", tablePrefix);
-        catalog.validateCaseInsensitive("Table suffix", tableSuffix);
+    private void validateCaseInsensitive(boolean caseSensitive) {
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
     }
 
     private void logNonPkTables(List<Identifier> nonPkTables) {
