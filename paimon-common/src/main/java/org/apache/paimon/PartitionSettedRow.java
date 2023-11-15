@@ -31,14 +31,14 @@ import org.apache.paimon.types.RowKind;
 /** An implementation of {@link InternalRow} which provides a row the fixed partition value. */
 public class PartitionSettedRow implements InternalRow {
 
-    private final BinaryRow paritition;
+    private final BinaryRow partition;
     private final PartitionInfo partitionInfo;
 
     protected InternalRow row;
 
     protected PartitionSettedRow(PartitionInfo partitionInfo) {
         this.partitionInfo = partitionInfo;
-        this.paritition = partitionInfo.getPartitionRow();
+        this.partition = partitionInfo.getPartitionRow();
     }
 
     /**
@@ -72,105 +72,105 @@ public class PartitionSettedRow implements InternalRow {
     @Override
     public boolean isNullAt(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.isNullAt(partitionInfo.getRealIndex(pos))
+                ? partition.isNullAt(partitionInfo.getRealIndex(pos))
                 : row.isNullAt(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public boolean getBoolean(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getBoolean(partitionInfo.getRealIndex(pos))
+                ? partition.getBoolean(partitionInfo.getRealIndex(pos))
                 : row.getBoolean(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public byte getByte(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getByte(partitionInfo.getRealIndex(pos))
+                ? partition.getByte(partitionInfo.getRealIndex(pos))
                 : row.getByte(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public short getShort(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getShort(partitionInfo.getRealIndex(pos))
+                ? partition.getShort(partitionInfo.getRealIndex(pos))
                 : row.getShort(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public int getInt(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getInt(partitionInfo.getRealIndex(pos))
+                ? partition.getInt(partitionInfo.getRealIndex(pos))
                 : row.getInt(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public long getLong(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getLong(partitionInfo.getRealIndex(pos))
+                ? partition.getLong(partitionInfo.getRealIndex(pos))
                 : row.getLong(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public float getFloat(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getFloat(partitionInfo.getRealIndex(pos))
+                ? partition.getFloat(partitionInfo.getRealIndex(pos))
                 : row.getFloat(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public double getDouble(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getDouble(partitionInfo.getRealIndex(pos))
+                ? partition.getDouble(partitionInfo.getRealIndex(pos))
                 : row.getDouble(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public BinaryString getString(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getString(partitionInfo.getRealIndex(pos))
+                ? partition.getString(partitionInfo.getRealIndex(pos))
                 : row.getString(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public Decimal getDecimal(int pos, int precision, int scale) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getDecimal(partitionInfo.getRealIndex(pos), precision, scale)
+                ? partition.getDecimal(partitionInfo.getRealIndex(pos), precision, scale)
                 : row.getDecimal(partitionInfo.getRealIndex(pos), precision, scale);
     }
 
     @Override
     public Timestamp getTimestamp(int pos, int precision) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getTimestamp(partitionInfo.getRealIndex(pos), precision)
+                ? partition.getTimestamp(partitionInfo.getRealIndex(pos), precision)
                 : row.getTimestamp(partitionInfo.getRealIndex(pos), precision);
     }
 
     @Override
     public byte[] getBinary(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getBinary(partitionInfo.getRealIndex(pos))
+                ? partition.getBinary(partitionInfo.getRealIndex(pos))
                 : row.getBinary(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public InternalArray getArray(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getArray(partitionInfo.getRealIndex(pos))
+                ? partition.getArray(partitionInfo.getRealIndex(pos))
                 : row.getArray(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public InternalMap getMap(int pos) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getMap(partitionInfo.getRealIndex(pos))
+                ? partition.getMap(partitionInfo.getRealIndex(pos))
                 : row.getMap(partitionInfo.getRealIndex(pos));
     }
 
     @Override
     public InternalRow getRow(int pos, int numFields) {
         return partitionInfo.inPartitionRow(pos)
-                ? paritition.getRow(partitionInfo.getRealIndex(pos), numFields)
+                ? partition.getRow(partitionInfo.getRealIndex(pos), numFields)
                 : row.getRow(partitionInfo.getRealIndex(pos), numFields);
     }
 

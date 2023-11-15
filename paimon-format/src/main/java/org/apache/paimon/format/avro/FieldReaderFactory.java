@@ -27,7 +27,6 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.VectorMappingUtils;
 
 import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
@@ -503,7 +502,7 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
                 Schema.Field schemaField = schema.getField(field.name());
                 if (schemaField != null) {
                     int index = schemaFields.indexOf(schemaField);
-                    this.mapping[i] = schemaFields.indexOf(schemaField);
+                    this.mapping[i] = index;
                     this.mappingBack[index] = i;
                 } else {
                     this.mapping[i] = -1;
@@ -541,10 +540,8 @@ public class FieldReaderFactory implements AvroSchemaTypelessReader<FieldReader>
                 }
             }
 
-            values = VectorMappingUtils.mappingObjects(values, mapping);
-
-            for (int i = 0; i < values.length; i++) {
-                row.setField(i, values[i]);
+            for (int i = 0; i < mapping.length; i++) {
+                row.setField(i, mapping[i] >= 0 ? values[mapping[i]] : null);
             }
 
             return row;

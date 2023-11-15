@@ -24,13 +24,9 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.columnar.BytesColumnVector.Bytes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.VectorMappingUtils;
-
-import javax.annotation.Nullable;
 
 import java.io.Serializable;
 
@@ -226,17 +222,14 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
                 "ColumnarRowData do not support hashCode, please hash fields one by one!");
     }
 
-    public void mapping(@Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
-        ColumnVector[] vectors = vectorizedColumnBatch.columns;
-        if (partitionInfo != null) {
-            vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
-        }
-        if (indexMapping != null) {
-            vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
-        }
+    VectorizedColumnBatch vectorizedColumnBatch() {
+        return vectorizedColumnBatch;
+    }
 
-        if (vectors != vectorizedColumnBatch.columns) {
-            this.vectorizedColumnBatch = new VectorizedColumnBatch(vectors);
-        }
+    public ColumnarRow copy(ColumnVector[] vectors) {
+        VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
+        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
+        columnarRow.setRowKind(rowKind);
+        return columnarRow;
     }
 }

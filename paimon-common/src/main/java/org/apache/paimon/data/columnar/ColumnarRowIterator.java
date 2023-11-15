@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.RecyclableIterator;
+import org.apache.paimon.utils.VectorMappingUtils;
 
 import javax.annotation.Nullable;
 
@@ -32,7 +33,7 @@ import javax.annotation.Nullable;
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
 
     private final ColumnarRow rowData;
-    private boolean mapped = false;
+    private final Runnable recycler;
 
     private int num;
     private int pos;
@@ -40,6 +41,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
     public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
         super(recycler);
         this.rowData = rowData;
+        this.recycler = recycler;
     }
 
     public void set(int num) {
@@ -60,9 +62,18 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
 
     public ColumnarRowIterator mapping(
             @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
-        if (!mapped) {
-            rowData.mapping(partitionInfo, indexMapping);
-            mapped = true;
+        if (partitionInfo != null || indexMapping != null) {
+            VectorizedColumnBatch vectorizedColumnBatch = rowData.vectorizedColumnBatch();
+            ColumnVector[] vectors = vectorizedColumnBatch.columns;
+            if (partitionInfo != null) {
+                vectors = VectorMappingUtils.createPartitionMappedVectors(partitionInfo, vectors);
+            }
+            if (indexMapping != null) {
+                vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
+            }
+            ColumnarRowIterator iterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
+            iterator.set(num);
+            return iterator;
         }
         return this;
     }

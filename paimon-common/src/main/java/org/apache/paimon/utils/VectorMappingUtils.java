@@ -110,14 +110,6 @@ public class VectorMappingUtils {
         return newVectors;
     }
 
-    public static Object[] mappingObjects(Object[] input, int[] mapping) {
-        Object[] output = new Object[mapping.length];
-        for (int i = 0; i < output.length; i++) {
-            output[i] = mapping[i] >= 0 ? input[mapping[i]] : null;
-        }
-        return output;
-    }
-
     private static class Visitor implements DataTypeVisitor<ColumnVector> {
 
         private final BinaryRow partition;
