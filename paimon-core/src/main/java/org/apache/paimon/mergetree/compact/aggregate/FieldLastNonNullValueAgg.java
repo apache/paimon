@@ -38,9 +38,4 @@ public class FieldLastNonNullValueAgg extends FieldAggregator {
     public Object agg(Object accumulator, Object inputField) {
         return (inputField == null) ? accumulator : inputField;
     }
-
-    @Override
-    public Object aggForOldSequence(Object accumulator, Object inputField) {
-        return accumulator;
-    }
 }

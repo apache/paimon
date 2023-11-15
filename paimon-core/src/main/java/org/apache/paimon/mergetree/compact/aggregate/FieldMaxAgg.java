@@ -52,9 +52,4 @@ public class FieldMaxAgg extends FieldAggregator {
         }
         return max;
     }
-
-    @Override
-    public Object aggForOldSequence(Object accumulator, Object inputField) {
-        return agg(accumulator, inputField);
-    }
 }

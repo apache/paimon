@@ -434,6 +434,18 @@ public class PartialUpdateMergeFunctionTest {
         validate(func, null, -2, 2, 3);
     }
 
+    @Test
+    public void testAggregationWithoutSequenceGroup() {
+        Options options = new Options();
+        options.set("fields.f1.aggregate-function", "listagg");
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
+        assertThatThrownBy(
+                        () ->
+                                PartialUpdateMergeFunction.factory(
+                                        options, rowType, ImmutableList.of("f0")))
+                .hasMessageContaining("Must use sequence group for aggregation functions");
+    }
+
     private void add(MergeFunction<KeyValue> function, Integer... f) {
         add(function, RowKind.INSERT, f);
     }

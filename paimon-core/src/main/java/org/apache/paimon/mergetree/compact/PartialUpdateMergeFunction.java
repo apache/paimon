@@ -111,10 +111,23 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         latestSequenceNumber = kv.sequenceNumber();
         isEmpty = false;
-        update(kv);
+        if (fieldSequences.isEmpty()) {
+            updateNonNullFields(kv);
+        } else {
+            updateWithSequenceGroup(kv);
+        }
     }
 
-    private void update(KeyValue kv) {
+    private void updateNonNullFields(KeyValue kv) {
+        for (int i = 0; i < getters.length; i++) {
+            Object field = getters[i].getFieldOrNull(kv.value());
+            if (field != null) {
+                row.setField(i, field);
+            }
+        }
+    }
+
+    private void updateWithSequenceGroup(KeyValue kv) {
         for (int i = 0; i < getters.length; i++) {
             Object field = getters[i].getFieldOrNull(kv.value());
             SequenceGenerator sequenceGen = fieldSequences.get(i);
@@ -134,7 +147,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         row.setField(
                                 i, aggregator == null ? field : aggregator.agg(accumulator, field));
                     } else if (aggregator != null) {
-                        row.setField(i, aggregator.aggForOldSequence(accumulator, field));
+                        row.setField(i, aggregator.agg(field, accumulator));
                     }
                 }
             }
@@ -253,6 +266,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             }
             this.fieldAggregators =
                     createFieldAggregators(rowType, primaryKeys, new CoreOptions(options));
+            if (fieldAggregators.size() > 0 && fieldSequences.isEmpty()) {
+                throw new IllegalArgumentException(
+                        "Must use sequence group for aggregation functions.");
+            }
         }
 
         @Override

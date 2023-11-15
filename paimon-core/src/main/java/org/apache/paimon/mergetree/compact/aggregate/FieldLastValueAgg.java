@@ -38,9 +38,4 @@ public class FieldLastValueAgg extends FieldAggregator {
     public Object agg(Object accumulator, Object inputField) {
         return inputField;
     }
-
-    @Override
-    public Object aggForOldSequence(Object accumulator, Object inputField) {
-        return accumulator;
-    }
 }

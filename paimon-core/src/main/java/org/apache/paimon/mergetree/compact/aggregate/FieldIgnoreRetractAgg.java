@@ -42,9 +42,4 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     public Object retract(Object accumulator, Object retractField) {
         return accumulator;
     }
-
-    @Override
-    public Object aggForOldSequence(Object accumulator, Object inputField) {
-        return aggregator.aggForOldSequence(accumulator, inputField);
-    }
 }
