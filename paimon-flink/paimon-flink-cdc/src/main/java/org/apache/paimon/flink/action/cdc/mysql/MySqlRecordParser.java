@@ -24,8 +24,6 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.format.DebeziumEvent;
 import org.apache.paimon.flink.sink.cdc.CdcRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
@@ -72,7 +70,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Function;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
@@ -181,45 +178,44 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
             return Collections.emptyList();
         }
 
-        Schema schema = buildSchema(tableChange);
-        return Collections.singletonList(createRecord(schema));
+        Table table = tableChange.getTable();
+
+        LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(table);
+        List<String> primaryKeys = listCaseConvert(table.primaryKeyColumnNames(), caseSensitive);
+
+        // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+        return Collections.singletonList(
+                new RichCdcMultiplexRecord(
+                        databaseName,
+                        currentTable,
+                        fieldTypes,
+                        primaryKeys,
+                        CdcRecord.emptyRecord()));
     }
 
-    private Schema buildSchema(TableChanges.TableChange tableChange) {
-        Table table = tableChange.getTable();
-        String tableName = tableChange.getId().toString();
+    private LinkedHashMap<String, DataType> extractFieldTypes(Table table) {
         List<Column> columns = table.columns();
-
+        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(columns.size());
         Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+        Function<String, String> columnDuplicateErrMsg =
+                columnDuplicateErrMsg(table.id().toString());
 
-        Schema.Builder builder = Schema.newBuilder();
-
-        // column
         for (Column column : columns) {
+            String columnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
             DataType dataType =
                     MySqlTypeUtils.toDataType(
                             column.typeExpression(),
                             column.length(),
                             column.scale().orElse(null),
                             typeMapping);
-
             dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
 
-            String columnName =
-                    columnCaseConvertAndDuplicateCheck(
-                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
-
-            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
-            builder.column(columnName, dataType, null);
+            fieldTypes.put(columnName, dataType);
         }
-
-        // primaryKey
-        List<String> primaryKeys = table.primaryKeyColumnNames();
-        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
-        builder.primaryKey(primaryKeys);
-
-        return builder.build();
+        return fieldTypes;
     }
 
     private List<RichCdcMultiplexRecord> extractRecords() {
@@ -384,23 +380,6 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
         }
 
         return resultMap;
-    }
-
-    protected RichCdcMultiplexRecord createRecord(Schema schema) {
-        LinkedHashMap<String, DataType> fieldTypes =
-                schema.fields().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        DataField::name,
-                                        DataField::type,
-                                        (v1, v2) -> v2,
-                                        LinkedHashMap::new));
-        return new RichCdcMultiplexRecord(
-                databaseName,
-                currentTable,
-                fieldTypes,
-                schema.primaryKeys(),
-                CdcRecord.emptyRecord());
     }
 
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {

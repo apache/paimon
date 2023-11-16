@@ -37,13 +37,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** {@link EventParser} for {@link RichCdcMultiplexRecord}. */
 public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMultiplexRecord> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(RichCdcMultiplexRecordEventParser.class);
 
-    private final NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder;
+    @Nullable private final NewTableSchemaBuilder schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final TableNameConverter tableNameConverter;
@@ -58,11 +60,11 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private RichEventParser currentParser;
 
     public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
-        this(record -> Optional.empty(), null, null, new TableNameConverter(caseSensitive));
+        this(null, null, null, new TableNameConverter(caseSensitive));
     }
 
     public RichCdcMultiplexRecordEventParser(
-            NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder,
+            @Nullable NewTableSchemaBuilder schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             TableNameConverter tableNameConverter) {
@@ -112,6 +114,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Override
     public Optional<Schema> parseNewTable() {
         if (shouldCreateCurrentTable()) {
+            checkNotNull(schemaBuilder, "NewTableSchemaBuilder hasn't been set.");
             return schemaBuilder.build(record);
         }
 
