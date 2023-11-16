@@ -41,6 +41,6 @@ public class OrcTimestampColumnVector extends AbstractOrcColumnVector
     @Override
     public Timestamp getTimestamp(int i, int precision) {
         int index = vector.isRepeating ? 0 : i;
-        return DateTimeUtils.toInternal(vector.time[index], vector.nanos[index]);
+        return DateTimeUtils.toInternal(vector.time[index], vector.nanos[index] % 1_000_000);
     }
 }
