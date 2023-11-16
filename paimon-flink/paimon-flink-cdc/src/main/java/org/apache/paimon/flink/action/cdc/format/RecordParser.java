@@ -219,7 +219,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 new CdcRecord(rowKind, data));
     }
 
-    private void setRoot(String record) {
+    protected void setRoot(String record) {
         root = JsonSerdeUtil.fromJson(record, JsonNode.class);
     }
 

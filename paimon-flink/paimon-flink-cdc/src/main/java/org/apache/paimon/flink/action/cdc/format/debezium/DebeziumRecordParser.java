@@ -23,6 +23,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
@@ -52,6 +53,8 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  */
 public class DebeziumRecordParser extends RecordParser {
 
+    private static final String FIELD_SCHEMA = "schema";
+    private static final String FIELD_PAYLOAD = "payload";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_SOURCE = "source";
@@ -97,6 +100,16 @@ public class DebeziumRecordParser extends RecordParser {
 
     private JsonNode getBefore(String op) {
         return getAndCheck(FIELD_BEFORE, FIELD_TYPE, op);
+    }
+
+    @Override
+    protected void setRoot(String record) {
+        JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
+        if (node.has(FIELD_SCHEMA)) {
+            root = node.get(FIELD_PAYLOAD);
+        } else {
+            root = node;
+        }
     }
 
     @Override
