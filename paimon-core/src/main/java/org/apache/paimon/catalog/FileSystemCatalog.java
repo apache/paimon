@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -28,9 +29,10 @@ import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+
+import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -42,7 +44,7 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, options);
         this.warehouse = warehouse;
     }
@@ -159,5 +161,10 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public String warehouse() {
         return warehouse.toString();
+    }
+
+    @Override
+    public boolean caseSensitive() {
+        return catalogOptions.get(CASE_SENSITIVE);
     }
 }

@@ -40,6 +40,8 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -49,6 +51,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -58,7 +61,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
-    protected final Map<String, String> catalogOptions;
+    protected final Options catalogOptions;
 
     @Nullable protected final LineageMetaFactory lineageMetaFactory;
 
@@ -66,16 +69,15 @@ public abstract class AbstractCatalog implements Catalog {
         this.fileIO = fileIO;
         this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
-        this.catalogOptions = new HashMap<>();
+        this.catalogOptions = new Options();
     }
 
-    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
+    protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
         this.lineageMetaFactory =
-                findAndCreateLineageMeta(
-                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
+                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
         this.tableDefaultOptions =
-                convertToPropertiesPrefixKey(options, TABLE_DEFAULT_OPTION_PREFIX);
+                convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
     }
 
@@ -174,6 +176,9 @@ public abstract class AbstractCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
+
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         }
@@ -197,6 +202,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
+        validateIdentifierNameCaseInsensitive(toTable);
 
         if (!tableExists(fromTable)) {
             if (ignoreIfNotExists) {
@@ -219,6 +225,9 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitiveInSchemaChange(changes);
+
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -311,7 +320,7 @@ public abstract class AbstractCatalog implements Catalog {
     public abstract String warehouse();
 
     public Map<String, String> options() {
-        return catalogOptions;
+        return catalogOptions.toMap();
     }
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
@@ -370,5 +379,51 @@ public abstract class AbstractCatalog implements Catalog {
 
     private boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, String... names) {
+        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, List<String> names) {
+        if (caseSensitive) {
+            return;
+        }
+        List<String> illegalNames =
+                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
+    }
+
+    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
+        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
+    }
+
+    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
+        List<String> fieldNames = new ArrayList<>();
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.AddColumn) {
+                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
+                fieldNames.add(addColumn.fieldName());
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
+                fieldNames.add(rename.newName());
+            } else {
+                // do nothing
+            }
+        }
+        validateFieldNameCaseInsensitive(fieldNames);
+    }
+
+    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+        validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
@@ -44,7 +45,6 @@ import java.util.Map;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * An {@link Action} which synchronize the Multiple topics into one Paimon database.
@@ -143,9 +143,7 @@ public class KafkaSyncDatabaseAction extends ActionBase {
     public void build() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive(caseSensitive);
 
         catalog.createDatabase(database, true);
 
@@ -182,22 +180,10 @@ public class KafkaSyncDatabaseAction extends ActionBase {
                 .build();
     }
 
-    private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                tablePrefix.equals(tablePrefix.toLowerCase()),
-                String.format(
-                        "Table prefix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tablePrefix));
-        checkArgument(
-                tableSuffix.equals(tableSuffix.toLowerCase()),
-                String.format(
-                        "Table suffix [%s] cannot contain upper case in case-insensitive catalog.",
-                        tableSuffix));
+    private void validateCaseInsensitive(boolean caseSensitive) {
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
     }
 
     @VisibleForTesting

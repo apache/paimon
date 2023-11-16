@@ -18,28 +18,18 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.TableType;
+import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.options.ConfigOptions;
 
-import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+/** Options for filesystem catalog. */
+public final class FileSystemCatalogOptions {
 
-/** Factory to create {@link FileSystemCatalog}. */
-public class FileSystemCatalogFactory implements CatalogFactory {
+    public static final ConfigOption<Boolean> CASE_SENSITIVE =
+            ConfigOptions.key("case-sensitive")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Is case sensitive. If case insensitive, you need to set this option to false, and the table name and fields be converted to lowercase.");
 
-    public static final String IDENTIFIER = "filesystem";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
-
-    @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        if (!TableType.MANAGED.equals(context.options().get(TABLE_TYPE))) {
-            throw new IllegalArgumentException(
-                    "Only managed table is supported in File system catalog.");
-        }
-        return new FileSystemCatalog(fileIO, warehouse, context.options());
-    }
+    private FileSystemCatalogOptions() {}
 }
