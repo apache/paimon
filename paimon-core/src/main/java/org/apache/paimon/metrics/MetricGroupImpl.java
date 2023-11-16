@@ -119,4 +119,7 @@ public class MetricGroupImpl implements MetricGroup {
     public Map<String, Metric> getMetrics() {
         return Collections.unmodifiableMap(metrics);
     }
+
+    @Override
+    public void close() {}
 }
