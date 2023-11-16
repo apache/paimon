@@ -18,35 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.FileStoreTable;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.connector.source.Source;
 
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.buildPaimonSchema;
-import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -68,15 +50,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * action.run();
  * </pre>
  */
-public class MongoDBSyncTableAction extends ActionBase {
-
-    private final String database;
-    private final String table;
-    private final Configuration mongodbConfig;
-    private FileStoreTable fileStoreTable;
-    private List<String> partitionKeys = new ArrayList<>();
-    private Map<String, String> tableConfig = new HashMap<>();
-    private List<String> computedColumnArgs = new ArrayList<>();
+public class MongoDBSyncTableAction extends SyncTableActionBase {
 
     public MongoDBSyncTableAction(
             String warehouse,
@@ -84,125 +58,53 @@ public class MongoDBSyncTableAction extends ActionBase {
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mongodbConfig) {
-        super(warehouse, catalogConfig);
-        this.database = database;
-        this.table = table;
-        this.mongodbConfig = Configuration.fromMap(mongodbConfig);
-    }
-
-    public MongoDBSyncTableAction withPartitionKeys(List<String> partitionKeys) {
-        this.partitionKeys = partitionKeys;
-        return this;
-    }
-
-    public MongoDBSyncTableAction withPartitionKeys(String... partitionKeys) {
-        return withPartitionKeys(Arrays.asList(partitionKeys));
-    }
-
-    public MongoDBSyncTableAction withTableConfig(Map<String, String> tableConfig) {
-        this.tableConfig = tableConfig;
-        return this;
-    }
-
-    public MongoDBSyncTableAction withComputedColumnArgs(List<String> computedColumnArgs) {
-        this.computedColumnArgs = computedColumnArgs;
-        return this;
+        super(warehouse, database, table, catalogConfig, mongodbConfig);
     }
 
     @Override
-    public void build() throws Exception {
+    protected void checkCdcSourceArgument() {
         checkArgument(
-                mongodbConfig.contains(MongoDBSourceOptions.COLLECTION),
+                cdcSourceConfig.contains(MongoDBSourceOptions.COLLECTION),
                 String.format(
                         "mongodb-conf [%s] must be specified.",
                         MongoDBSourceOptions.COLLECTION.key()));
-
-        String tableList =
-                mongodbConfig.get(MongoDBSourceOptions.DATABASE)
-                        + "\\."
-                        + mongodbConfig.get(MongoDBSourceOptions.COLLECTION);
-        MongoDBSource<String> source =
-                MongoDBActionUtils.buildMongodbSource(mongodbConfig, tableList);
-
-        boolean caseSensitive = catalog.caseSensitive();
-
-        validateCaseInsensitive(caseSensitive);
-
-        Schema mongodbSchema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, caseSensitive);
-        catalog.createDatabase(database, true);
-        List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, mongodbSchema.fields());
-
-        Identifier identifier = new Identifier(database, table);
-        Schema fromMongodb =
-                buildPaimonSchema(
-                        partitionKeys,
-                        Collections.emptyList(),
-                        computedColumns,
-                        tableConfig,
-                        mongodbSchema,
-                        new CdcMetadataConverter[] {},
-                        true);
-        // Check if table exists before trying to get or create it
-        if (catalog.tableExists(identifier)) {
-            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-            fileStoreTable = fileStoreTable.copy(tableConfig);
-            assertSchemaCompatible(fileStoreTable.schema(), fromMongodb.fields());
-        } else {
-            catalog.createTable(identifier, fromMongodb, false);
-            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-        }
-
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
-
-        CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
-                new CdcSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(
-                                env.fromSource(
-                                                source,
-                                                WatermarkStrategy.noWatermarks(),
-                                                "MongoDB Source")
-                                        .flatMap(
-                                                new MongoDBRecordParser(
-                                                        caseSensitive,
-                                                        computedColumns,
-                                                        mongodbConfig))
-                                        .name("Parse"))
-                        .withParserFactory(parserFactory)
-                        .withTable(fileStoreTable)
-                        .withIdentifier(identifier)
-                        .withCatalogLoader(catalogLoader());
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-        sinkBuilder.build();
     }
 
-    private void validateCaseInsensitive(boolean caseSensitive) {
+    @Override
+    protected Schema retrieveSchema() throws Exception {
+        boolean caseSensitive = catalog.caseSensitive();
+        return MongodbSchemaUtils.getMongodbSchema(cdcSourceConfig, caseSensitive);
+    }
+
+    @Override
+    protected Source<String, ?, ?> buildSource() throws Exception {
+        String tableList =
+                cdcSourceConfig.get(MongoDBSourceOptions.DATABASE)
+                        + "\\."
+                        + cdcSourceConfig.get(MongoDBSourceOptions.COLLECTION);
+        return MongoDBActionUtils.buildMongodbSource(cdcSourceConfig, tableList);
+    }
+
+    @Override
+    protected String sourceName() {
+        return "MongoDB Source";
+    }
+
+    @Override
+    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
+        boolean caseSensitive = catalog.caseSensitive();
+        return new MongoDBRecordParser(caseSensitive, computedColumns, cdcSourceConfig);
+    }
+
+    @Override
+    protected void validateCaseInsensitive(boolean caseSensitive) {
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
     }
 
-    @VisibleForTesting
-    public Map<String, String> tableConfig() {
-        return tableConfig;
-    }
-
-    @VisibleForTesting
-    public FileStoreTable fileStoreTable() {
-        return fileStoreTable;
-    }
-
-    // ------------------------------------------------------------------------
-    //  Flink run methods
-    // ------------------------------------------------------------------------
-
     @Override
-    public void run() throws Exception {
-        build();
-        execute(String.format("MongoDB-Paimon Database Sync: %s", database));
+    protected String jobName() {
+        return String.format("MongoDB-Paimon Table Sync: %s.%s", database, table);
     }
 }

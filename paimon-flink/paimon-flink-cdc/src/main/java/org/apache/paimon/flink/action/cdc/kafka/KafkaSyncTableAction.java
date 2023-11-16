@@ -41,22 +41,22 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected Source<String, ?, ?> buildSource() {
-        return KafkaActionUtils.buildKafkaSource(mqConfig);
+        return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
     }
 
     @Override
     protected String topic() {
-        return mqConfig.get(KafkaConnectorOptions.TOPIC).get(0);
+        return cdcSourceConfig.get(KafkaConnectorOptions.TOPIC).get(0);
     }
 
     @Override
     protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
-        return KafkaActionUtils.getKafkaEarliestConsumer(mqConfig, topic);
+        return KafkaActionUtils.getKafkaEarliestConsumer(cdcSourceConfig, topic);
     }
 
     @Override
     protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(mqConfig);
+        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override
