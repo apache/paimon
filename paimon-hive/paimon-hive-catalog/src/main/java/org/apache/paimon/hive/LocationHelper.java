@@ -28,11 +28,16 @@ import java.io.IOException;
 
 /** helper for specifying the storage location of hive table. */
 public interface LocationHelper {
+
     void createPathIfRequired(Path dbPath, FileIO fileIO) throws IOException;
 
     void dropPathIfRequired(Path path, FileIO fileIO) throws IOException;
 
     void specifyTableLocation(Table table, String location);
 
+    String getTableLocation(Table table);
+
     void specifyDatabaseLocation(Path path, Database database);
+
+    String getDatabaseLocation(Database database);
 }
