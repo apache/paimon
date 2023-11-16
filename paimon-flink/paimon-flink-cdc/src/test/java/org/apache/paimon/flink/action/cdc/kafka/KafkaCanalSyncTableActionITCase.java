@@ -1133,4 +1133,32 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 rowType,
                 Collections.emptyList());
     }
+
+    @Test
+    @Timeout(60)
+    public void testMissingDecimalPrecision() throws Exception {
+        String topic = "missing-decimal-precision";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/incomplete/canal-data-2.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DECIMAL(38, 18),
+                        },
+                        new String[] {"k", "v"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1.200000000000000000]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k"));
+    }
 }

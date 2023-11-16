@@ -136,6 +136,17 @@ public class MySqlTypeUtils {
 
     private static final List<String> HAVE_SCALE_LIST =
             Arrays.asList(DECIMAL, NUMERIC, DOUBLE, REAL, FIXED);
+    private static final List<String> MAP_TO_DECIMAL_TYPES =
+            Arrays.asList(
+                    NUMERIC,
+                    NUMERIC_UNSIGNED,
+                    NUMERIC_UNSIGNED_ZEROFILL,
+                    FIXED,
+                    FIXED_UNSIGNED,
+                    FIXED_UNSIGNED_ZEROFILL,
+                    DECIMAL,
+                    DECIMAL_UNSIGNED,
+                    DECIMAL_UNSIGNED_ZEROFILL);
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -342,6 +353,11 @@ public class MySqlTypeUtils {
         return typeName.toUpperCase().startsWith(SET);
     }
 
+    private static boolean isDecimalType(String typeName) {
+        return MAP_TO_DECIMAL_TYPES.stream()
+                .anyMatch(type -> getShortType(typeName).toUpperCase().startsWith(type));
+    }
+
     /* Get type after the brackets are removed.*/
     public static String getShortType(String typeName) {
 
@@ -371,7 +387,9 @@ public class MySqlTypeUtils {
                                     typeName.indexOf(RIGHT_BRACKETS))
                             .trim());
         } else {
-            return 0;
+            // when missing precision of the decimal, we
+            // use the max precision to avoid parse error
+            return isDecimalType(typeName) ? 38 : 0;
         }
     }
 
@@ -384,7 +402,9 @@ public class MySqlTypeUtils {
                                     typeName.indexOf(COMMA) + 1, typeName.indexOf(RIGHT_BRACKETS))
                             .trim());
         } else {
-            return 0;
+            // When missing scale of the decimal, we
+            // use the max scale to avoid parse error
+            return isDecimalType(typeName) ? 18 : 0;
         }
     }
 }
