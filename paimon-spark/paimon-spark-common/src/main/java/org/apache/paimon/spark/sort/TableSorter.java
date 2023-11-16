@@ -16,79 +16,79 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sorter;
+package org.apache.paimon.spark.sort;
 
-import org.apache.paimon.flink.action.SortCompactAction;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.data.RowData;
+import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.Row;
 
 import java.util.List;
 
-/** An abstract TableSorter for {@link SortCompactAction}. */
+/** Abstract sorter for sorting table. see {@link ZorderSorter} and {@link OrderSorter}. */
 public abstract class TableSorter {
 
-    protected final StreamExecutionEnvironment batchTEnv;
-    protected final DataStream<RowData> origin;
     protected final FileStoreTable table;
     protected final List<String> orderColNames;
 
-    public TableSorter(
-            StreamExecutionEnvironment batchTEnv,
-            DataStream<RowData> origin,
-            FileStoreTable table,
-            List<String> orderColNames) {
-        this.batchTEnv = batchTEnv;
-        this.origin = origin;
+    public TableSorter(FileStoreTable table, List<String> orderColNames) {
         this.table = table;
         this.orderColNames = orderColNames;
         checkColNames();
     }
 
-    private void checkColNames() {
-        if (orderColNames.size() < 1) {
-            throw new IllegalArgumentException("order column names should not be empty.");
+    protected void checkNotEmpty() {
+        if (orderColNames.isEmpty()) {
+            throw new IllegalArgumentException("order column could not be empty");
         }
-        List<String> columnNames = table.rowType().getFieldNames();
-        for (String zColumn : orderColNames) {
-            if (!columnNames.contains(zColumn)) {
-                throw new RuntimeException(
-                        "Can't find column "
-                                + zColumn
-                                + " in table columns. Possible columns are ["
-                                + columnNames.stream().reduce((a, b) -> a + "," + b).get()
-                                + "]");
+    }
+
+    private void checkColNames() {
+        if (!orderColNames.isEmpty()) {
+            List<String> columnNames = table.rowType().getFieldNames();
+            for (String zColumn : orderColNames) {
+                if (!columnNames.contains(zColumn)) {
+                    throw new RuntimeException(
+                            "Can't find column "
+                                    + zColumn
+                                    + " in table columns. Possible columns are ["
+                                    + columnNames.stream().reduce((a, b) -> a + "," + b).get()
+                                    + "]");
+                }
             }
         }
     }
 
-    public abstract DataStream<RowData> sort();
+    public abstract Dataset<Row> sort(Dataset<Row> input);
 
     public static TableSorter getSorter(
-            StreamExecutionEnvironment batchTEnv,
-            DataStream<RowData> origin,
-            FileStoreTable fileStoreTable,
-            String sortStrategy,
-            List<String> orderColumns) {
+            FileStoreTable table, String sortStrategy, List<String> orderColumns) {
         switch (OrderType.of(sortStrategy)) {
             case ORDER:
-                return new OrderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
+                return new OrderSorter(table, orderColumns);
             case ZORDER:
-                return new ZorderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
+                return new ZorderSorter(table, orderColumns);
             case HILBERT:
                 // todo support hilbert curve
                 throw new IllegalArgumentException("Not supported yet.");
+            case NONE:
+                return new TableSorter(table, orderColumns) {
+                    @Override
+                    public Dataset<Row> sort(Dataset<Row> input) {
+                        return input;
+                    }
+                };
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
         }
     }
 
-    enum OrderType {
+    /** order type for sorting. */
+    public enum OrderType {
         ORDER("order"),
         ZORDER("zorder"),
-        HILBERT("hilbert");
+        HILBERT("hilbert"),
+        NONE("none");
 
         private final String orderType;
 
@@ -108,6 +108,8 @@ public abstract class TableSorter {
                 return ZORDER;
             } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
                 return HILBERT;
+            } else if (NONE.orderType.equalsIgnoreCase(orderType)) {
+                return NONE;
             }
 
             throw new IllegalArgumentException("cannot match type: " + orderType + " for ordering");
