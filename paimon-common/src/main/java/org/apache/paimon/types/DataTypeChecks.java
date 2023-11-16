@@ -18,6 +18,8 @@
 
 package org.apache.paimon.types;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -65,8 +67,8 @@ public final class DataTypeChecks {
     }
 
     /** Returns the precision of all types that define a precision implicitly or explicitly. */
-    public static int getPrecision(DataType dataType) {
-        return dataType.accept(PRECISION_EXTRACTOR);
+    public static Integer getPrecision(@Nullable DataType dataType) {
+        return dataType == null ? null : dataType.accept(PRECISION_EXTRACTOR);
     }
 
     /** Checks the precision of a type that defines a precision implicitly or explicitly. */

@@ -221,4 +221,15 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         throw new UnsupportedOperationException(
                 "ColumnarRowData do not support hashCode, please hash fields one by one!");
     }
+
+    VectorizedColumnBatch vectorizedColumnBatch() {
+        return vectorizedColumnBatch;
+    }
+
+    public ColumnarRow copy(ColumnVector[] vectors) {
+        VectorizedColumnBatch vectorizedColumnBatchCopy = vectorizedColumnBatch.copy(vectors);
+        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatchCopy, rowId);
+        columnarRow.setRowKind(rowKind);
+        return columnarRow;
+    }
 }

@@ -42,16 +42,14 @@ public class AvroBulkFormat implements FormatReaderFactory {
 
     private static final long serialVersionUID = 1L;
 
-    protected final RowType rowType;
-    private final int[] projection;
+    protected final RowType projectedRowType;
 
-    public AvroBulkFormat(RowType rowType, int[] projection) {
-        this.rowType = rowType;
-        this.projection = projection;
+    public AvroBulkFormat(RowType projectedRowType) {
+        this.projectedRowType = projectedRowType;
     }
 
     @Override
-    public AvroReader createReader(FileIO fileIO, Path file) throws IOException {
+    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException {
         return new AvroReader(fileIO, file);
     }
 
@@ -79,7 +77,7 @@ public class AvroBulkFormat implements FormatReaderFactory {
         }
 
         private DataFileReader<InternalRow> createReaderFromPath(Path path) throws IOException {
-            DatumReader<InternalRow> datumReader = new AvroRowDatumReader(rowType, projection);
+            DatumReader<InternalRow> datumReader = new AvroRowDatumReader(projectedRowType);
             SeekableInput in =
                     new SeekableInputStreamWrapper(
                             fileIO.newInputStream(path), fileIO.getFileSize(path));

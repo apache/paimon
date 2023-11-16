@@ -47,7 +47,7 @@ public class AvroRowDatumWriter implements DatumWriter<InternalRow> {
             this.isUnion = true;
             schema = schema.getTypes().get(1);
         }
-        this.writer = new FieldWriterFactory().createRowWriter(schema, rowType.getFieldTypes());
+        this.writer = new FieldWriterFactory().createRowWriter(schema, rowType.getFields());
     }
 
     @Override
