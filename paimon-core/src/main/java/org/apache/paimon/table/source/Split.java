@@ -19,11 +19,8 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.table.Table;
 
 import java.io.Serializable;
-import java.util.List;
-import java.util.Optional;
 
 /**
  * An input split for reading.
@@ -34,12 +31,4 @@ import java.util.Optional;
 public interface Split extends Serializable {
 
     long rowCount();
-
-    /**
-     * If all files in this split can be read without merging, returns an {@link Optional} wrapping
-     * a list of {@link RawTableFile}s, otherwise returns {@link Optional#empty()}.
-     */
-    default Optional<List<RawTableFile>> getRawTableFiles(Table table) {
-        return Optional.empty();
-    }
 }

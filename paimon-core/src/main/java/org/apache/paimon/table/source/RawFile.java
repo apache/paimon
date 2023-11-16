@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
 
 import java.util.Objects;
@@ -28,16 +29,25 @@ import java.util.Objects;
  * @since 0.6.0
  */
 @Public
-public class RawTableFile {
+public class RawFile {
 
     private final String path;
     private final long offset;
     private final long length;
+    private final CoreOptions.FileFormatType format;
+    private final long schemaId;
 
-    public RawTableFile(String path, long offset, long length) {
+    public RawFile(
+            String path,
+            long offset,
+            long length,
+            CoreOptions.FileFormatType format,
+            long schemaId) {
         this.path = path;
         this.offset = offset;
         this.length = length;
+        this.format = format;
+        this.schemaId = schemaId;
     }
 
     /** Path of the file. */
@@ -55,18 +65,32 @@ public class RawTableFile {
         return length;
     }
 
+    public CoreOptions.FileFormatType format() {
+        return format;
+    }
+
+    public long schemaId() {
+        return schemaId;
+    }
+
     @Override
     public boolean equals(Object o) {
-        if (!(o instanceof RawTableFile)) {
+        if (!(o instanceof RawFile)) {
             return false;
         }
 
-        RawTableFile other = (RawTableFile) o;
-        return Objects.equals(path, other.path) && offset == other.offset && length == other.length;
+        RawFile other = (RawFile) o;
+        return Objects.equals(path, other.path)
+                && offset == other.offset
+                && length == other.length
+                && Objects.equals(format, other.format)
+                && schemaId == other.schemaId;
     }
 
     @Override
     public String toString() {
-        return String.format("{path = %s, offset = %d, length = %d}", path, offset, length);
+        return String.format(
+                "{path = %s, offset = %d, length = %d, format = %s, schemaId = %d}",
+                path, offset, length, format, schemaId);
     }
 }

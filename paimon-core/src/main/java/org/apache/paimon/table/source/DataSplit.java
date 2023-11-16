@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.AbstractFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
@@ -26,22 +25,15 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
-import org.apache.paimon.table.AbstractFileStoreTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SerializationUtils;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.OptionalLong;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -95,51 +87,6 @@ public class DataSplit implements Split {
             rowCount += file.rowCount();
         }
         return rowCount;
-    }
-
-    @Override
-    public Optional<List<RawTableFile>> getRawTableFiles(Table table) {
-        if (!(table instanceof AbstractFileStoreTable)) {
-            return Optional.empty();
-        }
-        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
-        if (!(fileStoreTable.store() instanceof AbstractFileStore)) {
-            return Optional.empty();
-        }
-
-        FileStorePathFactory pathFactory =
-                ((AbstractFileStore<?>) fileStoreTable.store()).pathFactory();
-        String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
-
-        // bucket with only one file can be returned
-        if (dataFiles.size() == 1) {
-            return Optional.of(
-                    Collections.singletonList(makeRawTableFile(bucketPath, dataFiles.get(0))));
-        }
-
-        // append only files can be returned
-        if (fileStoreTable.schema().primaryKeys().isEmpty()) {
-            return Optional.of(makeRawTableFiles(bucketPath));
-        }
-
-        // bucket containing only one level (except level 0) can be returned
-        Set<Integer> levels =
-                dataFiles.stream().map(DataFileMeta::level).collect(Collectors.toSet());
-        if (levels.size() == 1 && !levels.contains(0)) {
-            return Optional.of(makeRawTableFiles(bucketPath));
-        }
-
-        return Optional.empty();
-    }
-
-    private List<RawTableFile> makeRawTableFiles(String bucketPath) {
-        return dataFiles.stream()
-                .map(f -> makeRawTableFile(bucketPath, f))
-                .collect(Collectors.toList());
-    }
-
-    private RawTableFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
-        return new RawTableFile(bucketPath + "/" + meta.fileName(), 0, meta.fileSize());
     }
 
     @Override

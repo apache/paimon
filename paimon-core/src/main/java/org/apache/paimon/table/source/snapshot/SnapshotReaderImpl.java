@@ -36,10 +36,12 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TypeUtils;
@@ -72,6 +74,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final SplitGenerator splitGenerator;
     private final BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer;
     private final DefaultValueAssigner defaultValueAssigner;
+    private final FileStorePathFactory pathFactory;
 
     private ScanMode scanMode = ScanMode.ALL;
     private RecordComparator lazyPartitionComparator;
@@ -86,8 +89,8 @@ public class SnapshotReaderImpl implements SnapshotReader {
             SplitGenerator splitGenerator,
             BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer,
             DefaultValueAssigner defaultValueAssigner,
+            FileStorePathFactory pathFactory,
             String tableName) {
-        this.tableName = tableName;
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
@@ -97,6 +100,9 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.splitGenerator = splitGenerator;
         this.nonPartitionFilterConsumer = nonPartitionFilterConsumer;
         this.defaultValueAssigner = defaultValueAssigner;
+        this.pathFactory = pathFactory;
+
+        this.tableName = tableName;
     }
 
     @Override
@@ -267,6 +273,47 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .map(Optional::get)
                 .map(ManifestEntry::partition)
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    public Optional<List<RawFile>> convertToRawFiles(DataSplit split) {
+        String bucketPath = pathFactory.bucketPath(split.partition(), split.bucket()).toString();
+        List<DataFileMeta> dataFiles = split.dataFiles();
+
+        // bucket with only one file can be returned
+        if (dataFiles.size() == 1) {
+            return Optional.of(
+                    Collections.singletonList(makeRawTableFile(bucketPath, dataFiles.get(0))));
+        }
+
+        // append only files can be returned
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return Optional.of(makeRawTableFiles(bucketPath, dataFiles));
+        }
+
+        // bucket containing only one level (except level 0) can be returned
+        Set<Integer> levels =
+                dataFiles.stream().map(DataFileMeta::level).collect(Collectors.toSet());
+        if (levels.size() == 1 && !levels.contains(0)) {
+            return Optional.of(makeRawTableFiles(bucketPath, dataFiles));
+        }
+
+        return Optional.empty();
+    }
+
+    private List<RawFile> makeRawTableFiles(String bucketPath, List<DataFileMeta> dataFiles) {
+        return dataFiles.stream()
+                .map(f -> makeRawTableFile(bucketPath, f))
+                .collect(Collectors.toList());
+    }
+
+    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
+        return new RawFile(
+                bucketPath + "/" + meta.fileName(),
+                0,
+                meta.fileSize(),
+                new CoreOptions(tableSchema.options()).formatType(),
+                meta.schemaId());
     }
 
     @Override

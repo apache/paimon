@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.table.source;
+package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
@@ -29,6 +29,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
@@ -36,7 +37,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -53,8 +55,8 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link DataSplit}. */
-public class DataSplitTest {
+/** Tests for {@link SnapshotReader}. */
+public class SnapshotReaderTest {
 
     private @TempDir java.nio.file.Path tempDir;
 
@@ -96,15 +98,17 @@ public class DataSplitTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(dataSplit.getRawTableFiles(table))
+            assertThat(reader.convertToRawFiles(dataSplit))
                     .hasValue(
                             Collections.singletonList(
-                                    new RawTableFile(
+                                    new RawFile(
                                             String.format(
                                                     "%s/pt=%s/bucket-0/%s",
                                                     tablePath, partition, meta.fileName()),
                                             0,
-                                            meta.fileSize())));
+                                            meta.fileSize(),
+                                            CoreOptions.FileFormatType.AVRO,
+                                            meta.schemaId())));
         }
 
         // write another file on level 0
@@ -119,7 +123,7 @@ public class DataSplitTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(dataSplit.getRawTableFiles(table)).isNotPresent();
+            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
         }
 
         // compact all files
@@ -142,15 +146,17 @@ public class DataSplitTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(dataSplit.getRawTableFiles(table))
+            assertThat(reader.convertToRawFiles(dataSplit))
                     .hasValue(
                             Collections.singletonList(
-                                    new RawTableFile(
+                                    new RawFile(
                                             String.format(
                                                     "%s/pt=%s/bucket-0/%s",
                                                     tablePath, partition, meta.fileName()),
                                             0,
-                                            meta.fileSize())));
+                                            meta.fileSize(),
+                                            CoreOptions.FileFormatType.AVRO,
+                                            meta.schemaId())));
         }
 
         // write another file on level 0
@@ -165,7 +171,7 @@ public class DataSplitTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(dataSplit.getRawTableFiles(table)).isNotPresent();
+            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
         }
 
         write.close();
@@ -199,20 +205,30 @@ public class DataSplitTest {
         DataSplit dataSplit = dataSplits.get(0);
         assertThat(dataSplit.dataFiles()).hasSize(1);
         DataFileMeta meta = dataSplit.dataFiles().get(0);
-        assertThat(dataSplit.getRawTableFiles(table))
+        assertThat(reader.convertToRawFiles(dataSplit))
                 .hasValue(
                         Collections.singletonList(
-                                new RawTableFile(
+                                new RawFile(
                                         String.format("%s/bucket-0/%s", tablePath, meta.fileName()),
                                         0,
-                                        meta.fileSize())));
+                                        meta.fileSize(),
+                                        CoreOptions.FileFormatType.AVRO,
+                                        meta.schemaId())));
+
+        // change file schema
+
+        write.close();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
 
         // write another file
 
-        write.write(GenericRow.of(11, 1102L));
-        write.write(GenericRow.of(12, 1202L));
-        write.write(GenericRow.of(21, 2102L));
-        write.write(GenericRow.of(22, 2202L));
+        write.write(GenericRow.of(11, 1102L, BinaryString.fromString("eleven")));
+        write.write(GenericRow.of(12, 1202L, BinaryString.fromString("twelve")));
+        write.write(GenericRow.of(21, 2102L, BinaryString.fromString("twenty-one")));
+        write.write(GenericRow.of(22, 2202L, BinaryString.fromString("twenty-two")));
         commit.commit(2, write.prepareCommit(false, 2));
 
         dataSplits = reader.read().dataSplits();
@@ -221,19 +237,23 @@ public class DataSplitTest {
         assertThat(dataSplit.dataFiles()).hasSize(2);
         DataFileMeta meta0 = dataSplit.dataFiles().get(0);
         DataFileMeta meta1 = dataSplit.dataFiles().get(1);
-        assertThat(dataSplit.getRawTableFiles(table))
+        assertThat(reader.convertToRawFiles(dataSplit))
                 .hasValue(
                         Arrays.asList(
-                                new RawTableFile(
+                                new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta0.fileName()),
                                         0,
-                                        meta0.fileSize()),
-                                new RawTableFile(
+                                        meta0.fileSize(),
+                                        CoreOptions.FileFormatType.AVRO,
+                                        meta0.schemaId()),
+                                new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta1.fileName()),
                                         0,
-                                        meta1.fileSize())));
+                                        meta1.fileSize(),
+                                        CoreOptions.FileFormatType.AVRO,
+                                        meta1.schemaId())));
 
         write.close();
         commit.close();
@@ -245,6 +265,7 @@ public class DataSplitTest {
         Options options = new Options();
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 5);
+        options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
 
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
