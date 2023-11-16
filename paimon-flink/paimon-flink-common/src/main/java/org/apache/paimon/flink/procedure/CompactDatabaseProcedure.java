@@ -26,7 +26,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import java.util.Map;
 
-import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
+import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
  * Compact database procedure. Usage:

@@ -21,6 +21,7 @@ package org.apache.paimon.table.system;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 
@@ -82,7 +83,7 @@ public class SystemTableLoader {
             String tableName,
             FileIO fileIO,
             Supplier<Map<String, Map<String, Path>>> allTablePaths,
-            Map<String, String> catalogOptions,
+            Options catalogOptions,
             @Nullable LineageMetaFactory lineageMetaFactory) {
         switch (tableName.toLowerCase()) {
             case ALL_TABLE_OPTIONS:

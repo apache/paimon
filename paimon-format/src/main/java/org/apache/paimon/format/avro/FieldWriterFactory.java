@@ -23,11 +23,14 @@ import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
+import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.io.Encoder;
 import org.apache.avro.util.Utf8;
+import org.jetbrains.annotations.NotNull;
 
 import java.io.IOException;
 import java.util.List;
@@ -114,19 +117,28 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
-    public FieldWriter visitTimestampMillis(int precision) {
+    public FieldWriter visitTimestampMillis(Integer precision) {
+        if (precision == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, i, encoder) ->
                 encoder.writeLong(container.getTimestamp(i, precision).getMillisecond());
     }
 
     @Override
-    public FieldWriter visitTimestampMicros(int precision) {
+    public FieldWriter visitTimestampMicros(Integer precision) {
+        if (precision == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, i, encoder) ->
                 encoder.writeLong(container.getTimestamp(i, precision).toMicros());
     }
 
     @Override
-    public FieldWriter visitDecimal(int precision, int scale) {
+    public FieldWriter visitDecimal(Integer precision, Integer scale) {
+        if (precision == null || scale == null) {
+            throw new AvroRuntimeException("Can't assign null when creating FieldWriter");
+        }
         return (container, index, encoder) -> {
             Decimal decimal = container.getDecimal(index, precision, scale);
             encoder.writeBytes(decimal.toUnscaledBytes());
@@ -169,8 +181,8 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
     }
 
     @Override
-    public FieldWriter visitRecord(Schema schema, List<DataType> fieldTypes) {
-        return new RowWriter(schema, fieldTypes);
+    public FieldWriter visitRecord(Schema schema, @NotNull List<DataField> fields) {
+        return new RowWriter(schema, fields);
     }
 
     private static class NullableWriter implements FieldWriter {
@@ -197,12 +209,12 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
 
         private final FieldWriter[] fieldWriters;
 
-        private RowWriter(Schema schema, List<DataType> fieldTypes) {
+        private RowWriter(Schema schema, List<DataField> fields) {
             List<Schema.Field> schemaFields = schema.getFields();
             this.fieldWriters = new FieldWriter[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
-                DataType type = fieldTypes.get(i);
+                DataType type = fields.get(i).type();
                 fieldWriters[i] = visit(field.schema(), type);
             }
         }
@@ -220,7 +232,7 @@ public class FieldWriterFactory implements AvroSchemaVisitor<FieldWriter> {
         }
     }
 
-    public RowWriter createRowWriter(Schema schema, List<DataType> fieldTypes) {
-        return new RowWriter(schema, fieldTypes);
+    public RowWriter createRowWriter(Schema schema, List<DataField> fields) {
+        return new RowWriter(schema, fields);
     }
 }

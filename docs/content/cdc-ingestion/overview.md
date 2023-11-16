@@ -91,3 +91,7 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 6. When using Hive catalog, MySQL TIME type will be mapped to STRING.
 7. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
    should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
+
+## Setting Custom Job Name
+
+Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.

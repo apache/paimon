@@ -43,7 +43,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -306,10 +305,9 @@ public class KafkaActionUtils {
         public List<String> getRecords(String topic, int pollTimeOutMills) {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
-            Iterable<ConsumerRecord<String, String>> records = consumerRecords.records(topic);
-            List<String> result = new ArrayList<>();
-            records.forEach(r -> result.add(r.value()));
-            return result;
+            return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
+                    .map(ConsumerRecord::value)
+                    .collect(Collectors.toList());
         }
 
         @Override

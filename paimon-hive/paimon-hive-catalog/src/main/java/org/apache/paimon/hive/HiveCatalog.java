@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -109,14 +110,14 @@ public class HiveCatalog extends AbstractCatalog {
     private final LocationHelper locationHelper;
 
     public HiveCatalog(FileIO fileIO, HiveConf hiveConf, String clientClassName, String warehouse) {
-        this(fileIO, hiveConf, clientClassName, Collections.emptyMap(), warehouse);
+        this(fileIO, hiveConf, clientClassName, new Options(), warehouse);
     }
 
     public HiveCatalog(
             FileIO fileIO,
             HiveConf hiveConf,
             String clientClassName,
-            Map<String, String> options,
+            Options options,
             String warehouse) {
         super(fileIO, options);
         this.hiveConf = hiveConf;
@@ -280,8 +281,6 @@ public class HiveCatalog extends AbstractCatalog {
 
     @Override
     protected void createTableImpl(Identifier identifier, Schema schema) {
-        checkFieldNamesUpperCase(schema.rowType().getFieldNames());
-
         // first commit changes to underlying files
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema tableSchema;
@@ -323,7 +322,6 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
-            checkIdentifierUpperCase(toTable);
             String fromDB = fromTable.getDatabaseName();
             String fromTableName = fromTable.getObjectName();
             Table table = client.getTable(fromDB, fromTableName);
@@ -358,7 +356,6 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        checkFieldNamesUpperCaseInSchemaChange(changes);
 
         final SchemaManager schemaManager = schemaManager(identifier);
         // first commit changes to underlying files
@@ -401,34 +398,6 @@ public class HiveCatalog extends AbstractCatalog {
                 String.format(
                         "Table name[%s] cannot contain upper case in hive catalog",
                         identifier.getObjectName()));
-    }
-
-    private void checkFieldNamesUpperCaseInSchemaChange(List<SchemaChange> changes) {
-        List<String> fieldNames = new ArrayList<>();
-        for (SchemaChange change : changes) {
-            if (change instanceof SchemaChange.AddColumn) {
-                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
-                fieldNames.add(addColumn.fieldName());
-            } else if (change instanceof SchemaChange.RenameColumn) {
-                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
-                fieldNames.add(rename.newName());
-            } else {
-                // do nothing
-            }
-        }
-        checkFieldNamesUpperCase(fieldNames);
-    }
-
-    private void checkFieldNamesUpperCase(List<String> fieldNames) {
-        List<String> illegalFieldNames =
-                fieldNames.stream()
-                        .filter(f -> !f.equals(f.toLowerCase()))
-                        .collect(Collectors.toList());
-        checkState(
-                illegalFieldNames.isEmpty(),
-                String.format(
-                        "Field names %s cannot contain upper case in hive catalog",
-                        illegalFieldNames));
     }
 
     private Database convertToDatabase(String name) {
@@ -541,7 +510,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
-        checkIdentifierUpperCase(identifier);
         return new SchemaManager(fileIO, getDataTableLocation(identifier))
                 .withLock(lock(identifier));
     }

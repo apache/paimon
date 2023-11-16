@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -57,6 +58,7 @@ public class KeyValueFileReaderFactory {
     private final long asyncThreshold;
 
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final BinaryRow partition;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -66,7 +68,8 @@ public class KeyValueFileReaderFactory {
             RowType valueType,
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
             DataFilePathFactory pathFactory,
-            long asyncThreshold) {
+            long asyncThreshold,
+            BinaryRow partition) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -75,6 +78,7 @@ public class KeyValueFileReaderFactory {
         this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
         this.pathFactory = pathFactory;
         this.asyncThreshold = asyncThreshold;
+        this.partition = partition;
         this.bulkFormatMappings = new HashMap<>();
     }
 
@@ -118,7 +122,8 @@ public class KeyValueFileReaderFactory {
                 level,
                 poolSize,
                 bulkFormatMapping.getIndexMapping(),
-                bulkFormatMapping.getCastMapping());
+                bulkFormatMapping.getCastMapping(),
+                PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
     }
 
     public static Builder builder(
@@ -238,7 +243,8 @@ public class KeyValueFileReaderFactory {
                     BulkFormatMapping.newBuilder(
                             formatDiscover, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
-                    options.fileReaderAsyncThreshold().getBytes());
+                    options.fileReaderAsyncThreshold().getBytes(),
+                    partition);
         }
 
         private void applyProjection() {

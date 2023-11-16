@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
@@ -125,9 +126,7 @@ public class MongoDBSyncTableAction extends ActionBase {
 
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive(caseSensitive);
 
         Schema mongodbSchema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, caseSensitive);
         catalog.createDatabase(database, true);
@@ -181,24 +180,10 @@ public class MongoDBSyncTableAction extends ActionBase {
         sinkBuilder.build();
     }
 
-    private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                table.equals(table.toLowerCase()),
-                String.format(
-                        "Collection prefix [%s] cannot contain upper case in case-insensitive catalog.",
-                        table));
-        for (String part : partitionKeys) {
-            checkArgument(
-                    part.equals(part.toLowerCase()),
-                    String.format(
-                            "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            partitionKeys));
-        }
+    private void validateCaseInsensitive(boolean caseSensitive) {
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
     }
 
     @VisibleForTesting

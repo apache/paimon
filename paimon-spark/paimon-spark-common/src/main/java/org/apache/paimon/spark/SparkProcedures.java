@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
@@ -48,6 +49,7 @@ public class SparkProcedures {
         procedureBuilders.put("rollback", RollbackProcedure::builder);
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
+        procedureBuilders.put("compact", CompactProcedure::builder);
         return procedureBuilders.build();
     }
 }

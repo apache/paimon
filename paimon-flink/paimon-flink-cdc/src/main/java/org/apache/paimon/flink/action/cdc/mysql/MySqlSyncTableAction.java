@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -162,9 +163,7 @@ public class MySqlSyncTableAction extends ActionBase {
 
         boolean caseSensitive = catalog.caseSensitive();
 
-        if (!caseSensitive) {
-            validateCaseInsensitive();
-        }
+        validateCaseInsensitive(caseSensitive);
 
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
@@ -256,31 +255,11 @@ public class MySqlSyncTableAction extends ActionBase {
         sinkBuilder.build();
     }
 
-    private void validateCaseInsensitive() {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                table.equals(table.toLowerCase()),
-                String.format(
-                        "Table name [%s] cannot contain upper case in case-insensitive catalog.",
-                        table));
-        for (String part : partitionKeys) {
-            checkArgument(
-                    part.equals(part.toLowerCase()),
-                    String.format(
-                            "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            partitionKeys));
-        }
-        for (String pk : primaryKeys) {
-            checkArgument(
-                    pk.equals(pk.toLowerCase()),
-                    String.format(
-                            "Primary keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            primaryKeys));
-        }
+    private void validateCaseInsensitive(boolean caseSensitive) {
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Primary keys", primaryKeys);
     }
 
     private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {

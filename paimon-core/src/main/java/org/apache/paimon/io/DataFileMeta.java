@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.ArrayType;
@@ -238,6 +239,13 @@ public class DataFileMeta {
                 newLevel,
                 extraFiles,
                 creationTime);
+    }
+
+    public List<Path> collectFiles(DataFilePathFactory pathFactory) {
+        List<Path> paths = new ArrayList<>();
+        paths.add(pathFactory.toPath(fileName));
+        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        return paths;
     }
 
     public DataFileMeta copy(List<String> newExtraFiles) {

@@ -20,14 +20,19 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
+import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -40,6 +45,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final KeyValueSerializer serializer;
     private final int level;
     @Nullable private final int[] indexMapping;
+    @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public KeyValueDataFileRecordReader(
@@ -51,7 +57,8 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             int level,
             @Nullable Integer poolSize,
             @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping)
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
         this.reader =
@@ -61,6 +68,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.indexMapping = indexMapping;
+        this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
     }
 
@@ -68,42 +76,36 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     @Override
     public RecordIterator<KeyValue> readBatch() throws IOException {
         RecordReader.RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null
-                ? null
-                : new KeyValueDataFileRecordIterator(iterator, indexMapping, castMapping);
+        if (iterator == null) {
+            return null;
+        }
+
+        if (iterator instanceof ColumnarRowIterator) {
+            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+        } else {
+            if (partitionInfo != null) {
+                final PartitionSettedRow partitionSettedRow =
+                        PartitionSettedRow.from(partitionInfo);
+                iterator = iterator.transform(partitionSettedRow::replaceRow);
+            }
+            if (indexMapping != null) {
+                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
+                iterator = iterator.transform(projectedRow::replaceRow);
+            }
+        }
+        if (castMapping != null) {
+            final CastedRow castedRow = CastedRow.from(castMapping);
+            iterator = iterator.transform(castedRow::replaceRow);
+        }
+        return iterator.transform(
+                internalRow ->
+                        internalRow == null
+                                ? null
+                                : serializer.fromRow(internalRow).setLevel(level));
     }
 
     @Override
     public void close() throws IOException {
         reader.close();
-    }
-
-    private class KeyValueDataFileRecordIterator extends AbstractFileRecordIterator<KeyValue> {
-
-        private final RecordReader.RecordIterator<InternalRow> iterator;
-
-        private KeyValueDataFileRecordIterator(
-                RecordReader.RecordIterator<InternalRow> iterator,
-                @Nullable int[] indexMapping,
-                @Nullable CastFieldGetter[] castMapping) {
-            super(indexMapping, castMapping);
-            this.iterator = iterator;
-        }
-
-        @Override
-        public KeyValue next() throws IOException {
-            InternalRow result = iterator.next();
-
-            if (result == null) {
-                return null;
-            } else {
-                return serializer.fromRow(mappingRowData(result)).setLevel(level);
-            }
-        }
-
-        @Override
-        public void releaseBatch() {
-            iterator.releaseBatch();
-        }
     }
 }

@@ -209,7 +209,6 @@ INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite' = 'false') */
 Spark's default overwrite mode is static partition overwrite. To enable dynamic overwritten needs these configs below:
 
 ```text
---conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
@@ -371,7 +370,6 @@ UPDATE MyTable SET b = 1, c = 2 WHERE a = 'myTable';
 To enable update needs these configs below:
 
 ```text
---conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
@@ -478,7 +476,6 @@ Important table properties setting:
 To enable delete needs these configs below:
 
 ```text
---conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
