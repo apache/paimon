@@ -86,7 +86,8 @@ public abstract class HiveCatalogITCaseBase {
     @Minio private static MinioTestContainer minioTestContainer;
 
     private void before(boolean locationInProperties) throws Exception {
-        hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
+        hiveShell.execute("DROP DATABASE IF EXISTS test_db");
+        hiveShell.execute("CREATE DATABASE test_db");
         hiveShell.execute("USE test_db");
         hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
         hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");

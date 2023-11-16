@@ -109,7 +109,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                         .await())
                 .isInstanceOf(TableException.class)
                 .hasMessage(
-                        "Could not execute CreateTable in path `my_hive_custom_client`.`default`.`hive_table`");
+                        "Could not execute CreateTable in path `my_hive_custom_client`.`test_db`.`hive_table`");
         assertThat(
                         new SchemaManager(
                                         LocalFileIO.create(),
@@ -142,7 +142,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 TableException.class,
-                                "Could not execute AlterTable in path `my_alter_hive`.`default`.`alter_failed_table`"));
+                                "Could not execute AlterTable in path `my_alter_hive`.`test_db`.`alter_failed_table`"));
 
         assertThat(
                         new SchemaManager(
