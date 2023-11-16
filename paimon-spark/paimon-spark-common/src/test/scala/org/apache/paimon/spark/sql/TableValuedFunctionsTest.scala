@@ -18,6 +18,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+
 import org.apache.spark.sql.{DataFrame, Row}
 
 class TableValuedFunctionsTest extends PaimonSparkTestBase {
