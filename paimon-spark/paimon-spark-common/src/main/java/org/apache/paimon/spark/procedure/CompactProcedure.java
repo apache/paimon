@@ -86,14 +86,14 @@ public class CompactProcedure extends BaseProcedure {
         Preconditions.checkArgument(args.numFields() >= 1);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitionFilter = blank(args, 1) ? null : toWhere(args.getString(1));
-        String sortType = blank(args, 2) ? TableSorter.OrderType.ORDER.name() : args.getString(2);
+        String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
         List<String> sortColumns =
                 blank(args, 3)
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
-        if (TableSorter.OrderType.NONE.name().equals(sortType)) {
+        if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
-                    "order_strategy could only be either 'order' or 'zorder' yet");
+                    "order_strategy \"none\" cannot work with order_by columns.");
         }
 
         return modifyPaimonTable(
@@ -128,11 +128,13 @@ public class CompactProcedure extends BaseProcedure {
         CoreOptions coreOptions = table.store().options();
 
         // sort only works with bucket=-1 yet
-        if (!(table instanceof AppendOnlyFileStoreTable) || coreOptions.bucket() != -1) {
-            throw new UnsupportedOperationException(
-                    "Spark compact with sort_type "
-                            + sortType
-                            + " only support unaware-bucket append-only table yet.");
+        if (!TableSorter.OrderType.of(sortType).equals(TableSorter.OrderType.NONE)) {
+            if (!(table instanceof AppendOnlyFileStoreTable) || coreOptions.bucket() != -1) {
+                throw new UnsupportedOperationException(
+                        "Spark compact with sort_type "
+                                + sortType
+                                + " only support unaware-bucket append-only table yet.");
+            }
         }
 
         Dataset<Row> row = spark().read().format("paimon").load(coreOptions.path().getPath());
