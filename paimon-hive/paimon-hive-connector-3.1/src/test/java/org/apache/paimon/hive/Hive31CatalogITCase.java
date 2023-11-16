@@ -95,6 +95,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                         "  'type' = 'paimon',",
                         "  'metastore' = 'hive',",
                         "  'uri' = '',",
+                        "  'default-database' = 'test_db',",
                         "  'warehouse' = '" + path + "',",
                         "  'metastore.client.class' = '"
                                 + CreateFailHiveMetaStoreClient.class.getName()
@@ -113,7 +114,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                         new SchemaManager(
                                         LocalFileIO.create(),
                                         new org.apache.paimon.fs.Path(
-                                                path, "default.db/hive_table"))
+                                                path, "test_db.db/hive_table"))
                                 .listAllIds())
                 .isEmpty();
     }
@@ -127,6 +128,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                                 "  'type' = 'paimon',",
                                 "  'metastore' = 'hive',",
                                 "  'uri' = '',",
+                                "  'default-database' = 'test_db',",
                                 "  'warehouse' = '" + path + "',",
                                 "  'metastore.client.class' = '"
                                         + AlterFailHiveMetaStoreClient.class.getName()
@@ -146,7 +148,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
                         new SchemaManager(
                                         LocalFileIO.create(),
                                         new org.apache.paimon.fs.Path(
-                                                path, "default.db/alter_failed_table"))
+                                                path, "test_db.db/alter_failed_table"))
                                 .latest()
                                 .get()
                                 .options())
