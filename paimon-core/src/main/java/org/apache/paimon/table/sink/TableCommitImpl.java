@@ -20,6 +20,11 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
@@ -29,7 +34,9 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
@@ -38,17 +45,23 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -230,9 +243,77 @@ public class TableCommitImpl implements InnerTableCommit {
                         .sorted(Comparator.comparingLong(ManifestCommittable::identifier))
                         .collect(Collectors.toList());
         if (retryCommittables.size() > 0) {
+            checkFilesExistence(retryCommittables);
             commitMultiple(retryCommittables);
         }
         return retryCommittables.size();
+    }
+
+    private void checkFilesExistence(List<ManifestCommittable> committables) {
+        List<Path> files = new ArrayList<>();
+        Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        for (ManifestCommittable committable : committables) {
+            for (CommitMessage message : committable.fileCommittables()) {
+                CommitMessageImpl msg = (CommitMessageImpl) message;
+                DataFilePathFactory pathFactory =
+                        factoryMap.computeIfAbsent(
+                                Pair.of(message.partition(), message.bucket()),
+                                k ->
+                                        commit.pathFactory()
+                                                .createDataFilePathFactory(
+                                                        k.getKey(), k.getValue()));
+
+                Consumer<DataFileMeta> collector = f -> files.addAll(f.collectFiles(pathFactory));
+                msg.newFilesIncrement().newFiles().forEach(collector);
+                msg.newFilesIncrement().changelogFiles().forEach(collector);
+                msg.compactIncrement().compactBefore().forEach(collector);
+                msg.compactIncrement().compactAfter().forEach(collector);
+                msg.indexIncrement().newIndexFiles().stream()
+                        .map(IndexFileMeta::fileName)
+                        .map(pathFactory::toPath)
+                        .forEach(files::add);
+            }
+        }
+
+        Predicate<Path> nonExists =
+                p -> {
+                    try {
+                        return !commit.fileIO().exists(p);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                };
+        List<Path> nonExistFiles;
+        try {
+            nonExistFiles =
+                    FileUtils.COMMON_IO_FORK_JOIN_POOL
+                            .submit(
+                                    () ->
+                                            files.parallelStream()
+                                                    .filter(nonExists)
+                                                    .collect(Collectors.toList()))
+                            .get();
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException(e);
+        } catch (ExecutionException e) {
+            throw new RuntimeException(e.getCause());
+        }
+
+        if (nonExistFiles.size() > 0) {
+            String message =
+                    String.join(
+                            "\n",
+                            "Cannot recover from this checkpoint because some files in the snapshot that"
+                                    + " need to be resubmitted have been deleted:",
+                            "    "
+                                    + nonExistFiles.stream()
+                                            .map(Object::toString)
+                                            .collect(Collectors.joining(",")),
+                            "    The most likely reason is because you are recovering from a very old savepoint that"
+                                    + " contains some uncommitted files that have already been deleted.");
+            throw new RuntimeException(message);
+        }
     }
 
     private void expire(long partitionExpireIdentifier, ExecutorService executor) {

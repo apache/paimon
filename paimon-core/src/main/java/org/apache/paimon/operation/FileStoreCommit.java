@@ -19,9 +19,11 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -82,4 +84,8 @@ public interface FileStoreCommit {
 
     /** With metrics to measure commits. */
     FileStoreCommit withMetrics(CommitMetrics metrics);
+
+    FileStorePathFactory pathFactory();
+
+    FileIO fileIO();
 }
