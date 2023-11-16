@@ -504,6 +504,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         return this;
     }
 
+    @Override
+    public FileStorePathFactory pathFactory() {
+        return pathFactory;
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
     private void collectChanges(
             List<CommitMessage> commitMessages,
             List<ManifestEntry> appendTableFiles,
