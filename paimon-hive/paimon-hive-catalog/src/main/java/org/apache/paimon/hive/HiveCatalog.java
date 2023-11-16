@@ -163,6 +163,33 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
+    public Path getDataTableLocation(Identifier identifier) {
+        try {
+            String databaseName = identifier.getDatabaseName();
+            String tableName = identifier.getObjectName();
+            if (client.tableExists(databaseName, tableName)) {
+                String location =
+                        locationHelper.getTableLocation(client.getTable(databaseName, tableName));
+                if (location != null) {
+                    return new Path(location);
+                }
+            } else {
+                // If the table does not exist,
+                // we should use the database path to generate the table path.
+                String dbLocation =
+                        locationHelper.getDatabaseLocation(client.getDatabase(databaseName));
+                if (dbLocation != null) {
+                    return new Path(dbLocation, tableName);
+                }
+            }
+
+            return super.getDataTableLocation(identifier);
+        } catch (TException e) {
+            throw new RuntimeException("Can not get table " + identifier + " from metastore.", e);
+        }
+    }
+
+    @Override
     public List<String> listDatabases() {
         try {
             return client.getAllDatabases();
