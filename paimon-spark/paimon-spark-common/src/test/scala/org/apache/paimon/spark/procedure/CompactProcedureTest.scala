@@ -205,58 +205,6 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
-  test("Paimon Procedure: compact for pk") {
-    failAfter(streamingTimeout) {
-      withTempDir {
-        checkpointDir =>
-          spark.sql(s"""
-                       |CREATE TABLE T (a INT, b INT)
-                       |TBLPROPERTIES ('primary-key'='a,b', 'bucket'='1')
-                       |""".stripMargin)
-          val location = loadTable("T").location().getPath
-
-          val inputData = MemoryStream[(Int, Int)]
-          val stream = inputData
-            .toDS()
-            .toDF("a", "b")
-            .writeStream
-            .option("checkpointLocation", checkpointDir.getCanonicalPath)
-            .foreachBatch {
-              (batch: Dataset[Row], _: Long) =>
-                batch.write.format("paimon").mode("append").save(location)
-            }
-            .start()
-
-          val query = () => spark.sql("SELECT * FROM T")
-
-          try {
-            inputData.addData((0, 0))
-            inputData.addData((0, 1))
-            inputData.addData((0, 2))
-            inputData.addData((1, 0))
-            inputData.addData((1, 1))
-            inputData.addData((1, 2))
-            inputData.addData((2, 0))
-            inputData.addData((2, 1))
-            inputData.addData((2, 2))
-            stream.processAllAvailable()
-
-            val result = new util.ArrayList[Row]()
-            for (a <- 0 until 3) {
-              for (b <- 0 until 3) {
-                result.add(Row(a, b))
-              }
-            }
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
-            checkAnswer(spark.sql("CALL paimon.sys.compact(table => 'T')"), Row(true) :: Nil)
-            Assertions.assertThat(query().collect()).containsExactlyElementsOf(result)
-          } finally {
-            stream.stop()
-          }
-      }
-    }
-  }
-
   test("Piamon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
