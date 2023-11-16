@@ -44,8 +44,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.function.Function;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.assertSchemaCompatible;
@@ -121,14 +120,15 @@ public abstract class SyncTableActionBase extends ActionBase {
     public SyncTableActionBase withMetadataColumns(List<String> metadataColumns) {
         this.metadataConverters =
                 metadataColumns.stream()
-                        .map(metadataConverters())
-                        .filter(Objects::nonNull)
+                        .map(this::metadataConverter)
+                        .filter(Optional::isPresent)
+                        .map(Optional::get)
                         .toArray(CdcMetadataConverter[]::new);
         return this;
     }
 
-    protected Function<String, CdcMetadataConverter<?>> metadataConverters() {
-        return column -> null;
+    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
+        return Optional.empty();
     }
 
     protected void checkCdcSourceArgument() {}

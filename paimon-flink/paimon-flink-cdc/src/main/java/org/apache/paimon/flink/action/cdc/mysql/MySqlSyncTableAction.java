@@ -35,7 +35,7 @@ import org.apache.flink.api.connector.source.Source;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -88,8 +88,8 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected Function<String, CdcMetadataConverter<?>> metadataConverters() {
-        return MySqlMetadataProcessor::converter;
+    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
+        return Optional.of(MySqlMetadataProcessor.converter(column));
     }
 
     @Override
