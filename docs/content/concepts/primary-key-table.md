@@ -190,12 +190,12 @@ CREATE TABLE T (
      'fields.a.sequence-group' = 'b',
      'fields.b.aggregate-function' = 'first_value',
      'fields.c.sequence-group' = 'd',
-     'fields.d.aggregate-function' = 'sum',
+     'fields.d.aggregate-function' = 'sum'
  );
-INSERT INTO T VALUES (1, 1, 1, null, null);
-INSERT INTO T VALUES (1, null, null, 1, 1);
-INSERT INTO T VALUES (1, 2, 2, null, null);
-INSERT INTO T VALUES (1, null, null, 2, 2);
+INSERT INTO T VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
+INSERT INTO T VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
 
 
 SELECT * FROM T; -- output 1, 2, 1, 2, 3
@@ -215,8 +215,8 @@ CREATE TABLE T (
 ) WITH (
      'merge-engine'='partial-update'
      );
-INSERT INTO T VALUES (1, 1,null,null);
-INSERT INTO T VALUES (1, null,null,1);
+INSERT INTO T VALUES (1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1);
 
 SELECT * FROM T; -- output 1, 1, null, 1
 ```
@@ -234,8 +234,8 @@ CREATE TABLE T (
     'fields.b.default-value'='0'
 );
 
-INSERT INTO T VALUES (1, 1,null,null);
-INSERT INTO T VALUES (1, null,null,1);
+INSERT INTO T VALUES (1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1);
 
 SELECT * FROM T; -- output 1, 1, 0, 1
 ```
