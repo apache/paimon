@@ -48,6 +48,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.function.Consumer;
 
 import static org.apache.paimon.data.BinaryString.fromBytes;
@@ -57,6 +58,34 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test of {@link BinaryRow} and {@link BinaryRowWriter}. */
 public class BinaryRowTest {
+
+    public static void main(String[] args) {
+        Timestamp ts = Timestamp.fromLocalDateTime(LocalDateTime.now());
+        TimeZone zone = TimeZone.getDefault();
+        System.out.println(timestampWithLocalZoneToTimestamp(ts, zone));
+        System.out.println(timestampWithLocalZoneToTimestamp2(ts, zone));
+        System.out.println(timestampWithLocalZoneToTimestamp3(ts, zone));
+        //        long time = System.nanoTime();
+        //        for (int i = 0; i < 100_000_000; i++) {
+        //            timestampWithLocalZoneToTimestamp(ts, zone);
+        //        }
+        //        System.out.println((System.nanoTime() - time) / 1000_000L);
+    }
+
+    private static Timestamp timestampWithLocalZoneToTimestamp(Timestamp ts, TimeZone tz) {
+        int offset = tz.getOffset(ts.getMillisecond());
+        return Timestamp.fromEpochMillis(ts.getMillisecond() + offset, ts.getNanoOfMillisecond());
+    }
+
+    private static Timestamp timestampWithLocalZoneToTimestamp3(Timestamp ts, TimeZone tz) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.ofInstant(ts.toInstant(), tz.toZoneId()));
+    }
+
+    private static Timestamp timestampWithLocalZoneToTimestamp2(Timestamp ts, TimeZone tz) {
+        java.sql.Timestamp timestamp = new java.sql.Timestamp(ts.getMillisecond());
+        timestamp.setNanos(ts.getNanoOfMillisecond());
+        return Timestamp.fromSQLTimestamp(timestamp);
+    }
 
     @Test
     public void testBasic() {
