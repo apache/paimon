@@ -17,6 +17,8 @@
  */
 package org.apache.spark.sql
 
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+
 /**
  * Some classes or methods defined in the spark project are marked as private under
  * [[org.apache.spark.sql]] package, Hence, use this class to adapt then so that we can use them
@@ -40,4 +42,7 @@ object Utils {
     data.sqlContext.internalCreateDataFrame(data.queryExecution.toRdd, data.schema)
   }
 
+  def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
+    Dataset.ofRows(sparkSession, logicalPlan)
+  }
 }
