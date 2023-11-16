@@ -982,8 +982,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 + "(most probably due to checkpoint timeout).",
                         "   See https://paimon.apache.org/docs/master/maintenance/write-performance/ "
                                 + "for how to improve writing performance.",
-                        "2. Multiple jobs are writing into the same partition at the same time "
-                                + "(you'll probably see different base commit user and current commit user below).",
+                        "2. Multiple jobs are writing into the same partition at the same time, "
+                                + "or you use STATEMENT SET to execute multiple INSERT statements into the same Paimon table.",
+                        "   You'll probably see different base commit user and current commit user below.",
                         "   You can use "
                                 + "https://paimon.apache.org/docs/master/maintenance/dedicated-compaction#dedicated-compaction-job"
                                 + "to support multiple writing.",
@@ -1024,7 +1025,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (baseEntries.size() > maxEntry || changes.size() > maxEntry) {
             baseEntriesString =
                     "Base entries are:\n"
-                            + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
+                            + baseEntries
+                                    .subList(0, Math.min(baseEntries.size(), maxEntry))
                                     .stream()
                                     .map(ManifestEntry::toString)
                                     .collect(Collectors.joining("\n"));
