@@ -59,14 +59,6 @@ public class JsonSerdeUtil {
         OBJECT_MAPPER_INSTANCE.registerModule(createPaimonJacksonModule());
     }
 
-    public static JsonNode readValue(String value) {
-        try {
-            return OBJECT_MAPPER_INSTANCE.readValue(value, JsonNode.class);
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException("Error parsing JSON string", e);
-        }
-    }
-
     public static <V> LinkedHashMap<String, V> parseJsonMap(String jsonString, Class<V> valueType) {
         try {
             LinkedHashMap<String, Object> originalMap =
