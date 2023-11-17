@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
-import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -77,7 +76,6 @@ public class AppendOnlyTableCompactionWorkerOperator
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
         this.write = table.store().newWrite(commitUser);
-        this.write.withMetricRegistry(new FlinkMetricRegistry(getMetricGroup()));
         this.result = new LinkedList<>();
     }
 
