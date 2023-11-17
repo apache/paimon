@@ -37,6 +37,6 @@ public class OrderSorter extends TableSorter {
     @Override
     public Dataset<Row> sort(Dataset<Row> input) {
         Column[] sortColumns = orderColNames.stream().map(input::col).toArray(Column[]::new);
-        return input.repartitionByRange(sortColumns).sort(sortColumns);
+        return input.repartitionByRange(sortColumns).sortWithinPartitions(sortColumns);
     }
 }
