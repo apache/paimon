@@ -31,6 +31,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_PARTITION_DISCOVERY_INTERVAL_MS;
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC;
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_FORMAT;
 
@@ -100,6 +101,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
         }
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
+        pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
         pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
         pulsarConfig.put(TOPIC.key(), String.join(";", topics));
 

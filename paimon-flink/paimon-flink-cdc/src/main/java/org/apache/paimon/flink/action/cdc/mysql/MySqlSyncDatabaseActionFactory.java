@@ -49,18 +49,19 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         optionalConfigMap(params, "catalog-conf"),
                         optionalConfigMap(params, "mysql-conf"));
 
-        action.withTableConfig(optionalConfigMap(params, "table-conf"))
-                .ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
+        action.withTableConfig(optionalConfigMap(params, "table-conf"));
+        action.ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
                 .mergeShards(
                         !params.has("merge-shards")
                                 || Boolean.parseBoolean(params.get("merge-shards")))
+                .withMode(MultiTablesSinkMode.fromString(params.get("mode")))
                 .withTablePrefix(params.get("table-prefix"))
                 .withTableSuffix(params.get("table-suffix"))
                 .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"))
-                .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
+                .excludingTables(params.get("excluding-tables"));
+
         if (params.has("metadata-column")) {
-            action.withMetadataKeys(Arrays.asList(params.get("metadata-column").split(",")));
+            action.withMetadataColumns(Arrays.asList(params.get("metadata-column").split(",")));
         }
 
         if (params.has("type-mapping")) {

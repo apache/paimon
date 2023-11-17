@@ -18,29 +18,15 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.format.RecordParser;
-import org.apache.paimon.flink.sink.cdc.EventParser;
-import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.NewTableSchemaBuilder;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.configuration.Configuration;
-
-import javax.annotation.Nullable;
+import org.apache.flink.api.common.functions.FlatMapFunction;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Map;
-import java.util.regex.Pattern;
 
 /**
  * An {@link Action} which synchronize the Multiple message queue topics into one Paimon database.
@@ -74,130 +60,22 @@ import java.util.regex.Pattern;
  * <p>To automatically synchronize new table, This action creates a single sink for all Paimon
  * tables to be written. See {@link MultiTablesSinkMode#COMBINED}.
  */
-public abstract class MessageQueueSyncDatabaseActionBase extends ActionBase {
-
-    protected final String database;
-    protected final Configuration cdcSourceConfig;
-
-    private Map<String, String> tableConfig = new HashMap<>();
-    private String tablePrefix = "";
-    private String tableSuffix = "";
-    private String includingTables = ".*";
-    @Nullable String excludingTables;
-    private TypeMapping typeMapping = TypeMapping.defaultMapping();
+public abstract class MessageQueueSyncDatabaseActionBase extends SyncDatabaseActionBase {
 
     public MessageQueueSyncDatabaseActionBase(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(warehouse, catalogConfig);
-        this.database = database;
-        this.cdcSourceConfig = Configuration.fromMap(kafkaConfig);
-    }
-
-    public MessageQueueSyncDatabaseActionBase withTableConfig(Map<String, String> tableConfig) {
-        this.tableConfig = tableConfig;
-        return this;
-    }
-
-    public MessageQueueSyncDatabaseActionBase withTablePrefix(@Nullable String tablePrefix) {
-        if (tablePrefix != null) {
-            this.tablePrefix = tablePrefix;
-        }
-        return this;
-    }
-
-    public MessageQueueSyncDatabaseActionBase withTableSuffix(@Nullable String tableSuffix) {
-        if (tableSuffix != null) {
-            this.tableSuffix = tableSuffix;
-        }
-        return this;
-    }
-
-    public MessageQueueSyncDatabaseActionBase includingTables(@Nullable String includingTables) {
-        if (includingTables != null) {
-            this.includingTables = includingTables;
-        }
-        return this;
-    }
-
-    public MessageQueueSyncDatabaseActionBase excludingTables(@Nullable String excludingTables) {
-        this.excludingTables = excludingTables;
-        return this;
-    }
-
-    public MessageQueueSyncDatabaseActionBase withTypeMapping(TypeMapping typeMapping) {
-        this.typeMapping = typeMapping;
-        return this;
+            Map<String, String> mqConfig) {
+        super(warehouse, database, catalogConfig, mqConfig);
     }
 
     @Override
-    public void build() throws Exception {
-        boolean caseSensitive = catalog.caseSensitive();
-
-        validateCaseInsensitive(caseSensitive);
-
-        catalog.createDatabase(database, true);
-
-        Source<String, ?, ?> source = buildSource();
-
+    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
         DataFormat format = getDataFormat();
-        RecordParser recordParser =
-                format.createParser(caseSensitive, typeMapping, Collections.emptyList());
-        NewTableSchemaBuilder schemaBuilder = new NewTableSchemaBuilder(tableConfig, caseSensitive);
-        Pattern includingPattern = Pattern.compile(includingTables);
-        Pattern excludingPattern =
-                excludingTables == null ? null : Pattern.compile(excludingTables);
-        TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                () ->
-                        new RichCdcMultiplexRecordEventParser(
-                                schemaBuilder,
-                                includingPattern,
-                                excludingPattern,
-                                tableNameConverter);
-
-        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
-                .withInput(
-                        env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName())
-                                .flatMap(recordParser)
-                                .name("Parse"))
-                .withParserFactory(parserFactory)
-                .withCatalogLoader(catalogLoader())
-                .withDatabase(database)
-                .withMode(MultiTablesSinkMode.COMBINED)
-                .withTableOptions(tableConfig)
-                .build();
+        boolean caseSensitive = catalog.caseSensitive();
+        return format.createParser(caseSensitive, typeMapping, Collections.emptyList());
     }
-
-    private void validateCaseInsensitive(boolean caseSensitive) {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table prefix", tablePrefix);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table suffix", tableSuffix);
-    }
-
-    protected abstract Source<String, ?, ?> buildSource() throws Exception;
 
     protected abstract DataFormat getDataFormat();
-
-    protected abstract String sourceName();
-
-    protected abstract String jobName();
-
-    @VisibleForTesting
-    public Map<String, String> tableConfig() {
-        return tableConfig;
-    }
-
-    // ------------------------------------------------------------------------
-    //  Flink run methods
-    // ------------------------------------------------------------------------
-
-    @Override
-    public void run() throws Exception {
-        build();
-        execute(String.format("KAFKA-Paimon Database Sync: %s", database));
-    }
 }
