@@ -384,13 +384,13 @@ public class PreAggregationITCase {
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(-1 AS TINYINT), CAST(-1 AS SMALLINT), "
                             + "CAST(1000 AS BIGINT), 1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), "
-                            + "CAST('0001-01-01 01:01:01' AS TIMESTAMP)),"
+                            + "CAST('2021-01-01 01:01:01' AS TIMESTAMP)),"
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), "
                             + "CAST(100000 AS BIGINT), -1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), "
-                            + "CAST('0002-01-01 01:01:01' AS TIMESTAMP)), "
+                            + "CAST('2022-01-01 01:01:01' AS TIMESTAMP)), "
                             + "(1, 2, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), "
                             + "CAST(10000000 AS BIGINT), 0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), "
-                            + "CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
             List<Row> result = batchSql("SELECT * FROM T3");
             assertThat(result)
                     .containsExactlyInAnyOrder(
@@ -405,7 +405,7 @@ public class PreAggregationITCase {
                                     (float) -1.11,
                                     -1.11,
                                     LocalDate.of(2020, 1, 1),
-                                    LocalDateTime.of(1, 1, 1, 1, 1, 1)));
+                                    LocalDateTime.of(2021, 1, 1, 1, 1, 1)));
         }
 
         @Test
@@ -413,15 +413,15 @@ public class PreAggregationITCase {
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
-                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), "
-                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, 3, 10.00, CAST(-1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), "
-                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             List<Row> result = batchSql("SELECT * FROM T3");
             assertThat(result)
@@ -437,7 +437,7 @@ public class PreAggregationITCase {
                                     (float) -1.11,
                                     -1.11,
                                     LocalDate.of(2020, 1, 1),
-                                    LocalDateTime.of(1, 1, 1, 1, 1, 1)));
+                                    LocalDateTime.of(2021, 1, 1, 1, 1, 1)));
         }
 
         @Test
@@ -449,29 +449,29 @@ public class PreAggregationITCase {
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
-                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), "
-                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 2, 3, 10.00, CAST(-1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), "
-                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             // key 1 3
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 3, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
-                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 3, 6, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), "
-                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T3 VALUES "
                             + "(1, 3, 3, 10.00, CAST(-1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), "
-                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             assertThat(batchSql("SELECT * FROM T3"))
                     .containsExactlyInAnyOrder(
@@ -486,7 +486,7 @@ public class PreAggregationITCase {
                                     (float) -1.11,
                                     -1.11,
                                     LocalDate.of(2020, 1, 1),
-                                    LocalDateTime.of(1, 1, 1, 1, 1, 1)),
+                                    LocalDateTime.of(2021, 1, 1, 1, 1, 1)),
                             Row.of(
                                     1,
                                     3,
@@ -498,7 +498,7 @@ public class PreAggregationITCase {
                                     (float) -1.11,
                                     -1.11,
                                     LocalDate.of(2020, 1, 1),
-                                    LocalDateTime.of(1, 1, 1, 1, 1, 1)));
+                                    LocalDateTime.of(2021, 1, 1, 1, 1, 1)));
         }
 
         @Test
@@ -545,13 +545,13 @@ public class PreAggregationITCase {
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), "
                             + "CAST(1000 AS BIGINT), 1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), "
-                            + "CAST('0001-01-01 01:01:01' AS TIMESTAMP)),"
+                            + "CAST('2021-01-01 01:01:01' AS TIMESTAMP)),"
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), "
                             + "-1.11, CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), "
-                            + "CAST('0002-01-01 01:01:01' AS TIMESTAMP)), "
+                            + "CAST('2022-01-01 01:01:01' AS TIMESTAMP)), "
                             + "(1, 2, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), "
                             + "0, CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), "
-                            + "CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
             List<Row> result = batchSql("SELECT * FROM T2");
             assertThat(result)
                     .containsExactlyInAnyOrder(
@@ -566,7 +566,7 @@ public class PreAggregationITCase {
                                     (float) 1.11,
                                     1.21,
                                     LocalDate.of(2022, 1, 2),
-                                    LocalDateTime.of(2, 1, 1, 2, 0, 0)));
+                                    LocalDateTime.of(2022, 1, 1, 2, 0, 0)));
         }
 
         @Test
@@ -575,17 +575,17 @@ public class PreAggregationITCase {
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
                             + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), "
-                            + "CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), -1.11, "
                             + "CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), "
-                            + "CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), 0, "
                             + "CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), "
-                            + "CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             List<Row> result = batchSql("SELECT * FROM T2");
             assertThat(result)
@@ -601,7 +601,7 @@ public class PreAggregationITCase {
                                     (float) 1.11,
                                     1.21,
                                     LocalDate.of(2022, 1, 2),
-                                    LocalDateTime.of(2, 1, 1, 2, 0, 0)));
+                                    LocalDateTime.of(2022, 1, 1, 2, 0, 0)));
         }
 
         @Test
@@ -613,29 +613,29 @@ public class PreAggregationITCase {
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
-                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, 2, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), -1.11, "
-                            + "CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 2, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), 0, "
-                            + "CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             // key 1 3
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 3, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), CAST(1000 AS BIGINT), "
-                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('0001-01-01 01:01:01' AS TIMESTAMP))");
+                            + "1.11, CAST(1.11 AS DOUBLE), CAST('2020-01-01' AS DATE), CAST('2021-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 3, 6, 1.10, CAST(2 AS TINYINT), CAST(2 AS SMALLINT), CAST(100000 AS BIGINT), -1.11, "
-                            + "CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('0002-01-01 01:01:01' AS TIMESTAMP))");
+                            + "CAST(1.21 AS DOUBLE), CAST('2020-01-02' AS DATE), CAST('2022-01-01 01:01:01' AS TIMESTAMP))");
             batchSql(
                     "INSERT INTO T2 VALUES "
                             + "(1, 3, 3, 10.00, CAST(1 AS TINYINT), CAST(1 AS SMALLINT), CAST(10000000 AS BIGINT), 0, "
-                            + "CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('0002-01-01 02:00:00' AS TIMESTAMP))");
+                            + "CAST(-1.11 AS DOUBLE), CAST('2022-01-02' AS DATE), CAST('2022-01-01 02:00:00' AS TIMESTAMP))");
 
             assertThat(batchSql("SELECT * FROM T2"))
                     .containsExactlyInAnyOrder(
@@ -650,7 +650,7 @@ public class PreAggregationITCase {
                                     (float) 1.11,
                                     1.21,
                                     LocalDate.of(2022, 1, 2),
-                                    LocalDateTime.of(2, 1, 1, 2, 0, 0)),
+                                    LocalDateTime.of(2022, 1, 1, 2, 0, 0)),
                             Row.of(
                                     1,
                                     3,
@@ -662,7 +662,7 @@ public class PreAggregationITCase {
                                     (float) 1.11,
                                     1.21,
                                     LocalDate.of(2022, 1, 2),
-                                    LocalDateTime.of(2, 1, 1, 2, 0, 0)));
+                                    LocalDateTime.of(2022, 1, 1, 2, 0, 0)));
         }
 
         @Test
