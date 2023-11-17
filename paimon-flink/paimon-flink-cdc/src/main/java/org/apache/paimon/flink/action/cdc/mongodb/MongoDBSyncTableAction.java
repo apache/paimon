@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
@@ -94,13 +93,6 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
     protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
         boolean caseSensitive = catalog.caseSensitive();
         return new MongoDBRecordParser(caseSensitive, computedColumns, cdcSourceConfig);
-    }
-
-    @Override
-    protected void validateCaseInsensitive(boolean caseSensitive) {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
     }
 
     @Override

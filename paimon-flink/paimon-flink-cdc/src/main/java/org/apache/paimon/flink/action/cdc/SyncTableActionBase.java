@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
@@ -214,30 +215,10 @@ public abstract class SyncTableActionBase extends ActionBase {
     }
 
     protected void validateCaseInsensitive(boolean caseSensitive) {
-        checkArgument(
-                database.equals(database.toLowerCase()),
-                String.format(
-                        "Database name [%s] cannot contain upper case in case-insensitive catalog.",
-                        database));
-        checkArgument(
-                table.equals(table.toLowerCase()),
-                String.format(
-                        "Table name [%s] cannot contain upper case in case-insensitive catalog.",
-                        table));
-        for (String part : partitionKeys) {
-            checkArgument(
-                    part.equals(part.toLowerCase()),
-                    String.format(
-                            "Partition keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            partitionKeys));
-        }
-        for (String pk : primaryKeys) {
-            checkArgument(
-                    pk.equals(pk.toLowerCase()),
-                    String.format(
-                            "Primary keys [%s] cannot contain upper case in case-insensitive catalog.",
-                            primaryKeys));
-        }
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
+        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Primary keys", primaryKeys);
     }
 
     protected void checkComputedColumns(List<ComputedColumn> computedColumns) {
@@ -255,7 +236,7 @@ public abstract class SyncTableActionBase extends ActionBase {
         }
     }
 
-    protected void checkConstraints() {
+    private void checkConstraints() {
         if (!partitionKeys.isEmpty()) {
             List<String> actualPartitionKeys = fileStoreTable.partitionKeys();
             checkState(

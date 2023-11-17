@@ -96,6 +96,4 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
     protected abstract MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic);
 
     protected abstract DataFormat getDataFormat();
-
-    protected abstract String jobName();
 }

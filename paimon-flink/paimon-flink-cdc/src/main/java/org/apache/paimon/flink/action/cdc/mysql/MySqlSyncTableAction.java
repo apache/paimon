@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -131,7 +130,6 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     @Override
     protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
         boolean caseSensitive = catalog.caseSensitive();
-        TypeMapping typeMapping = this.typeMapping;
         return new MySqlRecordParser(
                 cdcSourceConfig, caseSensitive, computedColumns, typeMapping, metadataConverters);
     }
