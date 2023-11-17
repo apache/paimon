@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.utils;
 
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.metrics.groups.AbstractMetricGroup;
@@ -31,6 +32,10 @@ public class MetricUtils {
 
     public static Gauge<?> getGauge(MetricGroup group, String metricName) {
         return (Gauge<?>) getMetric(group, metricName);
+    }
+
+    public static Histogram getHistogram(MetricGroup group, String metricName) {
+        return (Histogram) getMetric(group, metricName);
     }
 
     @SuppressWarnings("unchecked")
