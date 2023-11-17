@@ -22,7 +22,7 @@ import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 
 import java.util.Map;
@@ -40,8 +40,8 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() {
-        return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
+    protected DataStreamSource<String> buildSource() {
+        return buildDataStreamSource(KafkaActionUtils.buildKafkaSource(cdcSourceConfig));
     }
 
     @Override
