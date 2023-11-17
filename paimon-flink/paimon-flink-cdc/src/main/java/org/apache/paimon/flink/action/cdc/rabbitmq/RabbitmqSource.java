@@ -27,6 +27,10 @@ import org.apache.flink.streaming.connectors.rabbitmq.common.RMQConnectionConfig
 
 import java.io.IOException;
 
+/**
+ * RabbitMQ source (consumer) which reads from a queue and acknowledges messages on checkpoints.
+ * When checkpointing is enabled, it guarantees exactly-once processing semantics.
+ */
 public class RabbitmqSource extends RMQSource<String> {
     private String exchange;
     private BuiltinExchangeType exchangeType;

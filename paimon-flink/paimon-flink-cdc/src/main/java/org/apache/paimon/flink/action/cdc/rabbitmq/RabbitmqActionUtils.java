@@ -274,7 +274,6 @@ public class RabbitmqActionUtils {
 
     private static void setupQueue(Channel channel, Configuration rabbitmqConfig, String queueName)
             throws IOException {
-        ;
         channel.queueDeclare(queueName, true, false, false, null);
         String exchange = null;
         if (rabbitmqConfig.contains(EXCHANGE)) {
