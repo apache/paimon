@@ -25,7 +25,6 @@ import org.apache.paimon.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.paimon.benchmark.utils.AutoClosableProcess;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.core.fs.FileSystem;
@@ -79,7 +78,7 @@ public class QueryRunner {
             String sinkPathConfig =
                     BenchmarkGlobalConfiguration.loadConfiguration()
                             .getString(BenchmarkOptions.SINK_PATH);
-            if (StringUtils.isBlank(sinkPathConfig)) {
+            if (sinkPathConfig == null) {
                 throw new IllegalArgumentException(
                         BenchmarkOptions.SINK_PATH.key() + " must be set");
             }

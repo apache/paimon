@@ -23,7 +23,6 @@ import org.apache.paimon.benchmark.metric.JobBenchmarkMetric;
 import org.apache.paimon.benchmark.metric.cpu.CpuMetricReceiver;
 import org.apache.paimon.benchmark.utils.BenchmarkGlobalConfiguration;
 import org.apache.paimon.benchmark.utils.BenchmarkUtils;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.commons.cli.CommandLine;
 import org.apache.commons.cli.DefaultParser;
@@ -59,8 +58,6 @@ public class Benchmark {
                     true,
                     "Sinks to run. If the value is 'all', all sinks will be run.");
 
-    private static final String ALL = "all";
-
     public static void main(String[] args) throws Exception {
         if (args.length != 6) {
             throw new RuntimeException(
@@ -75,7 +72,7 @@ public class Benchmark {
 
         String queriesValue = line.getOptionValue(QUERIES.getOpt());
         List<Query> queries = Query.load(location);
-        if (!ALL.equalsIgnoreCase(queriesValue)) {
+        if (!"all".equalsIgnoreCase(queriesValue)) {
             Set<String> wantedQueries =
                     Arrays.stream(queriesValue.split(","))
                             .map(String::trim)
@@ -96,7 +93,7 @@ public class Benchmark {
 
         String sinksValue = line.getOptionValue(SINKS.getOpt());
         List<Sink> sinks = Sink.load(location);
-        if (!ALL.equalsIgnoreCase(sinksValue)) {
+        if (!"all".equalsIgnoreCase(sinksValue)) {
             Set<String> wantedSinks =
                     Arrays.stream(sinksValue.split(","))
                             .map(String::trim)
@@ -127,7 +124,7 @@ public class Benchmark {
 
     private static void runQueries(List<Query> queries, List<Sink> sinks) {
         String flinkHome = System.getenv("FLINK_HOME");
-        if (StringUtils.isBlank(flinkHome)) {
+        if (flinkHome == null) {
             throw new IllegalArgumentException("FLINK_HOME environment variable is not set.");
         }
         Path flinkDist = new File(flinkHome).toPath();
