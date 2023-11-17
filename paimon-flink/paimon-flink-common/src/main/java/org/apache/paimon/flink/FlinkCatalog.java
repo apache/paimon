@@ -301,7 +301,9 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         Identifier identifier = toIdentifier(tablePath);
-        Map<String, String> options = table.getOptions();
+        // the returned value of "table.getOptions" may be unmodifiable (for example from
+        // TableDescriptor)
+        Map<String, String> options = new HashMap<>(table.getOptions());
         Schema paimonSchema = buildPaimonSchema(identifier, (CatalogTable) table, options);
 
         boolean unRegisterLogSystem = false;
