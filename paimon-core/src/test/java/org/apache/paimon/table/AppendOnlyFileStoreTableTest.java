@@ -51,6 +51,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
@@ -123,16 +124,59 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate = builder.equal(2, 201L);
-        List<Split> splits =
-                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
-        TableRead read = table.newRead().withFilter(predicate).executeFilter();
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+
+        // simple
+        TableRead read = table.newRead().withFilter(builder.equal(2, 201L)).executeFilter();
         assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
                 .hasSameElementsAs(
                         Arrays.asList(
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+
+        // or
+        read =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.or(builder.equal(2, 201L), builder.equal(2, 500L)))
+                        .executeFilter();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+
+        // projection all in
+        read =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.or(builder.equal(2, 201L), builder.equal(2, 500L)))
+                        .withProjection(new int[] {3, 2})
+                        .executeFilter();
+        Function<InternalRow, String> toString =
+                rowData -> rowData.getLong(1) + "|" + new String(rowData.getBinary(0));
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
+                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
+
+        // projection contains unknown index
+        read =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.or(builder.equal(2, 201L), builder.equal(0, 1)))
+                        .withProjection(new int[] {3, 2})
+                        .executeFilter();
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "100|binary",
+                                "101|binary",
+                                "102|binary",
+                                "101|binary",
+                                "102|binary"));
     }
 
     @Test

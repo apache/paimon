@@ -55,7 +55,7 @@ public class CompoundPredicate implements Predicate {
 
     @Override
     public boolean test(InternalRow row) {
-        return false;
+        return function.test(row, children);
     }
 
     @Override
