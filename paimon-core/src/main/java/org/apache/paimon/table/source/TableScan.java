@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.table.Table;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * A scan of {@link Table} to generate {@link Split} splits.
@@ -37,6 +38,14 @@ public interface TableScan {
 
     /** Get partitions from simple manifest entries. */
     List<BinaryRow> listPartitions();
+
+    /**
+     * If all files in this split can be read without merging, returns an {@link Optional} wrapping
+     * a list of {@link RawFile}s, otherwise returns {@link Optional#empty()}.
+     */
+    default Optional<List<RawFile>> convertToRawFiles(Split split) {
+        return Optional.empty();
+    }
 
     /**
      * Plan of scan.
