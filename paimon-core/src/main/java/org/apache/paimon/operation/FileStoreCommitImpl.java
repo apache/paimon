@@ -1025,8 +1025,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         if (baseEntries.size() > maxEntry || changes.size() > maxEntry) {
             baseEntriesString =
                     "Base entries are:\n"
-                            + baseEntries
-                                    .subList(0, Math.min(baseEntries.size(), maxEntry))
+                            + baseEntries.subList(0, Math.min(baseEntries.size(), maxEntry))
                                     .stream()
                                     .map(ManifestEntry::toString)
                                     .collect(Collectors.joining("\n"));
