@@ -107,7 +107,7 @@ public class SnapshotReaderTest {
                                                     tablePath, partition, meta.fileName()),
                                             0,
                                             meta.fileSize(),
-                                            CoreOptions.FileFormatType.AVRO,
+                                            "avro",
                                             meta.schemaId())));
         }
 
@@ -155,7 +155,7 @@ public class SnapshotReaderTest {
                                                     tablePath, partition, meta.fileName()),
                                             0,
                                             meta.fileSize(),
-                                            CoreOptions.FileFormatType.AVRO,
+                                            "avro",
                                             meta.schemaId())));
         }
 
@@ -212,7 +212,7 @@ public class SnapshotReaderTest {
                                         String.format("%s/bucket-0/%s", tablePath, meta.fileName()),
                                         0,
                                         meta.fileSize(),
-                                        CoreOptions.FileFormatType.AVRO,
+                                        "avro",
                                         meta.schemaId())));
 
         // change file schema
@@ -245,14 +245,14 @@ public class SnapshotReaderTest {
                                                 "%s/bucket-0/%s", tablePath, meta0.fileName()),
                                         0,
                                         meta0.fileSize(),
-                                        CoreOptions.FileFormatType.AVRO,
+                                        "avro",
                                         meta0.schemaId()),
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta1.fileName()),
                                         0,
                                         meta1.fileSize(),
-                                        CoreOptions.FileFormatType.AVRO,
+                                        "avro",
                                         meta1.schemaId())));
 
         write.close();

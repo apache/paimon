@@ -312,7 +312,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 bucketPath + "/" + meta.fileName(),
                 0,
                 meta.fileSize(),
-                new CoreOptions(tableSchema.options()).formatType(),
+                new CoreOptions(tableSchema.options()).formatType().toString().toLowerCase(),
                 meta.schemaId());
     }
 

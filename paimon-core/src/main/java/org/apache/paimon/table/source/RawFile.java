@@ -34,15 +34,10 @@ public class RawFile {
     private final String path;
     private final long offset;
     private final long length;
-    private final CoreOptions.FileFormatType format;
+    private final String format;
     private final long schemaId;
 
-    public RawFile(
-            String path,
-            long offset,
-            long length,
-            CoreOptions.FileFormatType format,
-            long schemaId) {
+    public RawFile(String path, long offset, long length, String format, long schemaId) {
         this.path = path;
         this.offset = offset;
         this.length = length;
@@ -65,10 +60,15 @@ public class RawFile {
         return length;
     }
 
-    public CoreOptions.FileFormatType format() {
+    /**
+     * Format of the file, which is a lower-cased string. See {@link CoreOptions.FileFormatType} for
+     * all possible types.
+     */
+    public String format() {
         return format;
     }
 
+    /** Schema id of the file. */
     public long schemaId() {
         return schemaId;
     }
