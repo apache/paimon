@@ -261,8 +261,8 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     }
 
     protected PulsarSyncDatabaseActionBuilder syncDatabaseActionBuilder(
-            Map<String, String> kafkaConfig) {
-        return new PulsarSyncDatabaseActionBuilder(kafkaConfig);
+            Map<String, String> pulsarConfig) {
+        return new PulsarSyncDatabaseActionBuilder(pulsarConfig);
     }
 
     /** Builder to build {@link PulsarSyncTableAction} from action arguments. */
@@ -307,8 +307,8 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     protected class PulsarSyncDatabaseActionBuilder
             extends SyncDatabaseActionBuilder<PulsarSyncDatabaseAction> {
 
-        public PulsarSyncDatabaseActionBuilder(Map<String, String> kafkaConfig) {
-            super(kafkaConfig);
+        public PulsarSyncDatabaseActionBuilder(Map<String, String> pulsarConfig) {
+            super(pulsarConfig);
         }
 
         public PulsarSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
