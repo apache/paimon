@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka;
+package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
@@ -25,10 +25,10 @@ import org.apache.flink.api.connector.source.Source;
 
 import java.util.Map;
 
-/** Synchronize database from Kafka. */
-public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
+/** Synchronize database from Pulsar. */
+public class PulsarSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
 
-    public KafkaSyncDatabaseAction(
+    public PulsarSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
@@ -38,21 +38,21 @@ public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase 
 
     @Override
     protected Source<String, ?, ?> buildSource() throws Exception {
-        return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
+        return PulsarActionUtils.buildPulsarSource(cdcSourceConfig);
     }
 
     @Override
     protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
+        return PulsarActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override
     protected String sourceName() {
-        return "Kafka Source";
+        return "Pulsar Source";
     }
 
     @Override
     protected String jobName() {
-        return String.format("Kafka-Paimon Database Sync: %s", database);
+        return String.format("Pulsar-Paimon Database Sync: %s", database);
     }
 }
