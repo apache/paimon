@@ -34,7 +34,6 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
@@ -131,14 +130,10 @@ public class TestChangelogDataReadWrite {
                         pathFactory,
                         EXTRACTOR,
                         new CoreOptions(new HashMap<>()));
-        return new KeyValueTableRead(read) {
-            @Override
-            public KeyValueTableRead withFilter(Predicate predicate) {
-                throw new UnsupportedOperationException();
-            }
+        return new KeyValueTableRead(read, null) {
 
             @Override
-            public KeyValueTableRead withProjection(int[][] projection) {
+            public void projection(int[][] projection) {
                 throw new UnsupportedOperationException();
             }
 

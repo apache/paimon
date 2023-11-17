@@ -118,6 +118,24 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBatchFilterWithExecution() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
+
+        Predicate predicate = builder.equal(2, 201L);
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
+        TableRead read = table.newRead().withFilter(predicate).executeFilter();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING)).isEmpty();
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testSplitOrder() throws Exception {
         FileStoreTable table = createFileStoreTable();
 

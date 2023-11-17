@@ -151,19 +151,12 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead innerRead() {
-        return new KeyValueTableRead(store().newRead()) {
+    public InnerTableRead newRead() {
+        return new KeyValueTableRead(store().newRead(), schema()) {
 
             @Override
-            public InnerTableRead withFilter(Predicate predicate) {
-                read.withFilter(predicate);
-                return this;
-            }
-
-            @Override
-            public InnerTableRead withProjection(int[][] projection) {
+            public void projection(int[][] projection) {
                 read.withValueProjection(projection);
-                return this;
             }
 
             @Override

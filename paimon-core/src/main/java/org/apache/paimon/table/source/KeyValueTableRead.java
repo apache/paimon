@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.schema.TableSchema;
 
 import javax.annotation.Nullable;
 
@@ -32,11 +33,12 @@ import java.io.IOException;
  * An abstraction layer above {@link KeyValueFileStoreRead} to provide reading of {@link
  * InternalRow}.
  */
-public abstract class KeyValueTableRead implements InnerTableRead {
+public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
 
     protected final KeyValueFileStoreRead read;
 
-    protected KeyValueTableRead(KeyValueFileStoreRead read) {
+    protected KeyValueTableRead(KeyValueFileStoreRead read, TableSchema schema) {
+        super(read, schema);
         this.read = read;
     }
 
@@ -47,7 +49,7 @@ public abstract class KeyValueTableRead implements InnerTableRead {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(Split split) throws IOException {
+    public final RecordReader<InternalRow> reader(Split split) throws IOException {
         return new RowDataRecordReader(read.createReader((DataSplit) split));
     }
 
