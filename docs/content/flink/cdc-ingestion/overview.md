@@ -40,6 +40,8 @@ We currently support the following sync ways:
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 8. Pulsar Synchronizing Table: synchronize one Pulsar topic's table into one Paimon table.
 9. Pulsar Synchronizing Database: synchronize one Pulsar topic containing multiple tables or multiple topics containing one table each into one Paimon database.
+10. SQLServer Synchronizing Table: synchronize one or multiple tables from SQLServer into one Paimon table.
+11. SQLServer Synchronizing Database: synchronize the whole SQLServer database into one Paimon database.
 
 ## What is Schema Evolution
 

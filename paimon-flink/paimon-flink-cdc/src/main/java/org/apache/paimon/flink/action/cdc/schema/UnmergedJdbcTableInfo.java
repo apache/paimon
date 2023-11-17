@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.schema;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.Collections;
 import java.util.List;
@@ -29,10 +30,12 @@ public class UnmergedJdbcTableInfo implements JdbcTableInfo {
 
     private final Identifier identifier;
     private final Schema schema;
+    private final String schemaName;
 
-    public UnmergedJdbcTableInfo(Identifier identifier, Schema schema) {
+    public UnmergedJdbcTableInfo(Identifier identifier, String schemaName, Schema schema) {
         this.identifier = identifier;
         this.schema = schema;
+        this.schemaName = schemaName;
     }
 
     @Override
@@ -54,7 +57,13 @@ public class UnmergedJdbcTableInfo implements JdbcTableInfo {
     public String toPaimonTableName() {
         // the Paimon table name should be compound of origin database name and table name
         // together to avoid name conflict
-        return identifier.getDatabaseName() + "_" + identifier.getObjectName();
+        if (StringUtils.isBlank(schemaName)) {
+            return String.format("%s_%s", identifier.getDatabaseName(), identifier.getObjectName());
+        } else {
+            return String.format(
+                    "%s_%s_%s",
+                    identifier.getDatabaseName(), schemaName, identifier.getObjectName());
+        }
     }
 
     @Override

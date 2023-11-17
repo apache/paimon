@@ -84,10 +84,9 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
         config.put("password", PASSWORD);
         // see mysql/my.cnf in test resources
         config.put("server-time-zone", ZoneId.of("America/New_York").toString());
-
-        // TODO When setting the parameter scan.newly-added-table.enabled=true in version 2.4.2, the
-        // Insert data inserted after the newly created table cannot be captured. When set to false,
-        // the mysql cdc works normally.
+        // Configure after upgrading to version 2.4.1;
+        // Refer:
+        // https://github.com/ververica/flink-cdc-connectors/blob/release-2.4/flink-connector-mysql-cdc/src/main/java/com/ververica/cdc/connectors/mysql/debezium/reader/BinlogSplitReader.java#L272
         config.put("scan.newly-added-table.enabled", "false");
         return config;
     }

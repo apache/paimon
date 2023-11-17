@@ -29,6 +29,8 @@ import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableActionFactory;
 import org.apache.paimon.flink.action.cdc.postgres.PostgresSyncTableActionFactory;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncDatabaseActionFactory;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncTableActionFactory;
+import org.apache.paimon.flink.action.cdc.sqlserver.SqlServerSyncDatabaseActionFactory;
+import org.apache.paimon.flink.action.cdc.sqlserver.SqlServerSyncTableActionFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
@@ -232,6 +234,10 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                 return PulsarSyncDatabaseActionFactory.IDENTIFIER;
             case "PostgresSyncTableAction":
                 return PostgresSyncTableActionFactory.IDENTIFIER;
+            case "SqlServerSyncTableAction":
+                return SqlServerSyncTableActionFactory.IDENTIFIER;
+            case "SqlServerSyncDatabaseAction":
+                return SqlServerSyncDatabaseActionFactory.IDENTIFIER;
             default:
                 throw new UnsupportedOperationException(
                         "Unknown sync action: " + clazz.getSimpleName());
@@ -254,6 +260,9 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                 return "--" + CdcActionCommonUtils.PULSAR_CONF;
             case "PostgresSyncTableAction":
                 return "--" + CdcActionCommonUtils.POSTGRES_CONF;
+            case "SqlServerSyncTableAction":
+            case "SqlServerSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.SQLSERVER_CONF;
             default:
                 throw new UnsupportedOperationException(
                         "Unknown sync action: " + clazz.getSimpleName());

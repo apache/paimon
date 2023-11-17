@@ -55,6 +55,7 @@ public class CdcActionCommonUtils {
     public static final String MONGODB_CONF = "mongodb_conf";
     public static final String MYSQL_CONF = "mysql_conf";
     public static final String POSTGRES_CONF = "postgres_conf";
+    public static final String SQLSERVER_CONF = "sqlserver_conf";
     public static final String PULSAR_CONF = "pulsar_conf";
     public static final String TABLE_PREFIX = "table_prefix";
     public static final String TABLE_SUFFIX = "table_suffix";

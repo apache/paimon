@@ -40,6 +40,10 @@ public class JdbcSchemasInfo {
         addSchema(identifier, null, schema);
     }
 
+    public List<JdbcSchemaInfo> schemaInfos() {
+        return schemasInfo;
+    }
+
     public void addSchema(Identifier identifier, String schemaName, Schema schema) {
         JdbcSchemaInfo schemaInfo =
                 new JdbcSchemaInfo(identifier, schemaName, !schema.primaryKeys().isEmpty(), schema);
@@ -78,13 +82,13 @@ public class JdbcSchemasInfo {
     }
 
     // only handle pk tables now
-    public List<JdbcTableInfo> toMySqlTableInfos(boolean mergeShards) {
+    public List<JdbcTableInfo> toTableInfos(boolean mergeShards) {
         if (mergeShards) {
             return mergeShards();
         } else {
             return schemasInfo.stream()
                     .filter(JdbcSchemaInfo::isPkTable)
-                    .map(e -> new UnmergedJdbcTableInfo(e.identifier(), e.schema()))
+                    .map(e -> new UnmergedJdbcTableInfo(e.identifier(), e.schemaName(), e.schema()))
                     .collect(Collectors.toList());
         }
     }

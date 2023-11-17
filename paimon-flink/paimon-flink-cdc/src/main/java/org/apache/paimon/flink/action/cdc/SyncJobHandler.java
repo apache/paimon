@@ -26,6 +26,8 @@ import org.apache.paimon.flink.action.cdc.mysql.MySqlRecordParser;
 import org.apache.paimon.flink.action.cdc.postgres.PostgresActionUtils;
 import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils;
+import org.apache.paimon.flink.action.cdc.sqlserver.SqlServerRecordParser;
+import org.apache.paimon.flink.action.cdc.sqlserver.SqlServerSourceOptions;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
@@ -46,6 +48,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CO
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.POSTGRES_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.SQLSERVER_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkOneRequiredOption;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkRequiredOptions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -138,6 +141,26 @@ public class SyncJobHandler {
                                     + "use postgres_sync_table instead.");
                 }
                 break;
+            case SQLSERVER:
+                checkRequiredOptions(
+                        cdcSourceConfig,
+                        SQLSERVER_CONF,
+                        SqlServerSourceOptions.HOSTNAME,
+                        SqlServerSourceOptions.USERNAME,
+                        SqlServerSourceOptions.PASSWORD,
+                        SqlServerSourceOptions.DATABASE_NAME);
+                if (isTableSync) {
+                    checkRequiredOptions(
+                            cdcSourceConfig, SQLSERVER_CONF, SqlServerSourceOptions.TABLE_NAME);
+                } else {
+                    checkArgument(
+                            !cdcSourceConfig.contains(SqlServerSourceOptions.TABLE_NAME),
+                            SqlServerSourceOptions.TABLE_NAME.key()
+                                    + " cannot be set for sqlserver_sync_database. "
+                                    + "If you want to sync several SQLServer tables into one Paimon table, "
+                                    + "use sqlserver_sync_table instead.");
+                }
+                break;
             case KAFKA:
                 checkRequiredOptions(
                         cdcSourceConfig,
@@ -212,6 +235,13 @@ public class SyncJobHandler {
                         computedColumns,
                         typeMapping,
                         metadataConverters);
+            case SQLSERVER:
+                return new SqlServerRecordParser(
+                        cdcSourceConfig,
+                        caseSensitive,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
@@ -257,8 +287,8 @@ public class SyncJobHandler {
         KAFKA("Kafka Source", "Kafka-Paimon %s Sync: %s"),
         MONGODB("MongoDB Source", "MongoDB-Paimon %s Sync: %s"),
         PULSAR("Pulsar Source", "Pulsar-Paimon %s Sync: %s"),
-        POSTGRES("Postgres Source", "Postgres-Paimon %s Sync: %s");
-
+        POSTGRES("Postgres Source", "Postgres-Paimon %s Sync: %s"),
+        SQLSERVER("SQlServer Source", "SQlServer-Paimon %s Sync: %s");
         private final String sourceName;
         private final String defaultJobNameFormat;
 

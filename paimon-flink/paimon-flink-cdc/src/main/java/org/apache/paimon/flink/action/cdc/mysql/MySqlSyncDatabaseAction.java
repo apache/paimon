@@ -127,7 +127,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         typeMapping);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
-        List<JdbcTableInfo> jdbcTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
+        List<JdbcTableInfo> jdbcTableInfos = mySqlSchemasInfo.toTableInfos(mergeShards);
 
         checkArgument(
                 !jdbcTableInfos.isEmpty(),

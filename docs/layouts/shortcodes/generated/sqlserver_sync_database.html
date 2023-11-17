@@ -1,0 +1,93 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Configuration</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>--warehouse</h5></td>
+        <td>The path to Paimon warehouse.</td>
+    </tr>
+    <tr>
+        <td><h5>--database</h5></td>
+        <td>The database name in Paimon catalog.</td>
+    </tr>
+    <tr>
+        <td><h5>--ignore-incompatible</h5></td>
+        <td>It is default false, in this case, if SQLServer table name exists in Paimon and their schema is incompatible,an exception will be thrown. You can specify it to true explicitly to ignore the incompatible tables and exception.</td>
+    </tr>
+    <tr>
+        <td><h5>--merge-shards</h5></td>
+        <td>It is default true, in this case, if some tables in different schemas have the same name, their table schemas will be merged and their records will be synchronized into one Paimon table. Otherwise, each table's records will be synchronized to a corresponding Paimon table, and the Paimon table will be named to 'databaseName_schemaName_tableName' to avoid potential name conflict.</td>
+    </tr>
+    <tr>
+        <td><h5>--table-prefix</h5></td>
+        <td>The prefix of all Paimon tables to be synchronized. For example, if you want all synchronized tables to have "ods_" as prefix, you can specify "--table-prefix ods_".</td>
+    </tr>
+    <tr>
+        <td><h5>--table-suffix</h5></td>
+        <td>The suffix of all Paimon tables to be synchronized. The usage is same as "--table-prefix".</td>
+    </tr>
+    <tr>
+        <td><h5>--including-tables</h5></td>
+        <td>It is used to specify which source tables are to be synchronized. You must use '|' to separate multiple tables.Because '|' is a special character, a comma is required, for example: 'a|b|c'.Regular expression is supported, for example, specifying "--including-tables test|paimon.*" means to synchronize table 'test' and all tables start with 'paimon'.</td>
+    </tr>
+    <tr>
+        <td><h5>--excluding-tables</h5></td>
+        <td>It is used to specify which source tables are not to be synchronized. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.</td>
+    </tr>
+    <tr>
+        <td><h5>--mode</h5></td>
+        <td>It is used to specify synchronization mode.<br />Possible values:<ul><li>"divided" (the default mode if you haven't specified one): start a sink for each table, the synchronization of the new table requires restarting the job.</li><li>"combined": start a single combined sink for all tables, the new table will be automatically synchronized.</li></ul></td>
+    </tr>
+    <tr>
+        <td><h5>--metadata-column</h5></td>
+        <td>--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Metadata columns provide additional information related to the source data, such as the `table_name`, `schema_name`, `database_name`, and `op_ts`. Each configuration should be specified in the format "key=value". See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/sqlserver-cdc.html#available-metadata">document</a> for a complete list of available metadata.</td>
+    </tr>
+    <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map SQLServer data type to Paimon type.<br />
+            Supported options:
+                <ul>
+                    <li>"tinyint1-not-bool": maps SQLServer TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                    <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).</li>
+                    <li>"to-string": maps all SQLServer types to STRING.</li>
+                    <li>"char-to-string": maps SQLServer CHAR(length)/VARCHAR(length)/NCHAR(length)/NVARCHAR(length) types to STRING.</li>
+                </ul>
+        </td>
+    </tr>
+    <tr>
+        <td><h5>--sqlserver-conf</h5></td>
+        <td>The configuration for Flink CDC SQLServer sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name, schema-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/sqlserver-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--catalog-conf</h5></td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--table-conf</h5></td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
+    </tr>
+    </tbody>
+</table>

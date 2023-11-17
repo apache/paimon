@@ -25,3 +25,6 @@ org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncTableActionFactory
 org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncDatabaseActionFactory
 org.apache.paimon.flink.action.cdc.postgres.PostgresSyncTableActionFactory
+org.apache.paimon.flink.action.cdc.sqlserver.SqlServerSyncDatabaseActionFactory
+org.apache.paimon.flink.action.cdc.sqlserver.SqlServerSyncTableActionFactory
+

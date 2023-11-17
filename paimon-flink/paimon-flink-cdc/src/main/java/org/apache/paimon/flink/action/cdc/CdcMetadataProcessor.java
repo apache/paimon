@@ -49,6 +49,13 @@ public enum CdcMetadataProcessor {
             new CdcMetadataConverter.DatabaseNameConverter(),
             new CdcMetadataConverter.TableNameConverter(),
             new CdcMetadataConverter.SchemaNameConverter(),
+            new CdcMetadataConverter.OpTsConverter()),
+
+    SQLSERVER_METADATA_PROCESSOR(
+            SyncJobHandler.SourceType.SQLSERVER,
+            new CdcMetadataConverter.DatabaseNameConverter(),
+            new CdcMetadataConverter.TableNameConverter(),
+            new CdcMetadataConverter.SchemaNameConverter(),
             new CdcMetadataConverter.OpTsConverter());
 
     private final SyncJobHandler.SourceType sourceType;

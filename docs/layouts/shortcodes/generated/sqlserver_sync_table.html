@@ -1,0 +1,81 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Configuration</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>--warehouse</h5></td>
+        <td>The path to Paimon warehouse.</td>
+    </tr>
+    <tr>
+        <td><h5>--database</h5></td>
+        <td>The database name in Paimon catalog.</td>
+    </tr>
+    <tr>
+        <td><h5>--table</h5></td>
+        <td>The Paimon table name.</td>
+    </tr>
+    <tr>
+        <td><h5>--partition-keys</h5></td>
+        <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".</td>
+    </tr>
+    <tr>
+        <td><h5>--primary-keys</h5></td>
+        <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".</td>
+    </tr>
+    <tr>
+        <td><h5>--type-mapping</h5></td>
+        <td>It is used to specify how to map SQLServer data type to Paimon type.<br />
+            Supported options:
+            <ul>
+                <li>"tinyint1-not-bool": maps SQLServer TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).</li>
+                <li>"to-string": maps all SQLServer types to STRING.</li>
+                <li>"char-to-string": maps SQLServer CHAR(length)/VARCHAR(length)/NCHAR(length)/NVARCHAR(length) types to STRING.</li>
+            </ul>
+        </td>
+    </tr>
+    <tr>
+        <td><h5>--computed-column</h5></td>
+        <td>The definitions of computed columns. The argument field is from SQLServer table field name. See <a href="../overview/#computed-functions">here</a> for a complete list of configurations. </td>
+    </tr>
+    <tr>
+        <td><h5>--metadata-column</h5></td>
+        <td>--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Metadata columns provide additional information related to the source data, such as the `table_name`,`schema_name`, `database_name`, and `op_ts`. Each configuration should be specified in the format "key=value". See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/sqlserver-cdc.html#available-metadata">document</a> for a complete list of available metadata.</td>
+    </tr>
+    <tr>
+        <td><h5>--sqlserver-conf</h5></td>
+        <td>The configuration for Flink CDC SQLServer sources. Each configuration should be specified in the format "key=value". hostname, username, password, database-name, schema-name and table-name are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/sqlserver-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--catalog-conf</h5></td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--table-conf</h5></td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
+    </tr>
+    </tbody>
+</table>
