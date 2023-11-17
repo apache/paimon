@@ -18,42 +18,27 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionBase;
-import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
-import org.apache.paimon.flink.action.cdc.ComputedColumn;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
-import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
-import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.FileStoreTable;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
+import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.connector.source.Source;
 
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -87,20 +72,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       are supported.
  * </ul>
  */
-public class MySqlSyncTableAction extends ActionBase {
+public class MySqlSyncTableAction extends SyncTableActionBase {
 
-    private final String database;
-    private final String table;
-    private final Configuration mySqlConfig;
-    private FileStoreTable fileStoreTable;
-
-    private List<String> partitionKeys = new ArrayList<>();
-    private List<String> primaryKeys = new ArrayList<>();
-
-    private Map<String, String> tableConfig = new HashMap<>();
-    private List<String> computedColumnArgs = new ArrayList<>();
-    private List<String> metadataColumns = new ArrayList<>();
-    private TypeMapping typeMapping = TypeMapping.defaultMapping();
+    private MySqlSchemasInfo mySqlSchemasInfo;
 
     public MySqlSyncTableAction(
             String warehouse,
@@ -108,158 +82,61 @@ public class MySqlSyncTableAction extends ActionBase {
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
-        super(warehouse, catalogConfig);
-        this.database = database;
-        this.table = table;
-        this.mySqlConfig = Configuration.fromMap(mySqlConfig);
-
+        super(warehouse, database, table, catalogConfig, mySqlConfig);
         MySqlActionUtils.registerJdbcDriver();
     }
 
-    public MySqlSyncTableAction withPartitionKeys(String... partitionKeys) {
-        return withPartitionKeys(Arrays.asList(partitionKeys));
-    }
-
-    public MySqlSyncTableAction withPartitionKeys(List<String> partitionKeys) {
-        this.partitionKeys = partitionKeys;
-        return this;
-    }
-
-    public MySqlSyncTableAction withPrimaryKeys(String... primaryKeys) {
-        return withPrimaryKeys(Arrays.asList(primaryKeys));
-    }
-
-    public MySqlSyncTableAction withPrimaryKeys(List<String> primaryKeys) {
-        this.primaryKeys = primaryKeys;
-        return this;
-    }
-
-    public MySqlSyncTableAction withTableConfig(Map<String, String> tableConfig) {
-        this.tableConfig = tableConfig;
-        return this;
-    }
-
-    public MySqlSyncTableAction withComputedColumnArgs(List<String> computedColumnArgs) {
-        this.computedColumnArgs = computedColumnArgs;
-        return this;
-    }
-
-    public MySqlSyncTableAction withTypeMapping(TypeMapping typeMapping) {
-        this.typeMapping = typeMapping;
-        return this;
-    }
-
-    public MySqlSyncTableAction withMetadataColumns(List<String> metadataColumns) {
-        this.metadataColumns = metadataColumns;
-        return this;
+    @Override
+    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
+        return Optional.of(MySqlMetadataProcessor.converter(column));
     }
 
     @Override
-    public void build() throws Exception {
+    protected void checkCdcSourceArgument() {
         checkArgument(
-                mySqlConfig.contains(MySqlSourceOptions.TABLE_NAME),
+                cdcSourceConfig.contains(MySqlSourceOptions.TABLE_NAME),
                 String.format(
                         "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
+    }
 
-        boolean caseSensitive = catalog.caseSensitive();
-
-        validateCaseInsensitive(caseSensitive);
-
-        MySqlSchemasInfo mySqlSchemasInfo =
+    @Override
+    protected Schema retrieveSchema() throws Exception {
+        this.mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
-                        mySqlConfig,
+                        cdcSourceConfig,
                         monitorTablePredication(),
                         new ArrayList<>(),
                         typeMapping,
-                        caseSensitive);
+                        catalog.caseSensitive());
         validateMySqlTableInfos(mySqlSchemasInfo);
-
-        catalog.createDatabase(database, true);
-
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
-        Identifier identifier = new Identifier(database, table);
-        List<ComputedColumn> computedColumns =
-                buildComputedColumns(computedColumnArgs, tableInfo.schema().fields());
+        return tableInfo.schema();
+    }
 
-        CdcMetadataConverter<?>[] metadataConverters =
-                metadataColumns.stream()
-                        .map(MySqlMetadataProcessor::converter)
-                        .toArray(CdcMetadataConverter[]::new);
-
-        Schema fromMySql =
-                CdcActionCommonUtils.buildPaimonSchema(
-                        partitionKeys,
-                        primaryKeys,
-                        computedColumns,
-                        tableConfig,
-                        tableInfo.schema(),
-                        metadataConverters,
-                        true);
-        try {
-            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-            fileStoreTable = fileStoreTable.copy(tableConfig);
-            if (!computedColumns.isEmpty()) {
-                List<String> computedFields =
-                        computedColumns.stream()
-                                .map(ComputedColumn::columnName)
-                                .collect(Collectors.toList());
-                List<String> fieldNames = fileStoreTable.schema().fieldNames();
-                checkArgument(
-                        new HashSet<>(fieldNames).containsAll(computedFields),
-                        " Exists Table should contain all computed columns %s, but are %s.",
-                        computedFields,
-                        fieldNames);
-            }
-            CdcActionCommonUtils.assertSchemaCompatible(
-                    fileStoreTable.schema(), fromMySql.fields());
-        } catch (Catalog.TableNotExistException e) {
-            catalog.createTable(identifier, fromMySql, false);
-            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-        }
-
+    @Override
+    protected Source<String, ?, ?> buildSource() throws Exception {
         String tableList =
                 mySqlSchemasInfo.pkTables().stream()
                         .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
                         .collect(Collectors.joining("|"));
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(mySqlConfig, tableList);
-
-        TypeMapping typeMapping = this.typeMapping;
-        MySqlRecordParser recordParser =
-                new MySqlRecordParser(
-                        mySqlConfig,
-                        caseSensitive,
-                        computedColumns,
-                        typeMapping,
-                        metadataConverters);
-
-        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
-                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
-
-        CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
-                new CdcSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(
-                                env.fromSource(
-                                                source,
-                                                WatermarkStrategy.noWatermarks(),
-                                                "MySQL Source")
-                                        .flatMap(recordParser)
-                                        .name("Parse"))
-                        .withParserFactory(parserFactory)
-                        .withTable(fileStoreTable)
-                        .withIdentifier(identifier)
-                        .withCatalogLoader(catalogLoader());
-        String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
-        if (sinkParallelism != null) {
-            sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
-        }
-        sinkBuilder.build();
+        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList);
     }
 
-    private void validateCaseInsensitive(boolean caseSensitive) {
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Primary keys", primaryKeys);
+    @Override
+    protected String sourceName() {
+        return "MySQL Source";
+    }
+
+    @Override
+    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
+        boolean caseSensitive = catalog.caseSensitive();
+        return new MySqlRecordParser(
+                cdcSourceConfig, caseSensitive, computedColumns, typeMapping, metadataConverters);
+    }
+
+    @Override
+    protected String jobName() {
+        return String.format("MySQL-Paimon Table Sync: %s.%s", database, table);
     }
 
     private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {
@@ -279,28 +156,8 @@ public class MySqlSyncTableAction extends ActionBase {
     private Predicate<String> monitorTablePredication() {
         return tableName -> {
             Pattern tableNamePattern =
-                    Pattern.compile(mySqlConfig.get(MySqlSourceOptions.TABLE_NAME));
+                    Pattern.compile(cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME));
             return tableNamePattern.matcher(tableName).matches();
         };
-    }
-
-    @VisibleForTesting
-    public Map<String, String> tableConfig() {
-        return tableConfig;
-    }
-
-    @VisibleForTesting
-    public FileStoreTable fileStoreTable() {
-        return fileStoreTable;
-    }
-
-    // ------------------------------------------------------------------------
-    //  Flink run methods
-    // ------------------------------------------------------------------------
-
-    @Override
-    public void run() throws Exception {
-        build();
-        execute(String.format("MySQL-Paimon Table Sync: %s.%s", database, table));
     }
 }

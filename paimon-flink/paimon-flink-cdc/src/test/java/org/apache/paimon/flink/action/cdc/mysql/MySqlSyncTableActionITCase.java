@@ -896,7 +896,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(160)
+    @Timeout(60)
     public void testMetadataColumns() throws Exception {
         try (Statement statement = getStatement()) {
             statement.execute("USE metadata");

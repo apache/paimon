@@ -44,12 +44,13 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
 
         MongoDBSyncTableAction action =
                 new MongoDBSyncTableAction(
-                                tablePath.f0,
-                                tablePath.f1,
-                                tablePath.f2,
-                                optionalConfigMap(params, "catalog-conf"),
-                                optionalConfigMap(params, "mongodb-conf"))
-                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "mongodb-conf"));
+
+        action.withTableConfig(optionalConfigMap(params, "table-conf"));
 
         if (params.has("partition-keys")) {
             action.withPartitionKeys(params.get("partition-keys").split(","));

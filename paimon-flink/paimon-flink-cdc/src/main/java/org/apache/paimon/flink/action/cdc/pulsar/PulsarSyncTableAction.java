@@ -41,18 +41,18 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected Source<String, ?, ?> buildSource() {
-        return PulsarActionUtils.buildPulsarSource(mqConfig);
+        return PulsarActionUtils.buildPulsarSource(cdcSourceConfig);
     }
 
     @Override
     protected String topic() {
-        return mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
+        return cdcSourceConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
     }
 
     @Override
     protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
         try {
-            return PulsarActionUtils.createPulsarConsumer(mqConfig, topic);
+            return PulsarActionUtils.createPulsarConsumer(cdcSourceConfig, topic);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
@@ -60,7 +60,7 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected DataFormat getDataFormat() {
-        return PulsarActionUtils.getDataFormat(mqConfig);
+        return PulsarActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override
