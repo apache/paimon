@@ -143,12 +143,6 @@ under the License.
 
         <dependency>
             <groupId>org.apache.parquet</groupId>
-            <artifactId>parquet-avro</artifactId>
-            <version>${parquet.version}</version>
-        </dependency>
-
-        <dependency>
-            <groupId>org.apache.parquet</groupId>
             <artifactId>parquet-hadoop</artifactId>
             <version>${parquet.version}</version>
             <exclusions>
@@ -294,7 +288,6 @@ under the License.
                                     <include>org.apache.commons:commons-compress</include>
 
                                     <!-- Parquet -->
-                                    <include>org.apache.parquet:parquet-avro</include>
                                     <include>org.apache.parquet:parquet-hadoop</include>
                                     <include>org.apache.parquet:parquet-format</include>
                                     <include>org.apache.parquet:parquet-column</include>
