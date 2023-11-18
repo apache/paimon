@@ -23,7 +23,6 @@ import org.apache.paimon.flink.sink.StoreSinkWriteState.StateValueFilter;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
@@ -92,10 +91,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         // runtime context, we can test to construct a writer here
         state = new StoreSinkWriteState(context, stateFilter);
 
-        OperatorMetricGroup metricGroup = getMetricGroup();
         write =
                 storeSinkWriteProvider.provide(
-                        table, commitUser, state, ioManager, memoryPool, metricGroup);
+                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
     }
 
     protected abstract boolean containLogSystem();

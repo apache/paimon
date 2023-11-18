@@ -138,6 +138,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         checkArgument(
                 !(memoryPool != null && memoryPoolFactory != null),
                 "memoryPool and memoryPoolFactory cannot be set at the same time.");
+
         TableWriteImpl<?> tableWrite =
                 table.newWrite(
                                 commitUser,

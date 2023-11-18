@@ -42,6 +42,7 @@ import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
 import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MetricGroup;
+import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.assertj.core.api.Assertions;
 import org.jetbrains.annotations.NotNull;
@@ -90,36 +91,44 @@ public abstract class WriterOperatorTestBase {
         harness.snapshot(1, 2);
         harness.notifyOfCompletedCheckpoint(1);
 
-        MetricGroup metricGroup =
-                rowDataStoreWriteOperator
-                        .getMetricGroup()
+        OperatorMetricGroup metricGroup = rowDataStoreWriteOperator.getMetricGroup();
+        MetricGroup writerMetricGroup =
+                metricGroup
                         .addGroup("paimon")
                         .addGroup("table", tableName)
-                        .addGroup("commit_user", "test")
+                        .addGroup("partition", "_")
+                        .addGroup("bucket", "0")
                         .addGroup("writer");
 
-        Counter writeRecordCount = MetricUtils.getCounter(metricGroup, "writeRecordCount");
+        Counter writeRecordCount = MetricUtils.getCounter(writerMetricGroup, "writeRecordCount");
         Assertions.assertThat(writeRecordCount.getCount()).isEqualTo(size);
 
         // test histogram has sample
-        Histogram flushCostMS = MetricUtils.getHistogram(metricGroup, "flushCostMillis");
+        Histogram flushCostMS = MetricUtils.getHistogram(writerMetricGroup, "flushCostMillis");
         Assertions.assertThat(flushCostMS.getCount()).isGreaterThan(0);
 
         Histogram prepareCommitCostMS =
-                MetricUtils.getHistogram(metricGroup, "prepareCommitCostMillis");
+                MetricUtils.getHistogram(writerMetricGroup, "prepareCommitCostMillis");
         Assertions.assertThat(prepareCommitCostMS.getCount()).isGreaterThan(0);
 
-        Gauge<Long> bufferPreemptCount = MetricUtils.getGauge(metricGroup, "bufferPreemptCount");
+        MetricGroup writerBufferMetricGroup =
+                metricGroup
+                        .addGroup("paimon")
+                        .addGroup("table", tableName)
+                        .addGroup("writerBuffer");
+
+        Gauge<Long> bufferPreemptCount =
+                MetricUtils.getGauge(writerBufferMetricGroup, "bufferPreemptCount");
         Assertions.assertThat(bufferPreemptCount.getValue()).isEqualTo(0);
 
         Gauge<Long> totalWriteBufferSizeByte =
-                MetricUtils.getGauge(metricGroup, "totalWriteBufferSizeByte");
+                MetricUtils.getGauge(writerBufferMetricGroup, "totalWriteBufferSizeByte");
         Assertions.assertThat(totalWriteBufferSizeByte.getValue()).isEqualTo(256);
 
         GenericRow row = GenericRow.of(1, 1);
         harness.processElement(row, 1);
         Gauge<Long> usedWriteBufferSizeByte =
-                MetricUtils.getGauge(metricGroup, "usedWriteBufferSizeByte");
+                MetricUtils.getGauge(writerBufferMetricGroup, "usedWriteBufferSizeByte");
         Assertions.assertThat(usedWriteBufferSizeByte.getValue()).isGreaterThan(0);
     }
 

@@ -166,7 +166,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         trySyncLatestCompaction(waitCompaction || forceCompact);
         CommitIncrement increment = drainIncrement();
         if (writerMetrics != null) {
-            writerMetrics.updatePrepareCommitCostMS(System.currentTimeMillis() - start);
+            writerMetrics.updatePrepareCommitCostMillis(System.currentTimeMillis() - start);
         }
         return increment;
     }
@@ -182,7 +182,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         compactManager.triggerCompaction(forcedFullCompaction);
         newFiles.addAll(flushedFiles);
         if (writerMetrics != null) {
-            writerMetrics.updateBufferFlushCostMS(System.currentTimeMillis() - start);
+            writerMetrics.updateBufferFlushCostMillis(System.currentTimeMillis() - start);
         }
     }
 
@@ -193,6 +193,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void close() throws Exception {
+        if (writerMetrics != null) {
+            writerMetrics.close();
+        }
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();

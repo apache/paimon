@@ -24,7 +24,8 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemoryPoolFactory;
-import org.apache.paimon.operation.metrics.WriterMetrics;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.WriterBufferMetric;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -53,6 +54,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
     private final CoreOptions options;
     protected final CacheManager cacheManager;
     private MemoryPoolFactory writeBufferPool;
+
+    private WriterBufferMetric writerBufferMetric;
 
     public MemoryFileStoreWrite(
             String commitUser,
@@ -116,11 +119,25 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
         writeBufferPool.notifyNewOwner((MemoryOwner) writer);
     }
 
-    protected void registerMemoryPoolMetric(WriterMetrics writerMetrics) {
-        if (writeBufferPool != null && writerMetrics != null) {
-            writerMetrics.setMemoryPreemptCount(writeBufferPool::bufferPreemptCount);
-            writerMetrics.setUsedWriteBufferSize(writeBufferPool::usedBufferSize);
-            writerMetrics.setTotaldWriteBufferSize(writeBufferPool::totalBufferSize);
+    @Override
+    public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
+        super.withMetricRegistry(metricRegistry);
+        registerWriterBufferMetric(metricRegistry);
+        return this;
+    }
+
+    private void registerWriterBufferMetric(MetricRegistry metricRegistry) {
+        if (metricRegistry != null) {
+            writerBufferMetric =
+                    new WriterBufferMetric(() -> writeBufferPool, metricRegistry, tableName);
+        }
+    }
+
+    @Override
+    public void close() throws Exception {
+        super.close();
+        if (this.writerBufferMetric != null) {
+            this.writerBufferMetric.close();
         }
     }
 }

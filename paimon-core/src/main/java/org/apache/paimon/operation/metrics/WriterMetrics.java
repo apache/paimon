@@ -23,8 +23,6 @@ import org.apache.paimon.metrics.Histogram;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
 
-import java.util.function.Supplier;
-
 /** Metrics for writer. */
 public class WriterMetrics {
 
@@ -32,12 +30,6 @@ public class WriterMetrics {
 
     private static final int WINDOW_SAMPLE_SIZE = 100;
     private static final String WRITE_RECORD_NUM = "writeRecordCount";
-
-    private static final String BUFFER_PREEMPT_COUNT = "bufferPreemptCount";
-
-    private static final String USED_WRITE_BUFFER_SIZE = "usedWriteBufferSizeByte";
-
-    private static final String TOTAL_WRITE_BUFFER_SIZE = "totalWriteBufferSizeByte";
 
     private static final String FLUSH_COST_MILLIS = "flushCostMillis";
 
@@ -51,14 +43,12 @@ public class WriterMetrics {
 
     private MetricGroup metricGroup;
 
-    public WriterMetrics(MetricRegistry registry, String tableName) {
-        metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+    public WriterMetrics(MetricRegistry registry, String tableName, String parition, int bucket) {
+        metricGroup = registry.bucketMetricGroup(GROUP_NAME, tableName, parition, bucket);
         writeRecordNumCounter = metricGroup.counter(WRITE_RECORD_NUM);
 
-        // cost
         bufferFlushCostMillis = metricGroup.histogram(FLUSH_COST_MILLIS, WINDOW_SAMPLE_SIZE);
 
-        // prepareCommittime
         prepareCommitCostMillis =
                 metricGroup.histogram(PREPARE_COMMIT_COST_MILLIS, WINDOW_SAMPLE_SIZE);
     }
@@ -67,23 +57,15 @@ public class WriterMetrics {
         writeRecordNumCounter.inc();
     }
 
-    public void updateBufferFlushCostMS(long bufferFlushCost) {
+    public void updateBufferFlushCostMillis(long bufferFlushCost) {
         bufferFlushCostMillis.update(bufferFlushCost);
     }
 
-    public void updatePrepareCommitCostMS(long cost) {
+    public void updatePrepareCommitCostMillis(long cost) {
         this.prepareCommitCostMillis.update(cost);
     }
 
-    public void setMemoryPreemptCount(Supplier<Long> bufferPreemptNumSupplier) {
-        metricGroup.gauge(BUFFER_PREEMPT_COUNT, bufferPreemptNumSupplier::get);
-    }
-
-    public void setUsedWriteBufferSize(Supplier<Long> usedWriteBufferSize) {
-        metricGroup.gauge(USED_WRITE_BUFFER_SIZE, usedWriteBufferSize::get);
-    }
-
-    public void setTotaldWriteBufferSize(Supplier<Long> totaldWriteBufferSize) {
-        metricGroup.gauge(TOTAL_WRITE_BUFFER_SIZE, totaldWriteBufferSize::get);
+    public void close() {
+        metricGroup.close();
     }
 }

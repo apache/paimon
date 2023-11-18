@@ -31,7 +31,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
-import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
@@ -125,8 +124,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
                                 getCompactionMetrics(partition, bucket));
-        WriterMetrics writerMetrics = getWriterMetrics();
-        registerMemoryPoolMetric(writerMetrics);
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -144,7 +141,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillable,
                 fileCompression,
                 statsCollectors,
-                writerMetrics);
+                getWriterMetrics(partition, bucket));
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(

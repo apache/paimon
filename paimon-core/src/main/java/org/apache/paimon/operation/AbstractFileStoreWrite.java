@@ -78,11 +78,9 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
-    private MetricRegistry metricRegistry;
+    private MetricRegistry metricRegistry = null;
 
-    protected WriterMetrics writerMetrics;
-
-    private final String tableName;
+    protected final String tableName;
     private final FileStorePathFactory pathFactory;
 
     protected AbstractFileStoreWrite(
@@ -374,11 +372,12 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Nullable
-    public WriterMetrics getWriterMetrics() {
-        if (metricRegistry != null && writerMetrics == null) {
-            writerMetrics = new WriterMetrics(metricRegistry, tableName);
+    public WriterMetrics getWriterMetrics(BinaryRow partition, int bucket) {
+        if (this.metricRegistry != null) {
+            return new WriterMetrics(
+                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
         }
-        return writerMetrics;
+        return null;
     }
 
     private String getPartitionString(FileStorePathFactory pathFactory, BinaryRow partition) {

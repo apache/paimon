@@ -148,7 +148,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
                         ? newSequenceNumber()
                         : kv.sequenceNumber();
-
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushWriteBuffer(false, false);
@@ -234,7 +233,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         trySyncLatestCompaction(waitForLatestCompaction);
         compactManager.triggerCompaction(forcedFullCompaction);
         if (writerMetrics != null) {
-            writerMetrics.updateBufferFlushCostMS(System.currentTimeMillis() - start);
+            writerMetrics.updateBufferFlushCostMillis(System.currentTimeMillis() - start);
         }
     }
 
@@ -250,7 +249,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         CommitIncrement increment = drainIncrement();
 
         if (writerMetrics != null) {
-            writerMetrics.updatePrepareCommitCostMS(System.currentTimeMillis() - start);
+            writerMetrics.updatePrepareCommitCostMillis(System.currentTimeMillis() - start);
         }
         return increment;
     }
@@ -308,6 +307,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void close() throws Exception {
+        if (writerMetrics != null) {
+            writerMetrics.close();
+        }
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();
