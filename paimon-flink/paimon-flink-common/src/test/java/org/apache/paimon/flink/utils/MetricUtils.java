@@ -48,9 +48,7 @@ public class MetricUtils {
         try {
             Field field = AbstractMetricGroup.class.getDeclaredField("metrics");
             field.setAccessible(true);
-            Object obj = field.get(group);
-            Map<String, Metric> map = (Map<String, Metric>) obj;
-            return map.get(metricName);
+            return ((Map<String, Metric>) field.get(group)).get(metricName);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
