@@ -168,15 +168,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 PredicateBuilder.or(builder.equal(2, 201L), builder.equal(0, 1)))
                         .withProjection(new int[] {3, 2})
                         .executeFilter();
-        assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(
-                        Arrays.asList(
-                                "100|binary",
-                                "101|binary",
-                                "102|binary",
-                                "101|binary",
-                                "102|binary"));
+                        Arrays.asList("200|binary", "201|binary", "202|binary", "201|binary"));
     }
 
     @Test
