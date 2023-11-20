@@ -17,7 +17,10 @@
  */
 package org.apache.spark.sql
 
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.execution.datasources.DataSourceStrategy
+import org.apache.spark.sql.sources.Filter
 
 /**
  * Some classes or methods defined in the spark project are marked as private under
@@ -44,5 +47,15 @@ object Utils {
 
   def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
     Dataset.ofRows(sparkSession, logicalPlan)
+  }
+
+  def normalizeExprs(exprs: Seq[Expression], attributes: Seq[Attribute]): Seq[Expression] = {
+    DataSourceStrategy.normalizeExprs(exprs, attributes)
+  }
+
+  def translateFilter(
+      predicate: Expression,
+      supportNestedPredicatePushdown: Boolean): Option[Filter] = {
+    DataSourceStrategy.translateFilter(predicate, supportNestedPredicatePushdown)
   }
 }

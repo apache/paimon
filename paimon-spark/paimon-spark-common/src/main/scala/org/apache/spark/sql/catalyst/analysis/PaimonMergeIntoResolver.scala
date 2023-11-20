@@ -22,7 +22,7 @@ import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
 
 /** Resolve all the expressions for MergeInto. */
-object PaimonMergeIntoResolver extends AnalysisHelper with ExpressionHelper {
+object PaimonMergeIntoResolver extends ExpressionHelper {
 
   def apply(merge: MergeIntoTable, spark: SparkSession): LogicalPlan = {
     val target = merge.targetTable

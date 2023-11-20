@@ -17,17 +17,22 @@
  */
 package org.apache.paimon.spark.commands
 
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 
+import org.apache.spark.sql.AnalysisException
+import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper}
+import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 import java.io.IOException
 
 /** Helper trait for all paimon commands. */
-trait PaimonCommand extends WithFileStoreTable {
+trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
 
   lazy val bucketMode: BucketMode = table match {
     case fileStoreTable: FileStoreTable =>
@@ -45,6 +50,22 @@ trait PaimonCommand extends WithFileStoreTable {
       case e: IOException =>
         throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
     }
+  }
+
+  protected def convertConditionToPaimonPredicate(
+      condition: Expression,
+      output: Seq[Attribute]): Predicate = {
+    val converter = new SparkFilterConverter(table.rowType)
+    val filters = normalizeExprs(Seq(condition), output)
+      .flatMap(splitConjunctivePredicates(_).map {
+        f =>
+          translateFilter(f, supportNestedPredicatePushdown = true).getOrElse(
+            throw new RuntimeException("Exec update failed:" +
+              s" cannot translate expression to source filter: $f"))
+      })
+      .toArray
+    val predicates = filters.map(converter.convert)
+    PredicateBuilder.and(predicates: _*)
   }
 
   /**

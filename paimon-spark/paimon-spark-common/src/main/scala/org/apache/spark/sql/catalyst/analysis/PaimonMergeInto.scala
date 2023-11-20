@@ -20,11 +20,11 @@ package org.apache.spark.sql.catalyst.analysis
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.commands.MergeIntoPaimonTable
-import org.apache.paimon.table.{FileStoreTable, PrimaryKeyFileStoreTable}
 
 import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.analysis.PaimonRelation
 import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
-import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression, SubqueryExpression}
+import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -33,26 +33,22 @@ import scala.collection.mutable
 /** A post-hoc resolution rule for MergeInto. */
 case class PaimonMergeInto(spark: SparkSession)
   extends Rule[LogicalPlan]
-  with AnalysisHelper
+  with RowLevelHelper
   with ExpressionHelper {
+
+  override val operation: RowLevelOp = MergeInto
 
   private val resolver: Resolver = spark.sessionState.conf.resolver
 
   def apply(plan: LogicalPlan): LogicalPlan = {
-    plan match {
-      case merge: MergeIntoTable =>
-        val relation = getPaimonTableRelation(merge.targetTable)
+    plan.resolveOperators {
+      case merge: MergeIntoTable
+          if merge.resolved && PaimonRelation.isPaimonTable(merge.targetTable) =>
+        val relation = PaimonRelation.getPaimonRelation(merge.targetTable)
         val v2Table = relation.table.asInstanceOf[SparkTable]
         val targetOutput = relation.output
 
-        v2Table.getTable match {
-          case _: PrimaryKeyFileStoreTable =>
-          case _: FileStoreTable =>
-            throw new RuntimeException("Only support to merge into table with primary keys.")
-          case _ =>
-            throw new RuntimeException("Can't merge into a non-file store table.")
-        }
-
+        checkPaimonTable(v2Table)
         checkCondition(merge.mergeCondition)
         merge.matchedActions.flatMap(_.condition).foreach(checkCondition)
         merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
@@ -60,8 +56,7 @@ case class PaimonMergeInto(spark: SparkSession)
         val updateActions = merge.matchedActions.collect { case a: UpdateAction => a }
         val primaryKeys = v2Table.properties().get(CoreOptions.PRIMARY_KEY.key).split(",")
         checkUpdateActionValidity(
-          merge.targetTable,
-          merge.sourceTable,
+          AttributeSet(targetOutput),
           merge.mergeCondition,
           updateActions,
           primaryKeys)
@@ -78,8 +73,6 @@ case class PaimonMergeInto(spark: SparkSession)
           merge.mergeCondition,
           alignedMatchedActions,
           alignedNotMatchedActions)
-
-      case _ => plan
     }
   }
 
@@ -171,54 +164,21 @@ case class PaimonMergeInto(spark: SparkSession)
 
   /** This check will avoid to update the primary key columns */
   private def checkUpdateActionValidity(
-      target: LogicalPlan,
-      source: LogicalPlan,
+      targetOutput: AttributeSet,
       mergeCondition: Expression,
       actions: Seq[UpdateAction],
       primaryKeys: Seq[String]): Unit = {
-    val targetOutput = target.outputSet
-    val sourceOutput = source.outputSet
-
-    // Check whether this attribute is same to primary key and is from target table.
-    def isTargetPrimaryKey(attr: AttributeReference, primaryKey: String): Boolean = {
-      resolver(primaryKey, attr.name) && targetOutput.contains(attr)
-    }
-
-    // Check whether there is an `EqualTo` expression related to primary key between source and target.
-    def existsPrimaryKeyEqualToExpression(
-        expressions: Seq[Expression],
-        primaryKey: String): Boolean = {
-      expressions.exists {
-        case EqualTo(left: AttributeReference, right: AttributeReference) =>
-          if (isTargetPrimaryKey(left, primaryKey)) {
-            sourceOutput.contains(right)
-          } else if (isTargetPrimaryKey(right, primaryKey)) {
-            targetOutput.contains(left)
-          } else {
-            false
-          }
-        case _ => false
-      }
-    }
-
     // Check whether there are enough `EqualTo` expressions related to all the primary keys.
     lazy val isMergeConditionValid = {
       val mergeExpressions = splitConjunctivePredicates(mergeCondition)
       primaryKeys.forall {
-        primaryKey => existsPrimaryKeyEqualToExpression(mergeExpressions, primaryKey)
+        primaryKey => isUpdateExpressionToPrimaryKey(targetOutput, mergeExpressions, primaryKey)
       }
     }
 
-    // Check whether there are on `EqualTo` expression related to any primary key.
-    // Then, we do not update primary key columns.
+    // Check whether there are an update expression related to any primary key.
     def isUpdateActionValid(action: UpdateAction): Boolean = {
-      val found = primaryKeys.find {
-        primaryKey =>
-          existsPrimaryKeyEqualToExpression(
-            action.assignments.map(a => EqualTo(a.key, a.value)),
-            primaryKey)
-      }
-      found.isEmpty
+      validUpdateAssignment(targetOutput, primaryKeys, action.assignments)
     }
 
     val valid = isMergeConditionValid || actions.forall(isUpdateActionValid)

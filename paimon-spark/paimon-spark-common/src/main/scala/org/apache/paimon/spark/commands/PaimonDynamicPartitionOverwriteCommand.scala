@@ -15,15 +15,16 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.paimon.spark.commands
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.DynamicOverWrite
-import org.apache.paimon.spark.commands.WriteIntoPaimonTable
 import org.apache.paimon.table.FileStoreTable
 
-import org.apache.spark.sql.{Dataset, Row, SparkSession}
+import org.apache.spark.sql.{Row, SparkSession}
+import org.apache.spark.sql.Utils.createDataset
 import org.apache.spark.sql.catalyst.analysis.NamedRelation
+import org.apache.spark.sql.catalyst.plans.logical.{Command, LogicalPlan, V2WriteCommand}
 import org.apache.spark.sql.execution.command.RunnableCommand
 
 import scala.collection.convert.ImplicitConversions._
@@ -62,7 +63,7 @@ case class PaimonDynamicPartitionOverwriteCommand(
     WriteIntoPaimonTable(
       fileStoreTable,
       DynamicOverWrite,
-      Dataset.ofRows(sparkSession, query),
+      createDataset(sparkSession, query),
       Options.fromMap(fileStoreTable.options() ++ writeOptions)
     ).run(sparkSession)
   }
