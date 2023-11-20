@@ -558,53 +558,62 @@ public class HiveCatalog extends AbstractCatalog {
             ImmutableMap.of(
                     // for hive 1.x
                     new Class<?>[] {
-                                HiveConf.class,
-                                HiveMetaHookLoader.class,
-                                ConcurrentHashMap.class,
-                                String.class
-                            },
-                            (getProxyMethod, hiveConf, clientClassName) ->
-                                    (IMetaStoreClient)
-                                            getProxyMethod.invoke(
-                                                    null,
-                                                    hiveConf,
-                                                    (HiveMetaHookLoader) (tbl -> null),
-                                                    new ConcurrentHashMap<>(),
-                                                    clientClassName),
+                        HiveConf.class,
+                        HiveMetaHookLoader.class,
+                        ConcurrentHashMap.class,
+                        String.class
+                    },
+                    (getProxyMethod, hiveConf, clientClassName) ->
+                            (IMetaStoreClient)
+                                    getProxyMethod.invoke(
+                                            null,
+                                            hiveConf,
+                                            (HiveMetaHookLoader) (tbl -> null),
+                                            new ConcurrentHashMap<>(),
+                                            clientClassName),
                     // for hive 2.x
                     new Class<?>[] {
-                                HiveConf.class,
-                                HiveMetaHookLoader.class,
-                                ConcurrentHashMap.class,
-                                String.class,
-                                Boolean.TYPE
-                            },
-                            (getProxyMethod, hiveConf, clientClassName) ->
-                                    (IMetaStoreClient)
-                                            getProxyMethod.invoke(
-                                                    null,
-                                                    hiveConf,
-                                                    (HiveMetaHookLoader) (tbl -> null),
-                                                    new ConcurrentHashMap<>(),
-                                                    clientClassName,
-                                                    true),
+                        HiveConf.class,
+                        HiveMetaHookLoader.class,
+                        ConcurrentHashMap.class,
+                        String.class,
+                        Boolean.TYPE
+                    },
+                    (getProxyMethod, hiveConf, clientClassName) ->
+                            (IMetaStoreClient)
+                                    getProxyMethod.invoke(
+                                            null,
+                                            hiveConf,
+                                            (HiveMetaHookLoader) (tbl -> null),
+                                            new ConcurrentHashMap<>(),
+                                            clientClassName,
+                                            true),
                     // for hive 3.x
                     new Class<?>[] {
-                                Configuration.class,
-                                HiveMetaHookLoader.class,
-                                ConcurrentHashMap.class,
-                                String.class,
-                                Boolean.TYPE
-                            },
-                            (getProxyMethod, hiveConf, clientClassName) ->
-                                    (IMetaStoreClient)
-                                            getProxyMethod.invoke(
-                                                    null,
-                                                    hiveConf,
-                                                    (HiveMetaHookLoader) (tbl -> null),
-                                                    new ConcurrentHashMap<>(),
-                                                    clientClassName,
-                                                    true));
+                        Configuration.class,
+                        HiveMetaHookLoader.class,
+                        ConcurrentHashMap.class,
+                        String.class,
+                        Boolean.TYPE
+                    },
+                    (getProxyMethod, hiveConf, clientClassName) ->
+                            (IMetaStoreClient)
+                                    getProxyMethod.invoke(
+                                            null,
+                                            hiveConf,
+                                            (HiveMetaHookLoader) (tbl -> null),
+                                            new ConcurrentHashMap<>(),
+                                            clientClassName,
+                                            true),
+                    // Revert to the simplest creation method,
+                    // which allows us to use shaded Hive packages to avoid dependency conflicts,
+                    // such as using apache-hive2.jar in Presto and Trino.
+                    new Class<?>[] {HiveConf.class},
+                    (getProxyMethod, hiveConf, clientClassName) ->
+                            (IMetaStoreClient) getProxyMethod.invoke(null, hiveConf),
+                    new Class<?>[] {HiveConf.class, Boolean.TYPE},
+                    (getProxyMethod, hiveConf, clientClassName) ->
+                            (IMetaStoreClient) getProxyMethod.invoke(null, hiveConf, true));
 
     static IMetaStoreClient createClient(HiveConf hiveConf, String clientClassName) {
         Method getProxy = null;
@@ -760,7 +769,7 @@ public class HiveCatalog extends AbstractCatalog {
 
     /** Function interface for creating hive metastore proxy. */
     public interface HiveMetastoreProxySupplier {
-        IMetaStoreClient get(Method getProxyMethod, HiveConf conf, String clientClassName)
+        IMetaStoreClient get(Method getProxyMethod, Configuration conf, String clientClassName)
                 throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
     }
 }
