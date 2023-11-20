@@ -23,9 +23,11 @@ import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
+import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -61,14 +63,16 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() throws Exception {
+    protected DataStreamSource<String> buildSource() throws Exception {
         List<Identifier> excludedTables = new ArrayList<>();
-        return MongoDBActionUtils.buildMongodbSource(
-                cdcSourceConfig,
-                CdcActionCommonUtils.combinedModeTableList(
-                        cdcSourceConfig.get(MongoDBSourceOptions.DATABASE),
-                        includingTables,
-                        excludedTables));
+        MongoDBSource<String> source =
+                MongoDBActionUtils.buildMongodbSource(
+                        cdcSourceConfig,
+                        CdcActionCommonUtils.combinedModeTableList(
+                                cdcSourceConfig.get(MongoDBSourceOptions.DATABASE),
+                                includingTables,
+                                excludedTables));
+        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
     }
 
     @Override

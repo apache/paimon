@@ -234,7 +234,7 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
         kafkaConfig.put(TOPIC.key(), topic);
-        kafkaConfig.put(SCAN_STARTUP_MODE.key(), SPECIFIC_OFFSETS.name());
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), SPECIFIC_OFFSETS.toString());
         kafkaConfig.put(SCAN_STARTUP_SPECIFIC_OFFSETS.key(), "partition:0,offset:1");
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)

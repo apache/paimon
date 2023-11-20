@@ -35,9 +35,11 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
 
+import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -146,9 +148,11 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() throws Exception {
+    protected DataStreamSource<String> buildSource() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
         Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         MySqlSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
                         cdcSourceConfig,
@@ -209,14 +213,16 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
 
-        return MySqlActionUtils.buildMySqlSource(
-                cdcSourceConfig,
-                tableList(
-                        mode,
-                        cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
-                        includingTables,
-                        monitoredTables,
-                        excludedTables));
+        MySqlSource<String> source =
+                MySqlActionUtils.buildMySqlSource(
+                        cdcSourceConfig,
+                        tableList(
+                                mode,
+                                cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                                includingTables,
+                                monitoredTables,
+                                excludedTables));
+        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
     }
 
     @Override

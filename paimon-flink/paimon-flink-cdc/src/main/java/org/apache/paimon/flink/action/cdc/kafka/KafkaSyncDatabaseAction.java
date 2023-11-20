@@ -21,7 +21,8 @@ package org.apache.paimon.flink.action.cdc.kafka;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.Map;
 
@@ -37,8 +38,11 @@ public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase 
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() throws Exception {
-        return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
+    protected DataStreamSource<String> buildSource() throws Exception {
+        return env.fromSource(
+                KafkaActionUtils.buildKafkaSource(cdcSourceConfig),
+                WatermarkStrategy.noWatermarks(),
+                sourceName());
     }
 
     @Override

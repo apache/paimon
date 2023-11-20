@@ -30,11 +30,10 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.table.FileStoreTable;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import javax.annotation.Nullable;
 
@@ -54,8 +53,7 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
     protected String tablePrefix = "";
     protected String tableSuffix = "";
     protected String includingTables = ".*";
-    @Nullable protected Pattern excludingPattern;
-
+    @Nullable protected String excludingTables;
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
@@ -97,7 +95,7 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
     }
 
     public SyncDatabaseActionBase excludingTables(@Nullable String excludingTables) {
-        this.excludingPattern = excludingTables == null ? null : Pattern.compile(excludingTables);
+        this.excludingTables = excludingTables;
         return this;
     }
 
@@ -122,7 +120,7 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
 
     protected void checkCdcSourceArgument() {}
 
-    protected abstract Source<String, ?, ?> buildSource() throws Exception;
+    protected abstract DataStreamSource<String> buildSource() throws Exception;
 
     protected abstract String sourceName();
 
@@ -145,17 +143,15 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
 
         catalog.createDatabase(database, true);
 
-        Source<String, ?, ?> source = buildSource();
-
         NewTableSchemaBuilder schemaBuilder = new NewTableSchemaBuilder(tableConfig, caseSensitive);
         Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
 
         DataStream<RichCdcMultiplexRecord> input =
-                env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName())
-                        .flatMap(recordParse())
-                        .name("Parse");
+                buildSource().flatMap(recordParse()).name("Parse");
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () ->
                         new RichCdcMultiplexRecordEventParser(
