@@ -31,6 +31,7 @@ import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -44,6 +45,8 @@ import java.io.Serializable;
  * @param <T> type of record to read and write.
  */
 public interface FileStore<T> extends Serializable {
+
+    FileStorePathFactory pathFactory();
 
     SnapshotManager snapshotManager();
 

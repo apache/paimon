@@ -29,7 +29,7 @@ import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -114,12 +114,12 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() throws Exception {
+    protected DataStreamSource<String> buildSource() throws Exception {
         String tableList =
                 mySqlSchemasInfo.pkTables().stream()
                         .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
                         .collect(Collectors.joining("|"));
-        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList);
+        return buildDataStreamSource(MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList));
     }
 
     @Override

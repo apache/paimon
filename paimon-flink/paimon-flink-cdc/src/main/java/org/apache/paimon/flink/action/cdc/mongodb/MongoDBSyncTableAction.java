@@ -24,7 +24,7 @@ import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.Map;
 
@@ -76,12 +76,13 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() throws Exception {
+    protected DataStreamSource<String> buildSource() throws Exception {
         String tableList =
                 cdcSourceConfig.get(MongoDBSourceOptions.DATABASE)
                         + "\\."
                         + cdcSourceConfig.get(MongoDBSourceOptions.COLLECTION);
-        return MongoDBActionUtils.buildMongodbSource(cdcSourceConfig, tableList);
+        return buildDataStreamSource(
+                MongoDBActionUtils.buildMongodbSource(cdcSourceConfig, tableList));
     }
 
     @Override

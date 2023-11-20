@@ -35,7 +35,6 @@ import java.net.Socket;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -153,7 +152,7 @@ public class CpuMetricReceiver implements Closeable {
         }
     }
 
-    public static void main(String[] args) throws ExecutionException, InterruptedException {
+    public static void main(String[] args) throws InterruptedException {
         // start metric servers
         Configuration conf = BenchmarkGlobalConfiguration.loadConfiguration();
         String reporterAddress = conf.get(BenchmarkOptions.METRIC_REPORTER_HOST);

@@ -425,6 +425,62 @@ val query = spark.readStream
 */
 ```
 
+## Schema Evolution
+
+Schema evolution is a feature that allows users to easily modify the current schema of a table to adapt to existing data, or new data that changes over time, while maintaining data integrity and consistency.
+
+Paimon supports automatic schema merging of source data and current table data while data is being written, and uses the merged schema as the latest schema of the table, and it only requires configuring `write.merge-schema`.
+
+```scala
+data.write
+  .format("paimon")
+  .mode("append")
+  .option("write.merge-schema", "true")
+  .save(location)
+```
+
+When enable `write.merge-schema`, Paimon can allow users to perform the following actions on table schema by default:
+- Adding columns
+- Up-casting the type of column(e.g. Int -> Long)
+
+Paimon also supports explicit type conversions between certain types (e.g. String -> Date, Long -> Int), it requires an explicit configuration `write.merge-schema.explicit-cast`.
+
+Schema evolution can be used in streaming mode at the same time.
+
+```scala
+val inputData = MemoryStream[(Int, String)]
+inputData
+  .toDS()
+  .toDF("col1", "col2")
+  .writeStream
+  .format("paimon")
+  .option("checkpointLocation", "/path/to/checkpoint")
+  .option("write.merge-schema", "true")
+  .option("write.merge-schema.explicit-cast", "true")
+  .start(location)
+```
+
+Here list the configurations.
+
+<table class="configuration table table-bordered">
+    <thead>
+        <tr>
+            <th class="text-left" style="width: 20%">Scan Mode</th>
+            <th class="text-left" style="width: 60%">Description</th>
+        </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td><h5>write.merge-schema</h5></td>
+            <td>If true, merge the data schema and the table schema automatically before write data.</td>
+        </tr>
+        <tr>
+            <td><h5>write.merge-schema.explicit-cast</h5></td>
+            <td>If true, allow to merge data types if the two types meet the rules for explicit casting.</td>
+        </tr>
+    </tbody>
+</table>
+
 ## Spark Procedure
 
 This section introduce all available spark procedures about paimon.

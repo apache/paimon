@@ -115,6 +115,10 @@ public class DateTimeUtils {
         return (int) (ts % MILLIS_PER_DAY);
     }
 
+    public static Timestamp toInternal(long millis, int nanos) {
+        return Timestamp.fromEpochMillis(millis + LOCAL_TZ.getOffset(millis), nanos);
+    }
+
     public static int toInternal(LocalDate date) {
         return ymdToUnixDate(date.getYear(), date.getMonthValue(), date.getDayOfMonth());
     }

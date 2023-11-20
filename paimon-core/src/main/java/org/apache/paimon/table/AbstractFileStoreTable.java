@@ -136,6 +136,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
                 DefaultValueAssigner.create(tableSchema),
+                store().pathFactory(),
                 name());
     }
 

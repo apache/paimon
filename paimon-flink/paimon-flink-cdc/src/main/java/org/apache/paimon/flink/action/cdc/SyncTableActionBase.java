@@ -36,6 +36,8 @@ import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -147,7 +149,7 @@ public abstract class SyncTableActionBase extends ActionBase {
                 true);
     }
 
-    protected abstract Source<String, ?, ?> buildSource() throws Exception;
+    protected abstract DataStreamSource<String> buildSource() throws Exception;
 
     protected abstract String sourceName();
 
@@ -194,9 +196,7 @@ public abstract class SyncTableActionBase extends ActionBase {
         checkComputedColumns(computedColumns);
 
         DataStream<RichCdcMultiplexRecord> input =
-                env.fromSource(buildSource(), WatermarkStrategy.noWatermarks(), sourceName())
-                        .flatMap(recordParse())
-                        .name("Parse");
+                buildSource().flatMap(recordParse()).name("Parse");
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
                 () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
 
@@ -212,6 +212,17 @@ public abstract class SyncTableActionBase extends ActionBase {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
+    }
+
+    protected DataStreamSource<String> buildDataStreamSource(Object source) {
+        if (source instanceof Source) {
+            return env.fromSource(
+                    (Source<String, ?, ?>) source, WatermarkStrategy.noWatermarks(), sourceName());
+        }
+        if (source instanceof SourceFunction) {
+            return env.addSource((SourceFunction<String>) source, sourceName());
+        }
+        throw new UnsupportedOperationException("Unrecognized source type");
     }
 
     protected void validateCaseInsensitive(boolean caseSensitive) {
