@@ -37,7 +37,8 @@ import org.apache.paimon.table.TableType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 
-import com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
+
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -757,6 +758,7 @@ public class HiveCatalog extends AbstractCatalog {
         return System.getenv("HIVE_CONF_DIR");
     }
 
+    /** Function interface for creating hive metastore proxy. */
     public interface HiveMetastoreProxySupplier {
         IMetaStoreClient get(Method getProxyMethod, HiveConf conf, String clientClassName)
                 throws IllegalAccessException, IllegalArgumentException, InvocationTargetException;
