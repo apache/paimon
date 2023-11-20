@@ -18,12 +18,14 @@
 
 package org.apache.paimon.predicate;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
 /** A {@link PredicateVisitor} which converts {@link Predicate} with projection. */
-public class PredicateProjectionConverter implements PredicateReplaceVisitor {
+public class PredicateProjectionConverter implements PredicateVisitor<Optional<Predicate>> {
 
     private final Map<Integer, Integer> reversed;
 
@@ -43,5 +45,22 @@ public class PredicateProjectionConverter implements PredicateReplaceVisitor {
         }
 
         return Optional.of(predicate.copyWithNewIndex(adjusted));
+    }
+
+    @Override
+    public Optional<Predicate> visit(CompoundPredicate predicate) {
+        List<Predicate> converted = new ArrayList<>();
+        boolean isAnd = predicate.function() instanceof And;
+        for (Predicate child : predicate.children()) {
+            Optional<Predicate> optional = child.visit(this);
+            if (optional.isPresent()) {
+                converted.add(optional.get());
+            } else {
+                if (!isAnd) {
+                    return Optional.empty();
+                }
+            }
+        }
+        return Optional.of(new CompoundPredicate(predicate.function(), converted));
     }
 }

@@ -161,7 +161,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
 
-        // projection contains unknown index
+        // projection contains unknown index or
         read =
                 table.newRead()
                         .withFilter(
@@ -171,6 +171,17 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         assertThat(getResult(read, splits, binaryRow(2), 0, toString))
                 .hasSameElementsAs(
                         Arrays.asList("200|binary", "201|binary", "202|binary", "201|binary"));
+
+        // projection contains unknown index and
+        read =
+                table.newRead()
+                        .withFilter(
+                                PredicateBuilder.and(builder.equal(2, 201L), builder.equal(0, 1)))
+                        .withProjection(new int[] {3, 2})
+                        .executeFilter();
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString)).isEmpty();
+        assertThat(getResult(read, splits, binaryRow(2), 0, toString))
+                .hasSameElementsAs(Arrays.asList("201|binary", "201|binary"));
     }
 
     @Test
