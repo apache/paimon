@@ -19,14 +19,15 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.PartitionExpressionVisitor;
 import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
@@ -43,7 +44,6 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
 
@@ -76,73 +76,52 @@ public abstract class FlinkTableSource {
     /** @return The unconsumed filters. */
     public List<ResolvedExpression> pushFilters(List<ResolvedExpression> filters) {
         List<String> partitionKeys = table.partitionKeys();
-        Tuple2<List<ResolvedExpression>, List<ResolvedExpression>> partitionedFilters;
-
-        if (partitionKeys.isEmpty() || isStreaming()) {
-            partitionedFilters = Tuple2.of(new ArrayList<>(), filters);
-        } else {
-            partitionedFilters = partition(filters, table.partitionKeys());
-        }
-        List<Predicate> converted = new ArrayList<>();
         RowType rowType = LogicalTypeConversion.toLogicalType(table.rowType());
+
         // The source must ensure the consumed filters are fully evaluated, otherwise the result
         // of query will be wrong.
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
-
-        if (partitionedFilters.f0.isEmpty()) {
-            for (ResolvedExpression filter : filters) {
-                PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
-            }
-            predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
-            return filters;
-        } else {
-            for (ResolvedExpression filter : partitionedFilters.f0) {
-                Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);
-                if (predicateOptional.isPresent()) {
-                    converted.add(predicateOptional.get());
-                    consumedFilters.add(filter);
-                } else {
-                    unConsumedFilters.add(filter);
-                }
-            }
-
-            for (ResolvedExpression filter : partitionedFilters.f1) {
-                PredicateConverter.convert(rowType, filter).ifPresent(converted::add);
-                unConsumedFilters.add(filter);
-            }
-
-            predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
-            LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
-
-            return unConsumedFilters;
-        }
-    }
-
-    /** split filters to partition and non-partition part. */
-    private Tuple2<List<ResolvedExpression>, List<ResolvedExpression>> partition(
-            List<ResolvedExpression> filters, List<String> partitionKeys) {
-        if (partitionKeys.isEmpty()) {
-            return Tuple2.of(new ArrayList<>(), filters);
-        } else {
-            List<ResolvedExpression> partitionFiltersCanBeConsumed = new ArrayList<>();
-            List<ResolvedExpression> remainingFilters = new ArrayList<>();
-            for (ResolvedExpression filter : filters) {
-                PartitionExpressionVisitor visitor =
-                        new PartitionExpressionVisitor(new HashSet<>(partitionKeys));
-                try {
-                    filter.accept(visitor);
-                    if (!visitor.getVisitedInputRef().isEmpty()) {
-                        partitionFiltersCanBeConsumed.add(filter);
-                    } else {
-                        remainingFilters.add(filter);
+        List<Predicate> converted = new ArrayList<>();
+        PredicateVisitor<Boolean> visitor =
+                new PredicateVisitor<Boolean>() {
+                    @Override
+                    public Boolean visit(LeafPredicate predicate) {
+                        return partitionKeys.contains(predicate.fieldName());
                     }
-                } catch (PredicateConverter.UnsupportedExpression e) {
-                    remainingFilters.add(filter);
+
+                    @Override
+                    public Boolean visit(CompoundPredicate predicate) {
+                        for (Predicate child : predicate.children()) {
+                            Boolean matched = child.visit(this);
+
+                            if (!matched) {
+                                return false;
+                            }
+                        }
+                        return true;
+                    }
+                };
+
+        for (ResolvedExpression filter : filters) {
+            Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);
+
+            if (!predicateOptional.isPresent()) {
+                unConsumedFilters.add(filter);
+            } else {
+                Predicate p = predicateOptional.get();
+                if (isStreaming() || !p.visit(visitor)) {
+                    unConsumedFilters.add(filter);
+                } else {
+                    consumedFilters.add(filter);
                 }
+                converted.add(p);
             }
-            return Tuple2.of(partitionFiltersCanBeConsumed, remainingFilters);
         }
+        predicate = converted.isEmpty() ? null : PredicateBuilder.and(converted);
+        LOG.info("Consumed filters: {} of {}", consumedFilters, filters);
+
+        return unConsumedFilters;
     }
 
     public void pushProjection(int[][] projectedFields) {

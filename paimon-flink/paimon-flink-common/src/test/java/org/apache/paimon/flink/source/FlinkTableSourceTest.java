@@ -122,6 +122,16 @@ public class FlinkTableSourceTest extends TableTestBase {
         filters = ImmutableList.of(col1Equal1(), and(p2Like("%a"), p1Equal1()));
         Assertions.assertThat(tableSource.pushFilters(filters))
                 .containsExactlyInAnyOrder(filters.toArray(new ResolvedExpression[0]));
+
+        // p2 like 'a%' && (col1 = 1 or p1 = 1) => [col1 = 1 or p1 = 1]
+        filters = ImmutableList.of(p2Like("a%"), or(col1Equal1(), p1Equal1()));
+        Assertions.assertThat(tableSource.pushFilters(filters))
+                .isEqualTo(ImmutableList.of(filters.get(1)));
+
+        // p2 like 'a%' && (col1 = 1 && p1 = 1) => [col1 = 1 && p1 = 1]
+        filters = ImmutableList.of(p2Like("a%"), and(col1Equal1(), p1Equal1()));
+        Assertions.assertThat(tableSource.pushFilters(filters))
+                .isEqualTo(ImmutableList.of(filters.get(1)));
     }
 
     private ResolvedExpression col1Equal1() {
