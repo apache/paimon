@@ -18,6 +18,7 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
@@ -53,6 +54,11 @@ public class CompoundPredicate implements Predicate {
     }
 
     @Override
+    public boolean test(InternalRow row) {
+        return function.test(row, children);
+    }
+
+    @Override
     public boolean test(long rowCount, FieldStats[] fieldStats) {
         return function.test(rowCount, fieldStats, children);
     }
@@ -80,6 +86,8 @@ public class CompoundPredicate implements Predicate {
     public abstract static class Function implements Serializable {
 
         public abstract boolean test(Object[] values, List<Predicate> children);
+
+        public abstract boolean test(InternalRow row, List<Predicate> children);
 
         public abstract boolean test(
                 long rowCount, FieldStats[] fieldStats, List<Predicate> children);
