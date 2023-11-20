@@ -123,11 +123,11 @@ public interface PartitionPredicate {
             }
 
             for (int i = 0; i < fieldStats.length; i++) {
-                if (min[i].test(rowCount, fieldStats) && max[i].test(rowCount, fieldStats)) {
-                    return true;
+                if (!min[i].test(rowCount, fieldStats) || !max[i].test(rowCount, fieldStats)) {
+                    return false;
                 }
             }
-            return false;
+            return true;
         }
     }
 }
