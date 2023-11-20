@@ -44,7 +44,7 @@ public class PostgreSqlActionITCaseBase extends CdcActionITCaseBase {
     private static final Logger LOG = LoggerFactory.getLogger(PostgreSqlActionITCaseBase.class);
 
     protected static final PostgreSqlContainer POSTGRE_SQL_CONTAINER =
-            createPostgreSqlContainer(PostgreSqlVersion.V9_6);
+            createPostgreSqlContainer(PostgreSqlVersion.V_12);
 
     private static final String USER = "postgres";
     private static final String PASSWORD = "postgres";
@@ -94,9 +94,52 @@ public class PostgreSqlActionITCaseBase extends CdcActionITCaseBase {
         return config;
     }
 
+    protected PostgreSqlSyncTableActionBuilder syncTableActionBuilder(
+            Map<String, String> postgreSqlConfig) {
+        return new PostgreSqlSyncTableActionBuilder(postgreSqlConfig);
+    }
+
     protected PostgreSqlSyncDatabaseActionBuilder syncDatabaseActionBuilder(
             Map<String, String> postgreSqlConfig) {
         return new PostgreSqlSyncDatabaseActionBuilder(postgreSqlConfig);
+    }
+
+    /** Builder to build {@link PostgreSqlSyncTableAction} from action arguments. */
+    protected class PostgreSqlSyncTableActionBuilder
+            extends SyncTableActionBuilder<PostgreSqlSyncTableAction> {
+
+        public PostgreSqlSyncTableActionBuilder(Map<String, String> postgreSqlConfig) {
+            super(postgreSqlConfig);
+        }
+
+        @Override
+        public PostgreSqlSyncTableAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    tableName));
+
+            args.addAll(mapToArgs("--postgresql-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(listToArgs("--partition-keys", partitionKeys));
+            args.addAll(listToArgs("--primary-keys", primaryKeys));
+
+            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (PostgreSqlSyncTableAction)
+                    new PostgreSqlSyncTableActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
+        }
     }
 
     /** Builder to build {@link PostgreSqlSyncDatabaseAction} from action arguments. */

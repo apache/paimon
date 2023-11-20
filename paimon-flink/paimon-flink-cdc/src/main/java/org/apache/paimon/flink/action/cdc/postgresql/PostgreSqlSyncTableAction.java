@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -27,6 +28,8 @@ import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.sink.cdc.CdcSinkBuilder;
 import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -37,14 +40,15 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.ComputedColumnUtils.buildComputedColumns;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -55,10 +59,11 @@ public class PostgreSqlSyncTableAction extends ActionBase {
     private final Configuration postgreSqlConfig;
     private final String database;
     private final String table;
-    private List<String> partitionKeys;
-    private List<String> primaryKeys;
-    private List<String> computedColumnArgs;
-    private Map<String, String> tableConfig;
+    private FileStoreTable fileStoreTable;
+    private List<String> partitionKeys = new ArrayList<>();
+    private List<String> primaryKeys = new ArrayList<>();
+    private List<String> computedColumnArgs = new ArrayList<>();
+    private Map<String, String> tableConfig = new HashMap<>();
 
     public PostgreSqlSyncTableAction(
             String warehouse,
@@ -120,7 +125,6 @@ public class PostgreSqlSyncTableAction extends ActionBase {
         catalog.createDatabase(database, true);
 
         Identifier identifier = new Identifier(database, table);
-        FileStoreTable table;
         List<ComputedColumn> computedColumns =
                 buildComputedColumns(computedColumnArgs, postgreSqlSchema.schema().fields());
 
@@ -133,28 +137,43 @@ public class PostgreSqlSyncTableAction extends ActionBase {
                         postgreSqlSchema.schema());
 
         try {
-            table = (FileStoreTable) catalog.getTable(identifier);
-            checkArgument(
-                    computedColumnArgs.isEmpty(),
-                    "Cannot add computed column when table already exists.");
-            PostgreSqlActionUtils.assertSchemaCompatible(table.schema(), fromPostgreSql);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = fileStoreTable.copy(tableConfig);
+            if (!computedColumns.isEmpty()) {
+                List<String> computedFields =
+                        computedColumns.stream()
+                                .map(ComputedColumn::columnName)
+                                .collect(Collectors.toList());
+                List<String> fieldNames = fileStoreTable.schema().fieldNames();
+                checkArgument(
+                        new HashSet<>(fieldNames).containsAll(computedFields),
+                        " Exists Table should contain all computed columns %s, but are %s.",
+                        computedFields,
+                        fieldNames);
+            }
+            CdcActionCommonUtils.assertSchemaCompatible(
+                    fileStoreTable.schema(), fromPostgreSql.fields());
         } catch (Catalog.TableNotExistException e) {
             catalog.createTable(identifier, fromPostgreSql, false);
-            table = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
         }
 
-        String serverTimeZone = postgreSqlConfig.get(PostgresSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        EventParser.Factory<String> parserFactory =
-                () ->
-                        new PostgreSqlDebeziumJsonEventParser(
-                                zoneId, catalog.caseSensitive(), computedColumns);
+        PostgreSqlRecordParser recordParser =
+                new PostgreSqlRecordParser(caseSensitive, computedColumns, postgreSqlConfig);
 
-        CdcSinkBuilder<String> sinkBuilder =
-                new CdcSinkBuilder<String>()
-                        .withInput(env.addSource(source, "PostgreSQL Source"))
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
+
+        CdcSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
+                new CdcSinkBuilder<RichCdcMultiplexRecord>()
+                        .withInput(
+                                env.addSource(source, "PostgreSQL Source")
+                                        .flatMap(recordParser)
+                                        .name("Parse"))
                         .withParserFactory(parserFactory)
-                        .withTable(table);
+                        .withTable(fileStoreTable)
+                        .withIdentifier(identifier)
+                        .withCatalogLoader(catalogLoader());
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
@@ -220,5 +239,10 @@ public class PostgreSqlSyncTableAction extends ActionBase {
     public void run() throws Exception {
         build();
         execute(String.format("PostgreSQL-Paimon Table Sync: %s.%s", database, table));
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 }

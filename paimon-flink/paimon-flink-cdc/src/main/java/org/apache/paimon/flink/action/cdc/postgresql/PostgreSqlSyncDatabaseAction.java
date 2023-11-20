@@ -26,6 +26,9 @@ import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.FlinkCdcSyncDatabaseSinkBuilder;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordSchemaBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -43,13 +46,12 @@ import javax.annotation.Nullable;
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
-import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -66,7 +68,7 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
     private String tableSuffix = "";
     private String includingTables = ".*";
     @Nullable private String excludingTables;
-    private Map<String, String> tableConfig;
+    private Map<String, String> tableConfig = new HashMap<>();
 
     public PostgreSqlSyncDatabaseAction(
             String warehouse,
@@ -130,7 +132,11 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
             validateCaseInsensitive();
         }
 
-        List<PostgreSqlSchema> postgreSqlSchemas = getPostgreSqlSchemaList();
+        Pattern includingPattern = Pattern.compile(includingTables);
+        Pattern excludingPattern =
+                excludingTables == null ? null : Pattern.compile(excludingTables);
+        List<PostgreSqlSchema> postgreSqlSchemas =
+                getPostgreSqlSchemaList(includingPattern, excludingPattern);
         checkArgument(
                 !postgreSqlSchemas.isEmpty(),
                 "No tables found in PostgreSQL schema "
@@ -180,15 +186,25 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
         SourceFunction<String> source =
                 PostgreSqlActionUtils.buildPostgreSqlSource(postgresqlConfig);
 
-        String serverTimeZone = postgresqlConfig.get(PostgresSourceOptions.SERVER_TIME_ZONE);
-        ZoneId zoneId = serverTimeZone == null ? ZoneId.systemDefault() : ZoneId.of(serverTimeZone);
-        EventParser.Factory<String> parserFactory =
-                () ->
-                        new PostgreSqlDebeziumJsonEventParser(
-                                zoneId, caseSensitive, tableNameConverter);
+        RichCdcMultiplexRecordSchemaBuilder schemaBuilder =
+                new RichCdcMultiplexRecordSchemaBuilder(tableConfig, caseSensitive);
 
-        new FlinkCdcSyncDatabaseSinkBuilder<String>()
-                .withInput(env.addSource(source, "PostgreSQL Source"))
+        PostgreSqlRecordParser recordParser =
+                new PostgreSqlRecordParser(caseSensitive, postgresqlConfig);
+
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory =
+                () ->
+                        new RichCdcMultiplexRecordEventParser(
+                                schemaBuilder,
+                                includingPattern,
+                                excludingPattern,
+                                tableNameConverter);
+
+        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
+                .withInput(
+                        env.addSource(source, "PostgreSQL Source")
+                                .flatMap(recordParser)
+                                .name("Parse"))
                 .withParserFactory(parserFactory)
                 .withDatabase(database)
                 .withCatalogLoader(catalogLoader())
@@ -196,7 +212,8 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                 .build();
     }
 
-    private List<PostgreSqlSchema> getPostgreSqlSchemaList() throws Exception {
+    private List<PostgreSqlSchema> getPostgreSqlSchemaList(
+            Pattern includingPattern, @Nullable Pattern excludingPattern) throws Exception {
         String databaseName = postgresqlConfig.get(PostgresSourceOptions.DATABASE_NAME);
         String schemaName = postgresqlConfig.get(PostgresSourceOptions.SCHEMA_NAME);
         List<PostgreSqlSchema> postgreSqlSchemaList = new ArrayList<>();
@@ -207,7 +224,7 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                 while (tables.next()) {
                     String tableName = tables.getString("TABLE_NAME");
                     String tableComment = tables.getString("REMARKS");
-                    if (!shouldMonitorTable(tableName)) {
+                    if (!shouldMonitorTable(tableName, includingPattern, excludingPattern)) {
                         continue;
                     }
                     PostgreSqlSchema postgreSqlSchema =
@@ -223,23 +240,24 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
         return postgreSqlSchemaList;
     }
 
-    private boolean shouldMonitorTable(String postgreSqlTableName) {
-        Matcher includingMatcher = Pattern.compile(includingTables).matcher(postgreSqlTableName);
-        Matcher excludingMatcher =
-                excludingTables == null
-                        ? null
-                        : Pattern.compile(excludingTables).matcher(postgreSqlTableName);
-
-        boolean shouldMonitor =
-                includingMatcher.matches()
-                        && (excludingMatcher == null || !excludingMatcher.matches());
-        LOG.debug("Source table {} is monitored? {}", postgreSqlTableName, shouldMonitor);
+    private boolean shouldMonitorTable(
+            String postgreSqlTableName,
+            Pattern includingPattern,
+            @Nullable Pattern excludingPattern) {
+        boolean shouldMonitor = includingPattern.matcher(postgreSqlTableName).matches();
+        if (excludingPattern != null) {
+            shouldMonitor =
+                    shouldMonitor && !excludingPattern.matcher(postgreSqlTableName).matches();
+        }
+        if (!shouldMonitor) {
+            LOG.debug("Source table '{}' is excluded.", postgreSqlTableName);
+        }
         return shouldMonitor;
     }
 
     private boolean shouldMonitorTable(
             TableSchema tableSchema, Schema postgreSqlSchema, Supplier<String> errMsg) {
-        if (PostgreSqlActionUtils.schemaCompatible(tableSchema, postgreSqlSchema)) {
+        if (CdcActionCommonUtils.schemaCompatible(tableSchema, postgreSqlSchema.fields())) {
             return true;
         } else if (ignoreIncompatible) {
             LOG.warn(errMsg.get() + "This table will be ignored.");

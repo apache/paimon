@@ -81,9 +81,13 @@ public class PostgreSqlTypeUtils {
     private static final String MACADDR8 = "MACADDR8";
     private static final String PATH = "PATH";
     private static final String DATE = "DATE";
+    private static final String TIMESTAMP_WITHOUT_TIME_ZONE = "TIMESTAMP WITHOUT TIME ZONE";
     private static final String TIMESTAMP = "TIMESTAMP";
+    private static final String TIMESTAMP_WITH_TIME_ZONE = "TIMESTAMP WITH TIME ZONE";
     private static final String TIMESTAMPTZ = "TIMESTAMPTZ";
+    private static final String TIME_WITHOUT_TIME_ZONE = "TIME WITHOUT TIME ZONE";
     private static final String TIME = "TIME";
+    private static final String TIME_WITH_TIME_ZONE = "TIME WITH TIME ZONE";
     private static final String TIMETZ = "TIMETZ";
     private static final String NUMERIC = "NUMERIC";
     private static final String DECIMAL = "DECIMAL";
@@ -144,43 +148,42 @@ public class PostgreSqlTypeUtils {
             case DATE:
                 return DataTypes.DATE();
             case TIMESTAMP:
-                if (length == 0) {
-                    return DataTypes.TIMESTAMP(0);
-                } else if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
-                    if (length > JDBC_TIMESTAMP_BASE_LENGTH + 1) {
-                        return DataTypes.TIMESTAMP(length - JDBC_TIMESTAMP_BASE_LENGTH - 1);
-                    } else {
-                        return DataTypes.TIMESTAMP(0);
-                    }
+            case TIMESTAMP_WITHOUT_TIME_ZONE:
+                if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
+                    int precision =
+                            length > JDBC_TIMESTAMP_BASE_LENGTH + 1
+                                    ? length - JDBC_TIMESTAMP_BASE_LENGTH - 1
+                                    : 0;
+                    return DataTypes.TIMESTAMP(precision);
                 } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
                     return DataTypes.TIMESTAMP(length);
                 } else {
                     throw new UnsupportedOperationException(
-                            "Unsupported length "
-                                    + length
-                                    + " for PostgreSQL DATETIME and TIMESTAMP types");
+                            "Unsupported length " + length + " for PostgreSQL TIMESTAMP type");
                 }
             case TIMESTAMPTZ:
-                if (length == 0) {
-                    return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0);
-                } else if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
-                    if (length > JDBC_TIMESTAMP_BASE_LENGTH + 1) {
-                        return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(
-                                length - JDBC_TIMESTAMP_BASE_LENGTH - 1);
-                    } else {
-                        return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(0);
-                    }
+            case TIMESTAMP_WITH_TIME_ZONE:
+                if (length >= JDBC_TIMESTAMP_BASE_LENGTH) {
+                    int precision =
+                            length > JDBC_TIMESTAMP_BASE_LENGTH + 1
+                                    ? Math.min(
+                                            length - JDBC_TIMESTAMP_BASE_LENGTH - 1,
+                                            TimestampType.MAX_PRECISION)
+                                    : 0;
+                    return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision);
                 } else if (length >= 0 && length <= TimestampType.MAX_PRECISION) {
                     return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(length);
                 } else {
                     throw new UnsupportedOperationException(
-                            "Unsupported length "
-                                    + length
-                                    + " for PostgreSQL DATETIME and TIMESTAMPZ types");
+                            "Unsupported length " + length + " for PostgreSQL TIMESTAMPZ type");
                 }
             case TIME:
-            case TIMETZ:
+            case TIME_WITHOUT_TIME_ZONE:
                 return DataTypes.TIME();
+            case TIMETZ:
+            case TIME_WITH_TIME_ZONE:
+                throw new UnsupportedOperationException(
+                        "PostgreSQL's TIMETZ and TIME_WITH_TIME_ZONE cannot be converted to Paimon data types. Paimon does not support TIME types with a time zone.");
             case NUMERIC:
             case DECIMAL:
             case MONEY:

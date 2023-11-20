@@ -18,12 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.postgresql;
 
-import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-
 import com.ververica.cdc.connectors.postgres.PostgreSQLSource;
 import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
@@ -31,8 +25,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -44,8 +36,6 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Utils for PostgreSqlAction. */
 public class PostgreSqlActionUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PostgreSqlActionUtils.class);
-
     static Connection getConnection(Configuration postgreSqlConfig) throws Exception {
         return DriverManager.getConnection(
                 String.format(
@@ -55,38 +45,6 @@ public class PostgreSqlActionUtils {
                         postgreSqlConfig.get(PostgresSourceOptions.DATABASE_NAME)),
                 postgreSqlConfig.get(PostgresSourceOptions.USERNAME),
                 postgreSqlConfig.get(PostgresSourceOptions.PASSWORD));
-    }
-
-    static void assertSchemaCompatible(TableSchema paimonSchema, Schema postgreSqlSchema) {
-        if (!schemaCompatible(paimonSchema, postgreSqlSchema)) {
-            throw new IllegalArgumentException(
-                    "Paimon schema and PostgreSQL schema are not compatible.\n"
-                            + "Paimon fields are: "
-                            + paimonSchema.fields()
-                            + ".\nPostgreSQL fields are: "
-                            + postgreSqlSchema.fields());
-        }
-    }
-
-    static boolean schemaCompatible(TableSchema paimonSchema, Schema postgreSqlSchema) {
-        for (DataField field : postgreSqlSchema.fields()) {
-            int idx = paimonSchema.fieldNames().indexOf(field.name());
-            if (idx < 0) {
-                LOG.info("Cannot find field '{}' in Paimon table.", field.name());
-                return false;
-            }
-            DataType type = paimonSchema.fields().get(idx).type();
-            if (UpdatedDataFieldsProcessFunction.canConvert(field.type(), type)
-                    != UpdatedDataFieldsProcessFunction.ConvertAction.CONVERT) {
-                LOG.info(
-                        "Cannot convert field '{}' from PostgreSQL type '{}' to Paimon type '{}'.",
-                        field.name(),
-                        field.type(),
-                        type);
-                return false;
-            }
-        }
-        return true;
     }
 
     static SourceFunction<String> buildPostgreSqlSource(Configuration postgreSqlConfig) {

@@ -198,7 +198,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             if (status == JobStatus.RUNNING) {
                 break;
             }
-            Thread.sleep(1000);
+            Thread.sleep(100);
         }
     }
 
