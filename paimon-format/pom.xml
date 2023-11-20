@@ -32,7 +32,7 @@ under the License.
     <name>Paimon : Format</name>
 
     <properties>
-        <parquet.version>1.12.3</parquet.version>
+        <parquet.version>1.13.1</parquet.version>
         <orc.version>1.8.3</orc.version>
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
