@@ -232,6 +232,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription("Whether to ignore delete records in partial-update mode.");
 
+    public static final ConfigOption<Boolean> FIRST_ROW_IGNORE_DELETE =
+            key("first-row.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore delete records in first-row mode.");
+
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
                     .enumType(SortEngine.class)
