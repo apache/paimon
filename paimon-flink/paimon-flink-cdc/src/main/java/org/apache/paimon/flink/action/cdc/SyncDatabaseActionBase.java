@@ -37,12 +37,10 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.regex.Pattern;
+
+import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 
 /** Base {@link Action} for synchronizing into one Paimon database. */
 public abstract class SyncDatabaseActionBase extends ActionBase {
@@ -50,6 +48,8 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
     protected final String database;
     protected final Configuration cdcSourceConfig;
     protected Map<String, String> tableConfig = new HashMap<>();
+    protected boolean mergeShards = true;
+    protected MultiTablesSinkMode mode = COMBINED;
     protected String tablePrefix = "";
     protected String tableSuffix = "";
     protected String includingTables = ".*";
@@ -57,6 +57,7 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
 
     protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
+    protected List<FileStoreTable> tables = new ArrayList<>();
 
     public SyncDatabaseActionBase(
             String warehouse,
@@ -70,6 +71,16 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
 
     public SyncDatabaseActionBase withTableConfig(Map<String, String> tableConfig) {
         this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public SyncDatabaseActionBase mergeShards(boolean mergeShards) {
+        this.mergeShards = mergeShards;
+        return this;
+    }
+
+    public SyncDatabaseActionBase withMode(MultiTablesSinkMode mode) {
+        this.mode = mode;
         return this;
     }
 
@@ -126,14 +137,6 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
 
     protected abstract FlatMapFunction<String, RichCdcMultiplexRecord> recordParse();
 
-    protected List<FileStoreTable> sinkTables() {
-        return Collections.emptyList();
-    }
-
-    protected MultiTablesSinkMode sinkMode() {
-        return MultiTablesSinkMode.COMBINED;
-    }
-
     @Override
     public void build() throws Exception {
         checkCdcSourceArgument();
@@ -148,7 +151,7 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
         TableNameConverter tableNameConverter =
-                new TableNameConverter(caseSensitive, true, tablePrefix, tableSuffix);
+                new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
 
         DataStream<RichCdcMultiplexRecord> input =
                 buildSource().flatMap(recordParse()).name("Parse");
@@ -160,21 +163,15 @@ public abstract class SyncDatabaseActionBase extends ActionBase {
                                 excludingPattern,
                                 tableNameConverter);
 
-        FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord> sinkBuilder =
-                new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
-                        .withInput(input)
-                        .withParserFactory(parserFactory)
-                        .withCatalogLoader(catalogLoader())
-                        .withDatabase(database)
-                        .withMode(sinkMode())
-                        .withTableOptions(tableConfig);
-
-        List<FileStoreTable> fileStoreTables = sinkTables();
-        if (!fileStoreTables.isEmpty()) {
-            sinkBuilder.withTables(sinkTables());
-        }
-
-        sinkBuilder.build();
+        new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
+                .withInput(input)
+                .withParserFactory(parserFactory)
+                .withCatalogLoader(catalogLoader())
+                .withDatabase(database)
+                .withTables(tables)
+                .withMode(mode)
+                .withTableOptions(tableConfig)
+                .build();
     }
 
     protected void validateCaseInsensitive(boolean caseSensitive) {

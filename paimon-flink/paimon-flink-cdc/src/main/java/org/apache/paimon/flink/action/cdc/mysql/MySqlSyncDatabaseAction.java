@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
@@ -100,13 +99,10 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
 
     private boolean ignoreIncompatible = false;
-    private boolean mergeShards = true;
-    private MultiTablesSinkMode mode = DIVIDED;
 
     // for test purpose
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
-    private final List<FileStoreTable> fileStoreTables = new ArrayList<>();
 
     public MySqlSyncDatabaseAction(
             String warehouse,
@@ -114,21 +110,12 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
         super(warehouse, database, catalogConfig, mySqlConfig);
+        this.mode = DIVIDED;
         MySqlActionUtils.registerJdbcDriver();
     }
 
     public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
         this.ignoreIncompatible = ignoreIncompatible;
-        return this;
-    }
-
-    public MySqlSyncDatabaseAction mergeShards(boolean mergeShards) {
-        this.mergeShards = mergeShards;
-        return this;
-    }
-
-    public MySqlSyncDatabaseAction withMode(MultiTablesSinkMode mode) {
-        this.mode = mode;
         return this;
     }
 
@@ -171,10 +158,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         + cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME)
                         + ", or MySQL database does not exist.");
 
-        catalog.createDatabase(database, true);
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
-
         for (MySqlTableInfo tableInfo : mySqlTableInfos) {
             Identifier identifier =
                     Identifier.create(
@@ -195,7 +180,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
-                    fileStoreTables.add(table);
+                    tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
                 } else {
                     excludedTables.addAll(tableInfo.identifiers());
@@ -203,7 +188,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             } catch (Catalog.TableNotExistException e) {
                 catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
-                fileStoreTables.add(table);
+                tables.add(table);
                 monitoredTables.addAll(tableInfo.identifiers());
             }
         }
@@ -235,16 +220,6 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
         boolean caseSensitive = catalog.caseSensitive();
         return new MySqlRecordParser(
                 cdcSourceConfig, caseSensitive, typeMapping, metadataConverters);
-    }
-
-    @Override
-    protected List<FileStoreTable> sinkTables() {
-        return this.fileStoreTables;
-    }
-
-    @Override
-    protected MultiTablesSinkMode sinkMode() {
-        return this.mode;
     }
 
     @Override
