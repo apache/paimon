@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.predicate.Predicate;
 
 import java.util.Map;
@@ -28,6 +29,11 @@ public interface InnerTableScan extends TableScan {
     InnerTableScan withFilter(Predicate predicate);
 
     default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+        return this;
+    }
+
+    default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
+        // do nothing, should implement this if need
         return this;
     }
 }
