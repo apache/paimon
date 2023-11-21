@@ -40,10 +40,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
-import org.apache.hadoop.hive.metastore.HiveMetaHookLoader;
-import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.hadoop.hive.metastore.RetryingMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
@@ -61,9 +58,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
-import java.lang.reflect.Method;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -72,7 +67,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -551,58 +545,8 @@ public class HiveCatalog extends AbstractCatalog {
         return Lock.fromCatalog(lock, identifier);
     }
 
-    private static final List<Class<?>[]> GET_PROXY_PARAMS =
-            Arrays.asList(
-                    // for hive 2.x
-                    new Class<?>[] {
-                        HiveConf.class,
-                        HiveMetaHookLoader.class,
-                        ConcurrentHashMap.class,
-                        String.class,
-                        Boolean.TYPE
-                    },
-                    // for hive 3.x
-                    new Class<?>[] {
-                        Configuration.class,
-                        HiveMetaHookLoader.class,
-                        ConcurrentHashMap.class,
-                        String.class,
-                        Boolean.TYPE
-                    });
-
     static IMetaStoreClient createClient(HiveConf hiveConf, String clientClassName) {
-        Method getProxy = null;
-        RuntimeException methodNotFound =
-                new RuntimeException(
-                        "Failed to find desired getProxy method from RetryingMetaStoreClient");
-        for (Class<?>[] classes : GET_PROXY_PARAMS) {
-            try {
-                getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
-            } catch (NoSuchMethodException e) {
-                methodNotFound.addSuppressed(e);
-            }
-        }
-        if (getProxy == null) {
-            throw methodNotFound;
-        }
-
-        IMetaStoreClient client;
-        try {
-            client =
-                    (IMetaStoreClient)
-                            getProxy.invoke(
-                                    null,
-                                    hiveConf,
-                                    (HiveMetaHookLoader) (tbl -> null),
-                                    new ConcurrentHashMap<>(),
-                                    clientClassName,
-                                    true);
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-        return isNullOrWhitespaceOnly(hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname))
-                ? client
-                : HiveMetaStoreClient.newSynchronizedClient(client);
+        return new RetryingMetaStoreClientFactory().createClient(hiveConf, clientClassName);
     }
 
     public static HiveConf createHiveConf(
