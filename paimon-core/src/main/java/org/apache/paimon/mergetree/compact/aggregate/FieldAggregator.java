@@ -74,9 +74,14 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldFirstValueAgg.NAME:
                         fieldAggregator = new FieldFirstValueAgg(fieldType);
                         break;
+                    case FieldFirstNotNullValueAgg.NAME:
+                        fieldAggregator = new FieldFirstNotNullValueAgg(fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
-                                "Use unsupported aggregation or spell aggregate function incorrectly!");
+                                String.format(
+                                        "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
+                                        strAgg));
                 }
             }
         }
