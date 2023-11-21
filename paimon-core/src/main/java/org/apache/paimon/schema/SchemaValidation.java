@@ -189,12 +189,22 @@ public class SchemaValidation {
             }
         }
 
-        if (schema.crossPartitionUpdate() && options.bucket() != -1) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                    + "(Primary key constraint %s not include all partition fields %s).",
-                            schema.primaryKeys(), schema.partitionKeys()));
+        if (schema.crossPartitionUpdate()) {
+            if (options.bucket() != -1) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (sequenceField.isPresent()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You can not use sequence.field in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
         }
     }
 
@@ -361,9 +371,7 @@ public class SchemaValidation {
                         .collect(Collectors.toSet());
         if (!illegalGroup.isEmpty()) {
             throw new IllegalArgumentException(
-                    String.format(
-                            "Should not defined aggregation function on sequence group: "
-                                    + illegalGroup));
+                    "Should not defined aggregation function on sequence group: " + illegalGroup);
         }
     }
 
