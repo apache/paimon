@@ -46,13 +46,13 @@ public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase 
     }
 
     @Override
-    protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
+    protected String sourceName() {
+        return "Kafka Source";
     }
 
     @Override
-    protected String sourceName() {
-        return "Kafka Source";
+    protected DataFormat getDataFormat() {
+        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override
