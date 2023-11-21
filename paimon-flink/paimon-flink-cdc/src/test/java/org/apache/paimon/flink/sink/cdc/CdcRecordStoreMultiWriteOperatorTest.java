@@ -726,6 +726,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                         .addGroup("bucket", "0")
                         .addGroup("compaction");
 
+        long cpId = 1L;
         Map<String, String> fields = new HashMap<>();
         fields.put("pt", "0");
         fields.put("k", "1");
@@ -739,10 +740,11 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         testHarness.processElement(record, 0);
         operator.writes().get(tableId).compact(row(0), 0, true);
+        operator.writes().get(tableId).prepareCommit(true, cpId++);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(0L);
+                .isEqualTo(1L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
@@ -764,10 +766,11 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
         testHarness.processElement(record1, 1);
         operator.writes().get(tableId).compact(row(0), 0, true);
+        operator.writes().get(tableId).prepareCommit(true, cpId);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(1L);
+                .isEqualTo(2L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())

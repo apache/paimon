@@ -113,12 +113,15 @@ public class FlinkSinkTest {
         streamRecords.add(new StreamRecord<>(row1));
         streamRecords.add(new StreamRecord<>(row2));
         streamRecords.add(new StreamRecord<>(row3));
+
+        long cpId = 1L;
         testHarness.processElements(streamRecords);
         operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.write.prepareCommit(true, cpId++);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(0L);
+                .isEqualTo(1L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
@@ -130,10 +133,11 @@ public class FlinkSinkTest {
 
         testHarness.processElement(row4, 0);
         operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.write.prepareCommit(true, cpId);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(1L);
+                .isEqualTo(2L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
@@ -177,12 +181,15 @@ public class FlinkSinkTest {
         streamRecords.add(new StreamRecord<>(Tuple2.of(row1, 0)));
         streamRecords.add(new StreamRecord<>(Tuple2.of(row2, 1)));
         streamRecords.add(new StreamRecord<>(Tuple2.of(row3, 2)));
+
+        long cpId = 1L;
         testHarness.processElements(streamRecords);
         operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.write.prepareCommit(true, cpId++);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(0L);
+                .isEqualTo(1L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
@@ -194,10 +201,11 @@ public class FlinkSinkTest {
 
         testHarness.processElement(Tuple2.of(row4, 0), 0);
         operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.write.prepareCommit(true, cpId);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(1L);
+                .isEqualTo(2L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())

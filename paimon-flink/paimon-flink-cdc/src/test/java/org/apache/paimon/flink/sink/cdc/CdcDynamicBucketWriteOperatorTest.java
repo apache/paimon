@@ -105,15 +105,17 @@ public class CdcDynamicBucketWriteOperatorTest {
                         .addGroup("compaction");
 
         long timestamp = 0;
+        long cpId = 1L;
         Map<String, String> fields = new HashMap<>();
         fields.put("pk", "1");
         fields.put("col1", "2");
         harness.processElement(Tuple2.of(new CdcRecord(RowKind.INSERT, fields), 0), timestamp++);
         operator.getWrite().compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.getWrite().prepareCommit(true, cpId++);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(0L);
+                .isEqualTo(1L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
@@ -127,10 +129,11 @@ public class CdcDynamicBucketWriteOperatorTest {
         fields.put("col1", "3");
         harness.processElement(Tuple2.of(new CdcRecord(RowKind.INSERT, fields), 0), timestamp);
         operator.getWrite().compact(BinaryRow.EMPTY_ROW, 0, true);
+        operator.getWrite().prepareCommit(true, cpId);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
                                 .getValue())
-                .isEqualTo(1L);
+                .isEqualTo(2L);
         assertThat(
                         MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
                                 .getValue())
