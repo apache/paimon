@@ -81,6 +81,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
     private PulsarAdmin admin;
     private PulsarClient client;
+    protected List<String> topics = new ArrayList<>();
 
     @RegisterExtension
     public static final PulsarContainerExtension PULSAR_CONTAINER =
@@ -191,7 +192,6 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void deleteTopics() throws Exception {
-        List<String> topics = admin.topics().getList("public/default");
         for (String topic : topics) {
             String topicName = topicName(topic);
             PartitionedTopicMetadata metadata =

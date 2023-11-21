@@ -46,7 +46,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
         final String topic3 = "schema_evolution_2";
         boolean writeOne = false;
         int fileCount = 3;
-        List<String> topics = Arrays.asList(topic1, topic2, topic3);
+        topics = Arrays.asList(topic1, topic2, topic3);
         topics.forEach(topic -> createTopic(topic, 1));
 
         // ---------- Write the Canal json into Pulsar -------------------
@@ -65,6 +65,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
         }
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
+        pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
         pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
         pulsarConfig.put(TOPIC.key(), String.join(",", topics));
         PulsarSyncDatabaseAction action =
@@ -82,7 +83,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
         final String topic = "schema_evolution";
         boolean writeOne = true;
         int fileCount = 3;
-        List<String> topics = Collections.singletonList(topic);
+        topics = Collections.singletonList(topic);
         topics.forEach(t -> createTopic(t, 1));
 
         // ---------- Write the Canal json into Pulsar -------------------
