@@ -773,4 +773,22 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + ") ")
                 .doesNotContain("schema");
     }
+
+    @Test
+    public void testReadOptimizedTable() {
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
+        sql("INSERT INTO T VALUES (1, 10), (2, 20)");
+        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
+        List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).isEmpty();
+
+        sql(
+                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '1') */ VALUES (2, 21), (3, 31)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+
+        sql("INSERT INTO T VALUES (1, 12), (3, 32)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+    }
 }

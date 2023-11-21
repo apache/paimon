@@ -155,7 +155,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public abstract SplitGenerator splitGenerator();
 
-    protected abstract boolean supportStreamingReadOverwrite();
+    public abstract boolean supportStreamingReadOverwrite();
 
     public abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 

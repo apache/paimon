@@ -41,6 +41,7 @@ import static org.apache.paimon.table.system.FilesTable.FILES;
 import static org.apache.paimon.table.system.ManifestsTable.MANIFESTS;
 import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
+import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
@@ -73,6 +74,8 @@ public class SystemTableLoader {
                 return new TagsTable(fileIO, location);
             case CONSUMERS:
                 return new ConsumersTable(fileIO, location);
+            case READ_OPTIMIZED:
+                return new ReadOptimizedTable(dataTable);
             default:
                 return null;
         }
