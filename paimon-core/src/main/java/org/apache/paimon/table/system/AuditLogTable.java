@@ -37,11 +37,9 @@ import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
@@ -280,13 +278,6 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public List<BinaryRow> partitions() {
             return snapshotReader.partitions();
-        }
-
-        @Override
-        public Optional<List<RawFile>> convertToRawFiles(DataSplit split) {
-            // we can't return snapshotReader.convertToRawFiles(split),
-            // because AuditLogTable must use its special reader
-            return Optional.empty();
         }
     }
 

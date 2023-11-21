@@ -197,13 +197,4 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
     public List<BinaryRow> listPartitions() {
         return snapshotReader.partitions();
     }
-
-    @Override
-    public Optional<List<RawFile>> convertToRawFiles(Split split) {
-        if (split instanceof DataSplit) {
-            return snapshotReader.convertToRawFiles((DataSplit) split);
-        } else {
-            return Optional.empty();
-        }
-    }
 }

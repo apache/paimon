@@ -98,8 +98,8 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(reader.convertToRawFiles(dataSplit))
-                    .hasValue(
+            assertThat(dataSplit.rawFiles())
+                    .isEqualTo(
                             Collections.singletonList(
                                     new RawFile(
                                             String.format(
@@ -123,7 +123,7 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
+            assertThat(dataSplit.rawFiles()).isEmpty();
         }
 
         // compact all files
@@ -146,8 +146,8 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(reader.convertToRawFiles(dataSplit))
-                    .hasValue(
+            assertThat(dataSplit.rawFiles())
+                    .isEqualTo(
                             Collections.singletonList(
                                     new RawFile(
                                             String.format(
@@ -171,7 +171,7 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
+            assertThat(dataSplit.rawFiles()).isEmpty();
         }
 
         write.close();
@@ -205,8 +205,8 @@ public class SnapshotReaderTest {
         DataSplit dataSplit = dataSplits.get(0);
         assertThat(dataSplit.dataFiles()).hasSize(1);
         DataFileMeta meta = dataSplit.dataFiles().get(0);
-        assertThat(reader.convertToRawFiles(dataSplit))
-                .hasValue(
+        assertThat(dataSplit.rawFiles())
+                .isEqualTo(
                         Collections.singletonList(
                                 new RawFile(
                                         String.format("%s/bucket-0/%s", tablePath, meta.fileName()),
@@ -237,8 +237,8 @@ public class SnapshotReaderTest {
         assertThat(dataSplit.dataFiles()).hasSize(2);
         DataFileMeta meta0 = dataSplit.dataFiles().get(0);
         DataFileMeta meta1 = dataSplit.dataFiles().get(1);
-        assertThat(reader.convertToRawFiles(dataSplit))
-                .hasValue(
+        assertThat(dataSplit.rawFiles())
+                .isEqualTo(
                         Arrays.asList(
                                 new RawFile(
                                         String.format(
