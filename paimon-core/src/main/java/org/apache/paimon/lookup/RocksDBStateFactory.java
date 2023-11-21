@@ -82,42 +82,45 @@ public class RocksDBStateFactory implements Closeable {
     }
 
     public void bulkLoad(RocksDBState<?, ?, ?> state, KeyValueIterator<byte[], byte[]> iterator)
-            throws IOException {
-        try {
-            long targetFileSize = options.targetFileSizeBase();
+            throws IOException, RocksDBException {
+        long targetFileSize = options.targetFileSizeBase();
 
-            List<String> files = new ArrayList<>();
-            SstFileWriter writer = null;
-            long recordNum = 0;
-            while (iterator.advanceNext()) {
-                byte[] key = iterator.getKey();
-                byte[] value = iterator.getValue();
+        List<String> files = new ArrayList<>();
+        SstFileWriter writer = null;
+        long recordNum = 0;
+        while (iterator.advanceNext()) {
+            byte[] key = iterator.getKey();
+            byte[] value = iterator.getValue();
 
-                if (writer == null) {
-                    writer = new SstFileWriter(new EnvOptions(), options);
-                    String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
-                    writer.open(path);
-                    files.add(path);
-                }
+            if (writer == null) {
+                writer = new SstFileWriter(new EnvOptions(), options);
+                String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
+                writer.open(path);
+                files.add(path);
+            }
 
+            try {
                 writer.put(key, value);
-                recordNum++;
-                if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
-                    writer.finish();
-                    writer = null;
-                    recordNum = 0;
-                }
+            } catch (RocksDBException e) {
+                throw new RuntimeException(
+                        "Exception in bulkLoad, the most suspicious reason is that "
+                                + "your data contains duplicates, please check your table.",
+                        e);
             }
-
-            if (writer != null) {
+            recordNum++;
+            if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
                 writer.finish();
+                writer = null;
+                recordNum = 0;
             }
+        }
 
-            if (files.size() > 0) {
-                db.ingestExternalFile(state.columnFamily, files, new IngestExternalFileOptions());
-            }
-        } catch (Exception e) {
-            throw new IOException(e);
+        if (writer != null) {
+            writer.finish();
+        }
+
+        if (files.size() > 0) {
+            db.ingestExternalFile(state.columnFamily, files, new IngestExternalFileOptions());
         }
     }
 
