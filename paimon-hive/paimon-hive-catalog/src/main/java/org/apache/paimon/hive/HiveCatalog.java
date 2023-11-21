@@ -69,6 +69,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -608,9 +609,13 @@ public class HiveCatalog extends AbstractCatalog {
                                                     new ConcurrentHashMap<>(),
                                                     clientClassName,
                                                     true))
-                    // Revert to the simplest creation method,
-                    // which allows us to use shaded Hive packages to avoid dependency conflicts,
-                    // such as using apache-hive2.jar in Presto and Trino.
+                    .build();
+    // If clientClassName is HiveMetaStoreClient,
+    // we can revert to the simplest creation method,
+    // which allows us to use shaded Hive packages to avoid dependency conflicts,
+    // such as using apache-hive2.jar in Presto and Trino.
+    private static final Map<Class<?>[], HiveMetastoreProxySupplier> PROXY_SUPPLIERS_SHADED =
+            ImmutableMap.<Class<?>[], HiveMetastoreProxySupplier>builder()
                     .put(
                             new Class<?>[] {HiveConf.class},
                             (getProxyMethod, hiveConf, clientClassName) ->
@@ -631,7 +636,12 @@ public class HiveCatalog extends AbstractCatalog {
         RuntimeException methodNotFound =
                 new RuntimeException(
                         "Failed to find desired getProxy method from RetryingMetaStoreClient");
-        for (Entry<Class<?>[], HiveMetastoreProxySupplier> entry : PROXY_SUPPLIERS.entrySet()) {
+        Map<Class<?>[], HiveMetastoreProxySupplier> suppliers =
+                new LinkedHashMap<>(PROXY_SUPPLIERS);
+        if (HiveMetaStoreClient.class.getName().equals(clientClassName)) {
+            suppliers.putAll(PROXY_SUPPLIERS_SHADED);
+        }
+        for (Entry<Class<?>[], HiveMetastoreProxySupplier> entry : suppliers.entrySet()) {
             Class<?>[] classes = entry.getKey();
             try {
                 getProxy = RetryingMetaStoreClient.class.getMethod("getProxy", classes);
