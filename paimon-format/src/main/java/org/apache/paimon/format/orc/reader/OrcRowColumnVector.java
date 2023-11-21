@@ -43,7 +43,8 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
 
     @Override
     public ColumnarRow getRow(int i) {
-        this.columnarRow.setRowId(i);
-        return this.columnarRow;
+        ColumnarRow copy = this.columnarRow.copy();
+        copy.setRowId(i);
+        return copy;
     }
 }

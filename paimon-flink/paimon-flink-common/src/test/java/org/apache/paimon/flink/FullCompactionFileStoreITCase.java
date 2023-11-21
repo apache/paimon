@@ -28,19 +28,20 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** SQL ITCase for continuous file store. */
 public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
     private final String table = "T";
+    private final String options =
+            " WITH('changelog-producer'='full-compaction', 'changelog-producer.compaction-interval' = '1s')";
 
     @Override
     @BeforeEach
     public void before() throws IOException {
         super.before();
-        String options =
-                " WITH('changelog-producer'='full-compaction', 'changelog-producer.compaction-interval' = '1s')";
         tEnv.executeSql(
                 "CREATE TABLE IF NOT EXISTS T (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
                         + options);
@@ -57,6 +58,28 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
+    }
+
+    /** Test streaming read with array and row nested data type. */
+    @Test
+    public void testStreamingReadOfArray() throws Exception {
+        String table = "T_ARRAY";
+        tEnv.executeSql(
+                "CREATE TABLE IF NOT EXISTS "
+                        + table
+                        + "("
+                        + "ID INT PRIMARY KEY NOT ENFORCED,\n"
+                        + "NAMES ARRAY<ROW<NAME STRING, MARK STRING>>\n"
+                        + ")"
+                        + options);
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
+
+        sql(
+                "INSERT INTO %s VALUES (1, ARRAY[('c','mark1'), ('d','mark2'), ('e','mark3')]);",
+                table);
+        assertThat(iterator.collect(1).stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("+I[1, [+I[c, mark1], +I[d, mark2], +I[e, mark3]]]");
     }
 
     @Test
