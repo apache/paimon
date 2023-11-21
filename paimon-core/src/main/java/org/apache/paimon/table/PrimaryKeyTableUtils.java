@@ -75,7 +75,7 @@ public class PrimaryKeyTableUtils {
                         tableSchema.primaryKeys());
             case FIRST_ROW:
                 return FirstRowMergeFunction.factory(
-                        new RowType(extractor.keyFields(tableSchema)), rowType);
+                        new RowType(extractor.keyFields(tableSchema)), rowType, conf);
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
         }

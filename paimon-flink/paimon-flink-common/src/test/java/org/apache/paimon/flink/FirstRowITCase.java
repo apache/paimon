@@ -22,6 +22,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
@@ -102,5 +105,31 @@ public class FirstRowITCase extends CatalogITCaseBase {
                 .containsExactlyInAnyOrder(
                         Row.ofKind(RowKind.INSERT, 1, 1, "1"),
                         Row.ofKind(RowKind.INSERT, 2, 3, "3"));
+    }
+
+    @Test
+    public void testIgnoreDelete() {
+        sql(
+                "CREATE TABLE IF NOT EXISTS T1 ("
+                        + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('merge-engine'='first-row', 'first-row.ignore-delete' = 'true',"
+                        + " 'changelog-producer' = 'lookup');");
+
+        List<Row> input =
+                ImmutableList.of(
+                        Row.ofKind(RowKind.INSERT, 1, 1, "1"),
+                        Row.ofKind(RowKind.UPDATE_BEFORE, 1, 1, "1"),
+                        Row.ofKind(RowKind.UPDATE_AFTER, 1, 2, "2"));
+
+        String id = TestValuesTableFactory.registerData(input);
+        sql(
+                "CREATE TEMPORARY TABLE source (a INT, b INT, c STRING) WITH "
+                        + "('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                id);
+
+        batchSql("INSERT INTO T1 SELECT * FROM source");
+        List<Row> result = batchSql("SELECT * FROM T1");
+
+        assertThat(result).containsExactly(Row.ofKind(RowKind.INSERT, 1, 1, "1"));
     }
 }
