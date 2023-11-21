@@ -38,6 +38,8 @@ We currently support the following sync ways:
 5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
 6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table.
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
+8. PostgreSQL Synchronizing Table: synchronize one or multiple tables from PostgreSQL into one Paimon table.
+9. PostgreSQL Synchronizing Database: synchronize the whole PostgreSQL database into one Paimon database.
 
 ## What is Schema Evolution
 
