@@ -344,6 +344,11 @@ public class DataTableSource extends FlinkTableSource {
         this.dynamicPartitionFilteringFields = candidateFilterFields;
     }
 
+    @Override
+    public boolean isStreaming() {
+        return streaming;
+    }
+
     /** Split statistics for inferring row count and parallelism size. */
     protected static class SplitStatistics {
 

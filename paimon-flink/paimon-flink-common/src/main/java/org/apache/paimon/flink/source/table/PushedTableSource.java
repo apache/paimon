@@ -45,8 +45,7 @@ public class PushedTableSource extends BaseTableSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        source.pushFilters(filters);
-        return Result.of(filters, filters);
+        return Result.of(filters, source.pushFilters(filters));
     }
 
     @Override
