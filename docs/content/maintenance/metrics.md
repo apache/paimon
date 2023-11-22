@@ -28,20 +28,20 @@ under the License.
 
 Paimon has built a metrics system to measure the behaviours of reading and writing, like how many manifest files it scanned in the last planning, how long it took in the last commit operation, how many files it deleted in the last compact operation.
 
-In paimon's metrics system, metrics are updated and reported at different levels of granularity. Currently, the levels of **table** and **bucket** are provided, which means you can get metrics per table or bucket.
+In Paimon's metrics system, metrics are updated and reported at different levels of granularity. Currently, the levels of **table** and **bucket** are provided, which means you can get metrics per table or bucket.
 
-There are three types of metrics provided in the paimon metric system, `Gauge`, `Counter`, `Histogram`.
+There are three types of metrics provided in the Paimon metric system, `Gauge`, `Counter`, `Histogram`.
 - `Gauge`: Provides a value of any type at a point in time.
 - `Counter`: Used to count values by incrementing and decrementing.
 - `Histogram`: Measure the statistical distribution of a set of values including the min, max, mean, standard deviation and percentile.
 
-Paimon has supported built-in metrics to measure operations of **commits**, **scans** and **compactions**, which can be bridged to any computing engine that supports, like flink, spark etc. Besides, when using flink to read and write, paimon has implemented some key standard flink connector metrics to measure the source latency and output of sink, see [FLIP-33: Standardize Connector Metrics](https://cwiki.apache.org/confluence/display/FLINK/FLIP-33%3A+Standardize+Connector+Metrics).
+Paimon has supported built-in metrics to measure operations of **commits**, **scans** and **compactions**, which can be bridged to any computing engine that supports, like Flink, Spark etc.
 
-# Metrics List
+## Metrics List
 
-Below is lists of paimon built-in metrics. They are summarized into three types of metrics, scan metrics, commit metrics and compaction metrics. And also Flink source / sink metrics implemented are listed here.
+Below is lists of Paimon built-in metrics. They are summarized into three types of metrics, scan metrics, commit metrics and compaction metrics.
 
-## Scan Metrics
+### Scan Metrics
 
 <table class="table table-bordered">
     <thead>
@@ -104,7 +104,7 @@ Below is lists of paimon built-in metrics. They are summarized into three types 
     </tbody>
 </table>
 
-## Commit Metrics
+### Commit Metrics
 
 <table class="table table-bordered">
     <thead>
@@ -215,7 +215,7 @@ Below is lists of paimon built-in metrics. They are summarized into three types 
     </tbody>
 </table>
 
-## Compaction Metrics
+### Compaction Metrics
 
 <table class="table table-bordered">
     <thead>
@@ -278,71 +278,19 @@ Below is lists of paimon built-in metrics. They are summarized into three types 
     </tbody>
 </table>
 
-## Source Metrics (Flink)
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
-      <th class="text-left" style="width: 70pt">Type</th>
-      <th class="text-left" style="width: 300pt">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>currentFetchEventTimeLag</td>
-            <td>Flink Source Operator</td>
-            <td>Gauge</td>
-            <td>Time difference between reading the data file and file creation.</td>
-        </tr>    
-    </tbody>
-</table>
-
-## Sink Metrics (Flink)
-
-<table class="table table-bordered">
-    <thead>
-    <tr>
-      <th class="text-left" style="width: 225pt">Metrics Name</th>
-      <th class="text-left" style="width: 65pt">Level</th>
-      <th class="text-left" style="width: 70pt">Type</th>
-      <th class="text-left" style="width: 300pt">Description</th>
-    </tr>
-    </thead>
-    <tbody>
-        <tr>
-            <td>numBytesOut</td>
-            <td>Table</td>
-            <td>Counter</td>
-            <td>The total number of output bytes.</td>
-        </tr>
-        <tr>
-            <td>numBytesOutPerSecond</td>
-            <td>Table</td>
-            <td>Meter</td>
-            <td>The output bytes per second.</td>
-        </tr>
-        <tr>
-            <td>numRecordsOut</td>
-            <td>Table</td>
-            <td>Counter</td>
-            <td>The total number of output records.</td>
-        </tr>
-        <tr>
-            <td>numRecordsOutPerSecond</td>
-            <td>Table</td>
-            <td>Meter</td>
-            <td>The output records per second.</td>
-        </tr>  
-    </tbody>
-</table>
-
 # Bridging To Flink
 
 Paimon has implemented bridging metrics to Flink's metrics system, which can be reported by Flink, and the lifecycle of metric groups are managed by Flink.
 
 Please join the `<scope>.<infix>.<metric_name>` to get the complete metric identifier when using Flink to access Paimon, `metric_name` can be got from [Metric List]({{< ref "maintenance/metrics#metrics-list" >}}).
+
+For example, the identifier of metric `lastPartitionsWritten` for table `word_count` in Flink job named `insert_word_count` is:
+
+`localhost.taskmanager.localhost:60340-775a20.insert_word_count.Global Committer : word_count.0.paimon.table.word_count.commit.lastPartitionsWritten`.
+
+From Flink Web-UI, go to the committer operator's metrics, it's shown as:
+
+`0.Global_Committer___word_count.paimon.table.word_count.commit.lastPartitionsWritten`.
 
 {{< hint info >}}
 1. Please refer to [System Scope](https://nightlies.apache.org/flink/flink-docs-master/docs/ops/metrics/#system-scope) to understand Flink `scope`
@@ -382,6 +330,70 @@ Please join the `<scope>.<infix>.<metric_name>` to get the complete metric ident
             <td>Flink Sink Metrics</td>
             <td>&lt;host&gt;.taskmanager.&lt;tm_id&gt;.&lt;job_name&gt;.&lt;committer_operator_name&gt;.&lt;subtask_index&gt;</td>
             <td>-</td>
+        </tr>  
+    </tbody>
+</table>
+
+## Flink Connector Standard Metrics
+
+When using Flink to read and write, Paimon has implemented some key standard Flink connector metrics to measure the source latency and output of sink, see [FLIP-33: Standardize Connector Metrics](https://cwiki.apache.org/confluence/display/FLINK/FLIP-33%3A+Standardize+Connector+Metrics). Flink source / sink metrics implemented are listed here.
+
+### Source Metrics (Flink)
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 65pt">Level</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>currentFetchEventTimeLag</td>
+            <td>Flink Source Operator</td>
+            <td>Gauge</td>
+            <td>Time difference between reading the data file and file creation.</td>
+        </tr>    
+    </tbody>
+</table>
+
+### Sink Metrics (Flink)
+
+<table class="table table-bordered">
+    <thead>
+    <tr>
+      <th class="text-left" style="width: 225pt">Metrics Name</th>
+      <th class="text-left" style="width: 65pt">Level</th>
+      <th class="text-left" style="width: 70pt">Type</th>
+      <th class="text-left" style="width: 300pt">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+        <tr>
+            <td>numBytesOut</td>
+            <td>Table</td>
+            <td>Counter</td>
+            <td>The total number of output bytes.</td>
+        </tr>
+        <tr>
+            <td>numBytesOutPerSecond</td>
+            <td>Table</td>
+            <td>Meter</td>
+            <td>The output bytes per second.</td>
+        </tr>
+        <tr>
+            <td>numRecordsOut</td>
+            <td>Table</td>
+            <td>Counter</td>
+            <td>The total number of output records.</td>
+        </tr>
+        <tr>
+            <td>numRecordsOutPerSecond</td>
+            <td>Table</td>
+            <td>Meter</td>
+            <td>The output records per second.</td>
         </tr>  
     </tbody>
 </table>
