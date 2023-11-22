@@ -122,9 +122,7 @@ public class CoreOptions implements Serializable {
                     .defaultValue(new HashMap<>())
                     .withDescription(
                             "Define different compression policies for different level, you can add the conf like this:"
-                                    + " 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value "
-                                    + "could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be "
-                                    + "UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.");
+                                    + " 'file.compression.per.level' = '0:lz4,1:zstd'.");
 
     public static final ConfigOption<Map<String, String>> FILE_FORMAT_PER_LEVEL =
             key("file.format.per.level")
