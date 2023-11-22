@@ -104,11 +104,11 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
-        if (split.beforeFiles().size() > 0) {
+        if (!split.beforeFiles().isEmpty()) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
         for (DataFileMeta file : split.dataFiles()) {
-            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file);
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
@@ -173,7 +173,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                     () ->
                             new RowDataFileRecordReader(
                                     fileIO,
-                                    dataFilePathFactory.toPath(file.fileName()),
+                                    dataFilePathFactory.toPath(file),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),

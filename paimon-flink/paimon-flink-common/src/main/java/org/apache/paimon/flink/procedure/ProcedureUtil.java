@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.factories.FactoryException;
 import org.apache.paimon.factories.FactoryUtil;
+import org.apache.paimon.flink.FlinkGenericCatalog;
 
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedures.Procedure;
@@ -51,6 +52,22 @@ public class ProcedureUtil {
                                     ProcedureBase.class,
                                     procedurePath.getObjectName())
                             .withCatalog(catalog);
+            return Optional.of(procedure);
+        } catch (FactoryException e) {
+            return Optional.empty();
+        }
+    }
+
+    public static Optional<Procedure> getGenericProcedure(
+            FlinkGenericCatalog flinkGenericCatalog, String database, String procedureName) {
+        try {
+            GenericProcedureBase procedure =
+                    FactoryUtil.discoverFactory(
+                                    GenericProcedureBase.class.getClassLoader(),
+                                    GenericProcedureBase.class,
+                                    procedureName)
+                            .withDefaultDatabase(database)
+                            .withFlinkCatalog(flinkGenericCatalog);
             return Optional.of(procedure);
         } catch (FactoryException e) {
             return Optional.empty();

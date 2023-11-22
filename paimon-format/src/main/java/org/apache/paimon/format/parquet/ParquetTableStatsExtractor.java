@@ -31,6 +31,7 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.parquet.column.statistics.BinaryStatistics;
@@ -67,15 +68,27 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
 
     @Override
     public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
-        Map<String, Statistics<?>> stats = ParquetUtil.extractColumnStats(fileIO, path);
+        return extractWithFileInfo(fileIO, path).getLeft();
+    }
+
+    @Override
+    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+            throws IOException {
+        Pair<Map<String, Statistics<?>>, FileInfo> statsPair =
+                ParquetUtil.extractColumnStats(fileIO, path);
         FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
-        return IntStream.range(0, rowType.getFieldCount())
-                .mapToObj(
-                        i -> {
-                            DataField field = rowType.getFields().get(i);
-                            return toFieldStats(field, stats.get(field.name()), collectors[i]);
-                        })
-                .toArray(FieldStats[]::new);
+        return Pair.of(
+                IntStream.range(0, rowType.getFieldCount())
+                        .mapToObj(
+                                i -> {
+                                    DataField field = rowType.getFields().get(i);
+                                    return toFieldStats(
+                                            field,
+                                            statsPair.getLeft().get(field.name()),
+                                            collectors[i]);
+                                })
+                        .toArray(FieldStats[]::new),
+                statsPair.getRight());
     }
 
     private FieldStats toFieldStats(

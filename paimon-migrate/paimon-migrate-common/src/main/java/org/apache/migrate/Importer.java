@@ -16,32 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.migrate;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+/** Importer interface for importing table from other data-lake like hive, iceberg, hudi and etc. */
+public interface Importer {
 
-import java.io.IOException;
-
-/** Extracts statistics directly from file. */
-public interface TableStatsExtractor {
-
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
-
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
-
-    /** File info fetched from physical file. */
-    class FileInfo {
-
-        private long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
-    }
+    void executeImport(boolean sync, boolean deleteOriginTable) throws Exception;
 }

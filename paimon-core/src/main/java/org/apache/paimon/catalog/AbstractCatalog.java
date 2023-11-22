@@ -352,6 +352,10 @@ public abstract class AbstractCatalog implements Catalog {
         tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
     private String[] tableAndSystemName(Identifier identifier) {
         String[] splits = StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
         if (splits.length != 2) {

@@ -114,8 +114,16 @@ public class TestHiveMetastore {
      * Starts a TestHiveMetastore with the default connection pool size (5) and the default
      * HiveConf.
      */
+    public void start(int port) {
+        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, port);
+    }
+
+    /**
+     * Starts a TestHiveMetastore with the default connection pool size (5) and the default
+     * HiveConf.
+     */
     public void start() {
-        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE);
+        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, 9093);
     }
 
     /**
@@ -124,9 +132,9 @@ public class TestHiveMetastore {
      * @param conf The hive configuration to use
      * @param poolSize The number of threads in the executor pool
      */
-    public void start(HiveConf conf, int poolSize) {
+    public void start(HiveConf conf, int poolSize, int portNum) {
         try {
-            TServerSocket socket = new TServerSocket(9083);
+            TServerSocket socket = new TServerSocket(portNum);
             int port = socket.getServerSocket().getLocalPort();
             initConf(conf, port);
 
@@ -141,6 +149,7 @@ public class TestHiveMetastore {
             System.setProperty(
                     HiveConf.ConfVars.METASTOREURIS.varname,
                     hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS));
+            System.setProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouseDir());
         } catch (Exception e) {
             throw new RuntimeException("Cannot start TestHiveMetastore", e);
         }
@@ -157,6 +166,8 @@ public class TestHiveMetastore {
         if (baseHandler != null) {
             baseHandler.shutdown();
         }
+        System.clearProperty(HiveConf.ConfVars.METASTOREURIS.varname);
+        System.clearProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname);
     }
 
     public void reset() throws Exception {
@@ -168,6 +179,10 @@ public class TestHiveMetastore {
                 fs.delete(fileStatus.getPath(), true);
             }
         }
+    }
+
+    private static String warehouseDir() {
+        return "file:" + HIVE_LOCAL_DIR.getAbsolutePath();
     }
 
     private TServer newThriftServer(TServerSocket socket, int poolSize, HiveConf conf)
@@ -192,9 +207,7 @@ public class TestHiveMetastore {
 
     private void initConf(HiveConf conf, int port) {
         conf.set(HiveConf.ConfVars.METASTOREURIS.varname, "thrift://localhost:" + port);
-        conf.set(
-                HiveConf.ConfVars.METASTOREWAREHOUSE.varname,
-                "file:" + HIVE_LOCAL_DIR.getAbsolutePath());
+        conf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouseDir());
         conf.set(HiveConf.ConfVars.METASTORE_TRY_DIRECT_SQL.varname, "false");
         conf.set(
                 HiveConf.ConfVars.METASTORE_DISALLOW_INCOMPATIBLE_COL_TYPE_CHANGES.varname,

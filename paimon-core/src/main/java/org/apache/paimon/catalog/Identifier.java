@@ -88,6 +88,17 @@ public class Identifier implements Serializable {
         return new Identifier(paths[0], paths[1]);
     }
 
+    public static Identifier getOrDefault(String name, String defaultDatabase) {
+        String[] paths = name.split("\\.");
+        if (paths.length == 1) {
+            return new Identifier(defaultDatabase, name);
+        } else if (paths.length == 2) {
+            return fromString(name);
+        } else {
+            throw new IllegalArgumentException("Can't parse table id " + name);
+        }
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {

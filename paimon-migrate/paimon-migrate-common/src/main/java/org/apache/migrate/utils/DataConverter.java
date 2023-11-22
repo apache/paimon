@@ -16,32 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.migrate.utils;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.data.BinaryRowWriter;
 
-import java.io.IOException;
+/** Converter to convert value to specified format in binaryRow. */
+public interface DataConverter {
 
-/** Extracts statistics directly from file. */
-public interface TableStatsExtractor {
-
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
-
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
-
-    /** File info fetched from physical file. */
-    class FileInfo {
-
-        private long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
-    }
+    void write(BinaryRowWriter binaryRowWriter, int position, String value);
 }

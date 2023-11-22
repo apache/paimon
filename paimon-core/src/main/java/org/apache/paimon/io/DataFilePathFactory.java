@@ -65,6 +65,14 @@ public class DataFilePathFactory {
         return new Path(bucketDir + "/" + fileName);
     }
 
+    public Path toPath(DataFileMeta file) {
+        if (file.isExternalFile()) {
+            return file.externalPath();
+        } else {
+            return toPath(file.fileName());
+        }
+    }
+
     @VisibleForTesting
     public String uuid() {
         return uuid;
@@ -81,5 +89,13 @@ public class DataFilePathFactory {
         }
 
         return fileName.substring(index + 1);
+    }
+
+    public static String formatIdentifier(DataFileMeta dataFileMeta) {
+        if (dataFileMeta.isExternalFile()) {
+            return dataFileMeta.externalFileFormat();
+        } else {
+            return formatIdentifier(dataFileMeta.fileName());
+        }
     }
 }

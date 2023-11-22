@@ -16,32 +16,36 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.connector.catalog.TableCatalog;
+import org.apache.spark.sql.types.StructType;
 
-import java.io.IOException;
+/** Test. */
+public class MigrationTableProcedure extends BaseProcedure {
 
-/** Extracts statistics directly from file. */
-public interface TableStatsExtractor {
+    protected MigrationTableProcedure(TableCatalog tableCatalog) {
+        super(tableCatalog);
+    }
 
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
+    @Override
+    public ProcedureParameter[] parameters() {
+        return new ProcedureParameter[0];
+    }
 
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
+    @Override
+    public StructType outputType() {
+        return null;
+    }
 
-    /** File info fetched from physical file. */
-    class FileInfo {
+    @Override
+    public InternalRow[] call(InternalRow args) {
+        return new InternalRow[0];
+    }
 
-        private long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
+    @Override
+    public String description() {
+        return super.description();
     }
 }

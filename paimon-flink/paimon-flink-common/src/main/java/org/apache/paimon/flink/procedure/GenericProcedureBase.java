@@ -16,32 +16,26 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.format;
+package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.factories.Factory;
+import org.apache.paimon.flink.FlinkGenericCatalog;
 
-import java.io.IOException;
+import org.apache.flink.table.procedures.Procedure;
 
-/** Extracts statistics directly from file. */
-public interface TableStatsExtractor {
+/** Test. */
+public abstract class GenericProcedureBase implements Procedure, Factory {
 
-    FieldStats[] extract(FileIO fileIO, Path path) throws IOException;
+    protected FlinkGenericCatalog flinkGenericCatalog;
+    protected String defaultDatabase;
 
-    Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path) throws IOException;
+    GenericProcedureBase withFlinkCatalog(FlinkGenericCatalog flinkGenericCatalog) {
+        this.flinkGenericCatalog = flinkGenericCatalog;
+        return this;
+    }
 
-    /** File info fetched from physical file. */
-    class FileInfo {
-
-        private long rowCount;
-
-        public FileInfo(long rowCount) {
-            this.rowCount = rowCount;
-        }
-
-        public long getRowCount() {
-            return rowCount;
-        }
+    GenericProcedureBase withDefaultDatabase(String database) {
+        this.defaultDatabase = database;
+        return this;
     }
 }
