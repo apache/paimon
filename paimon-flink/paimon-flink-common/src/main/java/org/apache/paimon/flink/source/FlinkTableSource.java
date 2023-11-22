@@ -20,8 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
@@ -83,25 +82,7 @@ public abstract class FlinkTableSource {
         List<ResolvedExpression> unConsumedFilters = new ArrayList<>();
         List<ResolvedExpression> consumedFilters = new ArrayList<>();
         List<Predicate> converted = new ArrayList<>();
-        PredicateVisitor<Boolean> visitor =
-                new PredicateVisitor<Boolean>() {
-                    @Override
-                    public Boolean visit(LeafPredicate predicate) {
-                        return partitionKeys.contains(predicate.fieldName());
-                    }
-
-                    @Override
-                    public Boolean visit(CompoundPredicate predicate) {
-                        for (Predicate child : predicate.children()) {
-                            Boolean matched = child.visit(this);
-
-                            if (!matched) {
-                                return false;
-                            }
-                        }
-                        return true;
-                    }
-                };
+        PredicateVisitor<Boolean> visitor = new PartitionPredicateVisitor(partitionKeys);
 
         for (ResolvedExpression filter : filters) {
             Optional<Predicate> predicateOptional = PredicateConverter.convert(rowType, filter);

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.spark;
 
+import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
 
@@ -27,6 +28,8 @@ import org.apache.spark.sql.connector.read.SupportsPushDownFilters;
 import org.apache.spark.sql.connector.read.SupportsPushDownRequiredColumns;
 import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.StructType;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +37,7 @@ import java.util.List;
 /** A Spark {@link ScanBuilder} for paimon. */
 public class SparkScanBuilder
         implements ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns {
-
+    private static final Logger LOG = LoggerFactory.getLogger(SparkScanBuilder.class);
     private final Table table;
 
     private List<Predicate> predicates = new ArrayList<>();
@@ -47,19 +50,35 @@ public class SparkScanBuilder
 
     @Override
     public Filter[] pushFilters(Filter[] filters) {
+        // There are 3 kinds of filters:
+        // (1) pushable filters which don't need to be evaluated again after scanning, e.g. filter
+        // partitions.
+        // (2) pushable filters which still need to be evaluated after scanning.
+        // (3) non-pushable filters.
+        // case 1 and 2 are considered as pushable filters and will be returned by pushedFilters().
+        // case 2 and 3 are considered as postScan filters and should be return by this method.
+        List<Filter> pushable = new ArrayList<>(filters.length);
+        List<Filter> postScan = new ArrayList<>(filters.length);
+        List<Predicate> predicates = new ArrayList<>(filters.length);
+
         SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
-        List<Predicate> predicates = new ArrayList<>();
-        List<Filter> pushed = new ArrayList<>();
+        PartitionPredicateVisitor visitor = new PartitionPredicateVisitor(table.partitionKeys());
         for (Filter filter : filters) {
             try {
-                predicates.add(converter.convert(filter));
-                pushed.add(filter);
-            } catch (UnsupportedOperationException ignore) {
+                Predicate predicate = converter.convert(filter);
+                predicates.add(predicate);
+                pushable.add(filter);
+                if (!predicate.visit(visitor)) {
+                    postScan.add(filter);
+                }
+            } catch (UnsupportedOperationException e) {
+                LOG.warn(e.getMessage());
+                postScan.add(filter);
             }
         }
         this.predicates = predicates;
-        this.pushedFilters = pushed.toArray(new Filter[0]);
-        return filters;
+        this.pushedFilters = pushable.toArray(new Filter[0]);
+        return postScan.toArray(new Filter[0]);
     }
 
     @Override
