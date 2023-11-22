@@ -139,6 +139,13 @@ Read-optimized system table improves reading performance by only scanning files 
 For primary-key tables, `ro` system table only scans files on the topmost level.
 That is to say, `ro` system table only produces the result of the latest full compaction.
 
+{{< hint info >}}
+
+It is possible that different buckets carry out full compaction at difference times,
+so it is possible that the values of different keys come from different snapshots.
+
+{{< /hint >}}
+
 For append-only tables, as all files can be read without merging,
 `ro` system table acts like the normal append-only table.
 

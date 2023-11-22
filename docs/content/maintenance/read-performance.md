@@ -44,8 +44,8 @@ it still cannot catch up with the ordinary AppendOnly table.
 
 If you want to query fast enough in certain scenarios, but can only find older data, you can:
 
-1. Configure 'full-compaction.delta-commits', when writing data (currently only Flink), full compaction will be performed periodically.
-2. Configure 'scan.mode' to 'compacted-full', when reading data, snapshot of full compaction is picked. Read performance is good.
+1. Configure 'full-compaction.delta-commits' when writing data (currently only in Flink). For streaming jobs, full compaction will then be performed periodically; For batch jobs, full compaction will be carried out when the job ends.
+2. Query from [read-optimized system table]({{< ref "how-to/system-tables#read-optimized-table" >}}). Reading from results of full compaction avoids merging records with the same key, thus improving reading performance.
 
 You can flexibly balance query performance and data latency when reading.
 
