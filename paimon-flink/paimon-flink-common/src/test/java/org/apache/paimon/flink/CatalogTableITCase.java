@@ -773,4 +773,26 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + ") ")
                 .doesNotContain("schema");
     }
+
+    @Test
+    public void testReadOptimizedTable() {
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
+
+        // full compaction will always be performed at the end of batch jobs, as long as
+        // full-compaction.delta-commits is set, regardless of its value
+        sql(
+                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10), (2, 20)");
+        List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
+
+        // no compaction, so result of ro table does not change
+        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
+
+        sql(
+                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
+    }
 }

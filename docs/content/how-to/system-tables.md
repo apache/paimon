@@ -130,6 +130,29 @@ SELECT * FROM MyTable$audit_log;
 */
 ```
 
+### Read-optimized Table
+
+If you require extreme reading performance and can accept reading slightly old data,
+you can use the `ro` (read-optimized) system table.
+Read-optimized system table improves reading performance by only scanning files which does not need merging.
+
+For primary-key tables, `ro` system table only scans files on the topmost level.
+That is to say, `ro` system table only produces the result of the latest full compaction.
+
+{{< hint info >}}
+
+It is possible that different buckets carry out full compaction at difference times,
+so it is possible that the values of different keys come from different snapshots.
+
+{{< /hint >}}
+
+For append-only tables, as all files can be read without merging,
+`ro` system table acts like the normal append-only table.
+
+```sql
+SELECT * FROM MyTable$ro;
+```
+
 ### Files Table
 You can query the files of the table with specific snapshot.
 
