@@ -43,10 +43,6 @@ public class MetricUtils {
         return (Histogram) getMetric(group, metricName);
     }
 
-    public static Histogram getHistogram(MetricGroup group, String metricName) {
-        return (Histogram) getMetric(group, metricName);
-    }
-
     @SuppressWarnings("unchecked")
     private static Metric getMetric(MetricGroup group, String metricName) {
         try {
