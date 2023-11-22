@@ -21,6 +21,7 @@ package org.apache.migrate.utils;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -88,10 +89,13 @@ public class FileMetaUtils {
                     StatsCollectorFactories.createStatsFactories(
                             ((AbstractFileStoreTable) table).coreOptions(),
                             table.rowType().getFieldNames());
+
             TableStatsExtractor tableStatsExtractor =
-                    ((AbstractFileStoreTable) table)
-                            .coreOptions()
-                            .fileFormat()
+                    FileFormat.getFileFormat(
+                                    ((AbstractFileStoreTable) table)
+                                            .coreOptions()
+                                            .toConfiguration(),
+                                    format)
                             .createStatsExtractor(table.rowType(), factories)
                             .get();
             return constructFileMeta(

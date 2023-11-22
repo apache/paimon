@@ -31,8 +31,8 @@ import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -45,18 +45,27 @@ public class AddFileProcedureTest extends ActionITCaseBase {
 
     private static final int PORT = 9084;
 
-    @BeforeAll
-    public static void beforeAll() {
+    @BeforeEach
+    public void beforeEach() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    @AfterAll
-    public static void afterAll() throws Exception {
+    @AfterEach
+    public void afterEach() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
     @Test
-    public void test() throws Exception {
+    public void testOrc() throws Exception {
+        test("orc");
+    }
+
+    @Test
+    public void testParquet() throws Exception {
+        test("parquet");
+    }
+
+    public void test(String format) throws Exception {
         StreamExecutionEnvironment env = buildDefaultEnv(false);
 
         TableEnvironment tEnv =
@@ -65,7 +74,8 @@ public class AddFileProcedureTest extends ActionITCaseBase {
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql(
-                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS orc;");
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
         tEnv.executeSql("INSERT INTO hivetable VALUES" + data(1000)).await();
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
