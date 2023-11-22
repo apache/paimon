@@ -28,7 +28,7 @@ import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-/** Temp. */
+/** Add file procedure to add file from hive to paimon. */
 public class AddFileProcedure extends GenericProcedureBase {
 
     @Override

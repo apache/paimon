@@ -33,7 +33,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.HashMap;
 import java.util.Map;
 
-/** Test. */
+/** Migrate procedure to migrate hive table to paimon table. */
 public class MigrationTableProcedure extends GenericProcedureBase {
 
     private static final String BACK_SUFFIX = "_back";
