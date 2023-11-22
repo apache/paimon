@@ -36,7 +36,7 @@ import java.util.Map;
 /** Migrate procedure to migrate hive table to paimon table. */
 public class MigrationTableProcedure extends GenericProcedureBase {
 
-    private static final String BACK_SUFFIX = "_back";
+    private static final String BACK_SUFFIX = "_BACKUP_";
 
     @Override
     public String identifier() {
