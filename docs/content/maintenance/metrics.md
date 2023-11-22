@@ -300,16 +300,16 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
 <table class="table table-bordered">
     <thead>
     <tr>
-      <th class="text-left" style="width: 200pt"></th>
-      <th class="text-left" style="width: 250pt">Scope</th>
-      <th class="text-left" style="width: 210pt">Infix</th>
+      <th class="text-left" style="width: 130pt"></th>
+      <th class="text-left" style="width: 280pt">Scope</th>
+      <th class="text-left" style="width: 250pt">Infix</th>
     </tr>
     </thead>
     <tbody>
         <tr>
             <td>Scan Metrics</td>
             <td>&lt;host&gt;.jobmanager.&lt;job_name&gt;</td>
-            <td>&lt;source_operator_name&gt;.coordinator.enumerator.paimon.table.&lt;table_name&gt;.scan</td>
+            <td>&lt;source_operator_name&gt;.coordinator. enumerator.paimon.table.&lt;table_name&gt;.scan</td>
         </tr>
         <tr>
             <td>Commit Metrics</td>
