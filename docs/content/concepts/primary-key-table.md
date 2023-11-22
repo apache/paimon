@@ -38,13 +38,19 @@ A bucket is the smallest storage unit for reads and writes, each bucket director
 
 ### Fixed Bucket
 
-Configure a bucket greater than 0, rescaling buckets can only be done through offline processes,
-see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
-small files, and a too small number of buckets leads to poor write performance.
+Configure a bucket greater than 0, using Fixed Bucket mode, according to `Math.abs(key_hashcode % numBuckets)` to compute
+the bucket of record.
+
+Rescaling buckets can only be done through offline processes, see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}).
+A too large number of buckets leads to too many small files, and a too small number of buckets leads to poor write performance.
 
 ### Dynamic Bucket
 
-Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of the number of buckets.
+Configure `'bucket' = '-1'`. The keys that arrive first will fall into the old buckets, and the new keys will fall into
+the new buckets, the distribution of buckets and keys depends on the order in which the data arrives. Paimon maintains
+an index to determine which key corresponds to which bucket.
+
+Paimon will automatically expand the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
 - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
