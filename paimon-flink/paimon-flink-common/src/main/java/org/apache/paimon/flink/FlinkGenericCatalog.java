@@ -378,7 +378,7 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public CatalogColumnStatistics getPartitionColumnStatistics(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
-            throws CatalogException, PartitionNotExistException {
+            throws PartitionNotExistException, CatalogException {
         return flink.getPartitionColumnStatistics(tablePath, partitionSpec);
     }
 
