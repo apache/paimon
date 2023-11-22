@@ -324,8 +324,7 @@ public class PulsarActionUtils {
     /** Referenced to {@link PulsarPartitionSplitReader#createPulsarConsumer}. */
     static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
             Configuration pulsarConfig, String topic) throws PulsarClientException {
-        SourceConfiguration pulsarSourceConfiguration =
-                toSourceConfiguration(preprocessPulsarConfig(pulsarConfig));
+        SourceConfiguration pulsarSourceConfiguration = toSourceConfiguration(pulsarConfig);
         PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
 
         ConsumerBuilder<String> consumerBuilder =
