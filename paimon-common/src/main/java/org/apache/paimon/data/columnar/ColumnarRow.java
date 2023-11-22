@@ -232,10 +232,4 @@ public final class ColumnarRow implements InternalRow, DataSetters, Serializable
         columnarRow.setRowKind(rowKind);
         return columnarRow;
     }
-
-    public ColumnarRow copy() {
-        ColumnarRow columnarRow = new ColumnarRow(vectorizedColumnBatch, rowId);
-        columnarRow.setRowKind(rowKind);
-        return columnarRow;
-    }
 }
