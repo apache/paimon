@@ -143,7 +143,9 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         rocksdbOptions.set(BLOCK_CACHE_SIZE, new MemorySize(blockCache));
         this.stateFactory =
                 new RocksDBStateFactory(
-                        path.toString(), options, coreOptions.crossPartitionUpsertIndexTtl());
+                        path.toString(),
+                        rocksdbOptions,
+                        coreOptions.crossPartitionUpsertIndexTtl());
         RowType keyType = table.schema().logicalTrimmedPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(
