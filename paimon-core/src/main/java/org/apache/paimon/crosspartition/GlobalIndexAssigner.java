@@ -32,6 +32,7 @@ import org.apache.paimon.lookup.RocksDBOptions;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.AbstractFileStoreTable;
@@ -67,6 +68,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 
+import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -107,6 +109,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     // ================== Start Public API ===================
 
     public void open(
+            long minOffHeapMemory,
             IOManager ioManager,
             int numAssigners,
             int assignId,
@@ -134,6 +137,10 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         ThreadLocalRandom.current().nextInt(ioManager.tempDirs().length)];
         this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
 
+        Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
+        long blockCache =
+                Math.max(minOffHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
+        rocksdbOptions.set(BLOCK_CACHE_SIZE, new MemorySize(blockCache));
         this.stateFactory =
                 new RocksDBStateFactory(
                         path.toString(), options, coreOptions.crossPartitionUpsertIndexTtl());
