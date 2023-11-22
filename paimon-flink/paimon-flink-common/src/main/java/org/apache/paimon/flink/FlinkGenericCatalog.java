@@ -285,8 +285,9 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogPartitionSpec partitionSpec,
             CatalogPartition partition,
             boolean ignoreIfExists)
-            throws CatalogException, TableNotPartitionedException, TableNotExistException,
-                    PartitionSpecInvalidException, PartitionAlreadyExistsException {
+            throws TableNotExistException, TableNotPartitionedException,
+                    PartitionSpecInvalidException, PartitionAlreadyExistsException,
+                    CatalogException {
         try {
             paimon.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
         } catch (Exception e) {
