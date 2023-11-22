@@ -20,7 +20,10 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.io.DataInputView;
+import org.apache.paimon.io.DataOutputView;
 
+import java.io.IOException;
 import java.util.Objects;
 
 /**
@@ -71,6 +74,24 @@ public class RawFile {
     /** Schema id of the file. */
     public long schemaId() {
         return schemaId;
+    }
+
+    public void serialize(DataOutputView out) throws IOException {
+        out.writeUTF(path);
+        out.writeLong(offset);
+        out.writeLong(length);
+        out.writeUTF(format);
+        out.writeLong(schemaId);
+    }
+
+    public static RawFile deserialize(DataInputView in) throws IOException {
+        String path = in.readUTF();
+        long offset = in.readLong();
+        long length = in.readLong();
+        String format = in.readUTF();
+        long schemaId = in.readLong();
+
+        return new RawFile(path, offset, length, format, schemaId);
     }
 
     @Override

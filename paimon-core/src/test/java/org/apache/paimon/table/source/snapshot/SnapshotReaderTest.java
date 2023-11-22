@@ -70,7 +70,7 @@ public class SnapshotReaderTest {
     }
 
     @Test
-    public void testGetPrimaryKeyRawTableFiles() throws Exception {
+    public void testGetPrimaryKeyRawFiles() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.STRING(), DataTypes.INT(), DataTypes.BIGINT()},
@@ -98,7 +98,7 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(reader.convertToRawFiles(dataSplit))
+            assertThat(dataSplit.convertToRawFiles())
                     .hasValue(
                             Collections.singletonList(
                                     new RawFile(
@@ -123,7 +123,7 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
+            assertThat(dataSplit.convertToRawFiles()).isNotPresent();
         }
 
         // compact all files
@@ -146,7 +146,7 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(reader.convertToRawFiles(dataSplit))
+            assertThat(dataSplit.convertToRawFiles())
                     .hasValue(
                             Collections.singletonList(
                                     new RawFile(
@@ -171,7 +171,7 @@ public class SnapshotReaderTest {
         assertThat(dataSplits).hasSize(2);
         for (DataSplit dataSplit : dataSplits) {
             assertThat(dataSplit.dataFiles()).hasSize(2);
-            assertThat(reader.convertToRawFiles(dataSplit)).isNotPresent();
+            assertThat(dataSplit.convertToRawFiles()).isNotPresent();
         }
 
         write.close();
@@ -179,7 +179,7 @@ public class SnapshotReaderTest {
     }
 
     @Test
-    public void testGetAppendOnlyRawTableFiles() throws Exception {
+    public void testGetAppendOnlyRawFiles() throws Exception {
         RowType rowType =
                 RowType.of(
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
@@ -205,7 +205,7 @@ public class SnapshotReaderTest {
         DataSplit dataSplit = dataSplits.get(0);
         assertThat(dataSplit.dataFiles()).hasSize(1);
         DataFileMeta meta = dataSplit.dataFiles().get(0);
-        assertThat(reader.convertToRawFiles(dataSplit))
+        assertThat(dataSplit.convertToRawFiles())
                 .hasValue(
                         Collections.singletonList(
                                 new RawFile(
@@ -237,7 +237,7 @@ public class SnapshotReaderTest {
         assertThat(dataSplit.dataFiles()).hasSize(2);
         DataFileMeta meta0 = dataSplit.dataFiles().get(0);
         DataFileMeta meta1 = dataSplit.dataFiles().get(1);
-        assertThat(reader.convertToRawFiles(dataSplit))
+        assertThat(dataSplit.convertToRawFiles())
                 .hasValue(
                         Arrays.asList(
                                 new RawFile(

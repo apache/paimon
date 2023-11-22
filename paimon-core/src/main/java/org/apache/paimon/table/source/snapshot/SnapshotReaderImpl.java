@@ -20,7 +20,6 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.consumer.ConsumerManager;
@@ -258,6 +257,40 @@ public class SnapshotReaderImpl implements SnapshotReader {
         };
     }
 
+    private List<DataSplit> generateSplits(
+            long snapshotId,
+            boolean isStreaming,
+            SplitGenerator splitGenerator,
+            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
+        List<DataSplit> splits = new ArrayList<>();
+        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
+                groupedDataFiles.entrySet()) {
+            BinaryRow partition = entry.getKey();
+            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
+            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
+                int bucket = bucketEntry.getKey();
+                List<DataFileMeta> bucketFiles = bucketEntry.getValue();
+                DataSplit.Builder builder =
+                        DataSplit.builder()
+                                .withSnapshot(snapshotId)
+                                .withPartition(partition)
+                                .withBucket(bucket)
+                                .isStreaming(isStreaming);
+                List<List<DataFileMeta>> splitGroups =
+                        isStreaming
+                                ? splitGenerator.splitForStreaming(bucketFiles)
+                                : splitGenerator.splitForBatch(bucketFiles);
+                for (List<DataFileMeta> dataFiles : splitGroups) {
+                    splits.add(
+                            builder.withDataFiles(dataFiles)
+                                    .rawFiles(convertToRawFiles(partition, bucket, dataFiles))
+                                    .build());
+                }
+            }
+        }
+        return splits;
+    }
+
     @Override
     public List<BinaryRow> partitions() {
         List<ManifestEntry> entryList = scan.plan().files();
@@ -273,47 +306,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 .map(Optional::get)
                 .map(ManifestEntry::partition)
                 .collect(Collectors.toList());
-    }
-
-    @Override
-    public Optional<List<RawFile>> convertToRawFiles(DataSplit split) {
-        String bucketPath = pathFactory.bucketPath(split.partition(), split.bucket()).toString();
-        List<DataFileMeta> dataFiles = split.dataFiles();
-
-        // bucket with only one file can be returned
-        if (dataFiles.size() == 1) {
-            return Optional.of(
-                    Collections.singletonList(makeRawTableFile(bucketPath, dataFiles.get(0))));
-        }
-
-        // append only files can be returned
-        if (tableSchema.primaryKeys().isEmpty()) {
-            return Optional.of(makeRawTableFiles(bucketPath, dataFiles));
-        }
-
-        // bucket containing only one level (except level 0) can be returned
-        Set<Integer> levels =
-                dataFiles.stream().map(DataFileMeta::level).collect(Collectors.toSet());
-        if (levels.size() == 1 && !levels.contains(0)) {
-            return Optional.of(makeRawTableFiles(bucketPath, dataFiles));
-        }
-
-        return Optional.empty();
-    }
-
-    private List<RawFile> makeRawTableFiles(String bucketPath, List<DataFileMeta> dataFiles) {
-        return dataFiles.stream()
-                .map(f -> makeRawTableFile(bucketPath, f))
-                .collect(Collectors.toList());
-    }
-
-    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
-        return new RawFile(
-                bucketPath + "/" + meta.fileName(),
-                0,
-                meta.fileSize(),
-                new CoreOptions(tableSchema.options()).formatType().toString().toLowerCase(),
-                meta.schemaId());
     }
 
     @Override
@@ -368,6 +360,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
+                                .rawFiles(convertToRawFiles(part, bucket, data))
                                 .build();
                 splits.add(split);
             }
@@ -414,36 +407,42 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return lazyPartitionComparator;
     }
 
-    @VisibleForTesting
-    public static List<DataSplit> generateSplits(
-            long snapshotId,
-            boolean isStreaming,
-            SplitGenerator splitGenerator,
-            Map<BinaryRow, Map<Integer, List<DataFileMeta>>> groupedDataFiles) {
-        List<DataSplit> splits = new ArrayList<>();
-        for (Map.Entry<BinaryRow, Map<Integer, List<DataFileMeta>>> entry :
-                groupedDataFiles.entrySet()) {
-            BinaryRow partition = entry.getKey();
-            Map<Integer, List<DataFileMeta>> buckets = entry.getValue();
-            for (Map.Entry<Integer, List<DataFileMeta>> bucketEntry : buckets.entrySet()) {
-                int bucket = bucketEntry.getKey();
-                List<DataFileMeta> bucketFiles = bucketEntry.getValue();
-                DataSplit.Builder builder =
-                        DataSplit.builder()
-                                .withSnapshot(snapshotId)
-                                .withPartition(partition)
-                                .withBucket(bucket)
-                                .isStreaming(isStreaming);
-                List<List<DataFileMeta>> splitGroups =
-                        isStreaming
-                                ? splitGenerator.splitForStreaming(bucketFiles)
-                                : splitGenerator.splitForBatch(bucketFiles);
-                splitGroups.stream()
-                        .map(builder::withDataFiles)
-                        .map(DataSplit.Builder::build)
-                        .forEach(splits::add);
-            }
+    private List<RawFile> convertToRawFiles(
+            BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
+        String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+
+        // bucket with only one file can be returned
+        if (dataFiles.size() == 1) {
+            return Collections.singletonList(makeRawTableFile(bucketPath, dataFiles.get(0)));
         }
-        return splits;
+
+        // append only files can be returned
+        if (tableSchema.primaryKeys().isEmpty()) {
+            return makeRawTableFiles(bucketPath, dataFiles);
+        }
+
+        // bucket containing only one level (except level 0) can be returned
+        Set<Integer> levels =
+                dataFiles.stream().map(DataFileMeta::level).collect(Collectors.toSet());
+        if (levels.size() == 1 && !levels.contains(0)) {
+            return makeRawTableFiles(bucketPath, dataFiles);
+        }
+
+        return Collections.emptyList();
+    }
+
+    private List<RawFile> makeRawTableFiles(String bucketPath, List<DataFileMeta> dataFiles) {
+        return dataFiles.stream()
+                .map(f -> makeRawTableFile(bucketPath, f))
+                .collect(Collectors.toList());
+    }
+
+    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
+        return new RawFile(
+                bucketPath + "/" + meta.fileName(),
+                0,
+                meta.fileSize(),
+                new CoreOptions(tableSchema.options()).formatType().toString().toLowerCase(),
+                meta.schemaId());
     }
 }
