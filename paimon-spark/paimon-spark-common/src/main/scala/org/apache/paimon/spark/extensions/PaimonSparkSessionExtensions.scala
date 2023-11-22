@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.extensions
 
 import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.analysis.{CoerceArguments, PaimonAnalysis, PaimonMergeInto, ResolveProcedures, RewriteRowLevelCommands}
+import org.apache.spark.sql.catalyst.analysis.{CoerceArguments, PaimonAnalysis, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonUpdateTable, ResolveProcedures}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.spark.sql.execution.datasources.v2.ExtendedDataSourceV2Strategy
@@ -35,7 +35,10 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectResolutionRule(spark => ResolveProcedures(spark))
     extensions.injectResolutionRule(_ => CoerceArguments)
 
-    extensions.injectPostHocResolutionRule(_ => RewriteRowLevelCommands)
+    extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
+
+    extensions.injectPostHocResolutionRule(_ => PaimonUpdateTable)
+    extensions.injectPostHocResolutionRule(_ => PaimonDeleteTable)
     extensions.injectPostHocResolutionRule(spark => PaimonMergeInto(spark))
 
     // table function extensions

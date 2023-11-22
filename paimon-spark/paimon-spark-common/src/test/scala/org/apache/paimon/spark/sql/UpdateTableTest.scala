@@ -20,7 +20,7 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.PaimonSparkTestBase
 
-import org.apache.spark.sql.Update
+import org.apache.spark.sql.catalyst.analysis.Update
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 class UpdateTableTest extends PaimonSparkTestBase {
@@ -33,7 +33,7 @@ class UpdateTableTest extends PaimonSparkTestBase {
     spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
 
     assertThatThrownBy(() => spark.sql("UPDATE T SET name = 'a_new' WHERE id = 1"))
-      .hasMessageContaining("can not support update, because there is no primary key")
+      .hasMessageContaining("Only support to update table with primary keys.")
   }
 
   CoreOptions.MergeEngine.values().foreach {
@@ -72,7 +72,7 @@ class UpdateTableTest extends PaimonSparkTestBase {
     spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22'), (3, 'c', '33')")
 
     assertThatThrownBy(() => spark.sql("UPDATE T SET id = 11 WHERE name = 'a'"))
-      .hasMessageContaining("update to primary keys is not supported")
+      .hasMessageContaining("Can't update the primary key column.")
   }
 
   test(s"test update with no where") {

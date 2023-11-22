@@ -18,14 +18,16 @@
 package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.commands.{PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeIntoTable, OverwritePartitionsDynamic, PaimonDynamicPartitionOverwriteCommand, PaimonTableValuedFunctions, PaimonTableValueFunction}
+import org.apache.spark.sql.catalyst.analysis.PaimonRelation.isPaimonTable
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeIntoTable, OverwritePartitionsDynamic, PaimonTableValuedFunctions, PaimonTableValueFunction, TruncateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
-class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] with AnalysisHelper {
+class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
@@ -39,6 +41,18 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] with Analy
       PaimonMergeIntoResolver(merge, session)
   }
 
+}
+
+case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    plan match {
+      case t @ TruncateTable(PaimonRelation(table)) if t.resolved =>
+        PaimonTruncateTableCommand(table, Map.empty)
+
+      case _ => plan
+    }
+  }
 }
 
 object PaimonDynamicPartitionOverwrite {

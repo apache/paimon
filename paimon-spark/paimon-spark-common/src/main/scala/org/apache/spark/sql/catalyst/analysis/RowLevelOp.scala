@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql
+package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.paimon.CoreOptions.MergeEngine
 
@@ -31,6 +31,13 @@ case object Delete extends RowLevelOp {
 
 case object Update extends RowLevelOp {
   override def toString: String = "update"
+
+  override val supportedMergeEngine: Seq[MergeEngine] =
+    Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+}
+
+case object MergeInto extends RowLevelOp {
+  override def toString: String = "merge into"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)

@@ -26,14 +26,18 @@ import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import scala.util.control.NonFatal
 
 /** An analysis helper */
-trait AnalysisHelper extends Logging {
+object PaimonRelation extends Logging {
+
+  def unapply(plan: LogicalPlan): Option[SparkTable] =
+    EliminateSubqueryAliases(plan) match {
+      case DataSourceV2Relation(table: SparkTable, _, _, _, _) => Some(table)
+      case ResolvedTable(_, _, table: SparkTable, _) => Some(table)
+      case _ => None
+    }
 
   def isPaimonTable(plan: LogicalPlan): Boolean = {
     try {
-      EliminateSubqueryAliases(plan) match {
-        case DataSourceV2Relation(_: SparkTable, _, _, _, _) => true
-        case _ => false
-      }
+      PaimonRelation.unapply(plan).nonEmpty
     } catch {
       case NonFatal(e) =>
         logWarning("Can't check if this plan is a paimon table", e)
@@ -41,7 +45,7 @@ trait AnalysisHelper extends Logging {
     }
   }
 
-  def getPaimonTableRelation(plan: LogicalPlan): DataSourceV2Relation = {
+  def getPaimonRelation(plan: LogicalPlan): DataSourceV2Relation = {
     EliminateSubqueryAliases(plan) match {
       case d @ DataSourceV2Relation(_: SparkTable, _, _, _, _) => d
       case _ => throw new RuntimeException(s"It's not a paimon table, $plan")

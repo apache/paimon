@@ -19,18 +19,12 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
 
-import org.apache.spark.sql.connector.catalog.SupportsDelete;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
@@ -40,28 +34,22 @@ import org.apache.spark.sql.connector.expressions.Transform;
 import org.apache.spark.sql.connector.read.ScanBuilder;
 import org.apache.spark.sql.connector.write.LogicalWriteInfo;
 import org.apache.spark.sql.connector.write.WriteBuilder;
-import org.apache.spark.sql.sources.AlwaysTrue;
-import org.apache.spark.sql.sources.Filter;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.UUID;
 
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for paimon. */
 public class SparkTable
         implements org.apache.spark.sql.connector.catalog.Table,
                 SupportsRead,
                 SupportsWrite,
-                SupportsDelete,
                 PaimonPartitionManagement {
 
     private final Table table;
@@ -117,49 +105,6 @@ public class SparkTable
         } catch (Exception e) {
             throw new RuntimeException("Only FileStoreTable can be written.");
         }
-    }
-
-    public boolean canDeleteWhere(Filter[] filters) {
-        SparkFilterConverter converter = new SparkFilterConverter(table.rowType());
-        List<Predicate> predicates = new ArrayList<>();
-        for (Filter filter : filters) {
-            if (filter.equals(new AlwaysTrue())) {
-                continue;
-            }
-            predicates.add(converter.convert(filter));
-        }
-        deletePredicate = predicates.isEmpty() ? null : PredicateBuilder.and(predicates);
-        return deletePredicate == null || deleteIsDropPartition();
-    }
-
-    @Override
-    public void deleteWhere(Filter[] filters) {
-        FileStoreCommit commit =
-                ((AbstractFileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
-        long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
-        if (deletePredicate == null) {
-            commit.purgeTable(identifier);
-        } else if (deleteIsDropPartition()) {
-            commit.dropPartitions(Collections.singletonList(deletePartitions()), identifier);
-        } else {
-            // can't reach here
-            throw new UnsupportedOperationException();
-        }
-    }
-
-    private boolean deleteIsDropPartition() {
-        return deletePredicate != null
-                && deletePredicate.visit(new OnlyPartitionKeyEqualVisitor(table.partitionKeys()));
-    }
-
-    private Map<String, String> deletePartitions() {
-        if (deletePredicate == null) {
-            return null;
-        }
-        OnlyPartitionKeyEqualVisitor visitor =
-                new OnlyPartitionKeyEqualVisitor(table.partitionKeys());
-        deletePredicate.visit(visitor);
-        return visitor.partitions();
     }
 
     @Override
