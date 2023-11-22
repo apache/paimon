@@ -61,16 +61,6 @@ trait AssignmentAlignmentHelper extends SQLConfHelper with ExpressionHelper {
     }
   }
 
-  private def toRefSeq(expr: Expression): Seq[String] = expr match {
-    case attr: Attribute =>
-      Seq(attr.name)
-    case GetStructField(child, _, Some(name)) =>
-      toRefSeq(child) :+ name
-    case other =>
-      throw new UnsupportedOperationException(
-        s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
-  }
-
   private def recursiveAlignUpdates(
       targetAttrs: Seq[NamedExpression],
       updates: Seq[AttrUpdate],
