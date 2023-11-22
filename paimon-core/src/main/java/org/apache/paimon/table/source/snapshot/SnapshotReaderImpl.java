@@ -186,6 +186,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withLimit(int limit) {
+        scan.withLimit(limit);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withMode(ScanMode scanMode) {
         this.scanMode = scanMode;
         scan.withKind(scanMode);

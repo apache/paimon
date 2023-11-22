@@ -85,6 +85,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     private ScanMetrics scanMetrics = null;
 
+    // Currently, only append-only table can set this to enable pushDownLimit.
+    protected Integer pushDownLimit = null;
+
     public AbstractFileStoreScan(
             RowType partitionType,
             ScanBucketFilter bucketKeyFilter,
@@ -200,6 +203,11 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withLimit(int limit) {
+        return this;
+    }
+
+    @Override
     public Plan plan() {
 
         Pair<Snapshot, List<ManifestEntry>> planResult = doPlan(this::readManifestFileMeta);
@@ -271,6 +279,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         List<ManifestEntry> files = new ArrayList<>();
         Collection<ManifestEntry> mergedEntries = ManifestEntry.mergeEntries(entries);
         long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
+        long scannedRowCount = 0;
         for (ManifestEntry file : mergedEntries) {
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
@@ -289,6 +298,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 partInfo, numOfBuckets, file.totalBuckets()));
             }
 
+            if (canStopScan(scannedRowCount)) {
+                break;
+            }
+
             // bucket filter should not be applied along with partition filter
             // because the specifiedBucket is computed against the current
             // numOfBuckets
@@ -297,6 +310,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             // which renders the bucket check invalid
             if (filterByBucket(file) && filterByBucketSelector(file) && filterByLevel(file)) {
                 files.add(file);
+                scannedRowCount += file.file().rowCount();
             }
         }
 
@@ -357,6 +371,14 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 snapshot.commitKind()));
             default:
                 throw new UnsupportedOperationException("Unknown scan kind " + scanMode.name());
+        }
+    }
+
+    private boolean canStopScan(long scannedRowCount) {
+        if (pushDownLimit == null) {
+            return false;
+        } else {
+            return scannedRowCount >= pushDownLimit;
         }
     }
 

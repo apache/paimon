@@ -65,6 +65,8 @@ public interface FileStoreScan {
 
     FileStoreScan withMetrics(ScanMetrics metrics);
 
+    FileStoreScan withLimit(int limit);
+
     /** Produce a {@link Plan}. */
     Plan plan();
 

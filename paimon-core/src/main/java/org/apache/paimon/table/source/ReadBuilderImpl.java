@@ -37,6 +37,9 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Predicate filter;
     private int[][] projection;
+
+    private Integer limit = null;
+
     private Map<String, String> partitionSpec;
 
     public ReadBuilderImpl(InnerTable table) {
@@ -75,8 +78,19 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withLimit(int limit) {
+        this.limit = limit;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
-        return table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
+        InnerTableScan tableScan =
+                table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
+        if (limit != null) {
+            tableScan.withLimit(limit);
+        }
+        return tableScan;
     }
 
     @Override

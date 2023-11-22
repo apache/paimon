@@ -68,6 +68,12 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return this;
     }
 
+    @Override
+    public AppendOnlyFileStoreScan withLimit(int limit) {
+        this.pushDownLimit = limit;
+        return this;
+    }
+
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {

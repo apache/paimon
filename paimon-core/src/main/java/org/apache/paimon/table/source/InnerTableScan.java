@@ -28,6 +28,10 @@ public interface InnerTableScan extends TableScan {
 
     InnerTableScan withFilter(Predicate predicate);
 
+    default InnerTableScan withLimit(int limit) {
+        return this;
+    }
+
     default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
         return this;
     }

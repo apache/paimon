@@ -60,6 +60,12 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     }
 
     @Override
+    public InnerTableScan withLimit(int limit) {
+        snapshotReader.withLimit(limit);
+        return this;
+    }
+
+    @Override
     public TableScan.Plan plan() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);

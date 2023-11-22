@@ -51,6 +51,10 @@ public interface SnapshotReader {
 
     SnapshotReader withFilter(Predicate predicate);
 
+    default SnapshotReader withLimit(int limit) {
+        return this;
+    }
+
     SnapshotReader withPartitionFilter(Map<String, String> partitionSpec);
 
     SnapshotReader withMode(ScanMode scanMode);

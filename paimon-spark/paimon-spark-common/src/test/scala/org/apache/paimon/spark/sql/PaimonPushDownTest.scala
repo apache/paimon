@@ -17,10 +17,16 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.table.source.DataSplit
+
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, EqualTo, Expression, Literal}
 import org.apache.spark.sql.catalyst.plans.logical.Filter
+import org.apache.spark.sql.connector.read.{ScanBuilder, SupportsPushDownLimit}
+import org.apache.spark.sql.util.CaseInsensitiveStringMap
 import org.junit.jupiter.api.Assertions
+
+import scala.collection.JavaConverters._
 
 class SparkPushDownTest extends PaimonSparkTestBase {
 
@@ -73,6 +79,62 @@ class SparkPushDownTest extends PaimonSparkTestBase {
     q = "SELECT * FROM T WHERE pt < 'p3'"
     Assertions.assertFalse(checkFilterExists(q))
     checkAnswer(spark.sql(q), Row(1, "a", "p1") :: Row(2, "b", "p1") :: Row(3, "c", "p2") :: Nil)
+  }
+
+  test("Paimon pushDown: limit for append-only tables") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING, c STRING)
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
+    spark.sql("INSERT INTO T VALUES (3, 'c', '11'), (4, 'd', '22')")
+
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY a"),
+      Row(1, "a", "11") :: Row(2, "b", "22") :: Row(3, "c", "11") :: Row(4, "d", "22") :: Nil)
+
+    val scanBuilder = getScanBuilder()
+    Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
+
+    val dataFilesWithoutLimit = scanBuilder.build().toBatch.planInputPartitions().flatMap {
+      case partition: SparkInputPartition =>
+        partition.split() match {
+          case dataSplit: DataSplit => dataSplit.dataFiles().asScala
+          case _ => Seq.empty
+        }
+    }
+    Assertions.assertTrue(dataFilesWithoutLimit.length >= 2)
+
+    // with limit
+    Assertions.assertTrue(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
+    val partitions = scanBuilder.build().toBatch.planInputPartitions()
+    Assertions.assertEquals(1, partitions.length)
+    val dataFiles =
+      partitions.head.asInstanceOf[SparkInputPartition].split().asInstanceOf[DataSplit].dataFiles()
+    Assertions.assertEquals(1, dataFiles.size())
+
+    Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
+  }
+
+  test("Paimon pushDown: limit for change-log tables") {
+    spark.sql(s"""
+                 |CREATE TABLE T (a INT, b STRING, c STRING)
+                 |TBLPROPERTIES ('primary-key'='a')
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
+    spark.sql("INSERT INTO T VALUES (3, 'c', '11'), (4, 'd', '22')")
+
+    val scanBuilder = getScanBuilder()
+    Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
+
+    // Tables with primary keys can't support the push-down limit.
+    Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
+  }
+
+  private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
+    new SparkTable(loadTable(tableName))
+      .newScanBuilder(CaseInsensitiveStringMap.empty())
   }
 
   private def checkFilterExists(sql: String): Boolean = {
