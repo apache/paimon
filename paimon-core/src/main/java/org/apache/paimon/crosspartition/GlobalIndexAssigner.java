@@ -109,7 +109,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     // ================== Start Public API ===================
 
     public void open(
-            long minOffHeapMemory,
+            long offHeapMemory,
             IOManager ioManager,
             int numAssigners,
             int assignId,
@@ -138,8 +138,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
 
         Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
-        long blockCache =
-                Math.max(minOffHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
+        // we should avoid too small memory
+        long blockCache = Math.max(offHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
         rocksdbOptions.set(BLOCK_CACHE_SIZE, new MemorySize(blockCache));
         this.stateFactory =
                 new RocksDBStateFactory(
