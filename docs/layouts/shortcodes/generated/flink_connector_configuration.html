@@ -129,6 +129,12 @@ under the License.
             <td>Sink committer memory to control heap memory of global committer.</td>
         </tr>
         <tr>
+            <td><h5>sink.cross-partition.managed-memory</h5></td>
+            <td style="word-wrap: break-word;">256 mb</td>
+            <td>MemorySize</td>
+            <td>Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size according to the weight, the actual memory used depends on the running environment.</td>
+        </tr>
+        <tr>
             <td><h5>sink.managed.writer-buffer-memory</h5></td>
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>

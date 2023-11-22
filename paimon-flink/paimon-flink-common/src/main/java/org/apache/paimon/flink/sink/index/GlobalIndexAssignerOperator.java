@@ -30,6 +30,8 @@ import org.apache.flink.streaming.api.operators.BoundedOneInput;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.computeManagedMemory;
+
 /** A {@link OneInputStreamOperator} for {@link GlobalIndexAssigner}. */
 public class GlobalIndexAssignerOperator
         extends AbstractStreamOperator<Tuple2<InternalRow, Integer>>
@@ -54,6 +56,7 @@ public class GlobalIndexAssignerOperator
                 getContainingTask().getEnvironment().getIOManager();
         ioManager = IOManager.create(flinkIoManager.getSpillingDirectoriesPaths());
         assigner.open(
+                computeManagedMemory(this),
                 ioManager,
                 getRuntimeContext().getNumberOfParallelSubtasks(),
                 getRuntimeContext().getIndexOfThisSubtask(),

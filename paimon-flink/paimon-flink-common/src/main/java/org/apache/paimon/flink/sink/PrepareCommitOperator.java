@@ -23,8 +23,6 @@ import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
 
-import org.apache.flink.core.memory.ManagedMemoryUseCase;
-import org.apache.flink.runtime.execution.Environment;
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
@@ -41,6 +39,7 @@ import java.io.IOException;
 import java.util.List;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.computeManagedMemory;
 
 /** Prepare commit operator to emit {@link Committable}s. */
 public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOperator<OUT>
@@ -67,21 +66,10 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
             memoryAllocator = new MemorySegmentAllocator(containingTask, memoryManager);
             memoryPool =
                     new FlinkMemorySegmentPool(
-                            computeMemorySize(), memoryManager.getPageSize(), memoryAllocator);
+                            computeManagedMemory(this),
+                            memoryManager.getPageSize(),
+                            memoryAllocator);
         }
-    }
-
-    /** Compute memory size from memory faction. */
-    private long computeMemorySize() {
-        final Environment environment = getContainingTask().getEnvironment();
-        return environment
-                .getMemoryManager()
-                .computeMemorySize(
-                        getOperatorConfig()
-                                .getManagedMemoryFractionOperatorUseCaseOfSlot(
-                                        ManagedMemoryUseCase.OPERATOR,
-                                        environment.getTaskManagerInfo().getConfiguration(),
-                                        environment.getUserCodeClassLoader().asClassLoader()));
     }
 
     @Override

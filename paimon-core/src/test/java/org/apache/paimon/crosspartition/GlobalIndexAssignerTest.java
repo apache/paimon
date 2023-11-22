@@ -93,7 +93,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     private void innerTestBucketAssign(boolean enableTtl) throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE, enableTtl);
         List<Integer> output = new ArrayList<>();
-        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(bucket));
+        assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(bucket));
         assigner.endBoostrap(false);
 
         // assign
@@ -127,7 +127,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     public void testUpsert() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<Pair<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
+        assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
         assigner.endBoostrap(false);
 
         // change partition
@@ -171,7 +171,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
                         : MergeEngine.AGGREGATE;
         GlobalIndexAssigner assigner = createAssigner(mergeEngine);
         List<Pair<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
+        assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
         assigner.endBoostrap(false);
 
         // change partition
@@ -195,7 +195,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
     public void testFirstRow() throws Exception {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.FIRST_ROW);
         List<Pair<InternalRow, Integer>> output = new ArrayList<>();
-        assigner.open(ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
+        assigner.open(0, ioManager(), 2, 0, (row, bucket) -> output.add(Pair.of(row, bucket)));
         assigner.endBoostrap(false);
 
         // change partition
@@ -218,6 +218,7 @@ public class GlobalIndexAssignerTest extends TableTestBase {
         GlobalIndexAssigner assigner = createAssigner(MergeEngine.DEDUPLICATE);
         List<List<Integer>> output = new ArrayList<>();
         assigner.open(
+                0,
                 ioManager(),
                 2,
                 0,
