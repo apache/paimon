@@ -280,15 +280,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
-                splitGroups.stream()
-                        .map(
-                                dataFiles ->
-                                        builder.withDataFiles(dataFiles)
-                                                .rawFiles(
-                                                        convertToRawFiles(
-                                                                partition, bucket, dataFiles)))
-                        .map(DataSplit.Builder::build)
-                        .forEach(splits::add);
+                for (List<DataFileMeta> dataFiles : splitGroups) {
+                    splits.add(
+                            builder.withDataFiles(dataFiles)
+                                    .rawFiles(convertToRawFiles(partition, bucket, dataFiles))
+                                    .build());
+                }
             }
         }
         return splits;

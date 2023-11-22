@@ -21,8 +21,8 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.annotation.Public;
 
 import java.io.Serializable;
-import java.util.Collections;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * An input split for reading.
@@ -35,18 +35,11 @@ public interface Split extends Serializable {
     long rowCount();
 
     /**
-     * If files in this split should be merged before reading, returns {@code true}. Otherwise, if
-     * all files in this split can be read without merging, returns {@code false}.
+     * If all files in this split can be read without merging, returns an {@link Optional} wrapping
+     * a list of {@link RawFile}s to be read without merging. Otherwise, returns {@link
+     * Optional#empty()}.
      */
-    default boolean needsMerging() {
-        return true;
-    }
-
-    /**
-     * If {@link Split#needsMerging()} is {@code true}, returns an empty list. Otherwise, returns a
-     * list of {@link RawFile}s to be read without merging.
-     */
-    default List<RawFile> rawFiles() {
-        return Collections.emptyList();
+    default Optional<List<RawFile>> convertToRawFiles() {
+        return Optional.empty();
     }
 }

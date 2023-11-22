@@ -34,6 +34,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -93,13 +94,12 @@ public class DataSplit implements Split {
     }
 
     @Override
-    public boolean needsMerging() {
-        return rawFiles.isEmpty();
-    }
-
-    @Override
-    public List<RawFile> rawFiles() {
-        return rawFiles;
+    public Optional<List<RawFile>> convertToRawFiles() {
+        if (rawFiles.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(rawFiles);
+        }
     }
 
     @Override
@@ -139,6 +139,7 @@ public class DataSplit implements Split {
         this.beforeFiles = other.beforeFiles;
         this.dataFiles = other.dataFiles;
         this.isStreaming = other.isStreaming;
+        this.rawFiles = other.rawFiles;
     }
 
     public void serialize(DataOutputView out) throws IOException {
