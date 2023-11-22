@@ -18,11 +18,12 @@
 package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeReference, CreateNamedStruct, Expression, GetStructField, Literal, NamedExpression}
+import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, CreateNamedStruct, Expression, GetStructField, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
 import org.apache.spark.sql.types.StructType
 
-trait AssignmentAlignmentHelper extends SQLConfHelper {
+trait AssignmentAlignmentHelper extends SQLConfHelper with ExpressionHelper {
 
   private lazy val resolver = conf.resolver
 
@@ -35,24 +36,32 @@ trait AssignmentAlignmentHelper extends SQLConfHelper {
   private case class AttrUpdate(ref: Seq[String], expr: Expression)
 
   /**
-   * Align update assignments to the given attrs, only supports PrimitiveType and StructType. For
-   * example, if attrs are [a int, b int, s struct(c1 int, c2 int)] and update assignments are [a =
-   * 1, s.c1 = 2], will return [1, b, struct(2, c2)].
+   * Generate aligned expressions, only supports PrimitiveType and StructType. For example, if attrs
+   * are [a int, b int, s struct(c1 int, c2 int)] and update assignments are [a = 1, s.c1 = 2], will
+   * return [1, b, struct(2, c2)].
    * @param attrs
    *   target attrs
    * @param assignments
    *   update assignments
    * @return
-   *   aligned update expressions
+   *   aligned expressions
    */
-  protected def alignUpdateAssignments(
+  protected def generateAlignedExpressions(
       attrs: Seq[Attribute],
       assignments: Seq[Assignment]): Seq[Expression] = {
     val attrUpdates = assignments.map(a => AttrUpdate(toRefSeq(a.key), a.value))
     recursiveAlignUpdates(attrs, attrUpdates)
   }
 
-  def toRefSeq(expr: Expression): Seq[String] = expr match {
+  protected def alignAssignments(
+      attrs: Seq[Attribute],
+      assignments: Seq[Assignment]): Seq[Assignment] = {
+    generateAlignedExpressions(attrs, assignments).zip(attrs).map {
+      case (expression, field) => Assignment(field, expression)
+    }
+  }
+
+  private def toRefSeq(expr: Expression): Seq[String] = expr match {
     case attr: Attribute =>
       Seq(attr.name)
     case GetStructField(child, _, Some(name)) =>
@@ -79,7 +88,7 @@ trait AssignmentAlignmentHelper extends SQLConfHelper {
           if (exactMatchedUpdate.isDefined) {
             if (headMatchedUpdates.size == 1) {
               // when an exact match (no nested fields) occurs, it must be the only match, then return it's expr
-              exactMatchedUpdate.get.expr
+              castIfNeeded(exactMatchedUpdate.get.expr, targetAttr.dataType)
             } else {
               // otherwise, there must be conflicting updates, for example:
               // - update the same attr multiple times
@@ -87,7 +96,7 @@ trait AssignmentAlignmentHelper extends SQLConfHelper {
               val conflictingAttrNames =
                 headMatchedUpdates.map(u => (namePrefix ++ u.ref).mkString(".")).distinct
               throw new UnsupportedOperationException(
-                s"Conflicting updates on attrs: ${conflictingAttrNames.mkString(", ")}"
+                s"Conflicting update/insert on attrs: ${conflictingAttrNames.mkString(", ")}"
               )
             }
           } else {

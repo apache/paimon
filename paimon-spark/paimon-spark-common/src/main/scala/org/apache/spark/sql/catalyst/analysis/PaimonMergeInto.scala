@@ -22,23 +22,19 @@ import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.commands.MergeIntoPaimonTable
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.PaimonRelation
 import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
-
-import scala.collection.mutable
 
 /** A post-hoc resolution rule for MergeInto. */
 case class PaimonMergeInto(spark: SparkSession)
   extends Rule[LogicalPlan]
   with RowLevelHelper
-  with ExpressionHelper {
+  with ExpressionHelper
+  with AssignmentAlignmentHelper {
 
   override val operation: RowLevelOp = MergeInto
-
-  private val resolver: Resolver = spark.sessionState.conf.resolver
 
   def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
@@ -62,9 +58,9 @@ case class PaimonMergeInto(spark: SparkSession)
           primaryKeys)
 
         val alignedMatchedActions =
-          merge.matchedActions.map(checkAndAlignActionAssigment(_, targetOutput))
+          merge.matchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
         val alignedNotMatchedActions =
-          merge.notMatchedActions.map(checkAndAlignActionAssigment(_, targetOutput))
+          merge.notMatchedActions.map(checkAndAlignActionAssignment(_, targetOutput))
 
         MergeIntoPaimonTable(
           v2Table,
@@ -76,41 +72,19 @@ case class PaimonMergeInto(spark: SparkSession)
     }
   }
 
-  private def checkAndAlignActionAssigment(
+  private def checkAndAlignActionAssignment(
       action: MergeAction,
       targetOutput: Seq[AttributeReference]): MergeAction = {
     action match {
       case d @ DeleteAction(_) => d
       case u @ UpdateAction(_, assignments) =>
-        val attrNameAndUpdateExpr = checkAndConvertAssignments(assignments, targetOutput)
-
-        val newAssignments = targetOutput.map {
-          field =>
-            val fieldAndExpr = attrNameAndUpdateExpr.find(a => resolver(field.name, a._1))
-            if (fieldAndExpr.isEmpty) {
-              Assignment(field, field)
-            } else {
-              Assignment(field, castIfNeeded(fieldAndExpr.get._2, field.dataType))
-            }
-        }
-        u.copy(assignments = newAssignments)
+        u.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case i @ InsertAction(_, assignments) =>
-        val attrNameAndUpdateExpr = checkAndConvertAssignments(assignments, targetOutput)
         if (assignments.length != targetOutput.length) {
           throw new RuntimeException("Can't align the table's columns in insert clause.")
         }
-
-        val newAssignments = targetOutput.map {
-          field =>
-            val fieldAndExpr = attrNameAndUpdateExpr.find(a => resolver(field.name, a._1))
-            if (fieldAndExpr.isEmpty) {
-              throw new RuntimeException(s"Can't find the expression for ${field.name}.")
-            } else {
-              Assignment(field, castIfNeeded(fieldAndExpr.get._2, field.dataType))
-            }
-        }
-        i.copy(assignments = newAssignments)
+        i.copy(assignments = alignAssignments(targetOutput, assignments))
 
       case _: UpdateStarAction =>
         throw new RuntimeException(s"UpdateStarAction should not be here.")
@@ -130,36 +104,6 @@ case class PaimonMergeInto(spark: SparkSession)
     if (SubqueryExpression.hasSubquery(condition)) {
       throw new RuntimeException(s"Condition $condition with subquery can't be supported.")
     }
-  }
-
-  private def checkAndConvertAssignments(
-      assignments: Seq[Assignment],
-      targetOutput: Seq[AttributeReference]): Seq[(String, Expression)] = {
-    val columnToAssign = mutable.HashMap.empty[String, Int]
-    val pairs = assignments.map {
-      assignment =>
-        assignment.key match {
-          case a: AttributeReference =>
-            if (!targetOutput.exists(attr => resolver(attr.name, a.name))) {
-              throw new RuntimeException(
-                s"Ths key of assignment doesn't belong to the target table, $assignment")
-            }
-            columnToAssign.put(a.name, columnToAssign.getOrElse(a.name, 0) + 1)
-          case _ =>
-            throw new RuntimeException(
-              s"Only primitive type is supported in update/insert clause, $assignment")
-        }
-        (assignment.key.asInstanceOf[AttributeReference].name, assignment.value)
-    }
-
-    val duplicatedColumns = columnToAssign.filter(_._2 > 1).keys
-    if (duplicatedColumns.nonEmpty) {
-      val partOfMsg = duplicatedColumns.mkString(",")
-      throw new RuntimeException(
-        s"Can't update/insert the same column ($partOfMsg) multiple times.")
-    }
-
-    pairs
   }
 
   /** This check will avoid to update the primary key columns */
