@@ -28,7 +28,7 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.migrate.Importer;
 import org.apache.migrate.hive.HiveImporter;
 
-/** Test. */
+/** Migration util to choose importer according to connector. */
 public class TableMigrationUtils {
 
     public static Importer getImporter(
