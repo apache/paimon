@@ -23,7 +23,7 @@ import org.apache.paimon.flink.FlinkGenericCatalog;
 
 import org.apache.flink.table.procedures.Procedure;
 
-/** Test. */
+/** Generic procedure base for FlinkGenericCatalog procedures. */
 public abstract class GenericProcedureBase implements Procedure, Factory {
 
     protected FlinkGenericCatalog flinkGenericCatalog;
