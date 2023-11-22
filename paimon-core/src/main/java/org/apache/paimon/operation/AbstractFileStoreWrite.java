@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
@@ -78,7 +79,8 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
     private MetricRegistry metricRegistry = null;
-    private final String tableName;
+
+    protected final String tableName;
     private final FileStorePathFactory pathFactory;
 
     protected AbstractFileStoreWrite(
@@ -364,6 +366,15 @@ public abstract class AbstractFileStoreWrite<T>
     public CompactionMetrics getCompactionMetrics(BinaryRow partition, int bucket) {
         if (metricRegistry != null) {
             return new CompactionMetrics(
+                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
+        }
+        return null;
+    }
+
+    @Nullable
+    public WriterMetrics getWriterMetrics(BinaryRow partition, int bucket) {
+        if (this.metricRegistry != null) {
+            return new WriterMetrics(
                     metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
         }
         return null;

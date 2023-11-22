@@ -163,6 +163,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         : universalCompaction;
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
+
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -174,7 +175,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer(),
-                restoreIncrement);
+                restoreIncrement,
+                getWriterMetrics(partition, bucket));
     }
 
     @VisibleForTesting

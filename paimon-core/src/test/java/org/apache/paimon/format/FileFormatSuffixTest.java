@@ -85,7 +85,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, SCHEMA.getFieldNames()));
+                                options, SCHEMA.getFieldNames()),
+                        null);
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

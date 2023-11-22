@@ -50,13 +50,17 @@ public class TableWriteImpl<T>
 
     private boolean batchCommitted = false;
 
+    private String tableName;
+
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
-            RecordExtractor<T> recordExtractor) {
+            RecordExtractor<T> recordExtractor,
+            String tableName) {
         this.write = (AbstractFileStoreWrite<T>) write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
+        this.tableName = tableName;
     }
 
     @Override
