@@ -171,7 +171,7 @@ public abstract class FlinkSink<T> implements Serializable {
         Options options = Options.fromMap(table.options());
         if (options.get(SINK_USE_MANAGED_MEMORY)) {
             MemorySize memorySize = options.get(SINK_MANAGED_WRITER_BUFFER_MEMORY);
-            written.getTransformation().declareManagedMemoryUseCaseAtSlotScope()
+            written.getTransformation()
                     .declareManagedMemoryUseCaseAtOperatorScope(
                             ManagedMemoryUseCase.OPERATOR, memorySize.getMebiBytes());
         }
