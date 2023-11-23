@@ -91,7 +91,4 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
   }
 
-  def explain(sql: String): String = {
-    spark.sql(s"EXPLAIN $sql").collect().map(_.mkString).mkString
-  }
 }
