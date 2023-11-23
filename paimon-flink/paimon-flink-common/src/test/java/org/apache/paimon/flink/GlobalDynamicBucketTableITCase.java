@@ -76,7 +76,7 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
                         + " (1, 1, 1, 1),"
                         + " (2, 1, 2, 3),"
                         + " (1, 3, 3, 3),"
-                        + " (2, 4, 4, 4))");
+                        + " (2, 4, 4, 4)");
         sql("INSERT INTO partial_update_t VALUES (3, 3, CAST(NULL AS INT), 5)");
         assertThat(sql("SELECT * FROM partial_update_t"))
                 .containsExactlyInAnyOrder(
