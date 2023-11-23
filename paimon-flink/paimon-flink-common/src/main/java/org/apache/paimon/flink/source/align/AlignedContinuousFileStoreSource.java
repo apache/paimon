@@ -90,6 +90,7 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
                 options.get(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL).toMillis(),
                 scan,
                 bucketMode,
-                options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis());
+                options.get(FlinkConnectorOptions.SOURCE_CHECKPOINT_ALIGN_TIMEOUT).toMillis(),
+                options.get(CoreOptions.SCAN_SPLIT_MAX_PER_TASK));
     }
 }
