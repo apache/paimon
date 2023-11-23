@@ -15,17 +15,24 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.execution.datasources.v2
+package org.apache.spark.sql.execution
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.catalog.CatalogUtils
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CallCommand, LogicalPlan}
-import org.apache.spark.sql.execution.SparkPlan
+import org.apache.spark.sql.catalyst.plans.logical.{CallCommand, CreateTableAsSelect, LogicalPlan, TableSpec}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Strategy
+import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
+import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
 
-case class ExtendedDataSourceV2Strategy(spark: SparkSession) extends Strategy with PredicateHelper {
+case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHelper {
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
+
+    case ctas: CreateTableAsSelect =>
+      PaimonCreateTableAsSelectStrategy(spark)(ctas)
+
     case c @ CallCommand(procedure, args) =>
       val input = buildInternalRow(args)
       CallExec(c.output, procedure, input) :: Nil
@@ -40,4 +47,15 @@ case class ExtendedDataSourceV2Strategy(spark: SparkSession) extends Strategy wi
     new GenericInternalRow(values)
   }
 
+  /** The following methods are copied from [[DataSourceV2Strategy]] */
+  private def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
+    tableSpec.withNewLocation(tableSpec.location.map(makeQualifiedDBObjectPath(_)))
+  }
+
+  private def makeQualifiedDBObjectPath(location: String): String = {
+    CatalogUtils.makeQualifiedDBObjectPath(
+      spark.sharedState.conf.get(WAREHOUSE_PATH),
+      location,
+      spark.sharedState.hadoopConf)
+  }
 }

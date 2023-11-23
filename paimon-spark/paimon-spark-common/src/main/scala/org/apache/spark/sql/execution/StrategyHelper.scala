@@ -15,22 +15,26 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.execution.datasources.v2
+package org.apache.spark.sql.execution
 
-import org.apache.paimon.spark.procedure.Procedure
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.catalog.CatalogUtils
+import org.apache.spark.sql.catalyst.plans.logical.TableSpec
+import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
 
-import org.apache.spark.sql.catalyst.InternalRow
-import org.apache.spark.sql.catalyst.expressions.Attribute
-import org.apache.spark.sql.catalyst.util.truncatedString
+trait StrategyHelper {
 
-case class CallExec(output: Seq[Attribute], procedure: Procedure, input: InternalRow)
-  extends LeafV2CommandExec {
+  def spark: SparkSession
 
-  override protected def run(): Seq[InternalRow] = {
-    procedure.call(input)
+  protected def makeQualifiedDBObjectPath(location: String): String = {
+    CatalogUtils.makeQualifiedDBObjectPath(
+      spark.sharedState.conf.get(WAREHOUSE_PATH),
+      location,
+      spark.sharedState.hadoopConf)
   }
 
-  override def simpleString(maxFields: Int): String = {
-    s"CallExec${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
+  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
+    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
   }
+
 }

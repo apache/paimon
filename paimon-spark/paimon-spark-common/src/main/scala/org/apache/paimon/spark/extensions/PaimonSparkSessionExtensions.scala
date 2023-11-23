@@ -21,7 +21,7 @@ import org.apache.spark.sql.SparkSessionExtensions
 import org.apache.spark.sql.catalyst.analysis.{CoerceArguments, PaimonAnalysis, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonUpdateTable, ResolveProcedures}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
 import org.apache.spark.sql.catalyst.plans.logical.PaimonTableValuedFunctions
-import org.apache.spark.sql.execution.datasources.v2.ExtendedDataSourceV2Strategy
+import org.apache.spark.sql.execution.PaimonStrategy
 
 /** Spark session extension to extends the syntax and adds the rules. */
 class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
@@ -49,6 +49,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // planner extensions
-    extensions.injectPlannerStrategy(spark => ExtendedDataSourceV2Strategy(spark))
+    extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
   }
 }
