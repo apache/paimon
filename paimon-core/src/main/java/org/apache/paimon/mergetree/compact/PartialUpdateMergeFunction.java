@@ -89,6 +89,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
 
+        latestSequenceNumber = kv.sequenceNumber();
+        isEmpty = false;
+
         // ignore delete?
         if (kv.valueKind().isRetract()) {
             if (ignoreDelete) {
@@ -111,8 +114,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             throw new IllegalArgumentException(msg);
         }
 
-        latestSequenceNumber = kv.sequenceNumber();
-        isEmpty = false;
         if (fieldSequences.isEmpty()) {
             updateNonNullFields(kv);
         } else {
