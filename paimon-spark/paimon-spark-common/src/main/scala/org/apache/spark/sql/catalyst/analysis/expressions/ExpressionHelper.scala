@@ -18,7 +18,7 @@
 package org.apache.spark.sql.catalyst.analysis.expressions
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{And, Attribute, Cast, Expression, Literal, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, NullType}
@@ -81,6 +81,16 @@ trait ExpressionHelper extends PredicateHelper {
           Cast(fromExpression, toDataType, Option(SQLConf.get.sessionLocalTimeZone))
         }
     }
+  }
+
+  protected def toRefSeq(expr: Expression): Seq[String] = expr match {
+    case attr: Attribute =>
+      Seq(attr.name)
+    case GetStructField(child, _, Some(name)) =>
+      toRefSeq(child) :+ name
+    case other =>
+      throw new UnsupportedOperationException(
+        s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
   }
 }
 

@@ -25,12 +25,11 @@ import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.Utils.createDataset
-import org.apache.spark.sql.catalyst.analysis.{AssignmentAlignmentHelper, EliminateSubqueryAliases}
+import org.apache.spark.sql.catalyst.analysis.{AssignmentAlignmentHelper, PaimonRelation}
 import org.apache.spark.sql.catalyst.expressions.Alias
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, Project, UpdateTable}
 import org.apache.spark.sql.execution.command.LeafRunnableCommand
-import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
 case class UpdatePaimonTableCommand(u: UpdateTable)
@@ -39,10 +38,10 @@ case class UpdatePaimonTableCommand(u: UpdateTable)
 
   override def run(sparkSession: SparkSession): Seq[Row] = {
 
-    val relation = EliminateSubqueryAliases(u.table).asInstanceOf[DataSourceV2Relation]
+    val relation = PaimonRelation.getPaimonRelation(u.table)
 
     val updatedExprs: Seq[Alias] =
-      alignUpdateAssignments(relation.output, u.assignments).zip(relation.output).map {
+      generateAlignedExpressions(relation.output, u.assignments).zip(relation.output).map {
         case (expr, attr) => Alias(expr, attr.name)()
       }
 

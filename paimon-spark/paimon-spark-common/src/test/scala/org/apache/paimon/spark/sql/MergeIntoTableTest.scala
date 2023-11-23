@@ -511,7 +511,7 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                      |THEN INSERT *
                      |""".stripMargin)
       }.getMessage
-      assert(error1.contains("Can't update/insert the same column (b) multiple times."))
+      assert(error1.contains("Conflicting update/insert on attrs: b"))
 
       val error2 = intercept[RuntimeException] {
         spark.sql(s"""
@@ -524,11 +524,11 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                      |THEN INSERT (a, a, c) VALUES (a, b, c)
                      |""".stripMargin)
       }.getMessage
-      assert(error2.contains("Can't update/insert the same column (a) multiple times."))
+      assert(error2.contains("Conflicting update/insert on attrs: a"))
     }
   }
 
-  test("Paimon MergeInto: fail in case that update nested column") {
+  test("Paimon MergeInto: update nested column") {
     withTable("source", "target") {
 
       Seq((1, 100, "x1", "y1"), (3, 300, "x3", "y3"))
@@ -541,16 +541,17 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                    |""".stripMargin)
       spark.sql("INSERT INTO target values (1, 10, struct('x', 'y')), (2, 20, struct('x', 'y'))")
 
-      val error = intercept[RuntimeException] {
-        spark.sql(s"""
-                     |MERGE INTO target
-                     |USING source
-                     |ON target.a = source.a
-                     |WHEN MATCHED THEN
-                     |UPDATE SET c.c1 = source.c1
-                     |""".stripMargin)
-      }.getMessage
-      assert(error.contains("Only primitive type is supported"))
+      spark.sql(s"""
+                   |MERGE INTO target
+                   |USING source
+                   |ON target.a = source.a
+                   |WHEN MATCHED THEN
+                   |UPDATE SET c.c1 = source.c1
+                   |""".stripMargin)
+
+      checkAnswer(
+        spark.sql("SELECT * FROM target ORDER BY a"),
+        Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y")) :: Nil)
     }
   }
 
