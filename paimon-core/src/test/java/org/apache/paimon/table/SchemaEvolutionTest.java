@@ -76,7 +76,7 @@ public class SchemaEvolutionTest {
     @BeforeEach
     public void beforeEach() {
         tablePath = new Path(tempDir.toUri());
-        identifier = SchemaManager.fromPath(tablePath.getPath(), true);
+        identifier = SchemaManager.fromPath(tablePath.toString(), true);
         schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         commitUser = UUID.randomUUID().toString();
     }

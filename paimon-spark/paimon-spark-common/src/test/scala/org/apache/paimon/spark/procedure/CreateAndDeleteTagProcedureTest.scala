@@ -36,7 +36,7 @@ class CreateAndDeleteTagProcedureTest extends PaimonSparkTestBase with StreamTes
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData

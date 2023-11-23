@@ -40,7 +40,7 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b INT)
                        |TBLPROPERTIES ('bucket'='-1')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, Int)]
           val stream = inputData
@@ -117,7 +117,7 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |TBLPROPERTIES ('bucket'='-1')
                        |PARTITIONED BY (p)
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, Int, Int)]
           val stream = inputData
@@ -213,7 +213,7 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b INT)
                        |TBLPROPERTIES ('primary-key'='a,b', 'bucket'='1')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, Int)]
           val stream = inputData

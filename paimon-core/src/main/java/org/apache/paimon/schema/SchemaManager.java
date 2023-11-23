@@ -161,7 +161,7 @@ public class SchemaManager implements Serializable {
                     latest().orElseThrow(
                                     () ->
                                             new Catalog.TableNotExistException(
-                                                    fromPath(tableRoot.getPath(), true)));
+                                                    fromPath(tableRoot.toString(), true)));
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
@@ -179,7 +179,7 @@ public class SchemaManager implements Serializable {
                     SchemaChange.Move move = addColumn.move();
                     if (newFields.stream().anyMatch(f -> f.name().equals(addColumn.fieldName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(tableRoot.getPath(), true), addColumn.fieldName());
+                                fromPath(tableRoot.toString(), true), addColumn.fieldName());
                     }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
@@ -214,7 +214,7 @@ public class SchemaManager implements Serializable {
                     validateNotPrimaryAndPartitionKey(schema, rename.fieldName());
                     if (newFields.stream().anyMatch(f -> f.name().equals(rename.newName()))) {
                         throw new Catalog.ColumnAlreadyExistException(
-                                fromPath(tableRoot.getPath(), true), rename.fieldName());
+                                fromPath(tableRoot.toString(), true), rename.fieldName());
                     }
 
                     updateNestedColumn(
@@ -233,7 +233,7 @@ public class SchemaManager implements Serializable {
                     if (!newFields.removeIf(
                             f -> f.name().equals(((DropColumn) change).fieldName()))) {
                         throw new Catalog.ColumnNotExistException(
-                                fromPath(tableRoot.getPath(), true), drop.fieldName());
+                                fromPath(tableRoot.toString(), true), drop.fieldName());
                     }
                     if (newFields.isEmpty()) {
                         throw new IllegalArgumentException("Cannot drop all fields in table");
@@ -424,7 +424,7 @@ public class SchemaManager implements Serializable {
         }
         if (!found) {
             throw new Catalog.ColumnNotExistException(
-                    fromPath(tableRoot.getPath(), true), Arrays.toString(updateFieldNames));
+                    fromPath(tableRoot.toString(), true), Arrays.toString(updateFieldNames));
         }
     }
 
