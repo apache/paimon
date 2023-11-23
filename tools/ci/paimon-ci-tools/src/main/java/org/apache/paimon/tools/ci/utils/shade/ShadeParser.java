@@ -20,8 +20,6 @@ package org.apache.paimon.tools.ci.utils.shade;
 import org.apache.paimon.tools.ci.utils.shared.Dependency;
 import org.apache.paimon.tools.ci.utils.shared.ParserUtils;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -69,7 +67,6 @@ public final class ShadeParser {
         }
     }
 
-    @VisibleForTesting
     static Map<String, Set<Dependency>> parseShadeOutput(Stream<String> lines) {
         return ParserUtils.parsePluginOutput(
                 lines.filter(line -> !line.contains(" Excluding ")),
@@ -94,7 +91,6 @@ public final class ShadeParser {
         return dependencies;
     }
 
-    @VisibleForTesting
     static Optional<Dependency> parseDependency(String line) {
         Matcher dependencyMatcher = SHADE_INCLUDE_MODULE_PATTERN.matcher(line);
         if (!dependencyMatcher.find()) {

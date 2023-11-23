@@ -21,8 +21,6 @@ import org.apache.paimon.tools.ci.utils.shared.Dependency;
 import org.apache.paimon.tools.ci.utils.shared.DependencyTree;
 import org.apache.paimon.tools.ci.utils.shared.ParserUtils;
 
-import org.apache.paimon.shade.guava30.com.google.common.annotations.VisibleForTesting;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -98,7 +96,6 @@ public class DependencyParser {
         }
     }
 
-    @VisibleForTesting
     static Map<String, Set<Dependency>> parseDependencyCopyOutput(Stream<String> lines) {
         return ParserUtils.parsePluginOutput(
                 lines,
@@ -106,7 +103,6 @@ public class DependencyParser {
                 DependencyParser::parseCopyDependencyBlock);
     }
 
-    @VisibleForTesting
     static Map<String, DependencyTree> parseDependencyTreeOutput(Stream<String> lines) {
         return ParserUtils.parsePluginOutput(
                 lines,
@@ -191,7 +187,6 @@ public class DependencyParser {
                         dependencyMatcher.group("classifier")));
     }
 
-    @VisibleForTesting
     static Optional<Dependency> parseTreeDependency(String line) {
         Matcher dependencyMatcher = DEPENDENCY_TREE_ITEM_PATTERN.matcher(line);
         if (!dependencyMatcher.find()) {

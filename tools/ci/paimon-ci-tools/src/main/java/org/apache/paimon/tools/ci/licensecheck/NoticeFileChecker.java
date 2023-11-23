@@ -25,7 +25,6 @@ import org.apache.paimon.tools.ci.utils.notice.NoticeParser;
 import org.apache.paimon.tools.ci.utils.shade.ShadeParser;
 import org.apache.paimon.tools.ci.utils.shared.Dependency;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -108,7 +107,6 @@ public class NoticeFileChecker {
         return run(modulesWithBundledDependencies, deployedModules, moduleToNotice);
     }
 
-    @VisibleForTesting
     static int run(
             Map<String, Set<Dependency>> modulesWithBundledDependencies,
             Set<String> deployedModules,
@@ -258,7 +256,6 @@ public class NoticeFileChecker {
         return severeProblems.size();
     }
 
-    @VisibleForTesting
     static Map<Severity, List<String>> checkNoticeFile(
             Map<String, Set<Dependency>> modulesWithShadedDependencies,
             String moduleName,
@@ -336,7 +333,6 @@ public class NoticeFileChecker {
         problemsBySeverity.computeIfAbsent(severity, ignored -> new ArrayList<>()).add(problem);
     }
 
-    @VisibleForTesting
     enum Severity {
         /** Issues that a legally problematic which must be fixed. */
         CRITICAL,

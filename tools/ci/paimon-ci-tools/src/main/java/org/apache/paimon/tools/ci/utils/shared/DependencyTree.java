@@ -17,8 +17,7 @@
 
 package org.apache.paimon.tools.ci.utils.shared;
 
-import com.google.common.annotations.VisibleForTesting;
-import com.google.common.graph.Traverser;
+import org.apache.paimon.shade.guava30.com.google.common.graph.Traverser;
 
 import javax.annotation.Nullable;
 
@@ -111,7 +110,6 @@ public class DependencyTree {
      * @param dependency
      * @return
      */
-    @VisibleForTesting
     static String getKey(Dependency dependency) {
         return dependency.getGroupId()
                 + ":"

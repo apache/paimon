@@ -20,8 +20,6 @@ package org.apache.paimon.tools.ci.utils.notice;
 
 import org.apache.paimon.tools.ci.utils.shared.Dependency;
 
-import com.google.common.annotations.VisibleForTesting;
-
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -61,7 +59,6 @@ public class NoticeParser {
         return parseNoticeFile(noticeContents);
     }
 
-    @VisibleForTesting
     static Optional<NoticeContents> parseNoticeFile(List<String> noticeContents) {
         if (noticeContents.isEmpty()) {
             return Optional.empty();

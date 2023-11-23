@@ -18,7 +18,6 @@
 
 package org.apache.paimon.tools.ci.licensecheck;
 
-import com.google.common.annotations.VisibleForTesting;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -60,7 +59,6 @@ public class JarFileChecker {
                 .collect(Collectors.toList());
     }
 
-    @VisibleForTesting
     static int checkJar(Path file) throws Exception {
         final URI uri = file.toUri();
 
