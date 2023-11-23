@@ -136,8 +136,8 @@ public class ContinuousFileSplitEnumerator
     @Override
     public void handleSplitRequest(int subtaskId, @Nullable String requesterHostname) {
         readersAwaitingSplit.add(subtaskId);
-        assignSplits(); // if current task assigned no split, we check conditions to scan one more
-        // time
+        assignSplits();
+        // if current task assigned no split, we check conditions to scan one more time
         if (readersAwaitingSplit.contains(subtaskId)) {
             if (stopTriggerScan) {
                 return;
