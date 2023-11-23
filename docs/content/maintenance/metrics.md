@@ -278,7 +278,7 @@ Below is lists of Paimon built-in metrics. They are summarized into three types 
     </tbody>
 </table>
 
-# Bridging To Flink
+## Bridging To Flink
 
 Paimon has implemented bridging metrics to Flink's metrics system, which can be reported by Flink, and the lifecycle of metric groups are managed by Flink.
 
@@ -334,11 +334,11 @@ From Flink Web-UI, go to the committer operator's metrics, it's shown as:
     </tbody>
 </table>
 
-## Flink Connector Standard Metrics
+### Flink Connector Standard Metrics
 
 When using Flink to read and write, Paimon has implemented some key standard Flink connector metrics to measure the source latency and output of sink, see [FLIP-33: Standardize Connector Metrics](https://cwiki.apache.org/confluence/display/FLINK/FLIP-33%3A+Standardize+Connector+Metrics). Flink source / sink metrics implemented are listed here.
 
-### Source Metrics (Flink)
+#### Source Metrics (Flink)
 
 <table class="table table-bordered">
     <thead>
@@ -359,7 +359,7 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
     </tbody>
 </table>
 
-### Sink Metrics (Flink)
+#### Sink Metrics (Flink)
 
 <table class="table table-bordered">
     <thead>
