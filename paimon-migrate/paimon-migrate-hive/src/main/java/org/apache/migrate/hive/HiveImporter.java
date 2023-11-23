@@ -211,7 +211,7 @@ public class HiveImporter implements Importer {
 
     private String parseFormat(String serder) {
         if (serder.contains("avro")) {
-            return "avro";
+            throw new UnsupportedOperationException("Can't support format avro yet.");
         } else if (serder.contains("parquet")) {
             return "parquet";
         } else if (serder.contains("orc")) {
