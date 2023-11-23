@@ -37,7 +37,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData
@@ -81,7 +81,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData
@@ -122,7 +122,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (city String, population Long)
                        |TBLPROPERTIES ('bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
           val stream = inputData.toDS
@@ -166,7 +166,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
           intercept[RuntimeException] {
@@ -190,7 +190,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                      |CREATE TABLE T (start Timestamp, stockId INT, avg_price DOUBLE)
                      |TBLPROPERTIES ('bucket'='3')
                      |""".stripMargin)
-        val location = loadTable("T").location().getPath
+        val location = loadTable("T").location().toString
 
         val inputData = MemoryStream[(Long, Int, Double)]
         val data = inputData.toDS
@@ -241,7 +241,7 @@ class PaimonSinkTest extends PaimonSparkTestBase with StreamTest {
                        |CREATE TABLE T (a INT, b STRING)
                        |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
-          val location = loadTable("T").location().getPath
+          val location = loadTable("T").location().toString
 
           val date = Date.valueOf("2023-08-10")
           spark.sql("INSERT INTO T VALUES (1, '2023-08-09'), (2, '2023-08-09')")

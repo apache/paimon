@@ -46,7 +46,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "a"), (2, "b")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)
@@ -92,7 +92,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "a"), (2, "b")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)
@@ -181,7 +181,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)

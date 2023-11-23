@@ -490,7 +490,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testStreamingChangelogCompatibility02() throws Exception {
         // already contains 2 commits
-        CompatibilityTestUtils.unzip("compatibility/table-changelog-0.2.zip", tablePath.getPath());
+        CompatibilityTestUtils.unzip(
+                "compatibility/table-changelog-0.2.zip", tablePath.toUri().getPath());
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
