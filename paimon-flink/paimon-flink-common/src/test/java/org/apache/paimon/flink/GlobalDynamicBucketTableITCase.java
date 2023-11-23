@@ -76,8 +76,8 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
                         + " (1, 1, 1, 1),"
                         + " (2, 1, 2, 3),"
                         + " (1, 3, 3, 3),"
-                        + " (2, 4, 4, 4),"
-                        + " (3, 3, CAST(NULL AS INT), 5)");
+                        + " (2, 4, 4, 4))");
+        sql("INSERT INTO partial_update_t VALUES (3, 3, CAST(NULL AS INT), 5)");
         assertThat(sql("SELECT * FROM partial_update_t"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 1, 2, 3), Row.of(2, 4, 4, 4), Row.of(1, 3, 3, 5));
@@ -85,6 +85,19 @@ public class GlobalDynamicBucketTableITCase extends CatalogITCaseBase {
         sql("INSERT INTO first_row_t VALUES (1, 1, 1), (2, 1, 2), (1, 3, 3), (2, 4, 4), (3, 3, 5)");
         assertThat(sql("SELECT * FROM first_row_t"))
                 .containsExactlyInAnyOrder(Row.of(1, 1, 1), Row.of(1, 3, 3), Row.of(2, 4, 4));
+    }
+
+    @Test
+    public void testBulkLoad2() {
+        sql(
+                "INSERT INTO partial_update_t VALUES"
+                        + " (1, 3, 1, 1),"
+                        + " (2, 3, 2, 3),"
+                        + " (1, 3, 3, 3),"
+                        + " (2, 3, 4, 4)");
+        sql("INSERT INTO partial_update_t VALUES (3, 3, CAST(NULL AS INT), 5)");
+        assertThat(sql("SELECT * FROM partial_update_t"))
+                .containsExactlyInAnyOrder(Row.of(1, 3, 4, 5));
     }
 
     @Test
