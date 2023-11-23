@@ -88,7 +88,7 @@ public class ContinuousFileSplitEnumerator
             long discoveryInterval,
             StreamTableScan scan,
             BucketMode bucketMode,
-            Integer splitMaxPerTask) {
+            int splitMaxPerTask) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
