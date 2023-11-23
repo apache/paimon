@@ -29,13 +29,17 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsConverters fieldKeyStatsConverters;
     private final FieldStatsConverters fieldValueStatsConverters;
+
+    private final boolean hasCustomSequenceField;
 
     private Predicate keyFilter;
     private Predicate valueFilter;
@@ -51,7 +55,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            Integer scanManifestParallelism) {
+            Integer scanManifestParallelism,
+            boolean hasCustomSequenceField) {
         super(
                 partitionType,
                 bucketFilter,
@@ -62,6 +67,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 scanManifestParallelism);
+        this.hasCustomSequenceField = hasCustomSequenceField;
         this.fieldKeyStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
@@ -97,23 +103,50 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     /** Note: Keep this thread-safe. */
     @Override
-    protected boolean filterWholeBucketByStats(List<ManifestEntry> entries) {
+    protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
+        if (valueFilter == null) {
+            return entries;
+        }
+
         // entries come from the same bucket, if any of it doesn't meet the request, we could filter
         // the bucket.
-        if (valueFilter != null) {
-            for (ManifestEntry entry : entries) {
-                if (valueFilter.test(
-                        entry.file().rowCount(),
-                        entry.file()
-                                .valueStats()
-                                .fields(
-                                        fieldValueStatsConverters.getOrCreate(
-                                                entry.file().schemaId()),
-                                        entry.file().rowCount()))) {
-                    return true;
-                }
+        if (canSkipWholeBucket(entries)) {
+            return Collections.emptyList();
+        }
+
+        // If there is no custom sequence field, we can filter the whole bucket by the max level.
+        if (!hasCustomSequenceField) {
+            @SuppressWarnings("OptionalGetWithoutIsPresent")
+            int maxLevel =
+                    entries.stream().mapToInt(entry -> entry.file().level()).max().getAsInt();
+
+            // Level 0 can't be filtered.
+            if (maxLevel > 0) {
+                return entries.stream()
+                        .filter(entry -> entry.file().level() < maxLevel || applyValueFilter(entry))
+                        .collect(Collectors.toList());
             }
         }
-        return valueFilter == null;
+
+        return entries;
+    }
+
+    private boolean canSkipWholeBucket(List<ManifestEntry> entries) {
+        for (ManifestEntry entry : entries) {
+            if (applyValueFilter(entry)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private boolean applyValueFilter(ManifestEntry entry) {
+        return valueFilter.test(
+                entry.file().rowCount(),
+                entry.file()
+                        .valueStats()
+                        .fields(
+                                fieldValueStatsConverters.getOrCreate(entry.file().schemaId()),
+                                entry.file().rowCount()));
     }
 }

@@ -203,6 +203,34 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
+    public void testWithValueFilterForMaxLevel() throws Exception {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        List<KeyValue> data = generateData(100, Math.abs(random.nextInt(1000)));
+        Snapshot snapshot;
+        do {
+            snapshot = writeData(data, "1", 0, false);
+        } while (snapshot.commitKind() != Snapshot.CommitKind.COMPACT);
+
+        data = generateData(100, Math.abs(random.nextInt(1000) + 1000));
+        snapshot = writeData(data, "1", 0);
+
+        KeyValueFileStoreScan scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        List<ManifestEntry> files = scan.plan().files();
+
+        scan = store.newScan();
+        scan.withSnapshot(snapshot.id());
+        scan.withValueFilter(
+                new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
+                        .between(1, 1000, 2000));
+
+        List<ManifestEntry> filesFiltered = scan.plan().files();
+
+        assertThat(files.size()).isEqualTo(2);
+        assertThat(filesFiltered.size()).isEqualTo(1);
+    }
+
+    @Test
     public void testWithBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(random.nextInt(1000) + 1);
@@ -325,12 +353,29 @@ public class KeyValueFileStoreScanTest {
     }
 
     private Snapshot writeData(List<KeyValue> kvs, String partition, int bucket) throws Exception {
+        return writeData(kvs, partition, bucket, true);
+    }
+
+    private Snapshot writeData(
+            List<KeyValue> kvs, String partition, int bucket, boolean ignorePreviousFiles)
+            throws Exception {
         BinaryRow binaryRow = new BinaryRow(2);
         BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
         binaryRowWriter.writeString(0, BinaryString.fromString(partition));
         binaryRowWriter.writeInt(1, 0);
         binaryRowWriter.complete();
-        List<Snapshot> snapshots = store.commitData(kvs, p -> binaryRow, b -> bucket);
+        List<Snapshot> snapshots =
+                store.commitDataImpl(
+                        kvs,
+                        p -> binaryRow,
+                        b -> bucket,
+                        false,
+                        null,
+                        null,
+                        Collections.emptyList(),
+                        (commit, committable) -> {
+                            commit.commit(committable, Collections.emptyMap());
+                        });
         return snapshots.get(snapshots.size() - 1);
     }
 
