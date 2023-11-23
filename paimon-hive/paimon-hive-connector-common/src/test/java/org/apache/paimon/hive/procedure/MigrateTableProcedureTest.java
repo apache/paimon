@@ -32,8 +32,8 @@ import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
@@ -46,18 +46,27 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
 
     private static final int PORT = 9084;
 
-    @BeforeAll
-    public static void beforeAll() {
+    @BeforeEach
+    public void beforeAll() {
         TEST_HIVE_METASTORE.start(PORT);
     }
 
-    @AfterAll
-    public static void afterAll() throws Exception {
+    @AfterEach
+    public void afterAll() throws Exception {
         TEST_HIVE_METASTORE.stop();
     }
 
     @Test
-    public void testUpgradeNonPartitionTable() throws Exception {
+    public void testOrc() throws Exception {
+        testUpgradeNonPartitionTable("orc");
+    }
+
+    @Test
+    public void testParquet() throws Exception {
+        testUpgradeNonPartitionTable("parquet");
+    }
+
+    public void testUpgradeNonPartitionTable(String format) throws Exception {
         StreamExecutionEnvironment env = buildDefaultEnv(false);
 
         TableEnvironment tEnv =
@@ -66,7 +75,8 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql(
-                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS orc;");
+                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
         tEnv.executeSql("INSERT INTO hivetable VALUES" + data(1000)).await();
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
@@ -74,7 +84,8 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic');");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable;").collect());
-        tEnv.executeSql("CALL migrate_table('default.hivetable')").await();
+        tEnv.executeSql("CALL migrate_table('default.hivetable', 'file.format=" + format + "')")
+                .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         tEnv.executeSql(

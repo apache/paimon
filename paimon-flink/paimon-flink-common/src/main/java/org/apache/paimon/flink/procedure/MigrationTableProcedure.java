@@ -20,6 +20,8 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
@@ -33,6 +35,8 @@ import org.apache.flink.table.procedure.ProcedureContext;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
+
 /** Migrate procedure to migrate hive table to paimon table. */
 public class MigrationTableProcedure extends GenericProcedureBase {
 
@@ -44,6 +48,12 @@ public class MigrationTableProcedure extends GenericProcedureBase {
     }
 
     public String[] call(ProcedureContext procedureContext, String sourceTablePath)
+            throws Exception {
+        return call(procedureContext, sourceTablePath, "");
+    }
+
+    public String[] call(
+            ProcedureContext procedureContext, String sourceTablePath, String properties)
             throws Exception {
         TableEnvironmentImpl tableEnvironment =
                 TableEnvironmentImpl.create(EnvironmentSettings.inBatchMode());
@@ -71,7 +81,8 @@ public class MigrationTableProcedure extends GenericProcedureBase {
         ObjectPath sourceObjectPath =
                 new ObjectPath(sourceTableId.getDatabaseName(), sourceTableId.getObjectName());
 
-        Map<String, String> paimonOption = toPaimonOption(resolvedSourceCatalogTable.getOptions());
+        Map<String, String> paimonOption =
+                toPaimonOption(ParameterUtils.parseCommaSeparatedKeyValues(properties));
 
         CatalogTable table =
                 new CatalogTableImpl(
@@ -89,10 +100,10 @@ public class MigrationTableProcedure extends GenericProcedureBase {
         return addFileProcedure.call(procedureContext, backTable, sourceTablePath, false, true);
     }
 
-    private Map<String, String> toPaimonOption(Map<String, String> sourceOptions) {
-        HashMap<String, String> map = new HashMap<>();
+    private Map<String, String> toPaimonOption(Map<String, String> optionsMap) {
+        HashMap<String, String> map = new HashMap<>(optionsMap);
         map.put(CoreOptions.BUCKET.key(), "-1");
-        map.put("connector", "paimon");
+        map.put(CONNECTOR.key(), FlinkCatalogFactory.IDENTIFIER);
         return map;
     }
 }

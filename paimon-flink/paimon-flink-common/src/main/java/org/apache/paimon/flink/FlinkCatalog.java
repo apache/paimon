@@ -349,12 +349,9 @@ public class FlinkCatalog extends AbstractCatalog {
         }
 
         // remove table path
-        String specific = options.remove(PATH.key());
-        if (specific != null || logStoreAutoRegister) {
-            catalogTable = catalogTable.copy(options);
-        }
+        options.remove(PATH.key());
 
-        return fromCatalogTable(catalogTable);
+        return fromCatalogTable(catalogTable.copy(options));
     }
 
     private List<SchemaChange> toSchemaChange(
