@@ -26,6 +26,7 @@ under the License.
 		<artifactId>paimon-parent</artifactId>
 		<groupId>org.apache.paimon</groupId>
 		<version>0.6-SNAPSHOT</version>
+		<relativePath>../../..</relativePath>
 	</parent>
 
 	<artifactId>paimon-ci-tools</artifactId>
