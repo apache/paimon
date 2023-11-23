@@ -137,7 +137,7 @@ public class CompactProcedure extends BaseProcedure {
             }
         }
 
-        Dataset<Row> row = spark().read().format("paimon").load(coreOptions.path().getPath());
+        Dataset<Row> row = spark().read().format("paimon").load(coreOptions.path().toString());
         row = StringUtils.isBlank(filter) ? row : row.where(filter);
         new WriteIntoPaimonTable(
                         table,

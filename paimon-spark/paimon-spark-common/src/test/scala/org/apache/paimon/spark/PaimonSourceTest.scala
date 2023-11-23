@@ -731,7 +731,7 @@ class PaimonSourceTest extends PaimonSparkTestBase with StreamTest {
                  |TBLPROPERTIES ($primaryKeysProp 'bucket'='2', 'file.format'='parquet')
                  |""".stripMargin)
     val table = loadTable(tableName)
-    val location = table.location().getPath
+    val location = table.location().toString
 
     val mergedData = scala.collection.mutable.TreeMap.empty[Int, String]
     val unmergedData = scala.collection.mutable.ArrayBuffer.empty[(Int, String)]

@@ -354,7 +354,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private Options createCatalogOptions(Path warehouse) {
         Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
+        conf.set(CatalogOptions.WAREHOUSE, warehouse.toString());
         conf.set(CatalogOptions.URI, "");
 
         return conf;
