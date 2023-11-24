@@ -16,10 +16,12 @@
  * limitations under the License.
  */
 
-package org.apache.migrate;
+package org.apache.paimon.migrate;
 
-/** Importer interface for importing table from other data-lake like hive, iceberg, hudi and etc. */
-public interface Importer {
+import org.apache.paimon.data.BinaryRowWriter;
 
-    void executeImport(boolean sync) throws Exception;
+/** Converter to convert value to specified format in binaryRow. */
+public interface DataConverter {
+
+    void write(BinaryRowWriter binaryRowWriter, int position, String value);
 }

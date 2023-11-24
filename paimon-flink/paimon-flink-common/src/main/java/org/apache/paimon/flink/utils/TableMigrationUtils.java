@@ -21,12 +21,12 @@ package org.apache.paimon.flink.utils;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.hive.HiveCatalog;
+import org.apache.paimon.hive.migrate.HiveImporter;
+import org.apache.paimon.migrate.Importer;
 import org.apache.paimon.table.AbstractFileStoreTable;
 
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
-import org.apache.migrate.Importer;
-import org.apache.migrate.hive.HiveImporter;
 
 /** Migration util to choose importer according to connector. */
 public class TableMigrationUtils {

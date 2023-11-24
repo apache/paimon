@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.migrate.utils;
+package org.apache.paimon.migrate;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;

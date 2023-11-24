@@ -65,7 +65,6 @@ under the License.
         <module>paimon-bundle</module>
         <module>paimon-hive</module>
         <module>paimon-spark</module>
-        <module>paimon-migrate</module>
         <module>paimon-test-utils</module>
         <module>tools/ci/paimon-ci-tools</module>
     </modules>

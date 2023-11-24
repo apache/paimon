@@ -16,13 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.migrate.hive;
+package org.apache.paimon.hive.migrate;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.migrate.DataConverter;
+import org.apache.paimon.migrate.DataTypeWriter;
+import org.apache.paimon.migrate.FileMetaUtils;
+import org.apache.paimon.migrate.Importer;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
@@ -34,10 +38,6 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.migrate.Importer;
-import org.apache.migrate.utils.DataConverter;
-import org.apache.migrate.utils.DataTypeWriter;
-import org.apache.migrate.utils.FileMetaUtils;
 import org.eclipse.jetty.util.BlockingArrayQueue;
 
 import java.io.IOException;
@@ -137,7 +137,7 @@ public class HiveImporter implements Importer {
             IMetaStoreClient client,
             FileIO fileIO,
             List<String> partitionNames,
-            org.apache.hadoop.hive.metastore.api.Table sourceTable,
+            Table sourceTable,
             AbstractFileStoreTable paimonTable)
             throws Exception {
         List<ImporterTask> importerTasks = new ArrayList<>();
@@ -170,18 +170,14 @@ public class HiveImporter implements Importer {
     }
 
     public ImporterTask importUnPartitionedTableTask(
-            FileIO fileIO,
-            org.apache.hadoop.hive.metastore.api.Table sourceTable,
-            AbstractFileStoreTable paimonTable) {
+            FileIO fileIO, Table sourceTable, AbstractFileStoreTable paimonTable) {
         String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
         String location = sourceTable.getSd().getLocation();
         Path path = paimonTable.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
         return new ImporterTask(fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path);
     }
 
-    private void checkCompatible(
-            org.apache.hadoop.hive.metastore.api.Table sourceHiveTable,
-            AbstractFileStoreTable paimonTable) {
+    private void checkCompatible(Table sourceHiveTable, AbstractFileStoreTable paimonTable) {
         List<FieldSchema> sourceFields = new ArrayList<>(sourceHiveTable.getPartitionKeys());
         List<DataField> targetFields =
                 new ArrayList<>(
