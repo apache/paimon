@@ -38,16 +38,17 @@ import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.eclipse.jetty.util.BlockingArrayQueue;
 
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
+import java.util.Queue;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Predicate;
 import java.util.function.Supplier;
 
@@ -98,7 +99,7 @@ public class HiveImporter implements Importer {
             tasks.forEach(task -> commitMessages.add(task.get()));
             paimonTable.newBatchWriteBuilder().newCommit().commit(commitMessages);
         } else {
-            List<CommitMessage> commitMessages = new BlockingArrayQueue<>();
+            Queue<CommitMessage> commitMessages = new LinkedBlockingQueue<>();
             List<Future<?>> futures = new ArrayList<>();
             ExecutorService executors =
                     Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
@@ -115,7 +116,7 @@ public class HiveImporter implements Importer {
                 }
             }
 
-            paimonTable.newBatchWriteBuilder().newCommit().commit(commitMessages);
+            paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
         }
 
         client.dropTable(sourceDatabase, sourceTable, true, true);
