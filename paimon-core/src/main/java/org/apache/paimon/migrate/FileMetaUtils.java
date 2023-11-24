@@ -67,10 +67,7 @@ public class FileMetaUtils {
                         .collect(Collectors.toList());
 
         return fileStatuses.stream()
-                .map(
-                        status ->
-                                constructFileMeta(
-                                        format, location, status, fileIO, paimonTable, dir))
+                .map(status -> constructFileMeta(format, status, fileIO, paimonTable, dir))
                 .collect(Collectors.toList());
     }
 
@@ -86,12 +83,7 @@ public class FileMetaUtils {
     // -----------------------------private method---------------------------------------------
 
     private static DataFileMeta constructFileMeta(
-            String format,
-            String location,
-            FileStatus fileStatus,
-            FileIO fileIO,
-            Table table,
-            Path dir) {
+            String format, FileStatus fileStatus, FileIO fileIO, Table table, Path dir) {
 
         try {
             FieldStatsCollector.Factory[] factories =
@@ -106,7 +98,11 @@ public class FileMetaUtils {
                                             .toConfiguration(),
                                     format)
                             .createStatsExtractor(table.rowType(), factories)
-                            .get();
+                            .orElseThrow(
+                                    () ->
+                                            new RuntimeException(
+                                                    "Can't get table stats extractor for format "
+                                                            + format));
             Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format);
             return constructFileMeta(
                     newPath.getName(),
@@ -146,7 +142,7 @@ public class FileMetaUtils {
         BinaryTableStats stats = statsArraySerializer.toBinary(fileInfo.getLeft());
 
         return DataFileMeta.forAppend(
-                path.getName(),
+                fileName,
                 fileSize,
                 fileInfo.getRight().getRowCount(),
                 stats,
