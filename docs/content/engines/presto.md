@@ -119,25 +119,25 @@ cd ${PRESTO_HOME}
 mkdir -p etc/catalog
 ```
 
-**Query FileSystem table:**
-
-```bash
-vim etc/catalog/paimon.properties
-```
-
-and set the following config:
-
 ```properties
 connector.name=paimon
-# set your filesystem path, like hdfs://namenode01:8020/path
+# set your filesystem path, such as hdfs://namenode01:8020/path and s3://${YOUR_S3_BUCKET}/path
 warehouse=${YOUR_FS_PATH}
 ```
 
-If you are using HDFS, you will also need to do one more thing: choose one of the following ways to configure your HDFS:
+If you are using HDFS FileSystem, you will also need to do one more thing: choose one of the following ways to configure your HDFS:
 
 - set environment variable HADOOP_HOME.
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
+
+If you are using S3 FileSystem, you need to  add `paimon-s3-${PAIMON_VERSION}.jar` in `${PRESTO_HOME}/plugin/paimon` and additionally configure the following properties in `paimon.properties`:
+
+```properties
+s3.endpoint=${YOUR_ENDPOINTS}
+s3.access-key=${YOUR_AK}
+s3.secret-key=${YOUR_SK}
+```
 
 **Query HiveCatalog table:**
 
@@ -149,7 +149,7 @@ and set the following config:
 
 ```properties
 connector.name=paimon
-# set your filesystem path, like hdfs://namenode01:8020/path
+# set your filesystem path, such as hdfs://namenode01:8020/path and s3://${YOUR_S3_BUCKET}/path
 warehouse=${YOUR_FS_PATH}
 metastore=hive
 uri=thrift://${YOUR_HIVE_METASTORE}:9083
