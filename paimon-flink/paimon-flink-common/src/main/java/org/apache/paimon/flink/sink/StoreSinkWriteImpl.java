@@ -63,7 +63,7 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     protected TableWriteImpl<?> write;
 
-    private MetricGroup metricGroup;
+    @Nullable private final MetricGroup metricGroup;
 
     public StoreSinkWriteImpl(
             FileStoreTable table,
