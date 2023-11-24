@@ -68,11 +68,11 @@ mvn clean install -DskipTests
 
 After the packaging is complete, you can choose the corresponding connector based on your own Presto version:
 
-| Version         | Package                                                                                   |
-|-----------------|-------------------------------------------------------------------------------------------|
-| [0.236, 0.268)  | `./paimon-presto-0.236/target/paimon-presto-0.236-{{< version >}}-SNAPSHOT-plugin.tar.gz` |
-| [0.268, 0.273)  | `./paimon-presto-0.268/target/paimon-presto-0.268-{{< version >}}-SNAPSHOT-plugin.tar.gz` |
-| [0.273, latest] | `./paimon-presto-0.273/target/paimon-presto-0.273-{{< version >}}-SNAPSHOT-plugin.tar.gz` |
+| Version         | Package                                                                          |
+|-----------------|----------------------------------------------------------------------------------|
+| [0.236, 0.268)  | `./paimon-presto-0.236/target/paimon-presto-0.236-{{< version >}}-plugin.tar.gz` |
+| [0.268, 0.273)  | `./paimon-presto-0.268/target/paimon-presto-0.268-{{< version >}}-plugin.tar.gz` |
+| [0.273, latest] | `./paimon-presto-0.273/target/paimon-presto-0.273-{{< version >}}-plugin.tar.gz` |
 
 Of course, we also support different versions of Hive and Hadoop. But note that we utilize
 Presto-shaded versions of Hive and Hadoop packages to address dependency conflicts.
