@@ -66,8 +66,8 @@ public class TestHiveMetastore {
 
     // It's tricky to clear all static fields in an HMS instance in order to switch derby root dir.
     // Therefore, we reuse the same derby root between tests and remove it after JVM exits.
-    private static File HIVE_LOCAL_DIR;
-    private static String DERBY_PATH;
+    private static File hiveLocalDir;
+    private static String derbyPath;
 
     static {
         setup();
@@ -75,18 +75,18 @@ public class TestHiveMetastore {
 
     private static void setup() {
         try {
-            HIVE_LOCAL_DIR =
+            hiveLocalDir =
                     createTempDirectory("hive", asFileAttribute(fromString("rwxrwxrwx"))).toFile();
-            DERBY_PATH = new File(HIVE_LOCAL_DIR, "metastore_db").getPath();
-            File derbyLogFile = new File(HIVE_LOCAL_DIR, "derby.log");
+            derbyPath = new File(hiveLocalDir, "metastore_db").getPath();
+            File derbyLogFile = new File(hiveLocalDir, "derby.log");
             System.setProperty("derby.stream.error.file", derbyLogFile.getAbsolutePath());
-            setupMetastoreDB("jdbc:derby:" + DERBY_PATH + ";create=true");
+            setupMetastoreDB("jdbc:derby:" + derbyPath + ";create=true");
             Runtime.getRuntime()
                     .addShutdownHook(
                             new Thread(
                                     () -> {
                                         Path localDirPath =
-                                                new Path(HIVE_LOCAL_DIR.getAbsolutePath());
+                                                new Path(hiveLocalDir.getAbsolutePath());
                                         FileSystem fs;
                                         try {
                                             fs =
@@ -176,7 +176,7 @@ public class TestHiveMetastore {
 
     public void reset() throws Exception {
         setup();
-        Path warehouseRoot = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
+        Path warehouseRoot = new Path(hiveLocalDir.getAbsolutePath());
         FileSystem fs = FileSystem.get(warehouseRoot.toUri(), hiveConf);
         for (FileStatus fileStatus : fs.listStatus(warehouseRoot)) {
             if (!fileStatus.getPath().getName().equals("derby.log")
@@ -187,7 +187,7 @@ public class TestHiveMetastore {
     }
 
     private static String warehouseDir() {
-        return "file:" + HIVE_LOCAL_DIR.getAbsolutePath();
+        return "file:" + hiveLocalDir.getAbsolutePath();
     }
 
     private TServer newThriftServer(TServerSocket socket, int poolSize, HiveConf conf)
@@ -195,7 +195,7 @@ public class TestHiveMetastore {
         HiveConf serverConf = new HiveConf(conf);
         serverConf.set(
                 HiveConf.ConfVars.METASTORECONNECTURLKEY.varname,
-                "jdbc:derby:" + DERBY_PATH + ";create=true");
+                "jdbc:derby:" + derbyPath + ";create=true");
         baseHandler = new HiveMetaStore.HMSHandler("new db based metaserver", serverConf);
         IHMSHandler handler = RetryingHMSHandler.getProxy(serverConf, baseHandler, false);
 

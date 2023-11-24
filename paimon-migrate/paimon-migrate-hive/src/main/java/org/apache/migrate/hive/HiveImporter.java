@@ -228,7 +228,7 @@ public class HiveImporter implements Importer {
         private final FileIO fileIO;
         private final String format;
         private final String location;
-        private final org.apache.paimon.table.Table paimonTable;
+        private final AbstractFileStoreTable paimonTable;
         private final BinaryRow partitionRow;
         private final Path newDir;
 
@@ -236,7 +236,7 @@ public class HiveImporter implements Importer {
                 FileIO fileIO,
                 String format,
                 String location,
-                org.apache.paimon.table.Table paimonTable,
+                AbstractFileStoreTable paimonTable,
                 BinaryRow partitionRow,
                 Path newDir) {
             this.fileIO = fileIO;
