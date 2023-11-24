@@ -87,14 +87,14 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.executeSql(
                 "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(1000)).await();
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-        tEnv.executeSql("CALL migrate_table('default.hivetable', 'file.format=" + format + "')")
+        tEnv.executeSql("CALL sys.migrate_table('default.hivetable', 'file.format=" + format + "')")
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
@@ -121,14 +121,14 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql("CREATE TABLE hivetable (id string, id2 int, id3 int) STORED AS " + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(1000)).await();
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-        tEnv.executeSql("CALL migrate_table('default.hivetable', 'file.format=" + format + "')")
+        tEnv.executeSql("CALL sys.migrate_table('default.hivetable', 'file.format=" + format + "')")
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 

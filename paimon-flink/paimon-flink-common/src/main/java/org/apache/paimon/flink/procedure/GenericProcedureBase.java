@@ -27,15 +27,9 @@ import org.apache.flink.table.procedures.Procedure;
 public abstract class GenericProcedureBase implements Procedure, Factory {
 
     protected FlinkGenericCatalog flinkGenericCatalog;
-    protected String defaultDatabase;
 
     GenericProcedureBase withFlinkCatalog(FlinkGenericCatalog flinkGenericCatalog) {
         this.flinkGenericCatalog = flinkGenericCatalog;
-        return this;
-    }
-
-    GenericProcedureBase withDefaultDatabase(String database) {
-        this.defaultDatabase = database;
         return this;
     }
 }

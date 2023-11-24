@@ -447,16 +447,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
         return paimon;
     }
 
-    public Catalog flinkCatalog() {
-        return flink;
-    }
-
     /**
      * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
      */
     public Procedure getProcedure(ObjectPath procedurePath)
             throws ProcedureNotExistException, CatalogException {
-        paimon.catalog();
         return ProcedureUtil.getGenericProcedure(
                         this, procedurePath.getDatabaseName(), procedurePath.getObjectName())
                 .orElseThrow(

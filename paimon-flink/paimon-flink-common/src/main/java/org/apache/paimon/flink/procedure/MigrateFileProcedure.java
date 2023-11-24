@@ -49,8 +49,8 @@ public class MigrateFileProcedure extends GenericProcedureBase {
             boolean sync)
             throws Exception {
         Catalog paimonCatalog = flinkGenericCatalog.paimonFlinkCatalog().catalog();
-        Identifier sourceTableId = Identifier.getOrDefault(sourceTablePath, defaultDatabase);
-        Identifier targetTableId = Identifier.getOrDefault(targetPaimonTablePath, defaultDatabase);
+        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
+        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
         CatalogBaseTable sourceFlinkTable =
                 flinkGenericCatalog.getTable(

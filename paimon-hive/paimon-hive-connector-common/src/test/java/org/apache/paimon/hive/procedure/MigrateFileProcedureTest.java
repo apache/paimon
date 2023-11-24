@@ -76,7 +76,7 @@ public class MigrateFileProcedureTest extends ActionITCaseBase {
         tEnv.executeSql(
                 "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(1000)).await();
+        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
@@ -85,7 +85,8 @@ public class MigrateFileProcedureTest extends ActionITCaseBase {
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
         tEnv.executeSql(
                 "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('connector' = 'paimon', 'bucket' = '-1');");
-        tEnv.executeSql("CALL migrate_file('hivetable', 'paimontable', false)").await();
+        tEnv.executeSql("CALL sys.migrate_file('default.hivetable', 'default.paimontable', false)")
+                .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);

@@ -60,13 +60,15 @@ public class ProcedureUtil {
 
     public static Optional<Procedure> getGenericProcedure(
             FlinkGenericCatalog flinkGenericCatalog, String database, String procedureName) {
+        if (!Catalog.SYSTEM_DATABASE_NAME.equals(database)) {
+            return Optional.empty();
+        }
         try {
             GenericProcedureBase procedure =
                     FactoryUtil.discoverFactory(
                                     GenericProcedureBase.class.getClassLoader(),
                                     GenericProcedureBase.class,
                                     procedureName)
-                            .withDefaultDatabase(database)
                             .withFlinkCatalog(flinkGenericCatalog);
             return Optional.of(procedure);
         } catch (FactoryException e) {

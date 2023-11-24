@@ -57,7 +57,7 @@ public class MigrateTableProcedure extends GenericProcedureBase {
             throws Exception {
         TableEnvironmentImpl tableEnvironment =
                 TableEnvironmentImpl.create(EnvironmentSettings.inBatchMode());
-        Identifier sourceTableId = Identifier.getOrDefault(sourceTablePath, defaultDatabase);
+        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
 
         CatalogTable sourceFlinkTable =
                 (CatalogTable)
@@ -76,7 +76,7 @@ public class MigrateTableProcedure extends GenericProcedureBase {
 
         String backTable = sourceTablePath + BACK_SUFFIX;
 
-        Identifier backTableId = Identifier.getOrDefault(backTable, defaultDatabase);
+        Identifier backTableId = Identifier.fromString(backTable);
 
         ObjectPath sourceObjectPath =
                 new ObjectPath(sourceTableId.getDatabaseName(), sourceTableId.getObjectName());
@@ -94,7 +94,6 @@ public class MigrateTableProcedure extends GenericProcedureBase {
         flinkGenericCatalog.createTable(sourceObjectPath, table, false);
 
         MigrateFileProcedure migrateFileProcedure = new MigrateFileProcedure();
-        migrateFileProcedure.withDefaultDatabase(defaultDatabase);
         migrateFileProcedure.withFlinkCatalog(flinkGenericCatalog);
 
         return migrateFileProcedure.call(procedureContext, backTable, sourceTablePath, false);
