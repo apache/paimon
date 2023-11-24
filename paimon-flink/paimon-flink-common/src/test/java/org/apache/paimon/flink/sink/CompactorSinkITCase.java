@@ -274,7 +274,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
             throws Exception {
         Path warehouse = new Path(TraceableFileIO.SCHEME + "://" + tempDir);
         Options catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse.toUri().getPath());
         catalogOptions.set(CatalogOptions.URI, "");
         Catalog.Loader catalogLoader =
                 () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
