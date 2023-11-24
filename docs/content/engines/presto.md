@@ -131,7 +131,7 @@ If you are using HDFS FileSystem, you will also need to do one more thing: choos
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
 
-If you are using S3 FileSystem, you need to  add `paimon-s3-${PAIMON_VERSION}.jar` in `${PRESTO_HOME}/plugin/paimon` and additionally configure the following properties in `paimon.properties`:
+If you are using S3 FileSystem, you need to add `paimon-s3-${PAIMON_VERSION}.jar` in `${PRESTO_HOME}/plugin/paimon` and additionally configure the following properties in `paimon.properties`:
 
 ```properties
 s3.endpoint=${YOUR_ENDPOINTS}
