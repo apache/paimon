@@ -21,7 +21,7 @@ import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
+import org.apache.paimon.spark._
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
@@ -102,7 +102,12 @@ case class WriteIntoPaimonTable(
         case BucketMode.DYNAMIC =>
           val partitioned = if (primaryKeyCols.nonEmpty) {
             // Make sure that the records with the same bucket values is within a task.
-            withBucketCol.repartition(primaryKeyCols: _*)
+            val assignerParallelism = table.coreOptions.dynamicBucketAssignerParallelism
+            if (assignerParallelism != null) {
+              withBucketCol.repartition(assignerParallelism, primaryKeyCols: _*)
+            } else {
+              withBucketCol.repartition(primaryKeyCols: _*)
+            }
           } else {
             withBucketCol
           }
@@ -230,7 +235,7 @@ object WriteIntoPaimonTable {
       fileStoreTable: FileStoreTable,
       rowType: RowType,
       bucketColIndex: Int,
-      numSparkPartitions: Long,
+      numSparkPartitions: Int,
       toRow: ExpressionEncoder.Serializer[Row],
       fromRow: ExpressionEncoder.Deserializer[Row]
   ) extends BucketProcessor {
