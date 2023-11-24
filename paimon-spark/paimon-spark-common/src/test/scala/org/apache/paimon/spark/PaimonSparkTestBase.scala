@@ -90,5 +90,4 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
   def loadTable(tableName: String): AbstractFileStoreTable = {
     catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
   }
-
 }
