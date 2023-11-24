@@ -217,6 +217,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofSeconds(10))
                     .withDescription("The discovery interval of continuous reading.");
 
+    public static final ConfigOption<Integer> SCAN_MAX_SPLITS_PER_TASK =
+            key("scan.max-splits-per-task")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "Max split size should be cached for one task while scanning. "
+                                    + "If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.");
+
     @Immutable
     public static final ConfigOption<MergeEngine> MERGE_ENGINE =
             key("merge-engine")
@@ -1130,6 +1138,10 @@ public class CoreOptions implements Serializable {
 
     public Duration continuousDiscoveryInterval() {
         return options.get(CONTINUOUS_DISCOVERY_INTERVAL);
+    }
+
+    public int scanSplitMaxPerTask() {
+        return options.get(SCAN_MAX_SPLITS_PER_TASK);
     }
 
     public int localSortMaxNumFileHandles() {

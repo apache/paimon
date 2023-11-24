@@ -33,6 +33,7 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
 import org.apache.flink.runtime.source.coordinator.ExecutorNotifier;
+import org.assertj.core.api.Assertions;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
@@ -750,6 +751,48 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(2L);
     }
 
+    @Test
+    public void testEnumeratorSplitMax() throws Exception {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(2);
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(1L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(2L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(3L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
+    }
+
     private void triggerCheckpointAndComplete(
             ContinuousFileSplitEnumerator enumerator, long checkpointId) throws Exception {
         enumerator.snapshotState(checkpointId);
@@ -825,7 +868,7 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode);
+                    context, initialSplits, null, discoveryInterval, scan, bucketMode, 10);
         }
     }
 

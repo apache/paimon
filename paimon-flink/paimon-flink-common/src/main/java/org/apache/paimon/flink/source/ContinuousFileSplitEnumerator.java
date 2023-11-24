@@ -47,6 +47,7 @@ import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -57,7 +58,6 @@ public class ContinuousFileSplitEnumerator
         implements SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> {
 
     private static final Logger LOG = LoggerFactory.getLogger(ContinuousFileSplitEnumerator.class);
-    private static final int SPLIT_MAX_NUM = 5_000;
 
     protected final SplitEnumeratorContext<FileStoreSourceSplit> context;
 
@@ -73,6 +73,8 @@ public class ContinuousFileSplitEnumerator
 
     protected final ConsumerProgressCalculator consumerProgressCalculator;
 
+    private final int splitMaxNum;
+
     @Nullable protected Long nextSnapshotId;
 
     protected boolean finished = false;
@@ -85,7 +87,8 @@ public class ContinuousFileSplitEnumerator
             @Nullable Long nextSnapshotId,
             long discoveryInterval,
             StreamTableScan scan,
-            BucketMode bucketMode) {
+            BucketMode bucketMode,
+            int splitMaxPerTask) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -94,6 +97,7 @@ public class ContinuousFileSplitEnumerator
         this.splitGenerator = new FileStoreSourceSplitGenerator();
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
+        this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
         addSplits(remainSplits);
 
         this.consumerProgressCalculator =
@@ -135,7 +139,7 @@ public class ContinuousFileSplitEnumerator
         assignSplits();
         // if current task assigned no split, we check conditions to scan one more time
         if (readersAwaitingSplit.contains(subtaskId)) {
-            if (stopTriggerScan || splitAssigner.remainingSplits().size() >= SPLIT_MAX_NUM) {
+            if (stopTriggerScan) {
                 return;
             }
             stopTriggerScan = true;
@@ -185,17 +189,21 @@ public class ContinuousFileSplitEnumerator
     // ------------------------------------------------------------------------
 
     // this need to be synchronized because scan object is not thread safe. handleSplitRequest and
-    // context.callAsync will invoke this.
-    protected synchronized PlanWithNextSnapshotId scanNextSnapshot() {
+    // context.callAsync will invoke this. This method runs in workerExecutorThreadPool in
+    // parallelism.
+    protected synchronized Optional<PlanWithNextSnapshotId> scanNextSnapshot() {
+        if (splitAssigner.remainingSplits().size() >= splitMaxNum) {
+            return Optional.empty();
+        }
         TableScan.Plan plan = scan.plan();
         Long nextSnapshotId = scan.checkpoint();
-        return new PlanWithNextSnapshotId(plan, nextSnapshotId);
+        return Optional.of(new PlanWithNextSnapshotId(plan, nextSnapshotId));
     }
 
     // this mothod could not be synchronized, because it runs in coordinatorThread, which will make
     // it serialize.
     protected void processDiscoveredSplits(
-            PlanWithNextSnapshotId planWithNextSnapshotId, Throwable error) {
+            Optional<PlanWithNextSnapshotId> planWithNextSnapshotIdOptional, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished
@@ -208,6 +216,10 @@ public class ContinuousFileSplitEnumerator
             return;
         }
 
+        if (!planWithNextSnapshotIdOptional.isPresent()) {
+            return;
+        }
+        PlanWithNextSnapshotId planWithNextSnapshotId = planWithNextSnapshotIdOptional.get();
         nextSnapshotId = planWithNextSnapshotId.nextSnapshotId;
         TableScan.Plan plan = planWithNextSnapshotId.plan;
         if (plan.equals(SnapshotNotExistPlan.INSTANCE)) {
@@ -239,7 +251,7 @@ public class ContinuousFileSplitEnumerator
                 continue;
             }
             List<FileStoreSourceSplit> splits = splitAssigner.getNext(task, null);
-            if (splits.size() > 0) {
+            if (!splits.isEmpty()) {
                 assignment.put(task, splits);
                 consumerProgressCalculator.updateAssignInformation(task, splits.get(0));
             }

@@ -88,12 +88,14 @@ public class ContinuousFileStoreSource extends FlinkSource {
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
+        CoreOptions coreOptions = CoreOptions.fromMap(options);
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
                 nextSnapshotId,
-                CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
+                coreOptions.continuousDiscoveryInterval().toMillis(),
                 scan,
-                bucketMode);
+                bucketMode,
+                coreOptions.scanSplitMaxPerTask());
     }
 }
