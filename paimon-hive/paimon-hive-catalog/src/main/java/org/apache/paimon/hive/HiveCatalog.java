@@ -579,15 +579,13 @@ public class HiveCatalog extends AbstractCatalog {
             hadoopConf = new Configuration();
         }
 
-        // ignore all the static conf file URLs that HiveConf may have set
-        HiveConf.setHiveSiteLocation(null);
-        HiveConf.setLoadMetastoreConfig(false);
-        HiveConf.setLoadHiveServer2Config(false);
-        HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
-
         LOG.info("Setting hive conf dir as {}", hiveConfDir);
-
         if (hiveConfDir != null) {
+            // ignore all the static conf file URLs that HiveConf may have set
+            HiveConf.setHiveSiteLocation(null);
+            HiveConf.setLoadMetastoreConfig(false);
+            HiveConf.setLoadHiveServer2Config(false);
+            HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
             org.apache.hadoop.fs.Path hiveSite =
                     new org.apache.hadoop.fs.Path(hiveConfDir, HIVE_SITE_FILE);
             if (!hiveSite.toUri().isAbsolute()) {
@@ -605,6 +603,7 @@ public class HiveCatalog extends AbstractCatalog {
 
             return hiveConf;
         } else {
+            HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
             // user doesn't provide hive conf dir, we try to find it in classpath
             URL hiveSite =
                     Thread.currentThread().getContextClassLoader().getResource(HIVE_SITE_FILE);
@@ -612,8 +611,8 @@ public class HiveCatalog extends AbstractCatalog {
                 LOG.info("Found {} in classpath: {}", HIVE_SITE_FILE, hiveSite);
                 hiveConf.addResource(hiveSite);
             }
+            return hiveConf;
         }
-        return hiveConf;
     }
 
     public static boolean isEmbeddedMetastore(HiveConf hiveConf) {
