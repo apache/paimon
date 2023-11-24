@@ -119,7 +119,7 @@ cd ${PRESTO_HOME}
 mkdir -p etc/catalog
 ```
 
-Query FileSystem table:
+**Query FileSystem table:**
 
 ```bash
 vim etc/catalog/paimon.properties
@@ -133,7 +133,13 @@ connector.name=paimon
 warehouse=${YOUR_FS_PATH}
 ```
 
-Query HiveCatalog table:
+If you are using HDFS, you will also need to do one more thing: choose one of the following ways to configure your HDFS:
+
+- set environment variable HADOOP_HOME.
+- set environment variable HADOOP_CONF_DIR.
+- configure `hadoop-conf-dir` in the properties.
+
+**Query HiveCatalog table:**
 
 ```bash
 vim etc/catalog/paimon.properties
