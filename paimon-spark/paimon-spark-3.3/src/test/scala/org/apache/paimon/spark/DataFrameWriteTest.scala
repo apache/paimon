@@ -21,7 +21,7 @@ import org.junit.jupiter.api.Assertions
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
 
-  test("Paimon: DataFrmaeWrite.saveAsTable") {
+  test("Paimon: DataFrameWrite.saveAsTable") {
 
     import testImplicits._
 
