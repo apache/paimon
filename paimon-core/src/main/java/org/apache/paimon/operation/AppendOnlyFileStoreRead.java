@@ -108,7 +108,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
         for (DataFileMeta file : split.dataFiles()) {
-            String formatIdentifier = DataFilePathFactory.formatIdentifier(file);
+            String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
@@ -173,7 +173,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                     () ->
                             new RowDataFileRecordReader(
                                     fileIO,
-                                    dataFilePathFactory.toPath(file),
+                                    dataFilePathFactory.toPath(file.fileName()),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),

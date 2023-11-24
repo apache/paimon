@@ -38,7 +38,7 @@ import java.util.Map;
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
 
 /** Migrate procedure to migrate hive table to paimon table. */
-public class MigrationTableProcedure extends GenericProcedureBase {
+public class MigrateTableProcedure extends GenericProcedureBase {
 
     private static final String BACK_SUFFIX = "_backup_";
 
@@ -93,11 +93,11 @@ public class MigrationTableProcedure extends GenericProcedureBase {
         flinkGenericCatalog.renameTable(sourceObjectPath, backTableId.getObjectName(), false);
         flinkGenericCatalog.createTable(sourceObjectPath, table, false);
 
-        AddFileProcedure addFileProcedure = new AddFileProcedure();
-        addFileProcedure.withDefaultDatabase(defaultDatabase);
-        addFileProcedure.withFlinkCatalog(flinkGenericCatalog);
+        MigrateFileProcedure migrateFileProcedure = new MigrateFileProcedure();
+        migrateFileProcedure.withDefaultDatabase(defaultDatabase);
+        migrateFileProcedure.withFlinkCatalog(flinkGenericCatalog);
 
-        return addFileProcedure.call(procedureContext, backTable, sourceTablePath, false, true);
+        return migrateFileProcedure.call(procedureContext, backTable, sourceTablePath, false);
     }
 
     private Map<String, String> toPaimonOption(Map<String, String> optionsMap) {

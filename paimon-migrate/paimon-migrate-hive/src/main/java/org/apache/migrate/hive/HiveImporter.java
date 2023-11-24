@@ -21,6 +21,7 @@ package org.apache.migrate.hive;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -77,7 +78,7 @@ public class HiveImporter implements Importer {
         check(paimonTable);
     }
 
-    public void executeImport(boolean sync, boolean deleteOriginTable) throws Exception {
+    public void executeImport(boolean sync) throws Exception {
         Table sourceHiveTable = client.getTable(sourceDatabase, sourceTable);
         List<String> partitionsNames =
                 client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
@@ -117,9 +118,7 @@ public class HiveImporter implements Importer {
             paimonTable.newBatchWriteBuilder().newCommit().commit(commitMessages);
         }
 
-        if (deleteOriginTable) {
-            client.dropTable(sourceDatabase, sourceTable, false, true);
-        }
+        client.dropTable(sourceDatabase, sourceTable, true, true);
     }
 
     private void check(AbstractFileStoreTable paimonTable) {
@@ -162,9 +161,10 @@ public class HiveImporter implements Importer {
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
                     FileMetaUtils.writePartitionValue(partitionRowType, values, converters);
+            Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
             importerTasks.add(
-                    new ImporterTask(fileIO, format, location, paimonTable, partitionRow));
+                    new ImporterTask(fileIO, format, location, paimonTable, partitionRow, path));
         }
         return importerTasks;
     }
@@ -172,10 +172,11 @@ public class HiveImporter implements Importer {
     public ImporterTask importUnPartitionedTableTask(
             FileIO fileIO,
             org.apache.hadoop.hive.metastore.api.Table sourceTable,
-            org.apache.paimon.table.Table paimonTable) {
+            AbstractFileStoreTable paimonTable) {
         String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
         String location = sourceTable.getSd().getLocation();
-        return new ImporterTask(fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW);
+        Path path = paimonTable.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
+        return new ImporterTask(fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path);
     }
 
     private void checkCompatible(
@@ -229,18 +230,21 @@ public class HiveImporter implements Importer {
         private final String location;
         private final org.apache.paimon.table.Table paimonTable;
         private final BinaryRow partitionRow;
+        private final Path newDir;
 
         public ImporterTask(
                 FileIO fileIO,
                 String format,
                 String location,
                 org.apache.paimon.table.Table paimonTable,
-                BinaryRow partitionRow) {
+                BinaryRow partitionRow,
+                Path newDir) {
             this.fileIO = fileIO;
             this.format = format;
             this.location = location;
             this.paimonTable = paimonTable;
             this.partitionRow = partitionRow;
+            this.newDir = newDir;
         }
 
         @Override
@@ -248,7 +252,7 @@ public class HiveImporter implements Importer {
             try {
                 List<DataFileMeta> fileMetas =
                         FileMetaUtils.construct(
-                                fileIO, format, location, paimonTable, HIDDEN_PATH_FILTER);
+                                fileIO, format, location, paimonTable, HIDDEN_PATH_FILTER, newDir);
                 return FileMetaUtils.commitFile(partitionRow, fileMetas);
             } catch (IOException e) {
                 throw new RuntimeException("Can't get commit message", e);

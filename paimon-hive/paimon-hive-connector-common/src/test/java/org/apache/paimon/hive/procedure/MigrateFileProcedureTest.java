@@ -19,7 +19,7 @@
 package org.apache.paimon.hive.procedure;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.procedure.AddFileProcedure;
+import org.apache.paimon.flink.procedure.MigrateFileProcedure;
 import org.apache.paimon.hive.TestHiveMetastore;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -38,8 +38,8 @@ import org.junit.jupiter.api.Test;
 import java.util.List;
 import java.util.Random;
 
-/** Tests for {@link AddFileProcedure}. */
-public class AddFileProcedureTest extends ActionITCaseBase {
+/** Tests for {@link MigrateFileProcedure}. */
+public class MigrateFileProcedureTest extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
@@ -70,7 +70,7 @@ public class AddFileProcedureTest extends ActionITCaseBase {
 
         TableEnvironment tEnv =
                 StreamTableEnvironment.create(env, EnvironmentSettings.inBatchMode());
-        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive');");
+        tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
         tEnv.executeSql(
@@ -80,15 +80,13 @@ public class AddFileProcedureTest extends ActionITCaseBase {
         tEnv.executeSql("SHOW CREATE TABLE hivetable");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
-        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic');");
+        tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
+        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
         tEnv.executeSql(
                 "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('connector' = 'paimon', 'bucket' = '-1');");
-        tEnv.executeSql("CALL add_file('hivetable', 'paimontable', false, false)").await();
-
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable;").collect());
-        List<Row> r2 =
-                ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable;").collect());
+        tEnv.executeSql("CALL migrate_file('hivetable', 'paimontable', false)").await();
+        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }

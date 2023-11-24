@@ -29,25 +29,24 @@ import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedure.ProcedureContext;
 
 /** Add file procedure to add file from hive to paimon. */
-public class AddFileProcedure extends GenericProcedureBase {
+public class MigrateFileProcedure extends GenericProcedureBase {
 
     @Override
     public String identifier() {
-        return "add_file";
+        return "migrate_file";
     }
 
     public String[] call(
             ProcedureContext procedureContext, String sourceTablePath, String targetPaimonTablePath)
             throws Exception {
-        return call(procedureContext, sourceTablePath, targetPaimonTablePath, false, false);
+        return call(procedureContext, sourceTablePath, targetPaimonTablePath, false);
     }
 
     public String[] call(
             ProcedureContext procedureContext,
             String sourceTablePath,
             String targetPaimonTablePath,
-            boolean sync,
-            boolean deleteOrigin)
+            boolean sync)
             throws Exception {
         Catalog paimonCatalog = flinkGenericCatalog.paimonFlinkCatalog().catalog();
         Identifier sourceTableId = Identifier.getOrDefault(sourceTablePath, defaultDatabase);
@@ -71,7 +70,7 @@ public class AddFileProcedure extends GenericProcedureBase {
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         (AbstractFileStoreTable) targetPaimonTable)
-                .executeImport(sync, deleteOrigin);
+                .executeImport(sync);
 
         return new String[] {"Success"};
     }

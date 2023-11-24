@@ -53,9 +53,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 meta.schemaId(),
                 meta.level(),
                 toStringArrayData(meta.extraFiles()),
-                meta.creationTime(),
-                BinaryString.fromString(meta.externalLocation()),
-                BinaryString.fromString(meta.externalFileFormat()));
+                meta.creationTime());
     }
 
     @Override
@@ -73,8 +71,6 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getLong(9),
                 row.getInt(10),
                 fromStringArrayData(row.getArray(11)),
-                row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getString(13).toString(),
-                row.isNullAt(14) ? null : row.getString(14).toString());
+                row.getTimestamp(12, 3));
     }
 }

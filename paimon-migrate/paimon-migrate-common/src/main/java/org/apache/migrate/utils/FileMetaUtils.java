@@ -57,7 +57,8 @@ public class FileMetaUtils {
             String format,
             String location,
             Table paimonTable,
-            Predicate<FileStatus> filter)
+            Predicate<FileStatus> filter,
+            Path dir)
             throws IOException {
         List<FileStatus> fileStatuses =
                 Arrays.stream(fileIO.listStatus(new Path(location)))
@@ -66,7 +67,10 @@ public class FileMetaUtils {
                         .collect(Collectors.toList());
 
         return fileStatuses.stream()
-                .map(status -> constructFileMeta(format, location, status, fileIO, paimonTable))
+                .map(
+                        status ->
+                                constructFileMeta(
+                                        format, location, status, fileIO, paimonTable, dir))
                 .collect(Collectors.toList());
     }
 
@@ -82,7 +86,12 @@ public class FileMetaUtils {
     // -----------------------------private method---------------------------------------------
 
     private static DataFileMeta constructFileMeta(
-            String format, String location, FileStatus fileStatus, FileIO fileIO, Table table) {
+            String format,
+            String location,
+            FileStatus fileStatus,
+            FileIO fileIO,
+            Table table,
+            Path dir) {
 
         try {
             FieldStatsCollector.Factory[] factories =
@@ -98,22 +107,37 @@ public class FileMetaUtils {
                                     format)
                             .createStatsExtractor(table.rowType(), factories)
                             .get();
+            Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format);
             return constructFileMeta(
-                    location, format, fileStatus, tableStatsExtractor, fileIO, table);
+                    newPath.getName(),
+                    fileStatus.getLen(),
+                    newPath,
+                    tableStatsExtractor,
+                    fileIO,
+                    table);
         } catch (IOException e) {
             throw new RuntimeException("error when construct file meta", e);
         }
     }
 
+    private static Path renameFile(FileIO fileIO, Path originPath, Path newDir, String format)
+            throws IOException {
+        String subfix = "." + format;
+        String fileName = originPath.getName();
+        String newFileName = fileName.endsWith(subfix) ? fileName : fileName + "." + format;
+        Path newPath = new Path(newDir, newFileName);
+        fileIO.rename(originPath, newPath);
+        return newPath;
+    }
+
     private static DataFileMeta constructFileMeta(
-            String location,
-            String format,
-            FileStatus fileStatus,
+            String fileName,
+            long fileSize,
+            Path path,
             TableStatsExtractor tableStatsExtractor,
             FileIO fileIO,
             Table table)
             throws IOException {
-        Path path = fileStatus.getPath();
         FieldStatsArraySerializer statsArraySerializer =
                 new FieldStatsArraySerializer(table.rowType());
 
@@ -123,14 +147,12 @@ public class FileMetaUtils {
 
         return DataFileMeta.forAppend(
                 path.getName(),
-                fileStatus.getLen(),
+                fileSize,
                 fileInfo.getRight().getRowCount(),
                 stats,
                 0,
                 0,
-                ((AbstractFileStoreTable) table).schema().id(),
-                location,
-                format);
+                ((AbstractFileStoreTable) table).schema().id());
     }
 
     public static BinaryRow writePartitionValue(

@@ -31,8 +31,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -72,8 +70,6 @@ public class DataFileMeta {
 
     private final List<String> extraFiles;
     private final Timestamp creationTime;
-    @Nullable private final String externalLocation;
-    @Nullable private final String externalFileFormat;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -95,34 +91,6 @@ public class DataFileMeta {
                 maxSequenceNumber,
                 schemaId,
                 DUMMY_LEVEL);
-    }
-
-    public static DataFileMeta forAppend(
-            String fileName,
-            long fileSize,
-            long rowCount,
-            BinaryTableStats rowStats,
-            long minSequenceNumber,
-            long maxSequenceNumber,
-            long schemaId,
-            String externalLocation,
-            String externalFileFormat) {
-        return new DataFileMeta(
-                fileName,
-                fileSize,
-                rowCount,
-                EMPTY_MIN_KEY,
-                EMPTY_MAX_KEY,
-                EMPTY_KEY_STATS,
-                rowStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                DUMMY_LEVEL,
-                Collections.emptyList(),
-                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
-                externalLocation,
-                externalFileFormat);
     }
 
     public DataFileMeta(
@@ -167,40 +135,6 @@ public class DataFileMeta {
             int level,
             List<String> extraFiles,
             Timestamp creationTime) {
-        this(
-                fileName,
-                fileSize,
-                rowCount,
-                minKey,
-                maxKey,
-                keyStats,
-                valueStats,
-                minSequenceNumber,
-                maxSequenceNumber,
-                schemaId,
-                level,
-                extraFiles,
-                creationTime,
-                null,
-                null);
-    }
-
-    public DataFileMeta(
-            String fileName,
-            long fileSize,
-            long rowCount,
-            BinaryRow minKey,
-            BinaryRow maxKey,
-            BinaryTableStats keyStats,
-            BinaryTableStats valueStats,
-            long minSequenceNumber,
-            long maxSequenceNumber,
-            long schemaId,
-            int level,
-            List<String> extraFiles,
-            Timestamp creationTime,
-            @Nullable String externalLocation,
-            @Nullable String externalFileFormat) {
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
@@ -216,8 +150,6 @@ public class DataFileMeta {
         this.schemaId = schemaId;
         this.extraFiles = Collections.unmodifiableList(extraFiles);
         this.creationTime = creationTime;
-        this.externalLocation = externalLocation;
-        this.externalFileFormat = externalFileFormat;
     }
 
     public String fileName() {
@@ -351,9 +283,7 @@ public class DataFileMeta {
                 && schemaId == that.schemaId
                 && level == that.level
                 && Objects.equals(extraFiles, that.extraFiles)
-                && Objects.equals(creationTime, that.creationTime)
-                && Objects.equals(externalLocation, that.externalLocation)
-                && Objects.equals(externalFileFormat, that.externalFileFormat);
+                && Objects.equals(creationTime, that.creationTime);
     }
 
     @Override
@@ -371,15 +301,13 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime,
-                externalLocation,
-                externalFileFormat);
+                creationTime);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s, %s, %s}",
+                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s}",
                 fileName,
                 fileSize,
                 rowCount,
@@ -392,9 +320,7 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime,
-                externalLocation,
-                externalFileFormat);
+                creationTime);
     }
 
     public static RowType schema() {
@@ -412,8 +338,6 @@ public class DataFileMeta {
         fields.add(new DataField(10, "_LEVEL", new IntType(false)));
         fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
-        fields.add(new DataField(13, "_EXTERNAL_LOCATION", newStringType(true)));
-        fields.add(new DataField(14, "_EXTERNAL_FILE_FORMAT", newStringType(true)));
         return new RowType(fields);
     }
 
@@ -422,22 +346,5 @@ public class DataFileMeta {
                 .map(DataFileMeta::maxSequenceNumber)
                 .max(Long::compare)
                 .orElse(-1L);
-    }
-
-    public boolean isExternalFile() {
-        return externalLocation != null;
-    }
-
-    public Path externalPath() {
-        checkArgument(externalLocation != null);
-        return new Path(externalLocation, fileName);
-    }
-
-    public String externalLocation() {
-        return externalLocation;
-    }
-
-    public String externalFileFormat() {
-        return externalFileFormat;
     }
 }

@@ -21,5 +21,5 @@ package org.apache.migrate;
 /** Importer interface for importing table from other data-lake like hive, iceberg, hudi and etc. */
 public interface Importer {
 
-    void executeImport(boolean sync, boolean deleteOriginTable) throws Exception;
+    void executeImport(boolean sync) throws Exception;
 }

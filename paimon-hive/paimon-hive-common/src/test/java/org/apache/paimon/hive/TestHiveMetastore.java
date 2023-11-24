@@ -66,10 +66,14 @@ public class TestHiveMetastore {
 
     // It's tricky to clear all static fields in an HMS instance in order to switch derby root dir.
     // Therefore, we reuse the same derby root between tests and remove it after JVM exits.
-    private static final File HIVE_LOCAL_DIR;
-    private static final String DERBY_PATH;
+    private static File HIVE_LOCAL_DIR;
+    private static String DERBY_PATH;
 
     static {
+        setup();
+    }
+
+    private static void setup() {
         try {
             HIVE_LOCAL_DIR =
                     createTempDirectory("hive", asFileAttribute(fromString("rwxrwxrwx"))).toFile();
@@ -171,6 +175,7 @@ public class TestHiveMetastore {
     }
 
     public void reset() throws Exception {
+        setup();
         Path warehouseRoot = new Path(HIVE_LOCAL_DIR.getAbsolutePath());
         FileSystem fs = FileSystem.get(warehouseRoot.toUri(), hiveConf);
         for (FileStatus fileStatus : fs.listStatus(warehouseRoot)) {
