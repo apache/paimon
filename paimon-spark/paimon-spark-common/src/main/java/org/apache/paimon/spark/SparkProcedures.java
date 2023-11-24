@@ -25,7 +25,7 @@ import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 
-import org.apache.hadoop.shaded.com.google.common.collect.ImmutableMap;
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
 import java.util.Locale;
 import java.util.Map;
