@@ -119,4 +119,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
             throws IOException {
         return write.prepareCommit(waitCompaction, checkpointId);
     }
+
+    @VisibleForTesting
+    public StoreSinkWrite getWrite() {
+        return write;
+    }
 }
