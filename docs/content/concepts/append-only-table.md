@@ -264,11 +264,25 @@ CREATE TABLE MyTable (
 
 ## Multiple Partitions Write
 
-While writing multiple partitions in a single insert job, we may get an out-of-memory error if
-too many records arrived between two checkpoint.
+Since the number of write tasks that Paimon-sink needs to handle is: the number of partitions to which the data is written * the number of buckets per partition. 
+Therefore, we need to try to control the number of write tasks per paimon-sink task as much as possible,so that it is distributed within a reasonable range. 
+If each sink-task handles too many write tasks, not only will it cause problems with too many small files, but it may also lead to out-of-memory errors.
 
-You can `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
+In addition, write failures introduce orphan files, which undoubtedly adds to the cost of maintaining paimon. We need to avoid this problem as much as possible.
+
+For flink-jobs with auto-merge enabled, we recommend trying to follow the following formula to adjust the parallelism of paimon-sink(This doesn't just apply to append-only-tables, it actually applies to most scenarios):
+```
+(N*B)/P < 100   (This value needs to be adjusted according to the actual situation)
+N(the number of partitions to which the data is written)
+B(bucket number)
+P(parallelism of paimon-sink)
+100 (This is an empirically derived threshold,For flink-jobs with auto-merge disabled, this value can be reduced.
+However, please note that you are only transferring part of the work to the user-compaction-job, you still have to deal with the problem in essence,
+the amount of work you have to deal with has not been reduced, and the user-compaction-job still needs to be adjusted according to the above formula.)
+```
+You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
+files as much as possible.To use this option, you need to have a certain size of local disks for your flink cluster. This is especially important for those using flink on k8s.
+
+For append-only-table,You can set `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
 the records use Segment Pool to avoid OOM.
 
-You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
-files as much as possible.
