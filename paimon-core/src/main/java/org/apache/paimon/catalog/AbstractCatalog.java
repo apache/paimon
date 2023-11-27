@@ -295,8 +295,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    public Path databasePath(String database) {
-        return databasePath(warehouse(), database);
+    public Path newDatabasePath(String database) {
+        return newDatabasePath(warehouse(), database);
     }
 
     Map<String, Map<String, Path>> allTablePaths() {
@@ -306,9 +306,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Map<String, Path> tableMap =
                         allPaths.computeIfAbsent(database, d -> new HashMap<>());
                 for (String table : listTables(database)) {
-                    tableMap.put(
-                            table,
-                            dataTableLocation(warehouse(), Identifier.create(database, table)));
+                    tableMap.put(table, getDataTableLocation(Identifier.create(database, table)));
                 }
             }
             return allPaths;
@@ -328,7 +326,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        return dataTableLocation(warehouse(), identifier);
+        return newTableLocation(warehouse(), identifier);
     }
 
     private static boolean isSpecifiedSystemTable(Identifier identifier) {
@@ -362,7 +360,7 @@ public abstract class AbstractCatalog implements Catalog {
         return splits;
     }
 
-    public static Path dataTableLocation(String warehouse, Identifier identifier) {
+    public static Path newTableLocation(String warehouse, Identifier identifier) {
         if (isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -370,10 +368,11 @@ public abstract class AbstractCatalog implements Catalog {
                             identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
         }
         return new Path(
-                databasePath(warehouse, identifier.getDatabaseName()), identifier.getObjectName());
+                newDatabasePath(warehouse, identifier.getDatabaseName()),
+                identifier.getObjectName());
     }
 
-    public static Path databasePath(String warehouse, String database) {
+    public static Path newDatabasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 

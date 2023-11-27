@@ -68,23 +68,23 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
-        return uncheck(() -> fileIO.exists(databasePath(databaseName)));
+        return uncheck(() -> fileIO.exists(newDatabasePath(databaseName)));
     }
 
     @Override
     protected void createDatabaseImpl(String name) {
-        uncheck(() -> fileIO.mkdirs(databasePath(name)));
+        uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
     }
 
     @Override
     protected void dropDatabaseImpl(String name) {
-        uncheck(() -> fileIO.delete(databasePath(name), true));
+        uncheck(() -> fileIO.delete(newDatabasePath(name), true));
     }
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listStatus(databasePath(databaseName)))) {
+        for (FileStatus status : uncheck(() -> fileIO.listStatus(newDatabasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
