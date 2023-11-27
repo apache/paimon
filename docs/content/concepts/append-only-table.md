@@ -268,6 +268,8 @@ Since the number of write tasks that Paimon-sink needs to handle is: the number 
 Therefore, we need to try to control the number of write tasks per paimon-sink task as much as possible,so that it is distributed within a reasonable range. 
 If each sink-task handles too many write tasks, not only will it cause problems with too many small files, but it may also lead to out-of-memory errors.
 
+In addition, write failures introduce orphan files, which undoubtedly adds to the cost of maintaining paimon. We need to avoid this problem as much as possible.
+
 For flink-jobs with auto-merge enabled, we recommend trying to follow the following formula to adjust the parallelism of paimon-sink(This doesn't just apply to append-only-tables, it actually applies to most scenarios):
 ```
 (N*B)/P < 100   (This value needs to be adjusted according to the actual situation)
