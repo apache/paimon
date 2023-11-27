@@ -37,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -221,6 +222,16 @@ public class DataFileMeta {
                 .atZone(ZoneId.systemDefault())
                 .toInstant()
                 .toEpochMilli();
+    }
+
+    public Optional<CoreOptions.FileFormatType> fileFormat() {
+        String[] split = fileName.split("\\.");
+        try {
+            return Optional.of(
+                    CoreOptions.FileFormatType.valueOf(split[split.length - 1].toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
     }
 
     public DataFileMeta upgrade(int newLevel) {

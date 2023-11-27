@@ -50,7 +50,9 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -155,7 +157,7 @@ public class SnapshotReaderTest {
                                                     tablePath, partition, meta.fileName()),
                                             0,
                                             meta.fileSize(),
-                                            "avro",
+                                            meta.level() == 5 ? "orc" : "avro",
                                             meta.schemaId())));
         }
 
@@ -266,6 +268,9 @@ public class SnapshotReaderTest {
         options.set(CoreOptions.BUCKET, 1);
         options.set(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER, 5);
         options.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        Map<String, String> formatPerLevel = new HashMap<>();
+        formatPerLevel.put("5", "orc");
+        options.set(CoreOptions.FILE_FORMAT_PER_LEVEL, formatPerLevel);
 
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         TableSchema tableSchema =
