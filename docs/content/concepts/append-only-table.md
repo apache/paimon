@@ -275,9 +275,9 @@ N(the number of partitions to which the data is written)
 B(bucket number)
 P(parallelism of paimon-sink)
 ```
+You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
+files as much as possible.To use this option, you need to have a certain size of local disks for your flink cluster. This is especially important for those using flink on k8s.
 
-You can `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
+For append-only-table,You can set `write-buffer-for-append` option for append-only table. Setting this parameter to true, writer will cache
 the records use Segment Pool to avoid OOM.
 
-You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
-files as much as possible.
