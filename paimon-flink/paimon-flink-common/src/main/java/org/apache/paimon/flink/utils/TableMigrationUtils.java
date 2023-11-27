@@ -18,35 +18,32 @@
 
 package org.apache.paimon.flink.utils;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.hive.HiveCatalog;
-import org.apache.paimon.hive.migrate.HiveImporter;
-import org.apache.paimon.migrate.Importer;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.hive.migrate.HiveMigrator;
+import org.apache.paimon.migrate.Migrator;
 
-import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import java.util.Map;
 
 /** Migration util to choose importer according to connector. */
 public class TableMigrationUtils {
 
-    public static Importer getImporter(
-            CatalogBaseTable sourceFlinkTable,
-            Catalog paimonCatalog,
+    public static Migrator getImporter(
+            String connector,
+            HiveCatalog paimonCatalog,
             String sourceDatabase,
             String souceTableName,
-            AbstractFileStoreTable targetPaimonTable) {
-        String connector = sourceFlinkTable.getOptions().get("connector");
+            String targetDatabase,
+            String targetTableName,
+            Map<String, String> options) {
         switch (connector) {
             case "hive":
-                {
-                    HiveCatalog paimonHiveCatalog = (HiveCatalog) paimonCatalog;
-                    FileIO fileIO = paimonHiveCatalog.fileIO();
-                    IMetaStoreClient client = paimonHiveCatalog.getHmsClient();
-                    return new HiveImporter(
-                            fileIO, client, sourceDatabase, souceTableName, targetPaimonTable);
-                }
+                return new HiveMigrator(
+                        paimonCatalog,
+                        sourceDatabase,
+                        souceTableName,
+                        targetDatabase,
+                        targetTableName,
+                        options);
             default:
                 throw new UnsupportedOperationException("Don't support connector " + connector);
         }

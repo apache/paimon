@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.flink.procedure.ProcedureUtil;
-
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
@@ -38,7 +36,6 @@ import org.apache.flink.table.catalog.exceptions.FunctionNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionAlreadyExistsException;
 import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.PartitionSpecInvalidException;
-import org.apache.flink.table.catalog.exceptions.ProcedureNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
@@ -49,7 +46,6 @@ import org.apache.flink.table.expressions.Expression;
 import org.apache.flink.table.factories.Factory;
 import org.apache.flink.table.factories.FunctionDefinitionFactory;
 import org.apache.flink.table.factories.TableFactory;
-import org.apache.flink.table.procedures.Procedure;
 
 import java.util.List;
 import java.util.Optional;
@@ -229,54 +225,34 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public List<CatalogPartitionSpec> listPartitions(ObjectPath tablePath)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
-        try {
-            return paimon.listPartitions(tablePath);
-        } catch (Exception e) {
-            return flink.listPartitions(tablePath);
-        }
+        return flink.listPartitions(tablePath);
     }
 
     @Override
     public List<CatalogPartitionSpec> listPartitions(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
-            throws TableNotExistException, TableNotPartitionedException, CatalogException,
-                    PartitionSpecInvalidException {
-        try {
-            return paimon.listPartitions(tablePath, partitionSpec);
-        } catch (Exception e) {
-            return flink.listPartitions(tablePath, partitionSpec);
-        }
+            throws TableNotExistException, TableNotPartitionedException,
+                    PartitionSpecInvalidException, CatalogException {
+        return flink.listPartitions(tablePath, partitionSpec);
     }
 
     @Override
     public List<CatalogPartitionSpec> listPartitionsByFilter(
             ObjectPath tablePath, List<Expression> filters)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
-        try {
-            return paimon.listPartitionsByFilter(tablePath, filters);
-        } catch (Exception e) {
-            return flink.listPartitionsByFilter(tablePath, filters);
-        }
+        return flink.listPartitionsByFilter(tablePath, filters);
     }
 
     @Override
     public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        try {
-            return paimon.getPartition(tablePath, partitionSpec);
-        } catch (Exception e) {
-            return flink.getPartition(tablePath, partitionSpec);
-        }
+        return flink.getPartition(tablePath, partitionSpec);
     }
 
     @Override
     public boolean partitionExists(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws CatalogException {
-        try {
-            return paimon.partitionExists(tablePath, partitionSpec);
-        } catch (Exception e) {
-            return flink.partitionExists(tablePath, partitionSpec);
-        }
+        return flink.partitionExists(tablePath, partitionSpec);
     }
 
     @Override
@@ -288,22 +264,14 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             throws TableNotExistException, TableNotPartitionedException,
                     PartitionSpecInvalidException, PartitionAlreadyExistsException,
                     CatalogException {
-        try {
-            paimon.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
-        } catch (Exception e) {
-            flink.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
-        }
+        flink.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
     }
 
     @Override
     public void dropPartition(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec, boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        try {
-            paimon.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
-        } catch (Exception e) {
-            flink.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
-        }
+        flink.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
     }
 
     @Override
@@ -313,11 +281,7 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogPartition newPartition,
             boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        try {
-            paimon.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
-        } catch (Exception e) {
-            flink.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
-        }
+        flink.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
     }
 
     @Override
@@ -425,38 +389,13 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     public List<CatalogTableStatistics> bulkGetPartitionStatistics(
             ObjectPath tablePath, List<CatalogPartitionSpec> partitionSpecs)
             throws PartitionNotExistException, CatalogException {
-        try {
-            return flink.bulkGetPartitionStatistics(tablePath, partitionSpecs);
-        } catch (Exception e) {
-            return paimon.bulkGetPartitionStatistics(tablePath, partitionSpecs);
-        }
+        return flink.bulkGetPartitionStatistics(tablePath, partitionSpecs);
     }
 
     @Override
     public List<CatalogColumnStatistics> bulkGetPartitionColumnStatistics(
             ObjectPath tablePath, List<CatalogPartitionSpec> partitionSpecs)
             throws PartitionNotExistException, CatalogException {
-        try {
-            return paimon.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
-        } catch (Exception e) {
-            return flink.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
-        }
-    }
-
-    public FlinkCatalog paimonFlinkCatalog() {
-        return paimon;
-    }
-
-    /**
-     * Do not annotate with <code>@override</code> here to maintain compatibility with Flink 1.17-.
-     */
-    public Procedure getProcedure(ObjectPath procedurePath)
-            throws ProcedureNotExistException, CatalogException {
-        return ProcedureUtil.getGenericProcedure(
-                        this, procedurePath.getDatabaseName(), procedurePath.getObjectName())
-                .orElseThrow(
-                        () ->
-                                new ProcedureNotExistException(
-                                        procedurePath.getObjectName(), procedurePath));
+        return flink.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
     }
 }

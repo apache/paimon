@@ -127,7 +127,7 @@ public class TestHiveMetastore {
      * HiveConf.
      */
     public void start() {
-        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, 9093);
+        start(new HiveConf(new Configuration(), TestHiveMetastore.class), DEFAULT_POOL_SIZE, 9083);
     }
 
     /**

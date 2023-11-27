@@ -30,6 +30,7 @@ import org.apache.flink.table.api.SqlDialect;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
+import org.apache.hadoop.hive.conf.HiveConf;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -83,9 +84,17 @@ public class MigrateFileProcedureTest extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+
         tEnv.executeSql(
-                "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('connector' = 'paimon', 'bucket' = '-1');");
-        tEnv.executeSql("CALL sys.migrate_file('default.hivetable', 'default.paimontable', false)")
+                "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
+                        + PORT
+                        + "' , 'warehouse' = '"
+                        + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
+                        + "')");
+        tEnv.useCatalog("PAIMON");
+        tEnv.executeSql(
+                "CREATE TABLE paimontable (id STRING, id2 INT, id3 INT) PARTITIONED BY (id2, id3) with ('bucket' = '-1');");
+        tEnv.executeSql("CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable')")
                 .await();
         List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM paimontable").collect());
 

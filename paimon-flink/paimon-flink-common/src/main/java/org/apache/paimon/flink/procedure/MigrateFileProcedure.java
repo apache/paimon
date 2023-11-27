@@ -18,18 +18,16 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
-import org.apache.paimon.table.AbstractFileStoreTable;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.hive.HiveCatalog;
 
-import org.apache.flink.table.catalog.CatalogBaseTable;
-import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import java.util.Collections;
+
 /** Add file procedure to add file from hive to paimon. */
-public class MigrateFileProcedure extends GenericProcedureBase {
+public class MigrateFileProcedure extends ProcedureBase {
 
     @Override
     public String identifier() {
@@ -37,41 +35,31 @@ public class MigrateFileProcedure extends GenericProcedureBase {
     }
 
     public String[] call(
-            ProcedureContext procedureContext, String sourceTablePath, String targetPaimonTablePath)
-            throws Exception {
-        return call(procedureContext, sourceTablePath, targetPaimonTablePath, false);
-    }
-
-    public String[] call(
             ProcedureContext procedureContext,
+            String connector,
             String sourceTablePath,
-            String targetPaimonTablePath,
-            boolean sync)
+            String targetPaimonTablePath)
             throws Exception {
-        Catalog paimonCatalog = flinkGenericCatalog.paimonFlinkCatalog().catalog();
+        if (!(catalog instanceof HiveCatalog)) {
+            throw new IllegalArgumentException("Only support Hive Catalog");
+        }
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
-        CatalogBaseTable sourceFlinkTable =
-                flinkGenericCatalog.getTable(
-                        new ObjectPath(
-                                sourceTableId.getDatabaseName(), sourceTableId.getObjectName()));
-
-        Table targetPaimonTable =
-                flinkGenericCatalog.paimonFlinkCatalog().catalog().getTable(targetTableId);
-
-        if (!(targetPaimonTable instanceof AbstractFileStoreTable)) {
-            throw new IllegalArgumentException("Target table must be paimon data table");
+        if (!(catalog.tableExists(targetTableId))) {
+            throw new IllegalArgumentException(
+                    "Target paimon table does not exist: " + targetPaimonTablePath);
         }
 
         TableMigrationUtils.getImporter(
-                        sourceFlinkTable,
-                        paimonCatalog,
+                        connector,
+                        (HiveCatalog) catalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
-                        (AbstractFileStoreTable) targetPaimonTable)
-                .executeImport(sync);
-
+                        targetTableId.getDatabaseName(),
+                        targetTableId.getObjectName(),
+                        Collections.emptyMap())
+                .executeMigrate(false);
         return new String[] {"Success"};
     }
 }

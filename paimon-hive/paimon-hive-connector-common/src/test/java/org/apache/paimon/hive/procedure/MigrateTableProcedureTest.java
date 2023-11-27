@@ -94,9 +94,6 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-        tEnv.executeSql("CALL sys.migrate_table('default.hivetable', 'file.format=" + format + "')")
-                .await();
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -105,11 +102,14 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        List<Row> r3 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        tEnv.executeSql(
+                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                                + format
+                                + "')")
+                .await();
+        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
-        Assertions.assertThatList(r1)
-                .containsExactlyInAnyOrderElementsOf(r2)
-                .containsExactlyInAnyOrderElementsOf(r3);
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {
@@ -128,9 +128,6 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
         List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
-        tEnv.executeSql("CALL sys.migrate_table('default.hivetable', 'file.format=" + format + "')")
-                .await();
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -139,11 +136,14 @@ public class MigrateTableProcedureTest extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        List<Row> r3 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        tEnv.executeSql(
+                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                                + format
+                                + "')")
+                .await();
+        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
 
-        Assertions.assertThatList(r1)
-                .containsExactlyInAnyOrderElementsOf(r2)
-                .containsExactlyInAnyOrderElementsOf(r3);
+        Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
     private String data(int i) {

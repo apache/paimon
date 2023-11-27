@@ -18,91 +18,55 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.FlinkCatalogFactory;
+import org.apache.paimon.flink.utils.TableMigrationUtils;
+import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.ParameterUtils;
 
-import org.apache.flink.table.api.EnvironmentSettings;
-import org.apache.flink.table.api.internal.TableEnvironmentImpl;
-import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.CatalogTableImpl;
-import org.apache.flink.table.catalog.ObjectPath;
-import org.apache.flink.table.catalog.ResolvedCatalogTable;
-import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.HashMap;
-import java.util.Map;
-
-import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
-
 /** Migrate procedure to migrate hive table to paimon table. */
-public class MigrateTableProcedure extends GenericProcedureBase {
+public class MigrateTableProcedure extends ProcedureBase {
 
-    private static final String BACK_SUFFIX = "_backup_";
+    private static final String PAIMON_SUFFIX = "_paimon_";
 
     @Override
     public String identifier() {
         return "migrate_table";
     }
 
-    public String[] call(ProcedureContext procedureContext, String sourceTablePath)
+    public String[] call(
+            ProcedureContext procedureContext, String connector, String sourceTablePath)
             throws Exception {
-        return call(procedureContext, sourceTablePath, "");
+        return call(procedureContext, connector, sourceTablePath, "");
     }
 
     public String[] call(
-            ProcedureContext procedureContext, String sourceTablePath, String properties)
+            ProcedureContext procedureContext,
+            String connector,
+            String sourceTablePath,
+            String properties)
             throws Exception {
-        TableEnvironmentImpl tableEnvironment =
-                TableEnvironmentImpl.create(EnvironmentSettings.inBatchMode());
-        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
-
-        CatalogTable sourceFlinkTable =
-                (CatalogTable)
-                        flinkGenericCatalog.getTable(
-                                new ObjectPath(
-                                        sourceTableId.getDatabaseName(),
-                                        sourceTableId.getObjectName()));
-        ResolvedCatalogTable resolvedSourceCatalogTable =
-                tableEnvironment.getCatalogManager().resolveCatalogTable(sourceFlinkTable);
-        ResolvedSchema resolvedSchema = resolvedSourceCatalogTable.getResolvedSchema();
-
-        if (resolvedSchema.getPrimaryKey().isPresent()
-                && !resolvedSchema.getPrimaryKey().get().getColumns().isEmpty()) {
-            throw new IllegalArgumentException("Can't migrate primary key table yet.");
+        if (!(catalog instanceof HiveCatalog)) {
+            throw new IllegalArgumentException("Only support Hive Catalog");
         }
 
-        String backTable = sourceTablePath + BACK_SUFFIX;
+        String targetPaimonTablePath = sourceTablePath + PAIMON_SUFFIX;
 
-        Identifier backTableId = Identifier.fromString(backTable);
+        Identifier sourceTableId = Identifier.fromString(sourceTablePath);
+        Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
-        ObjectPath sourceObjectPath =
-                new ObjectPath(sourceTableId.getDatabaseName(), sourceTableId.getObjectName());
+        TableMigrationUtils.getImporter(
+                        connector,
+                        (HiveCatalog) catalog,
+                        sourceTableId.getDatabaseName(),
+                        sourceTableId.getObjectName(),
+                        targetTableId.getDatabaseName(),
+                        targetTableId.getObjectName(),
+                        ParameterUtils.parseCommaSeparatedKeyValues(properties))
+                .executeMigrate(false);
 
-        Map<String, String> paimonOption =
-                toPaimonOption(ParameterUtils.parseCommaSeparatedKeyValues(properties));
-
-        CatalogTable table =
-                new CatalogTableImpl(
-                        resolvedSourceCatalogTable.getSchema(),
-                        resolvedSourceCatalogTable.getPartitionKeys(),
-                        paimonOption,
-                        resolvedSourceCatalogTable.getComment());
-        flinkGenericCatalog.renameTable(sourceObjectPath, backTableId.getObjectName(), false);
-        flinkGenericCatalog.createTable(sourceObjectPath, table, false);
-
-        MigrateFileProcedure migrateFileProcedure = new MigrateFileProcedure();
-        migrateFileProcedure.withFlinkCatalog(flinkGenericCatalog);
-
-        return migrateFileProcedure.call(procedureContext, backTable, sourceTablePath, false);
-    }
-
-    private Map<String, String> toPaimonOption(Map<String, String> optionsMap) {
-        HashMap<String, String> map = new HashMap<>(optionsMap);
-        map.put(CoreOptions.BUCKET.key(), "-1");
-        map.put(CONNECTOR.key(), FlinkCatalogFactory.IDENTIFIER);
-        return map;
+        catalog.renameTable(targetTableId, sourceTableId, false);
+        return new String[] {"Success"};
     }
 }
