@@ -59,7 +59,7 @@ We can add our table properties while importing by sys.migrate_table('<database>
 <tableproperties> here should be separated by ",".  For example:
 
 ```sql
-CALL sys.migrate_table('my_db.wait_to_upgrate', 'file.format=orc,read.batch-size=2096,write-only=true')
+CALL sys.migrate_table('hive', 'my_db.wait_to_upgrate', 'file.format=orc,read.batch-size=2096,write-only=true')
 ```
 
 **Migrate Hive File**
