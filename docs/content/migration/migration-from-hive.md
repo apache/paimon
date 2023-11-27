@@ -33,8 +33,9 @@ still need the original table. The migrated table will be [unware-bucket append-
 Now, we can use flink generic catalog with Migrate Table Procedure and Migrate File Procedure to totally migrate a table from hive to paimon.
 
 * Migrate Table Procedure: Paimon table does not exist, use the procedure upgrade hive table to paimon table. Hive table will disappear after action done.
-* Migrate File Procedure:  Paimon table already exists, use the procedure to migrate files from hive table to paimon table. <font color="red"> Notice that, Hive table will also disappear after action done. </font>
+* Migrate File Procedure:  Paimon table already exists, use the procedure to migrate files from hive table to paimon table. **Notice that, Hive table will also disappear after action done.**
 
+<span style="color: red; "> **We highly recomment to back up hive table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
 
 ## Example for Migration
 
@@ -42,16 +43,16 @@ Now, we can use flink generic catalog with Migrate Table Procedure and Migrate F
 
 Command: <br>
 
-***CALL <font color="green">sys.migrate_table</font>(&#39;&lt;hive_database&gt;.&lt;hive_tablename&gt;&#39;, &#39;&lt;paimon_tableconf&gt;&#39;);***
+***CALL <font color="green">sys.migrate_table</font>(&#39;hive&#39;, &#39;&lt;hive_database&gt;.&lt;hive_tablename&gt;&#39;, &#39;&lt;paimon_tableconf&gt;&#39;);***
 
 **Example**
 
 ```sql
-CREATE CATALOG PAIMON WITH ('type'='paimon-generic', 'hive-conf-dir' = '/path/to/hive-site.xml');
+CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:9083', 'warehouse'='/path/to/warehouse/');
 
 USE CATALOG PAIMON;
 
-CALL sys.migrate_table('default.hivetable', 'file.format=orc');
+CALL sys.migrate_table('hive', 'default.hivetable', 'file.format=orc');
 ```
 After invoke, hivetable will totally convert to paimon format. Writing and reading the table by old "hive way" will fail.
 We can add our table properties while importing by sys.migrate_table('<database>.<tablename>', '<tableproperties>').
@@ -65,7 +66,7 @@ CALL sys.migrate_table('my_db.wait_to_upgrate', 'file.format=orc,read.batch-size
 
 Command: <br>
 
-***CALL <font color="green">sys.migrate_file</font>(&#39;&lt;hive_database&gt;.&lt;hive_table_name&gt;&#39;, &#39;&lt;paimon_database&gt;.&lt;paimon_tablename&gt;&#39;);***
+***CALL <font color="green">sys.migrate_file</font>(&#39;hive&#39;, &#39;&#39;&lt;hive_database&gt;.&lt;hive_table_name&gt;&#39;, &#39;&lt;paimon_database&gt;.&lt;paimon_tablename&gt;&#39;);***
 
 **Example**
 
@@ -74,7 +75,7 @@ CREATE CATALOG PAIMON WITH ('type'='paimon-generic', 'hive-conf-dir' = '/path/to
 
 USE CATALOG PAIMON;
 
-CALL sys.migrate_file('default.hivetable', 'default.paimontable');
+CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable');
 ```
 After invoke, "hivetable" will disappear. And all files will be moved and renamed to paimon directory. "paimontable" here must have the same
 partition keys with "hivetable", and paimontabl should be in unaware-bucket mode.
