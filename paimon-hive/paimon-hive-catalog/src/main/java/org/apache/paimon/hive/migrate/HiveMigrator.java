@@ -112,7 +112,6 @@ public class HiveMigrator implements Migrator {
 
         List<String> partitionsNames =
                 client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
-
         checkCompatible(sourceHiveTable, paimonTable);
 
         List<MigrateTask> tasks = new ArrayList<>();
