@@ -78,4 +78,4 @@ USE CATALOG PAIMON;
 CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable');
 ```
 After invoke, "hivetable" will disappear. And all files will be moved and renamed to paimon directory. "paimontable" here must have the same
-partition keys with "hivetable", and paimontabl should be in unaware-bucket mode.
+partition keys with "hivetable", and paimontable should be in unaware-bucket mode.
