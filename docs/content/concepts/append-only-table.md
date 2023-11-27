@@ -276,6 +276,9 @@ For flink-jobs with auto-merge enabled, we recommend trying to follow the follow
 N(the number of partitions to which the data is written)
 B(bucket number)
 P(parallelism of paimon-sink)
+100 (This is an empirically derived threshold,For flink-jobs with auto-merge disabled, this value can be reduced.
+However, please note that you are only transferring part of the work to the user-compaction-job, you still have to deal with the problem in essence,
+the amount of work you have to deal with has not been reduced, and the user-compaction-job still needs to be adjusted according to the above formula.)
 ```
 You can also set `write-buffer-spillable` to true, writer can spill the records to disk. This can reduce small
 files as much as possible.To use this option, you need to have a certain size of local disks for your flink cluster. This is especially important for those using flink on k8s.
