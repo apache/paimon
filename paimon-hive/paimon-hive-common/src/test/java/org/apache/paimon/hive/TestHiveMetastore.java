@@ -62,7 +62,7 @@ import static java.nio.file.attribute.PosixFilePermissions.fromString;
  */
 public class TestHiveMetastore {
 
-    private static final int DEFAULT_POOL_SIZE = 5;
+    private static final int DEFAULT_POOL_SIZE = 15;
 
     // It's tricky to clear all static fields in an HMS instance in order to switch derby root dir.
     // Therefore, we reuse the same derby root between tests and remove it after JVM exits.
