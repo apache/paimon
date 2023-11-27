@@ -66,7 +66,7 @@ CALL sys.migrate_table('my_db.wait_to_upgrate', 'file.format=orc,read.batch-size
 
 Command: <br>
 
-***CALL <font color="green">sys.migrate_file</font>(&#39;hive&#39;, &#39;&#39;&lt;hive_database&gt;.&lt;hive_table_name&gt;&#39;, &#39;&lt;paimon_database&gt;.&lt;paimon_tablename&gt;&#39;);***
+***CALL <font color="green">sys.migrate_file</font>(&#39;hive&#39;, &#39;&lt;hive_database&gt;.&lt;hive_table_name&gt;&#39;, &#39;&lt;paimon_database&gt;.&lt;paimon_tablename&gt;&#39;);***
 
 **Example**
 

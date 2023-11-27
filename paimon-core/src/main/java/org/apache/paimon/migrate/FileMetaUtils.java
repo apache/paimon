@@ -20,6 +20,7 @@ package org.apache.paimon.migrate;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.TableStatsExtractor;
@@ -40,6 +41,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
+import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.util.Arrays;
@@ -154,7 +156,7 @@ public class FileMetaUtils {
     public static BinaryRow writePartitionValue(
             RowType partitionRowType,
             Map<String, String> partitionValues,
-            List<DataConverter> dataConverters) {
+            List<BinaryWriter.ValueSetter> valueSetters) {
 
         BinaryRow binaryRow = new BinaryRow(partitionRowType.getFieldCount());
         BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
@@ -162,9 +164,10 @@ public class FileMetaUtils {
         List<DataField> fields = partitionRowType.getFields();
 
         for (int i = 0; i < fields.size(); i++) {
-            dataConverters
-                    .get(i)
-                    .write(binaryRowWriter, i, partitionValues.get(fields.get(i).name()));
+            Object value =
+                    TypeUtils.castFromString(
+                            partitionValues.get(fields.get(i).name()), fields.get(i).type());
+            valueSetters.get(i).setValue(binaryRowWriter, i, value);
         }
         binaryRowWriter.complete();
         return binaryRow;

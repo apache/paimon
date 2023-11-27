@@ -21,13 +21,12 @@ package org.apache.paimon.hive.migrate;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.migrate.DataConverter;
-import org.apache.paimon.migrate.DataTypeWriter;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.schema.Schema;
@@ -220,16 +219,14 @@ public class HiveMigrator implements Migrator {
             AbstractFileStoreTable paimonTable)
             throws Exception {
         List<MigrateTask> migrateTasks = new ArrayList<>();
-        List<DataConverter> converters = new ArrayList<>();
-
-        DataTypeWriter dataTypeWriter = new DataTypeWriter();
+        List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
 
         RowType partitionRowType =
                 paimonTable.schema().projectedLogicalRowType(paimonTable.schema().partitionKeys());
 
         partitionRowType
                 .getFieldTypes()
-                .forEach(type -> converters.add(type.accept(dataTypeWriter)));
+                .forEach(type -> valueSetters.add(BinaryWriter.createValueSetter(type)));
 
         for (String partitionName : partitionNames) {
             Partition partition =
@@ -239,7 +236,7 @@ public class HiveMigrator implements Migrator {
             String format = parseFormat(partition.getSd().getSerdeInfo().toString());
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =
-                    FileMetaUtils.writePartitionValue(partitionRowType, values, converters);
+                    FileMetaUtils.writePartitionValue(partitionRowType, values, valueSetters);
             Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
             migrateTasks.add(

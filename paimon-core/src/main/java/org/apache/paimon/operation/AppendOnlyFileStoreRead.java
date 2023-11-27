@@ -104,7 +104,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         DataFilePathFactory dataFilePathFactory =
                 pathFactory.createDataFilePathFactory(split.partition(), split.bucket());
         List<ConcatRecordReader.ReaderSupplier<InternalRow>> suppliers = new ArrayList<>();
-        if (!split.beforeFiles().isEmpty()) {
+        if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
         for (DataFileMeta file : split.dataFiles()) {
