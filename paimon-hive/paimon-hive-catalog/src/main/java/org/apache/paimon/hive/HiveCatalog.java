@@ -208,8 +208,13 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void createDatabaseImpl(String name) {
         try {
-            client.createDatabase(convertToDatabase(name));
-            locationHelper.createPathIfRequired(databasePath(name), fileIO);
+            Path databasePath = newDatabasePath(name);
+            locationHelper.createPathIfRequired(databasePath, fileIO);
+
+            Database database = new Database();
+            database.setName(name);
+            locationHelper.specifyDatabaseLocation(databasePath, database);
+            client.createDatabase(database);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
@@ -218,7 +223,9 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected void dropDatabaseImpl(String name) {
         try {
-            locationHelper.dropPathIfRequired(databasePath(name), fileIO);
+            Database database = client.getDatabase(name);
+            String location = locationHelper.getDatabaseLocation(database);
+            locationHelper.dropPathIfRequired(new Path(location), fileIO);
             client.dropDatabase(name, true, false, true);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);
@@ -419,13 +426,6 @@ public class HiveCatalog extends AbstractCatalog {
                 String.format(
                         "Table name[%s] cannot contain upper case in hive catalog",
                         identifier.getObjectName()));
-    }
-
-    private Database convertToDatabase(String name) {
-        Database database = new Database();
-        database.setName(name);
-        locationHelper.specifyDatabaseLocation(databasePath(name), database);
-        return database;
     }
 
     private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
