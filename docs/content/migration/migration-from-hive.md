@@ -71,11 +71,11 @@ Command: <br>
 **Example**
 
 ```sql
-CREATE CATALOG PAIMON WITH ('type'='paimon-generic', 'hive-conf-dir' = '/path/to/hive-site.xml');
+CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:9083', 'warehouse'='/path/to/warehouse/');
 
 USE CATALOG PAIMON;
 
 CALL sys.migrate_file('hive', 'default.hivetable', 'default.paimontable');
 ```
 After invoke, "hivetable" will disappear. And all files will be moved and renamed to paimon directory. "paimontable" here must have the same
-partition keys with "hivetable", and paimontable should be in unaware-bucket mode.
+partition keys with "hivetable", and "paimontable" should be in unaware-bucket mode.
