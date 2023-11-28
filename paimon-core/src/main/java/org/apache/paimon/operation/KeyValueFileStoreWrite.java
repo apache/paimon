@@ -80,7 +80,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
     private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final CoreOptions options;
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
@@ -130,7 +129,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
-        this.options = options;
     }
 
     @Override

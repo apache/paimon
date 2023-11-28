@@ -20,13 +20,13 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactManager;
 import org.apache.paimon.append.AppendOnlyWriter;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
@@ -58,15 +58,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final AppendOnlyFileStoreRead read;
     private final long schemaId;
     private final RowType rowType;
-    private final FileFormat fileFormat;
     private final FileStorePathFactory pathFactory;
-    private final long targetFileSize;
-    private final int compactionMinFileNum;
-    private final int compactionMaxFileNum;
-    private final boolean commitForceCompact;
-    private final String fileCompression;
-    private final boolean useWriteBuffer;
-    private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
     private boolean skipCompaction;
@@ -88,16 +80,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.read = read;
         this.schemaId = schemaId;
         this.rowType = rowType;
-        this.fileFormat = options.fileFormat();
         this.pathFactory = pathFactory;
-        this.targetFileSize = options.targetFileSize();
-        this.compactionMinFileNum = options.compactionMinFileNum();
-        this.compactionMaxFileNum = options.compactionMaxFileNum();
-        this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
-        this.fileCompression = options.fileCompression();
-        this.useWriteBuffer = options.useWriteBufferForAppend();
-        this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
     }
@@ -119,9 +103,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                         : new AppendOnlyCompactManager(
                                 compactExecutor,
                                 restoredFiles,
-                                compactionMinFileNum,
-                                compactionMaxFileNum,
-                                targetFileSize,
+                                options.compactionMinFileNum(),
+                                options.compactionMaxFileNum(),
+                                options.targetFileSize(),
                                 compactRewriter(partition, bucket),
                                 getCompactionMetrics(partition, bucket));
 
@@ -129,19 +113,24 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 fileIO,
                 ioManager,
                 schemaId,
-                fileFormat,
-                targetFileSize,
+                options.fileFormat(),
+                options.targetFileSize(),
                 rowType,
                 maxSequenceNumber,
                 compactManager,
-                commitForceCompact,
+                options.commitForceCompact(),
                 factory,
                 restoreIncrement,
-                useWriteBuffer,
-                spillable,
-                fileCompression,
+                options.useWriteBufferForAppend(),
+                bufferSpillable(),
+                options.fileCompression(),
                 statsCollectors,
                 getWriterMetrics(partition, bucket));
+    }
+
+    @VisibleForTesting
+    public boolean bufferSpillable() {
+        return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -154,12 +143,12 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                     new RowDataRollingFileWriter(
                             fileIO,
                             schemaId,
-                            fileFormat,
-                            targetFileSize,
+                            options.fileFormat(),
+                            options.targetFileSize(),
                             rowType,
                             pathFactory.createDataFilePathFactory(partition, bucket),
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
-                            fileCompression,
+                            options.fileCompression(),
                             statsCollectors);
             try {
                 rewriter.write(
