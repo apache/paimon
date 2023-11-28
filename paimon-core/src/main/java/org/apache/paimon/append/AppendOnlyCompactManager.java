@@ -25,6 +25,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -68,9 +69,10 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
-            @Nullable CompactionMetrics metrics) {
+            @Nullable CompactionMetrics metrics,
+            BucketMode bucketMode) {
         this.executor = executor;
-        this.toCompact = new TreeSet<>(fileComparator());
+        this.toCompact = new TreeSet<>(fileComparator(bucketMode));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
@@ -304,13 +306,13 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      * may be put after the new files, and this order will be disrupted. We need to ensure this
      * order, so we force the order by sequence.
      */
-    public static Comparator<DataFileMeta> fileComparator() {
+    public static Comparator<DataFileMeta> fileComparator(BucketMode bucketMode) {
         return (o1, o2) -> {
             if (o1 == o2) {
                 return 0;
             }
 
-            if (isOverlap(o1, o2)) {
+            if (bucketMode != BucketMode.UNAWARE && isOverlap(o1, o2)) {
                 LOG.warn(
                         String.format(
                                 "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"

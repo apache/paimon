@@ -32,6 +32,7 @@ import org.apache.paimon.io.KeyValueFileReadWriteTest;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -77,7 +78,14 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         SCHEMA,
                         0,
                         new AppendOnlyCompactManager(
-                                null, toCompact, 4, 10, 10, null, null), // not used
+                                null,
+                                toCompact,
+                                4,
+                                10,
+                                10,
+                                null,
+                                null,
+                                BucketMode.FIXED), // not used
                         false,
                         dataFilePathFactory,
                         null,

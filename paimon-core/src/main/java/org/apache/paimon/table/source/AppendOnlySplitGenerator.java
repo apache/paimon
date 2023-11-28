@@ -46,7 +46,7 @@ public class AppendOnlySplitGenerator implements SplitGenerator {
     @Override
     public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> input) {
         List<DataFileMeta> files = new ArrayList<>(input);
-        files.sort(fileComparator());
+        files.sort(fileComparator(bucketMode));
         Function<DataFileMeta, Long> weightFunc = file -> Math.max(file.fileSize(), openFileCost);
         return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
     }

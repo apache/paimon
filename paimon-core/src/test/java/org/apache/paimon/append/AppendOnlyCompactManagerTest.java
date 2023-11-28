@@ -19,6 +19,7 @@
 package org.apache.paimon.append;
 
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.table.BucketMode;
 
 import org.junit.jupiter.api.Test;
 
@@ -207,7 +208,8 @@ public class AppendOnlyCompactManagerTest {
                         maxFileNum,
                         targetFileSize,
                         null, // not used
-                        null);
+                        null,
+                        BucketMode.FIXED); // not use
         Optional<List<DataFileMeta>> actual = manager.pickCompactBefore();
         assertThat(actual.isPresent()).isEqualTo(expectedPresent);
         if (expectedPresent) {

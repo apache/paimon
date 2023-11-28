@@ -123,7 +123,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                getCompactionMetrics(partition, bucket));
+                                getCompactionMetrics(partition, bucket),
+                                bucketMode);
 
         return new AppendOnlyWriter(
                 fileIO,

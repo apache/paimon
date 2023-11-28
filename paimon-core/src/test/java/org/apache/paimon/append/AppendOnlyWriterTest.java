@@ -37,6 +37,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
@@ -528,7 +529,8 @@ public class AppendOnlyWriterTest {
                                     : Collections.singletonList(
                                             generateCompactAfter(compactBefore));
                         },
-                        null);
+                        null,
+                        BucketMode.FIXED);
         CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
