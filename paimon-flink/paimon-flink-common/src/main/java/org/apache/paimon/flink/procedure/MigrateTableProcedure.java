@@ -64,7 +64,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         ParameterUtils.parseCommaSeparatedKeyValues(properties))
-                .executeMigrate(false);
+                .executeMigrate();
 
         catalog.renameTable(targetTableId, sourceTableId, false);
         return new String[] {"Success"};

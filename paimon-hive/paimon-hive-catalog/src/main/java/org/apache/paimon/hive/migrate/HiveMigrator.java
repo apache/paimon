@@ -42,7 +42,6 @@ import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.Table;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoUtils;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -51,8 +50,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Queue;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Future;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.function.Predicate;
@@ -60,6 +58,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.hive.HiveTypeUtils.toPaimonType;
+import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
 
 /** Migrate hive table to paimon table. */
 public class HiveMigrator implements Migrator {
@@ -93,7 +92,7 @@ public class HiveMigrator implements Migrator {
         this.options = options;
     }
 
-    public void executeMigrate(boolean sync) throws Exception {
+    public void executeMigrate() throws Exception {
         if (!client.tableExists(sourceDatabase, sourceTable)) {
             throw new RuntimeException("Source hive table does not exist");
         }
@@ -114,39 +113,53 @@ public class HiveMigrator implements Migrator {
         checkCompatible(sourceHiveTable, paimonTable);
 
         List<MigrateTask> tasks = new ArrayList<>();
+        Map<Path, Path> rollBack = new ConcurrentHashMap<>();
         if (partitionsNames.isEmpty()) {
-            tasks.add(importUnPartitionedTableTask(fileIO, sourceHiveTable, paimonTable));
+            tasks.add(importUnPartitionedTableTask(fileIO, sourceHiveTable, paimonTable, rollBack));
         } else {
             tasks.addAll(
                     importPartitionedTableTask(
-                            client, fileIO, partitionsNames, sourceHiveTable, paimonTable));
+                            client,
+                            fileIO,
+                            partitionsNames,
+                            sourceHiveTable,
+                            paimonTable,
+                            rollBack));
         }
 
-        if (sync) {
-            List<CommitMessage> commitMessages = new ArrayList<>();
-            tasks.forEach(task -> commitMessages.add(task.get()));
-            paimonTable.newBatchWriteBuilder().newCommit().commit(commitMessages);
-        } else {
-            Queue<CommitMessage> commitMessages = new LinkedBlockingQueue<>();
-            List<Future<?>> futures = new ArrayList<>();
-            ExecutorService executors =
-                    Executors.newFixedThreadPool(Runtime.getRuntime().availableProcessors());
-            tasks.forEach(
-                    task -> futures.add(executors.submit(() -> commitMessages.add(task.get()))));
+        Queue<CommitMessage> commitMessages = new LinkedBlockingQueue<>();
+        List<Future<?>> futures = new ArrayList<>();
+        tasks.forEach(
+                task ->
+                        futures.add(
+                                COMMON_IO_FORK_JOIN_POOL.submit(
+                                        () -> commitMessages.add(task.get()))));
 
+        try {
             for (Future<?> future : futures) {
-                try {
-                    future.get();
-                } catch (Exception e) {
-                    throw new RuntimeException("Error happend while execute importer", e);
-                } finally {
-                    executors.shutdown();
+                future.get();
+            }
+        } catch (Exception e) {
+            futures.forEach(f -> f.cancel(true));
+            for (Future<?> future : futures) {
+                // wait all task cancelled or finished
+                while (!future.isDone()) {
+                    Thread.sleep(100);
+                }
+            }
+            // roll back all renamed path
+            for (Map.Entry<Path, Path> entry : rollBack.entrySet()) {
+                Path newPath = entry.getKey();
+                Path origin = entry.getValue();
+                if (fileIO.exists(newPath)) {
+                    fileIO.rename(newPath, origin);
                 }
             }
 
-            paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
+            throw new RuntimeException("Migrating failed because exception happens", e);
         }
 
+        paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
         client.dropTable(sourceDatabase, sourceTable, true, true);
     }
 
@@ -160,12 +173,12 @@ public class HiveMigrator implements Migrator {
     private void checkPaimonTable(AbstractFileStoreTable paimonTable) {
         if (!(paimonTable instanceof AppendOnlyFileStoreTable)) {
             throw new IllegalArgumentException(
-                    "Hive importor only support append only table target table");
+                    "Hive migrator only support append only table target table");
         }
 
         if (paimonTable.store().bucketMode() != BucketMode.UNAWARE) {
             throw new IllegalArgumentException(
-                    "Hive importor only support unaware-bucket target table");
+                    "Hive migrator only support unaware-bucket target table");
         }
     }
 
@@ -199,8 +212,6 @@ public class HiveMigrator implements Migrator {
                                         .map(FieldSchema::getName)
                                         .collect(Collectors.toList()));
 
-        TypeInfoUtils.getTypeInfoFromTypeString(fields.get(0).getType());
-
         fields.forEach(
                 field ->
                         schemaBuilder.column(
@@ -216,7 +227,8 @@ public class HiveMigrator implements Migrator {
             FileIO fileIO,
             List<String> partitionNames,
             Table sourceTable,
-            AbstractFileStoreTable paimonTable)
+            AbstractFileStoreTable paimonTable,
+            Map<Path, Path> rollback)
             throws Exception {
         List<MigrateTask> migrateTasks = new ArrayList<>();
         List<BinaryWriter.ValueSetter> valueSetters = new ArrayList<>();
@@ -240,17 +252,22 @@ public class HiveMigrator implements Migrator {
             Path path = paimonTable.store().pathFactory().bucketPath(partitionRow, 0);
 
             migrateTasks.add(
-                    new MigrateTask(fileIO, format, location, paimonTable, partitionRow, path));
+                    new MigrateTask(
+                            fileIO, format, location, paimonTable, partitionRow, path, rollback));
         }
         return migrateTasks;
     }
 
     public MigrateTask importUnPartitionedTableTask(
-            FileIO fileIO, Table sourceTable, AbstractFileStoreTable paimonTable) {
+            FileIO fileIO,
+            Table sourceTable,
+            AbstractFileStoreTable paimonTable,
+            Map<Path, Path> rollback) {
         String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
         String location = sourceTable.getSd().getLocation();
         Path path = paimonTable.store().pathFactory().bucketPath(BinaryRow.EMPTY_ROW, 0);
-        return new MigrateTask(fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path);
+        return new MigrateTask(
+                fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path, rollback);
     }
 
     private void checkCompatible(Table sourceHiveTable, AbstractFileStoreTable paimonTable) {
@@ -303,6 +320,7 @@ public class HiveMigrator implements Migrator {
         private final AbstractFileStoreTable paimonTable;
         private final BinaryRow partitionRow;
         private final Path newDir;
+        private final Map<Path, Path> rollback;
 
         public MigrateTask(
                 FileIO fileIO,
@@ -310,13 +328,15 @@ public class HiveMigrator implements Migrator {
                 String location,
                 AbstractFileStoreTable paimonTable,
                 BinaryRow partitionRow,
-                Path newDir) {
+                Path newDir,
+                Map<Path, Path> rollback) {
             this.fileIO = fileIO;
             this.format = format;
             this.location = location;
             this.paimonTable = paimonTable;
             this.partitionRow = partitionRow;
             this.newDir = newDir;
+            this.rollback = rollback;
         }
 
         @Override
@@ -324,7 +344,13 @@ public class HiveMigrator implements Migrator {
             try {
                 List<DataFileMeta> fileMetas =
                         FileMetaUtils.construct(
-                                fileIO, format, location, paimonTable, HIDDEN_PATH_FILTER, newDir);
+                                fileIO,
+                                format,
+                                location,
+                                paimonTable,
+                                HIDDEN_PATH_FILTER,
+                                newDir,
+                                rollback);
                 return FileMetaUtils.commitFile(partitionRow, fileMetas);
             } catch (IOException e) {
                 throw new RuntimeException("Can't get commit message", e);

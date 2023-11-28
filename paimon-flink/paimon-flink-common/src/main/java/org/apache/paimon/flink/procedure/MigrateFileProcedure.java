@@ -59,7 +59,7 @@ public class MigrateFileProcedure extends ProcedureBase {
                         targetTableId.getDatabaseName(),
                         targetTableId.getObjectName(),
                         Collections.emptyMap())
-                .executeMigrate(false);
+                .executeMigrate();
         return new String[] {"Success"};
     }
 }

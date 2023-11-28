@@ -60,7 +60,8 @@ public class FileMetaUtils {
             String location,
             Table paimonTable,
             Predicate<FileStatus> filter,
-            Path dir)
+            Path dir,
+            Map<Path, Path> rollback)
             throws IOException {
         List<FileStatus> fileStatuses =
                 Arrays.stream(fileIO.listStatus(new Path(location)))
@@ -69,7 +70,10 @@ public class FileMetaUtils {
                         .collect(Collectors.toList());
 
         return fileStatuses.stream()
-                .map(status -> constructFileMeta(format, status, fileIO, paimonTable, dir))
+                .map(
+                        status ->
+                                constructFileMeta(
+                                        format, status, fileIO, paimonTable, dir, rollback))
                 .collect(Collectors.toList());
     }
 
@@ -85,7 +89,12 @@ public class FileMetaUtils {
     // -----------------------------private method---------------------------------------------
 
     private static DataFileMeta constructFileMeta(
-            String format, FileStatus fileStatus, FileIO fileIO, Table table, Path dir) {
+            String format,
+            FileStatus fileStatus,
+            FileIO fileIO,
+            Table table,
+            Path dir,
+            Map<Path, Path> rollback) {
 
         try {
             FieldStatsCollector.Factory[] factories =
@@ -105,7 +114,7 @@ public class FileMetaUtils {
                                             new RuntimeException(
                                                     "Can't get table stats extractor for format "
                                                             + format));
-            Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format);
+            Path newPath = renameFile(fileIO, fileStatus.getPath(), dir, format, rollback);
             return constructFileMeta(
                     newPath.getName(),
                     fileStatus.getLen(),
@@ -118,12 +127,14 @@ public class FileMetaUtils {
         }
     }
 
-    private static Path renameFile(FileIO fileIO, Path originPath, Path newDir, String format)
+    private static Path renameFile(
+            FileIO fileIO, Path originPath, Path newDir, String format, Map<Path, Path> rollback)
             throws IOException {
         String subfix = "." + format;
         String fileName = originPath.getName();
         String newFileName = fileName.endsWith(subfix) ? fileName : fileName + "." + format;
         Path newPath = new Path(newDir, newFileName);
+        rollback.put(newPath, originPath);
         fileIO.rename(originPath, newPath);
         return newPath;
     }
