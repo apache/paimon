@@ -18,9 +18,11 @@
 
 package org.apache.paimon.format.parquet;
 
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.statistics.Statistics;
@@ -44,8 +46,8 @@ public class ParquetUtil {
      * @return result sets as map, key is column name, value is statistics (for example, null count,
      *     minimum value, maximum value)
      */
-    public static Map<String, Statistics<?>> extractColumnStats(FileIO fileIO, Path path)
-            throws IOException {
+    public static Pair<Map<String, Statistics<?>>, TableStatsExtractor.FileInfo> extractColumnStats(
+            FileIO fileIO, Path path) throws IOException {
         try (ParquetFileReader reader = getParquetReader(fileIO, path)) {
             ParquetMetadata parquetMetadata = reader.getFooter();
             List<BlockMetaData> blockMetaDataList = parquetMetadata.getBlocks();
@@ -65,7 +67,7 @@ public class ParquetUtil {
                     resultStats.put(columnName, midStats);
                 }
             }
-            return resultStats;
+            return Pair.of(resultStats, new TableStatsExtractor.FileInfo(reader.getRecordCount()));
         }
     }
 

@@ -30,6 +30,7 @@ import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -57,6 +58,12 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
 
     @Override
     public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+        return extractWithFileInfo(fileIO, path).getLeft();
+    }
+
+    @Override
+    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+            throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
         List<InternalRow> records =
@@ -66,7 +73,7 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
         for (InternalRow record : records) {
             statsCollector.collect(record);
         }
-        return statsCollector.extract();
+        return Pair.of(statsCollector.extract(), new FileInfo(records.size()));
     }
 
     private static class IdentityObjectSerializer extends ObjectSerializer<InternalRow> {

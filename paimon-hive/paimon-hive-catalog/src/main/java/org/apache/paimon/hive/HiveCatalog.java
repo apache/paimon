@@ -58,6 +58,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
@@ -515,7 +516,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @VisibleForTesting
-    IMetaStoreClient getHmsClient() {
+    public IMetaStoreClient getHmsClient() {
         return client;
     }
 
@@ -585,7 +586,6 @@ public class HiveCatalog extends AbstractCatalog {
             HiveConf.setLoadMetastoreConfig(false);
             HiveConf.setLoadHiveServer2Config(false);
             HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
-
             org.apache.hadoop.fs.Path hiveSite =
                     new org.apache.hadoop.fs.Path(hiveConfDir, HIVE_SITE_FILE);
             if (!hiveSite.toUri().isAbsolute()) {
@@ -603,7 +603,15 @@ public class HiveCatalog extends AbstractCatalog {
 
             return hiveConf;
         } else {
-            return new HiveConf(hadoopConf, HiveConf.class);
+            HiveConf hiveConf = new HiveConf(hadoopConf, HiveConf.class);
+            // user doesn't provide hive conf dir, we try to find it in classpath
+            URL hiveSite =
+                    Thread.currentThread().getContextClassLoader().getResource(HIVE_SITE_FILE);
+            if (hiveSite != null) {
+                LOG.info("Found {} in classpath: {}", HIVE_SITE_FILE, hiveSite);
+                hiveConf.addResource(hiveSite);
+            }
+            return hiveConf;
         }
     }
 

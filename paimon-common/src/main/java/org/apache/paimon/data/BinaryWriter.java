@@ -144,9 +144,9 @@ public interface BinaryWriter {
     }
 
     /**
-     * Creates an accessor for setting the elements of an array writer during runtime.
+     * Creates an accessor for setting the elements of a binary writer during runtime.
      *
-     * @param elementType the element type of the array
+     * @param elementType the element type
      */
     static ValueSetter createValueSetter(DataType elementType) {
         // ordered by type root definition
@@ -208,8 +208,8 @@ public interface BinaryWriter {
         }
     }
 
-    /** Accessor for setting the elements of an array writer during runtime. */
+    /** Accessor for setting the elements of a binary writer during runtime. */
     interface ValueSetter extends Serializable {
-        void setValue(BinaryArrayWriter writer, int pos, Object value);
+        void setValue(BinaryWriter writer, int pos, Object value);
     }
 }

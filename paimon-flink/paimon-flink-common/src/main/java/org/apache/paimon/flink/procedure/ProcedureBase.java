@@ -41,7 +41,7 @@ public abstract class ProcedureBase implements Procedure, Factory {
 
     protected Catalog catalog;
 
-    ProcedureBase withCatalog(Catalog catalog) {
+    public ProcedureBase withCatalog(Catalog catalog) {
         this.catalog = catalog;
         return this;
     }
