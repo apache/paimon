@@ -26,11 +26,21 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.utils.StringUtils;
 
+import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.util.Objects;
+
+import static org.apache.paimon.hive.HiveCatalog.createHadoopConfiguration;
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
@@ -61,7 +71,7 @@ public class HiveCatalogFactory implements CatalogFactory {
         String hiveConfDir = context.options().get(HIVE_CONF_DIR);
         String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
         HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
-
+        Configuration hadoopConfiguration = createHadoopConfiguration(hadoopConfDir);
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
         if (uri != null) {
@@ -80,8 +90,38 @@ public class HiveCatalogFactory implements CatalogFactory {
         }
 
         String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
-
+        if (Objects.isNull(warehouse)) {
+            warehouse = getHiveWarehouse(hiveConf, hadoopConfiguration);
+        }
+        try {
+            if (Objects.isNull(fileIO)) {
+                fileIO = FileIO.get(warehouse, context);
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
         return new HiveCatalog(
                 fileIO, hiveConf, clientClassName, context.options(), warehouse.toUri().toString());
+    }
+
+    private Path getHiveWarehouse(HiveConf hiveConf, Configuration hadoopConfiguration) {
+        String warehouse = hiveConf.get(ConfVars.METASTOREWAREHOUSE.varname);
+        // if hive.metastore.uris not found, set local file as default conf
+        if (StringUtils.isNullOrWhitespaceOnly(warehouse)) {
+            warehouse = "/tmp/paimon/warehouse";
+        }
+        try {
+            if (new Path(warehouse).toUri().getScheme() == null) {
+                warehouse =
+                        FileSystem.get(new URI(warehouse), hadoopConfiguration).getUri().toString()
+                                + "/"
+                                + warehouse;
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        } catch (URISyntaxException e) {
+            throw new RuntimeException(e);
+        }
+        return new Path(warehouse);
     }
 }

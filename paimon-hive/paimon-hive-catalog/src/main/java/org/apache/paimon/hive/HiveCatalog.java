@@ -556,29 +556,7 @@ public class HiveCatalog extends AbstractCatalog {
         if (isNullOrWhitespaceOnly(hiveConfDir)) {
             hiveConfDir = possibleHiveConfPath();
         }
-        if (isNullOrWhitespaceOnly(hadoopConfDir)) {
-            hadoopConfDir = possibleHadoopConfPath();
-        }
-
-        // create HiveConf from hadoop configuration with hadoop conf directory configured.
-        Configuration hadoopConf = null;
-        if (!isNullOrWhitespaceOnly(hadoopConfDir)) {
-            hadoopConf = getHadoopConfiguration(hadoopConfDir);
-            if (hadoopConf == null) {
-                String possiableUsedConfFiles =
-                        "core-site.xml | hdfs-site.xml | yarn-site.xml | mapred-site.xml";
-                throw new RuntimeException(
-                        "Failed to load the hadoop conf from specified path:" + hadoopConfDir,
-                        new FileNotFoundException(
-                                "Please check the path none of the conf files ("
-                                        + possiableUsedConfFiles
-                                        + ") exist in the folder."));
-            }
-        }
-        if (hadoopConf == null) {
-            hadoopConf = new Configuration();
-        }
-
+        Configuration hadoopConf = createHadoopConfiguration(hadoopConfDir);
         LOG.info("Setting hive conf dir as {}", hiveConfDir);
         if (hiveConfDir != null) {
             // ignore all the static conf file URLs that HiveConf may have set
@@ -613,6 +591,36 @@ public class HiveCatalog extends AbstractCatalog {
             }
             return hiveConf;
         }
+    }
+
+    public static Configuration createHadoopConfiguration(@Nullable String hadoopConfDir) {
+
+        LOG.info("Setting hadoop conf dir as {}", hadoopConfDir);
+
+        if (isNullOrWhitespaceOnly(hadoopConfDir)) {
+            hadoopConfDir = possibleHadoopConfPath();
+        }
+
+        // create HiveConf from hadoop configuration with hadoop conf directory configured.
+        Configuration hadoopConf = null;
+        if (!isNullOrWhitespaceOnly(hadoopConfDir)) {
+            hadoopConf = getHadoopConfiguration(hadoopConfDir);
+            if (hadoopConf == null) {
+                String possiableUsedConfFiles =
+                        "core-site.xml | hdfs-site.xml | yarn-site.xml | mapred-site.xml";
+                throw new RuntimeException(
+                        "Failed to load the hadoop conf from specified path:" + hadoopConfDir,
+                        new FileNotFoundException(
+                                "Please check the path none of the conf files ("
+                                        + possiableUsedConfFiles
+                                        + ") exist in the folder."));
+            }
+        }
+        if (hadoopConf == null) {
+            hadoopConf = new Configuration();
+        }
+
+        return hadoopConf;
     }
 
     public static boolean isEmbeddedMetastore(HiveConf hiveConf) {

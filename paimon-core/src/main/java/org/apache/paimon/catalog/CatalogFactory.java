@@ -23,7 +23,8 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -40,13 +41,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public interface CatalogFactory extends Factory {
 
-    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
+    Catalog create(@Nullable FileIO fileIO, @Nullable Path warehouse, CatalogContext context);
 
     static Path warehouse(CatalogContext context) {
-        String warehouse =
-                Preconditions.checkNotNull(
-                        context.options().get(WAREHOUSE),
-                        "Paimon '" + WAREHOUSE.key() + "' path must be set");
+        String warehouse = context.options().get(WAREHOUSE);
         return new Path(warehouse);
     }
 
@@ -59,18 +57,26 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
+        String metastore = context.options().get(METASTORE);
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
-        String warehouse = warehouse(context).toUri().toString();
-
-        String metastore = context.options().get(METASTORE);
+        String warehouse = null;
+        try {
+            warehouse = warehouse(context).toUri().toString();
+        } catch (IllegalArgumentException e) {
+            // do nothing, because catalog warehouse is null
+        }
         CatalogFactory catalogFactory =
                 FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
 
-        Path warehousePath = new Path(warehouse);
-        FileIO fileIO;
-
+        Path warehousePath = null;
+        try {
+            warehousePath = new Path(warehouse);
+        } catch (IllegalArgumentException e) {
+            // do nothing, because warehouse is null
+        }
+        FileIO fileIO = null;
         try {
             fileIO = FileIO.get(warehousePath, context);
             if (fileIO.exists(warehousePath)) {
@@ -84,8 +90,9 @@ public interface CatalogFactory extends Factory {
             }
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        } catch (NullPointerException e) {
+            // do nothing, because warehousePath is null
         }
-
         return catalogFactory.create(fileIO, warehousePath, context);
     }
 }
