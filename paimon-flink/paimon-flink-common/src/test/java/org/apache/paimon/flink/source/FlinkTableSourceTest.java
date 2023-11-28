@@ -86,11 +86,11 @@ public class FlinkTableSourceTest extends TableTestBase {
         Assertions.assertThat(tableSource.pushFilters(filters))
                 .isEqualTo(ImmutableList.of(filters.get(0)));
 
-        // col1 = 1 && p2 like '%a' => [p2 like '%a']
-        filters = ImmutableList.of(p2Like("%a"));
+        // col1 = 1 && p2 like '%a' => None
+        filters = ImmutableList.of(col1Equal1(), p2Like("%a"));
         Assertions.assertThat(tableSource.pushFilters(filters)).isEqualTo(filters);
 
-        // col1 = 1 && p2 like 'a%' => None
+        // col1 = 1 && p2 like 'a%' => [p2 like 'a%']
         filters = ImmutableList.of(col1Equal1(), p2Like("a%"));
         Assertions.assertThat(tableSource.pushFilters(filters))
                 .isEqualTo(ImmutableList.of(filters.get(0)));
@@ -99,7 +99,7 @@ public class FlinkTableSourceTest extends TableTestBase {
         filters = ImmutableList.of(rand());
         Assertions.assertThat(tableSource.pushFilters(filters)).isEqualTo(filters);
 
-        // upper(p1) = "A"
+        // upper(p1) = "A" => [upper(p1) = "A"]
         filters = ImmutableList.of(upperP2EqualA());
         Assertions.assertThat(tableSource.pushFilters(filters)).isEqualTo(filters);
 
