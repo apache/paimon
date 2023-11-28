@@ -18,7 +18,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
-import org.apache.paimon.table.Table
+import org.apache.paimon.table.{AppendOnlyFileStoreTable, Table}
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownLimit, SupportsPushDownRequiredColumns}
@@ -106,6 +106,9 @@ class SparkScanBuilder(table: Table)
   }
 
   override def pushLimit(limit: Int): Boolean = {
+    if (table.isInstanceOf[AppendOnlyFileStoreTable]) {
+      pushDownLimit = Some(limit)
+    }
     // just make a best effort to push down limit
     false
   }
