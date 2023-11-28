@@ -56,7 +56,8 @@ Paimon will automatically expand the number of buckets.
 - Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
 
 {{< hint info >}}
-Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
+Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition 
+(this can lead to duplicate data). Even if you enable `'write-only'` and start a dedicated compaction job, it won't work.
 {{< /hint >}}
 
 #### Normal Dynamic Bucket Mode
