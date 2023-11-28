@@ -43,6 +43,9 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StatsCollectorFactories;
 import org.apache.paimon.utils.TypeUtils;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.Collections;
@@ -53,6 +56,8 @@ import java.util.stream.Collectors;
 
 /** To construct file meta data for external files. */
 public class FileMetaUtils {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileMetaUtils.class);
 
     public static List<DataFileMeta> construct(
             FileIO fileIO,
@@ -135,6 +140,7 @@ public class FileMetaUtils {
         String newFileName = fileName.endsWith(subfix) ? fileName : fileName + "." + format;
         Path newPath = new Path(newDir, newFileName);
         rollback.put(newPath, originPath);
+        LOG.info("Migration: rename file from " + originPath + " to " + newPath);
         fileIO.rename(originPath, newPath);
         return newPath;
     }
