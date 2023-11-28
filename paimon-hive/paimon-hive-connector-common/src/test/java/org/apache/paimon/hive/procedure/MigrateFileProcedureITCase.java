@@ -40,7 +40,7 @@ import java.util.List;
 import java.util.Random;
 
 /** Tests for {@link MigrateFileProcedure}. */
-public class MigrateFileProcedureTest extends ActionITCaseBase {
+public class MigrateFileProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 

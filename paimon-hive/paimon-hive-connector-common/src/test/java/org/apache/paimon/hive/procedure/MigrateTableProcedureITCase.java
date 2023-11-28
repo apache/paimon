@@ -45,7 +45,7 @@ import java.util.Map;
 import java.util.Random;
 
 /** Tests for {@link MigrateFileProcedure}. */
-public class MigrateTableProcedureTest extends ActionITCaseBase {
+public class MigrateTableProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
