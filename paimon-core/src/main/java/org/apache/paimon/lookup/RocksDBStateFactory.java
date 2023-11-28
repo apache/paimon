@@ -104,7 +104,9 @@ public class RocksDBStateFactory implements Closeable {
             } catch (RocksDBException e) {
                 throw new RuntimeException(
                         "Exception in bulkLoad, the most suspicious reason is that "
-                                + "your data contains duplicates, please check your sink table.",
+                                + "your data contains duplicates, please check your sink table. "
+                                + "(The likelihood of duplication is that you used multiple jobs to write the "
+                                + "same dynamic bucket table, it only supports single write)",
                         e);
             }
             recordNum++;
