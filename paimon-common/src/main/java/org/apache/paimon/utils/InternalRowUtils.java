@@ -281,9 +281,7 @@ public class InternalRowUtils {
                 break;
             case VARCHAR:
             case CHAR:
-                String s1 = ((BinaryString) x).toString();
-                String s2 = ((BinaryString) y).toString();
-                ret = s1.compareTo(s2);
+                ret = ((BinaryString) x).compareTo((BinaryString) y);
                 break;
             default:
                 throw new IllegalArgumentException("Incomparable type: " + type);
