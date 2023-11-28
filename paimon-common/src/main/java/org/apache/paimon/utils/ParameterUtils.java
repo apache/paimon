@@ -36,8 +36,10 @@ public class ParameterUtils {
 
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
         Map<String, String> kvs = new HashMap<>();
-        for (String kvString : keyValues.split(",")) {
-            parseKeyValueString(kvs, kvString);
+        if (!StringUtils.isBlank(keyValues)) {
+            for (String kvString : keyValues.split(",")) {
+                parseKeyValueString(kvs, kvString);
+            }
         }
         return kvs;
     }

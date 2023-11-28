@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <flink.version>1.18.0</flink.version>
+        <hive.version>2.3.9</hive.version>
     </properties>
 
     <dependencies>
