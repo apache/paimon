@@ -105,8 +105,8 @@ class SparkPushDownTest extends PaimonSparkTestBase {
     }
     Assertions.assertTrue(dataFilesWithoutLimit.length >= 2)
 
-    // with limit
-    Assertions.assertTrue(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
+    // It still return false even it can push down limit.
+    Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
     val partitions = scanBuilder.build().toBatch.planInputPartitions()
     Assertions.assertEquals(1, partitions.length)
     val dataFiles =
