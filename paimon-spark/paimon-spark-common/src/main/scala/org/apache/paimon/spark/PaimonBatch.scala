@@ -15,39 +15,27 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark
 
-package org.apache.paimon.spark;
+import org.apache.paimon.table.source.{ReadBuilder, Split}
 
-import org.apache.paimon.table.source.Split;
+import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionReaderFactory}
 
-import org.apache.spark.sql.connector.read.InputPartition;
+/** A Spark {@link Batch} for paimon. */
+case class PaimonBatch(splits: Array[Split], readBuilder: ReadBuilder) extends Batch {
 
-/** A Spark {@link InputPartition} for paimon. */
-public class SparkInputPartition implements InputPartition {
+  override def planInputPartitions(): Array[InputPartition] =
+    splits.map(new SparkInputPartition(_).asInstanceOf[InputPartition])
 
-    private static final long serialVersionUID = 1L;
+  override def createReaderFactory(): PartitionReaderFactory = new SparkReaderFactory(readBuilder)
 
-    private final Split split;
+  override def equals(obj: Any): Boolean = {
+    obj match {
+      case other: PaimonBatch =>
+        this.splits.sameElements(other.splits) &&
+        readBuilder.equals(other.readBuilder)
 
-    public SparkInputPartition(Split split) {
-        this.split = split;
+      case _ => false
     }
-
-    public Split split() {
-        return split;
-    }
-
-    @Override
-    public boolean equals(Object o) {
-        if (this == o) {
-            return true;
-        }
-
-        if (o == null || getClass() != o.getClass()) {
-            return false;
-        }
-
-        SparkInputPartition that = (SparkInputPartition) o;
-        return this.split.equals(that.split);
-    }
+  }
 }
