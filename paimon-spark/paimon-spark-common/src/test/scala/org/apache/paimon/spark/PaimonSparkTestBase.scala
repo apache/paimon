@@ -24,6 +24,7 @@ import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.WithTableOptions
 import org.apache.paimon.table.AbstractFileStoreTable
 
+import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
 import org.apache.spark.sql.test.SharedSparkSession
@@ -42,7 +43,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   protected val tableName0: String = "T"
 
-  override protected def sparkConf = {
+  override protected def sparkConf: SparkConf = {
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
@@ -51,12 +52,14 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   override protected def beforeAll(): Unit = {
     super.beforeAll()
-    spark.sql(s"CREATE DATABASE paimon.$dbName0")
+    spark.sql(s"USE paimon")
+    spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon.$dbName0")
     spark.sql(s"USE paimon.$dbName0")
   }
 
   override protected def afterAll(): Unit = {
     try {
+      spark.sql(s"USE paimon")
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE paimon.$dbName0 CASCADE")
     } finally {
@@ -66,6 +69,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   override protected def beforeEach(): Unit = {
     super.beforeAll()
+    spark.sql(s"USE paimon")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
   }
 
