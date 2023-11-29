@@ -15,29 +15,30 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark
 
-package org.apache.paimon.table.source;
+import org.apache.paimon.table.{AppendOnlyFileStoreTable, Table}
+import org.apache.paimon.table.source.ReadBuilder
 
-import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.predicate.Predicate;
+import org.apache.spark.sql.connector.read.{Scan, SupportsPushDownLimit}
 
-import java.util.Map;
+class PaimonScanBuilder(table: Table)
+  extends PaimonBaseScanBuilder(table)
+  with SupportsPushDownLimit {
 
-/** Inner {@link TableScan} contains filter push down. */
-public interface InnerTableScan extends TableScan {
+  private var pushDownLimit: Option[Int] = None
 
-    InnerTableScan withFilter(Predicate predicate);
+  override protected def getReadBuilder(): ReadBuilder = {
+    val readBuilder = super.getReadBuilder()
+    pushDownLimit.foreach(readBuilder.withLimit)
+    readBuilder
+  }
 
-    default InnerTableScan withLimit(int limit) {
-        return this;
+  override def pushLimit(limit: Int): Boolean = {
+    if (table.isInstanceOf[AppendOnlyFileStoreTable]) {
+      pushDownLimit = Some(limit)
     }
-
-    default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-        return this;
-    }
-
-    default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
-        // do nothing, should implement this if need
-        return this;
-    }
+    // just make a best effort to push down limit
+    false
+  }
 }

@@ -66,7 +66,7 @@ public class SparkTable
     @Override
     public ScanBuilder newScanBuilder(CaseInsensitiveStringMap options) {
         Table newTable = table.copy(options.asCaseSensitiveMap());
-        return new SparkScanBuilder(newTable);
+        return new PaimonScanBuilder(newTable);
     }
 
     @Override
