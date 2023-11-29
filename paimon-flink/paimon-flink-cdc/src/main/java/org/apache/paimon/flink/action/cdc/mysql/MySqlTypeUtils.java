@@ -273,10 +273,6 @@ public class MySqlTypeUtils {
             case TINYTEXT:
             case TEXT:
             case MEDIUMTEXT:
-            case LONGTEXT:
-                return length == null || length == 0 || typeMapping.containsMode(LONGTEXT_TO_BYTES)
-                        ? DataTypes.VARCHAR(length)
-                        : DataTypes.STRING();
             case JSON:
             case ENUM:
             case GEOMETRY:
@@ -290,6 +286,10 @@ public class MySqlTypeUtils {
                 return DataTypes.STRING();
                 // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
                 // DataTypes.VARBINARY to retain the length information
+            case LONGTEXT:
+                return typeMapping.containsMode(LONGTEXT_TO_BYTES)
+                        ? DataTypes.BYTES()
+                        : DataTypes.STRING();
             case BINARY:
             case VARBINARY:
                 return length == null || length == 0
