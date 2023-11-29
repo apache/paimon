@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -29,18 +30,16 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.stream.Collectors;
 
 /** {@link FileStoreScan} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsConverters fieldKeyStatsConverters;
     private final FieldStatsConverters fieldValueStatsConverters;
-
-    private final boolean hasCustomSequenceField;
-
+    private final CoreOptions.MergeEngine mergeEngine;
     private Predicate keyFilter;
     private Predicate valueFilter;
 
@@ -56,7 +55,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            boolean hasCustomSequenceField) {
+            CoreOptions.MergeEngine mergeEngine) {
         super(
                 partitionType,
                 bucketFilter,
@@ -67,7 +66,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 numOfBuckets,
                 checkNumOfBuckets,
                 scanManifestParallelism);
-        this.hasCustomSequenceField = hasCustomSequenceField;
+        this.mergeEngine = mergeEngine;
         this.fieldKeyStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
@@ -108,36 +107,66 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             return entries;
         }
 
-        // entries come from the same bucket, if any of it doesn't meet the request, we could filter
-        // the bucket.
-        if (canSkipWholeBucket(entries)) {
-            return Collections.emptyList();
-        }
+        // Filter 1: filter the files in the max level. If there are matching files in the max
+        //           level, return those files along with the files in the non-max level.
+        // Filter 2: filter the files in the whole bucket. If no files match, the whole bucket can
+        //           be skipped.
 
-        // If there is no custom sequence field, we can filter the whole bucket by the max level.
-        if (!hasCustomSequenceField) {
-            @SuppressWarnings("OptionalGetWithoutIsPresent")
-            int maxLevel =
-                    entries.stream().mapToInt(entry -> entry.file().level()).max().getAsInt();
+        @SuppressWarnings("OptionalGetWithoutIsPresent")
+        int maxLevel = entries.stream().mapToInt(entry -> entry.file().level()).max().getAsInt();
 
-            // Level 0 can't be filtered.
-            if (maxLevel > 0) {
-                return entries.stream()
-                        .filter(entry -> entry.file().level() < maxLevel || applyValueFilter(entry))
-                        .collect(Collectors.toList());
+        if (canFilterMaxLevel(entries, maxLevel)) {
+            List<ManifestEntry> files = new ArrayList<>();
+            boolean hasMaxFile = false;
+            for (ManifestEntry entry : entries) {
+                if (entry.file().level() != maxLevel) {
+                    files.add(entry);
+                } else if (applyValueFilter(entry)) {
+                    hasMaxFile = true;
+                    files.add(entry);
+                }
             }
+            if (hasMaxFile) {
+                return files;
+            } else {
+                // If none of the "max level" files match,
+                // further checking if it is possible to skip the whole bucket.
+                return filterWholeFiles(files);
+            }
+        } else {
+            return filterWholeFiles(entries);
         }
-
-        return entries;
     }
 
-    private boolean canSkipWholeBucket(List<ManifestEntry> entries) {
+    private List<ManifestEntry> filterWholeFiles(List<ManifestEntry> entries) {
         for (ManifestEntry entry : entries) {
             if (applyValueFilter(entry)) {
-                return false;
+                return entries;
             }
         }
-        return true;
+        return Collections.emptyList();
+    }
+
+    private boolean canFilterMaxLevel(List<ManifestEntry> entries, int maxLevel) {
+        // The primary keys in Level 0 overlap, so they cannot be filtered.
+        if (mergeEngine != CoreOptions.MergeEngine.DEDUPLICATE || maxLevel == 0) {
+            return false;
+        }
+
+        // If the minimum sequence number of the max level is greater than the maximum sequence
+        // number of the non-max level, then we can filter the max level.
+        long maxLevelMaxSequenceNumber = Long.MIN_VALUE;
+        long nonMaxLevelMinSequenceNumber = Long.MAX_VALUE;
+        for (ManifestEntry entry : entries) {
+            if (entry.file().level() == maxLevel) {
+                maxLevelMaxSequenceNumber =
+                        Math.max(maxLevelMaxSequenceNumber, entry.file().maxSequenceNumber());
+            } else {
+                nonMaxLevelMinSequenceNumber =
+                        Math.min(nonMaxLevelMinSequenceNumber, entry.file().minSequenceNumber());
+            }
+        }
+        return maxLevelMaxSequenceNumber < nonMaxLevelMinSequenceNumber;
     }
 
     private boolean applyValueFilter(ManifestEntry entry) {

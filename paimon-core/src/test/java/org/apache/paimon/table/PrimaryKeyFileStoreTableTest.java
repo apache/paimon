@@ -74,6 +74,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -269,6 +271,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testBatchFilter() throws Exception {
+        // All files are level 0, only key filter should be performed.
         writeData();
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
@@ -285,6 +288,75 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 // and records from the same file should also be selected
                                 "2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
                                 "2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
+
+        // Skip whole bucket by value filter.
+        checkValueFilter(
+                conf -> conf.set(BUCKET, 1), predicateBuilder -> predicateBuilder.equal(2, 310L));
+
+        // Skip max level files by value filter.
+        checkValueFilter(
+                conf -> conf.set(BUCKET, 1),
+                predicateBuilder -> predicateBuilder.equal(2, 210L),
+                "1|10|210|binary|varbinary|mapKey:mapVal|multiset",
+                "1|30|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Non-max level files should can't be skipped.
+        checkValueFilter(
+                conf -> conf.set(BUCKET, 1),
+                predicateBuilder -> predicateBuilder.equal(2, 110L),
+                "1|10|210|binary|varbinary|mapKey:mapVal|multiset",
+                "1|20|120|binary|varbinary|mapKey:mapVal|multiset",
+                "1|30|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Can't skip max level files by value filter if merge engine is not deduplicate.
+        checkValueFilter(
+                conf -> {
+                    conf.set(BUCKET, 1);
+                    conf.set(SEQUENCE_FIELD, "b");
+                },
+                predicateBuilder -> predicateBuilder.equal(2, 210L),
+                "1|10|210|binary|varbinary|mapKey:mapVal|multiset",
+                "1|20|120|binary|varbinary|mapKey:mapVal|multiset",
+                "1|30|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Can't skip max level files by value filter if merge engine is not deduplicate.
+        checkValueFilter(
+                conf -> {
+                    conf.set(BUCKET, 1);
+                    conf.set(MERGE_ENGINE, CoreOptions.MergeEngine.PARTIAL_UPDATE);
+                },
+                predicateBuilder -> predicateBuilder.equal(2, 210L),
+                "1|10|210|binary|varbinary|mapKey:mapVal|multiset",
+                "1|20|120|binary|varbinary|mapKey:mapVal|multiset",
+                "1|30|100|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    private void checkValueFilter(
+            Consumer<Options> configure,
+            Function<PredicateBuilder, Predicate> predicateBuilder,
+            String... result)
+            throws Exception {
+        FileStoreTable table = createFileStoreTable(configure);
+        StreamTableWrite write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 110L));
+        write.write(rowData(1, 20, 120L));
+        write.compact(binaryRow(1), 0, true);
+        write.write(rowData(1, 10, 210L));
+        write.write(rowData(1, 30, 100L));
+
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
+
+        Predicate predicate = predicateBuilder.apply(builder);
+        List<Split> splits =
+                toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(result == null ? Collections.emptyList() : Arrays.asList(result));
     }
 
     @Test

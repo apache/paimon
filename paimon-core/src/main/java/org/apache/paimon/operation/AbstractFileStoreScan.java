@@ -306,19 +306,21 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         // Why do this: because in primary key table, we can't just filter the value
         // by the stat in files (see `PrimaryKeyFileStoreTable.nonPartitionFilterConsumer`),
         // but we can do this by filter the whole bucket files
-        files =
-                files.stream()
-                        .collect(
-                                Collectors.groupingBy(
-                                        // we use LinkedHashMap to avoid disorder
-                                        file -> Pair.of(file.partition(), file.bucket()),
-                                        LinkedHashMap::new,
-                                        Collectors.toList()))
-                        .values()
-                        .stream()
-                        .map(this::filterWholeBucketByStats)
-                        .flatMap(Collection::stream)
-                        .collect(Collectors.toList());
+        if (scanMode == ScanMode.ALL) {
+            files =
+                    files.stream()
+                            .collect(
+                                    Collectors.groupingBy(
+                                            // we use LinkedHashMap to avoid disorder
+                                            file -> Pair.of(file.partition(), file.bucket()),
+                                            LinkedHashMap::new,
+                                            Collectors.toList()))
+                            .values()
+                            .stream()
+                            .map(this::filterWholeBucketByStats)
+                            .flatMap(Collection::stream)
+                            .collect(Collectors.toList());
+        }
 
         long skippedByWholeBucketFiles = afterBucketFilter - files.size();
         long scanDuration = (System.nanoTime() - started) / 1_000_000;
