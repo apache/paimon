@@ -34,8 +34,6 @@ import java.util.Objects;
 @Public
 public class RawFile {
 
-    private static final long serialVersionUID = 2L;
-
     private final String path;
     private final long offset;
     private final long length;

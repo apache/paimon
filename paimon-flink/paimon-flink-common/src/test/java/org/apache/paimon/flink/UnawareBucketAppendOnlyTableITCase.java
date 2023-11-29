@@ -299,6 +299,13 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 });
     }
 
+    @Test
+    public void testLimit() {
+        sql("INSERT INTO append_table VALUES (1, 'AAA')");
+        sql("INSERT INTO append_table VALUES (2, 'BBB')");
+        assertThat(sql("SELECT * FROM append_table LIMIT 1")).hasSize(1);
+    }
+
     @Override
     protected List<String> ddl() {
         return Arrays.asList(

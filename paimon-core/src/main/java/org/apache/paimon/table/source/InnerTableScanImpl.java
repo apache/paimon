@@ -23,6 +23,7 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -88,20 +89,18 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     }
 
     private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
-        if (pushDownLimit != null && result instanceof StartingScanner.ScannedResult) {
+        if (pushDownLimit != null && result instanceof ScannedResult) {
             long scannedRowCount = 0;
-            SnapshotReader.Plan plan = ((StartingScanner.ScannedResult) result).plan();
+            SnapshotReader.Plan plan = ((ScannedResult) result).plan();
             List<DataSplit> splits = plan.dataSplits();
-            List<DataSplit> limitedSplits = new ArrayList<>();
-            for (int i = 0; i < splits.size(); i++) {
+            List<Split> limitedSplits = new ArrayList<>();
+            for (DataSplit dataSplit : splits) {
+                long splitRowCount = getRowCountForSplit(dataSplit);
+                limitedSplits.add(dataSplit);
+                scannedRowCount += splitRowCount;
                 if (scannedRowCount >= pushDownLimit) {
                     break;
                 }
-
-                DataSplit split = splits.get(i);
-                long splitRowCount = getRowCountForSplit(split);
-                limitedSplits.add(split);
-                scannedRowCount += splitRowCount;
             }
 
             SnapshotReader.Plan newPlan =
@@ -120,10 +119,10 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
                         @Override
                         public List<Split> splits() {
-                            return (List) limitedSplits;
+                            return limitedSplits;
                         }
                     };
-            return new StartingScanner.ScannedResult(newPlan);
+            return new ScannedResult(newPlan);
         } else {
             return result;
         }
