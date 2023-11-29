@@ -203,6 +203,19 @@ public class DataSplit implements Split {
                 .build();
     }
 
+    public static Builder copy(DataSplit split) {
+        Builder builder = builder();
+        builder.withSnapshot(split.snapshotId);
+        builder.withPartition(split.partition);
+        builder.withBucket(split.bucket);
+        builder.withBeforeFiles(split.beforeFiles);
+        builder.withDataFiles(split.dataFiles);
+        builder.isStreaming(split.isStreaming);
+        builder.rawFiles(split.rawFiles);
+
+        return builder;
+    }
+
     public static Builder builder() {
         return new Builder();
     }

@@ -40,12 +40,16 @@ public class RawFile {
     private final String format;
     private final long schemaId;
 
-    public RawFile(String path, long offset, long length, String format, long schemaId) {
+    private final long rowCount;
+
+    public RawFile(
+            String path, long offset, long length, String format, long schemaId, long rowCount) {
         this.path = path;
         this.offset = offset;
         this.length = length;
         this.format = format;
         this.schemaId = schemaId;
+        this.rowCount = rowCount;
     }
 
     /** Path of the file. */
@@ -76,12 +80,18 @@ public class RawFile {
         return schemaId;
     }
 
+    /** row count of the file. */
+    public long rowCount() {
+        return schemaId;
+    }
+
     public void serialize(DataOutputView out) throws IOException {
         out.writeUTF(path);
         out.writeLong(offset);
         out.writeLong(length);
         out.writeUTF(format);
         out.writeLong(schemaId);
+        out.writeLong(rowCount);
     }
 
     public static RawFile deserialize(DataInputView in) throws IOException {
@@ -90,8 +100,9 @@ public class RawFile {
         long length = in.readLong();
         String format = in.readUTF();
         long schemaId = in.readLong();
+        long rowCount = in.readLong();
 
-        return new RawFile(path, offset, length, format, schemaId);
+        return new RawFile(path, offset, length, format, schemaId, rowCount);
     }
 
     @Override

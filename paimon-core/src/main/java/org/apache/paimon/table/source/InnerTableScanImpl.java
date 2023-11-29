@@ -19,12 +19,17 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /** {@link TableScan} implementation for batch planning. */
@@ -35,6 +40,8 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     private StartingScanner startingScanner;
     private boolean hasNext;
+
+    private Integer pushDownLimit;
 
     public InnerTableScanImpl(
             CoreOptions options,
@@ -61,7 +68,7 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     @Override
     public InnerTableScan withLimit(int limit) {
-        snapshotReader.withLimit(limit);
+        this.pushDownLimit = limit;
         return this;
     }
 
@@ -78,5 +85,90 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
         } else {
             throw new EndOfScanException();
         }
+    }
+
+    private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
+        if (pushDownLimit != null && result instanceof StartingScanner.ScannedResult) {
+            long scannedRowCount = 0;
+            SnapshotReader.Plan plan = ((StartingScanner.ScannedResult) result).plan();
+            List<DataSplit> splits = plan.dataSplits();
+            List<DataSplit> limitedSplits = new ArrayList<>();
+            for (int i = 0; i < splits.size(); i++) {
+                if (scannedRowCount >= pushDownLimit) {
+                    break;
+                }
+
+                DataSplit split = splits.get(i);
+                long splitRowCount = getRowCountForSplit(split);
+                if (scannedRowCount + splitRowCount <= pushDownLimit) {
+                    limitedSplits.add(split);
+                    scannedRowCount += splitRowCount;
+                } else {
+                    DataSplit newSplit = composeDataSplit(split, pushDownLimit - scannedRowCount);
+                    limitedSplits.add(newSplit);
+                    scannedRowCount += getRowCountForSplit(newSplit);
+                }
+            }
+
+            SnapshotReader.Plan newPlan =
+                    new SnapshotReader.Plan() {
+                        @Nullable
+                        @Override
+                        public Long watermark() {
+                            return plan.watermark();
+                        }
+
+                        @Nullable
+                        @Override
+                        public Long snapshotId() {
+                            return plan.snapshotId();
+                        }
+
+                        @Override
+                        public List<Split> splits() {
+                            return (List) limitedSplits;
+                        }
+                    };
+            return new StartingScanner.ScannedResult(newPlan);
+        } else {
+            return result;
+        }
+    }
+
+    /**
+     * 0 represents that we can't compute the row count of this split, 'cause this split needs to be
+     * merged.
+     */
+    private long getRowCountForSplit(DataSplit split) {
+        if (split.convertToRawFiles().isPresent()) {
+            return split.convertToRawFiles().get().stream()
+                    .map(RawFile::rowCount)
+                    .reduce(Long::sum)
+                    .orElse(0L);
+        } else {
+            return 0L;
+        }
+    }
+
+    private DataSplit composeDataSplit(DataSplit split, long rowCountRequired) {
+        List<DataFileMeta> dataFiles = new ArrayList<>();
+        List<RawFile> rawFiles = new ArrayList<>();
+        long scannedRowCount = 0;
+
+        List<DataFileMeta> originalDataFiles = split.dataFiles();
+        List<RawFile> originalRawFiles = split.convertToRawFiles().get();
+        for (int i = 0; i <= dataFiles.size(); i++) {
+            if (scannedRowCount >= rowCountRequired) {
+                break;
+            }
+
+            dataFiles.add(originalDataFiles.get(i));
+            rawFiles.add(originalRawFiles.get(i));
+        }
+
+        DataSplit.Builder builder = DataSplit.copy(split);
+        builder.withDataFiles(dataFiles);
+        builder.rawFiles(rawFiles);
+        return builder.build();
     }
 }
