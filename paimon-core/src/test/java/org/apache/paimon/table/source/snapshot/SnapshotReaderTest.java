@@ -110,7 +110,8 @@ public class SnapshotReaderTest {
                                             0,
                                             meta.fileSize(),
                                             "avro",
-                                            meta.schemaId())));
+                                            meta.schemaId(),
+                                            meta.rowCount())));
         }
 
         // write another file on level 0
@@ -158,7 +159,8 @@ public class SnapshotReaderTest {
                                             0,
                                             meta.fileSize(),
                                             meta.level() == 5 ? "orc" : "avro",
-                                            meta.schemaId())));
+                                            meta.schemaId(),
+                                            meta.rowCount())));
         }
 
         // write another file on level 0
@@ -215,7 +217,8 @@ public class SnapshotReaderTest {
                                         0,
                                         meta.fileSize(),
                                         "avro",
-                                        meta.schemaId())));
+                                        meta.schemaId(),
+                                        meta.rowCount())));
 
         // change file schema
 
@@ -248,14 +251,16 @@ public class SnapshotReaderTest {
                                         0,
                                         meta0.fileSize(),
                                         "avro",
-                                        meta0.schemaId()),
+                                        meta0.schemaId(),
+                                        meta0.rowCount()),
                                 new RawFile(
                                         String.format(
                                                 "%s/bucket-0/%s", tablePath, meta1.fileName()),
                                         0,
                                         meta1.fileSize(),
                                         "avro",
-                                        meta1.schemaId())));
+                                        meta1.schemaId(),
+                                        meta1.rowCount())));
 
         write.close();
         commit.close();
