@@ -449,6 +449,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                         .formatType()
                                         .toString()
                                         .toLowerCase()),
-                meta.schemaId());
+                meta.schemaId(),
+                meta.rowCount());
     }
 }

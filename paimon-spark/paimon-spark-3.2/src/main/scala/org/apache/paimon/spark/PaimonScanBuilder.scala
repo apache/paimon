@@ -15,29 +15,8 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark
 
-package org.apache.paimon.table.source;
+import org.apache.paimon.table.Table
 
-import org.apache.paimon.metrics.MetricRegistry;
-import org.apache.paimon.predicate.Predicate;
-
-import java.util.Map;
-
-/** Inner {@link TableScan} contains filter push down. */
-public interface InnerTableScan extends TableScan {
-
-    InnerTableScan withFilter(Predicate predicate);
-
-    default InnerTableScan withLimit(int limit) {
-        return this;
-    }
-
-    default InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-        return this;
-    }
-
-    default InnerTableScan withMetricsRegistry(MetricRegistry metricRegistry) {
-        // do nothing, should implement this if need
-        return this;
-    }
-}
+class PaimonScanBuilder(table: Table) extends PaimonBaseScanBuilder(table)

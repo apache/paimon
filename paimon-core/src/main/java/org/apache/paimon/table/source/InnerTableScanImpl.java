@@ -25,6 +25,10 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.utils.SnapshotManager;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 
 /** {@link TableScan} implementation for batch planning. */
@@ -35,6 +39,8 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
     private StartingScanner startingScanner;
     private boolean hasNext;
+
+    private Integer pushDownLimit;
 
     public InnerTableScanImpl(
             CoreOptions options,
@@ -60,6 +66,12 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     }
 
     @Override
+    public InnerTableScan withLimit(int limit) {
+        this.pushDownLimit = limit;
+        return this;
+    }
+
+    @Override
     public TableScan.Plan plan() {
         if (startingScanner == null) {
             startingScanner = createStartingScanner(false);
@@ -68,9 +80,67 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
         if (hasNext) {
             hasNext = false;
             StartingScanner.Result result = startingScanner.scan(snapshotReader);
-            return DataFilePlan.fromResult(result);
+            StartingScanner.Result limitedResult = applyPushDownLimit(result);
+            return DataFilePlan.fromResult(limitedResult);
         } else {
             throw new EndOfScanException();
+        }
+    }
+
+    private StartingScanner.Result applyPushDownLimit(StartingScanner.Result result) {
+        if (pushDownLimit != null && result instanceof StartingScanner.ScannedResult) {
+            long scannedRowCount = 0;
+            SnapshotReader.Plan plan = ((StartingScanner.ScannedResult) result).plan();
+            List<DataSplit> splits = plan.dataSplits();
+            List<DataSplit> limitedSplits = new ArrayList<>();
+            for (int i = 0; i < splits.size(); i++) {
+                if (scannedRowCount >= pushDownLimit) {
+                    break;
+                }
+
+                DataSplit split = splits.get(i);
+                long splitRowCount = getRowCountForSplit(split);
+                limitedSplits.add(split);
+                scannedRowCount += splitRowCount;
+            }
+
+            SnapshotReader.Plan newPlan =
+                    new SnapshotReader.Plan() {
+                        @Nullable
+                        @Override
+                        public Long watermark() {
+                            return plan.watermark();
+                        }
+
+                        @Nullable
+                        @Override
+                        public Long snapshotId() {
+                            return plan.snapshotId();
+                        }
+
+                        @Override
+                        public List<Split> splits() {
+                            return (List) limitedSplits;
+                        }
+                    };
+            return new StartingScanner.ScannedResult(newPlan);
+        } else {
+            return result;
+        }
+    }
+
+    /**
+     * 0 represents that we can't compute the row count of this split, 'cause this split needs to be
+     * merged.
+     */
+    private long getRowCountForSplit(DataSplit split) {
+        if (split.convertToRawFiles().isPresent()) {
+            return split.convertToRawFiles().get().stream()
+                    .map(RawFile::rowCount)
+                    .reduce(Long::sum)
+                    .orElse(0L);
+        } else {
+            return 0L;
         }
     }
 }
