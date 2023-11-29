@@ -238,7 +238,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'fields.g_1.sequence-group'='a,b', "
                                                 + "'fields.g_2.sequence-group'='a,d');"))
                 .hasRootCauseMessage(
-                        "Field a is defined repeatedly by multiple groups: [fields.g_1.sequence-group, fields.g_2.sequence-group].");
+                        "Field a is defined repeatedly by multiple groups: [g_1, g_2].");
     }
 
     @Test
@@ -250,5 +250,81 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + "'fields.a.sequence-group'='j', 'fields.b.sequence-group'='c');");
         batchSql("INSERT INTO T_P VALUES (1, 1, 1, 1, '1')");
         assertThat(sql("SELECT k, c FROM T_P")).containsExactlyInAnyOrder(Row.of(1, "1"));
+    }
+
+    @Test
+    public void testLocalMerge() {
+        sql(
+                "CREATE TABLE T1 ("
+                        + "k INT,"
+                        + "v INT,"
+                        + "d INT,"
+                        + "PRIMARY KEY (k, d) NOT ENFORCED) PARTITIONED BY (d) "
+                        + " WITH ('merge-engine'='partial-update', "
+                        + "'local-merge-buffer-size'='1m'"
+                        + ");");
+
+        sql("INSERT INTO T1 VALUES (1, CAST(NULL AS INT), 1), (2, 1, 1), (1, 2, 1)");
+        assertThat(batchSql("SELECT * FROM T1"))
+                .containsExactlyInAnyOrder(Row.of(1, 2, 1), Row.of(2, 1, 1));
+    }
+
+    @Test
+    public void testPartialUpdateWithAggregation() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a INT, b INT, g_1 INT, c VARCHAR, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.a.aggregate-function'='sum', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.g_2.sequence-group'='c');");
+        // a in group g_1 with sum agg
+        // b not in group
+        // c in group g_2 without agg
+
+        sql("INSERT INTO AGG VALUES (1, 1, 1, 1, '1', 1)");
+
+        // g_2 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 2, 2, 2, '2', CAST(NULL AS INT))");
+
+        // select *
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 3, 2, 2, "1", 1));
+
+        // projection
+        assertThat(sql("SELECT a, c FROM AGG")).containsExactlyInAnyOrder(Row.of(3, "1"));
+
+        // g_1 should not be updated
+        sql("INSERT INTO AGG VALUES (1, 3, 3, 1, '3', 3)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 6, 3, 2, "3", 3));
+
+        sql(
+                "INSERT INTO AGG VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, CAST(NULL AS VARCHAR), 4)");
+
+        // a keep the last accumulator
+        // b is not updated to null
+        // c updated to null
+        assertThat(sql("SELECT a, b, c FROM AGG")).containsExactlyInAnyOrder(Row.of(6, 3, null));
+    }
+
+    @Test
+    public void testFirstValuePartialUpdate() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a INT, g_1 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.a.aggregate-function'='first_value');");
+
+        sql("INSERT INTO AGG VALUES (1, 1, 1), (1, 2, 2)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 1, 2));
+
+        // old sequence
+        sql("INSERT INTO AGG VALUES (1, 0, 0)");
+
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 0, 2));
     }
 }

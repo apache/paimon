@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
@@ -70,6 +71,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
 
     public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    public AbstractInnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+        snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
     }
 
@@ -187,6 +193,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         }
     }
 
+    @Override
     public List<BinaryRow> listPartitions() {
         return snapshotReader.partitions();
     }

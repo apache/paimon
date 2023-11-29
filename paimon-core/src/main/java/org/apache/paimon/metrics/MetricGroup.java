@@ -68,4 +68,7 @@ public interface MetricGroup {
 
     /** Returns all the metrics the group carries. */
     Map<String, Metric> getMetrics();
+
+    /** Close the metric group and release related resources. */
+    void close();
 }

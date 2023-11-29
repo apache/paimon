@@ -21,7 +21,6 @@ package org.apache.paimon.table;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
@@ -34,12 +33,12 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.Preconditions;
 
@@ -81,7 +80,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             new CoreOptions(tableSchema.options()),
                             tableSchema.logicalPartitionType(),
                             tableSchema.logicalBucketKeyType(),
-                            tableSchema.logicalRowType());
+                            tableSchema.logicalRowType(),
+                            name());
         }
         return lazyStore;
     }
@@ -109,28 +109,17 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead innerRead() {
+    public InnerTableRead newRead() {
         AppendOnlyFileStoreRead read = store().newRead();
-        return new InnerTableRead() {
-            @Override
-            public InnerTableRead withFilter(Predicate predicate) {
-                read.withFilter(predicate);
-                return this;
-            }
+        return new AbstractDataTableRead<InternalRow>(read, schema()) {
 
             @Override
-            public InnerTableRead withProjection(int[][] projection) {
+            public void projection(int[][] projection) {
                 read.withProjection(projection);
-                return this;
             }
 
             @Override
-            public TableRead withIOManager(IOManager ioManager) {
-                return this;
-            }
-
-            @Override
-            public RecordReader<InternalRow> createReader(Split split) throws IOException {
+            public RecordReader<InternalRow> reader(Split split) throws IOException {
                 return read.createReader((DataSplit) split);
             }
         };
@@ -156,6 +145,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             "Append only writer can not accept row with RowKind %s",
                             record.row().getRowKind());
                     return record.row();
-                });
+                },
+                name());
     }
 }

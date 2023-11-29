@@ -18,9 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -38,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -248,7 +248,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(action::run)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "kafka-conf [topic] must be specified."));
     }
@@ -596,7 +596,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -613,5 +613,33 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 table,
                 rowType,
                 Collections.singletonList("k1"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testCannotSynchronizeIncompleteJson() throws Exception {
+        final String topic = "incomplete";
+        createTestTopic(topic, 1, 1);
+
+        writeRecordsToKafka(topic, readLines("kafka/canal/database/incomplete/canal-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        action.withStreamExecutionEnvironment(env).build();
+
+        assertThatThrownBy(() -> env.execute())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Cannot synchronize record when database name or table name is unknown. "
+                                        + "Invalid record is:\n"
+                                        + "{databaseName=null, tableName=null, fieldTypes={k=STRING, v0=STRING, v1=STRING}, "
+                                        + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
     }
 }

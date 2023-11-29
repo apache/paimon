@@ -37,13 +37,15 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
+
 /** {@link EventParser} for {@link RichCdcMultiplexRecord}. */
 public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMultiplexRecord> {
 
     private static final Logger LOG =
             LoggerFactory.getLogger(RichCdcMultiplexRecordEventParser.class);
 
-    private final NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder;
+    @Nullable private final NewTableSchemaBuilder schemaBuilder;
     @Nullable private final Pattern includingPattern;
     @Nullable private final Pattern excludingPattern;
     private final TableNameConverter tableNameConverter;
@@ -58,11 +60,11 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     private RichEventParser currentParser;
 
     public RichCdcMultiplexRecordEventParser(boolean caseSensitive) {
-        this(record -> Optional.empty(), null, null, new TableNameConverter(caseSensitive));
+        this(null, null, null, new TableNameConverter(caseSensitive));
     }
 
     public RichCdcMultiplexRecordEventParser(
-            NewTableSchemaBuilder<RichCdcMultiplexRecord> schemaBuilder,
+            @Nullable NewTableSchemaBuilder schemaBuilder,
             @Nullable Pattern includingPattern,
             @Nullable Pattern excludingPattern,
             TableNameConverter tableNameConverter) {
@@ -85,6 +87,13 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
 
     @Override
     public String parseTableName() {
+        // database synchronization needs this, so we validate the record here
+        if (record.databaseName() == null || record.tableName() == null) {
+            throw new IllegalArgumentException(
+                    "Cannot synchronize record when database name or table name is unknown. "
+                            + "Invalid record is:\n"
+                            + record);
+        }
         return tableNameConverter.convert(Identifier.create(record.databaseName(), currentTable));
     }
 
@@ -105,6 +114,7 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     @Override
     public Optional<Schema> parseNewTable() {
         if (shouldCreateCurrentTable()) {
+            checkNotNull(schemaBuilder, "NewTableSchemaBuilder hasn't been set.");
             return schemaBuilder.build(record);
         }
 
@@ -112,6 +122,12 @@ public class RichCdcMultiplexRecordEventParser implements EventParser<RichCdcMul
     }
 
     private boolean shouldSynchronizeCurrentTable() {
+        // In case the record is incomplete, we let the null value pass validation
+        // and handle the null value when we really need it
+        if (currentTable == null) {
+            return true;
+        }
+
         if (includedTables.contains(currentTable)) {
             return true;
         }

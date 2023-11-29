@@ -86,7 +86,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                     PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
 
             MergeFunctionFactory<KeyValue> mfFactory =
-                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema);
+                    PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
             if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
                 mfFactory =
                         LookupMergeFunction.wrap(
@@ -106,7 +106,8 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             new RowType(extractor.keyFields(tableSchema)),
                             rowType,
                             extractor,
-                            mfFactory);
+                            mfFactory,
+                            name());
         }
         return lazyStore;
     }
@@ -150,19 +151,12 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public InnerTableRead innerRead() {
-        return new KeyValueTableRead(store().newRead()) {
+    public InnerTableRead newRead() {
+        return new KeyValueTableRead(store().newRead(), schema()) {
 
             @Override
-            public InnerTableRead withFilter(Predicate predicate) {
-                read.withFilter(predicate);
-                return this;
-            }
-
-            @Override
-            public InnerTableRead withProjection(int[][] projection) {
+            public void projection(int[][] projection) {
                 read.withValueProjection(projection);
-                return this;
             }
 
             @Override
@@ -203,6 +197,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             sequenceNumber,
                             record.row().getRowKind(),
                             record.row());
-                });
+                },
+                name());
     }
 }

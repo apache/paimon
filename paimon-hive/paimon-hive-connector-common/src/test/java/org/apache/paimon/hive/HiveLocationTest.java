@@ -147,7 +147,7 @@ public class HiveLocationTest {
             catalog.createDatabase(db, true);
             assertThat(hmsClient.getDatabase(db)).isNotNull();
 
-            Path actual = catalog.databasePath(db);
+            Path actual = catalog.newDatabasePath(db);
             Path expected = new Path(this.objectStorepath + "/" + db + ".db");
             assertThat(fileIO.exists(expected)).isTrue();
             assertThat(actual).isEqualTo(expected);
@@ -256,7 +256,7 @@ public class HiveLocationTest {
 
             Identifier identifier = Identifier.create(dbName, tableName);
             String location =
-                    AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
+                    AbstractCatalog.newTableLocation(warehouse, identifier).toUri().toString();
 
             String createTableSqlStr =
                     getCreateTableSqlStr(tableName, location, locationInProperties);

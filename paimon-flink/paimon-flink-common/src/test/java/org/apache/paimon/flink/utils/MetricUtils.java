@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink.utils;
 
+import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.Metric;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.metrics.groups.AbstractMetricGroup;
@@ -29,8 +31,16 @@ import java.util.Map;
 /** Test utils for Flink's {@link Metric}s. */
 public class MetricUtils {
 
-    public static Gauge<?> getGauge(MetricGroup group, String metricName) {
-        return (Gauge<?>) getMetric(group, metricName);
+    public static <T> Gauge<T> getGauge(MetricGroup group, String metricName) {
+        return (Gauge<T>) getMetric(group, metricName);
+    }
+
+    public static Counter getCounter(MetricGroup group, String metricName) {
+        return (Counter) getMetric(group, metricName);
+    }
+
+    public static Histogram getHistogram(MetricGroup group, String metricName) {
+        return (Histogram) getMetric(group, metricName);
     }
 
     @SuppressWarnings("unchecked")

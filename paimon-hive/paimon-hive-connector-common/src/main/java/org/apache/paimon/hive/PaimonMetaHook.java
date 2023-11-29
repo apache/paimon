@@ -87,7 +87,7 @@ public class PaimonMetaHook implements HiveMetaHook {
             org.apache.hadoop.fs.Path hadoopPath =
                     getDnsPath(new org.apache.hadoop.fs.Path(warehouse), conf);
             warehouse = hadoopPath.toUri().toString();
-            location = AbstractCatalog.dataTableLocation(warehouse, identifier).toUri().toString();
+            location = AbstractCatalog.newTableLocation(warehouse, identifier).toUri().toString();
             table.getSd().setLocation(location);
         }
 

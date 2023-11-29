@@ -24,10 +24,13 @@ import org.apache.paimon.compact.CompactFutureManager;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -56,20 +59,24 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     private List<DataFileMeta> compacting;
 
+    @Nullable private final CompactionMetrics metrics;
+
     public AppendOnlyCompactManager(
             ExecutorService executor,
             List<DataFileMeta> restored,
             int minFileNum,
             int maxFileNum,
             long targetFileSize,
-            CompactRewriter rewriter) {
+            CompactRewriter rewriter,
+            @Nullable CompactionMetrics metrics) {
         this.executor = executor;
-        this.toCompact = new TreeSet<>(fileComparator());
+        this.toCompact = new TreeSet<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
+        this.metrics = metrics;
     }
 
     @Override
@@ -90,7 +97,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             return;
         }
 
-        taskFuture = executor.submit(new FullCompactTask(toCompact, targetFileSize, rewriter));
+        taskFuture =
+                executor.submit(new FullCompactTask(toCompact, targetFileSize, rewriter, metrics));
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
     }
@@ -102,7 +110,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         Optional<List<DataFileMeta>> picked = pickCompactBefore();
         if (picked.isPresent()) {
             compacting = picked.get();
-            taskFuture = executor.submit(new AutoCompactTask(compacting, rewriter));
+            taskFuture = executor.submit(new AutoCompactTask(compacting, rewriter, metrics));
         }
     }
 
@@ -187,7 +195,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        if (metrics != null) {
+            metrics.close();
+        }
+    }
 
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {
@@ -197,7 +209,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         private final CompactRewriter rewriter;
 
         public FullCompactTask(
-                Collection<DataFileMeta> inputs, long targetFileSize, CompactRewriter rewriter) {
+                Collection<DataFileMeta> inputs,
+                long targetFileSize,
+                CompactRewriter rewriter,
+                @Nullable CompactionMetrics metrics) {
+            super(metrics);
             this.inputs = new LinkedList<>(inputs);
             this.targetFileSize = targetFileSize;
             this.rewriter = rewriter;
@@ -249,7 +265,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         private final List<DataFileMeta> toCompact;
         private final CompactRewriter rewriter;
 
-        public AutoCompactTask(List<DataFileMeta> toCompact, CompactRewriter rewriter) {
+        public AutoCompactTask(
+                List<DataFileMeta> toCompact,
+                CompactRewriter rewriter,
+                @Nullable CompactionMetrics metrics) {
+            super(metrics);
             this.toCompact = toCompact;
             this.rewriter = rewriter;
         }
@@ -284,13 +304,13 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      * may be put after the new files, and this order will be disrupted. We need to ensure this
      * order, so we force the order by sequence.
      */
-    public static Comparator<DataFileMeta> fileComparator() {
+    public static Comparator<DataFileMeta> fileComparator(boolean ignoreOverlap) {
         return (o1, o2) -> {
             if (o1 == o2) {
                 return 0;
             }
 
-            if (isOverlap(o1, o2)) {
+            if (!ignoreOverlap && isOverlap(o1, o2)) {
                 LOG.warn(
                         String.format(
                                 "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"

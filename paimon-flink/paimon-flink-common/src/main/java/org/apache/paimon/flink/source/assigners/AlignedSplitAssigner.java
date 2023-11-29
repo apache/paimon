@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Splits are allocated at the granularity of snapshots. When the splits of the current snapshot are
@@ -98,6 +99,12 @@ public class AlignedSplitAssigner implements SplitAssigner {
         return remainingSplits;
     }
 
+    @Override
+    public Optional<Long> getNextSnapshotId(int subtask) {
+        PendingSnapshot head = pendingSplitAssignment.peek();
+        return Optional.ofNullable(head != null ? head.snapshotId : null);
+    }
+
     public boolean isAligned() {
         PendingSnapshot head = pendingSplitAssignment.peek();
         return head != null && head.empty();
@@ -112,11 +119,6 @@ public class AlignedSplitAssigner implements SplitAssigner {
         Preconditions.checkArgument(
                 head != null && head.empty(),
                 "The head pending splits is not empty. This is a bug, please file an issue.");
-    }
-
-    public Long minRemainingSnapshotId() {
-        PendingSnapshot head = pendingSplitAssignment.peek();
-        return head != null ? head.snapshotId : null;
     }
 
     private static class PendingSnapshot {

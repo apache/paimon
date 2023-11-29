@@ -111,6 +111,12 @@ under the License.
             <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
         </tr>
         <tr>
+            <td><h5>consumer.mode</h5></td>
+            <td style="word-wrap: break-word;">exactly-once</td>
+            <td><p>Enum</p></td>
+            <td>Specify the consumer consistency mode for table.<br /><br />Possible values:<ul><li>"exactly-once": Readers consume data at snapshot granularity, and strictly ensure that the snapshot-id recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed.</li><li>"at-least-once": Each reader consumes snapshots at a different rate, and the snapshot with the slowest consumption progress among all readers will be recorded in the consumer.</li></ul></td>
+        </tr>
+        <tr>
             <td><h5>continuous.discovery-interval</h5></td>
             <td style="word-wrap: break-word;">10 s</td>
             <td>Duration</td>
@@ -162,7 +168,7 @@ under the License.
             <td><h5>file.compression.per.level</h5></td>
             <td style="word-wrap: break-word;"></td>
             <td>Map</td>
-            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zlib', for orc file format, the compression value could be NONE, ZLIB, SNAPPY, LZO, LZ4, for parquet file format, the compression value could be UNCOMPRESSED, SNAPPY, GZIP, LZO, BROTLI, LZ4, ZSTD.</td>
+            <td>Define different compression policies for different level, you can add the conf like this: 'file.compression.per.level' = '0:lz4,1:zstd'.</td>
         </tr>
         <tr>
             <td><h5>file.format</h5></td>
@@ -175,6 +181,12 @@ under the License.
             <td style="word-wrap: break-word;"></td>
             <td>Map</td>
             <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
+        </tr>
+        <tr>
+            <td><h5>first-row.ignore-delete</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore delete records in first-row mode.</td>
         </tr>
         <tr>
             <td><h5>full-compaction.delta-commits</h5></td>
@@ -212,30 +224,6 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">128</td>
             <td>Integer</td>
             <td>The maximal fan-in for external merge sort. It limits the number of file handles. If it is too small, may cause intermediate merging. But if it is too large, it will cause too many files opened at the same time, consume memory and lead to random reading.</td>
-        </tr>
-        <tr>
-            <td><h5>log.changelog-mode</h5></td>
-            <td style="word-wrap: break-word;">auto</td>
-            <td><p>Enum</p></td>
-            <td>Specify the log changelog mode for table.<br /><br />Possible values:<ul><li>"auto": Upsert for table with primary key, all for table without primary key.</li><li>"all": The log system stores all changes including UPDATE_BEFORE.</li><li>"upsert": The log system does not store the UPDATE_BEFORE changes, the log consumed job will automatically add the normalized node, relying on the state to generate the required update_before.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>log.consistency</h5></td>
-            <td style="word-wrap: break-word;">transactional</td>
-            <td><p>Enum</p></td>
-            <td>Specify the log consistency mode for table.<br /><br />Possible values:<ul><li>"transactional": Only the data after the checkpoint can be seen by readers, the latency depends on checkpoint interval.</li><li>"eventual": Immediate data visibility, you may see some intermediate states, but eventually the right results will be produced, only works for table with primary key.</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>log.format</h5></td>
-            <td style="word-wrap: break-word;">"debezium-json"</td>
-            <td>String</td>
-            <td>Specify the message format of log system.</td>
-        </tr>
-        <tr>
-            <td><h5>log.key.format</h5></td>
-            <td style="word-wrap: break-word;">"json"</td>
-            <td>String</td>
-            <td>Specify the key message format of log system with primary key.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache-file-retention</h5></td>
@@ -442,6 +430,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The parallelism of scanning manifest files, default value is the size of cpu processor. Note: Scale-up this parameter will increase memory usage while scanning manifest files. We can consider downsize it when we encounter an out of memory exception while scanning</td>
+        </tr>
+        <tr>
+            <td><h5>scan.max-splits-per-task</h5></td>
+            <td style="word-wrap: break-word;">10</td>
+            <td>Integer</td>
+            <td>Max split size should be cached for one task while scanning. If splits size cached in enumerator are greater than tasks size multiply by this value, scanner will pause scanning.</td>
         </tr>
         <tr>
             <td><h5>scan.mode</h5></td>

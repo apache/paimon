@@ -227,6 +227,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return this;
         }
 
+        @Override
+        public SnapshotReader withPartitionFilter(Map<String, String> partitionSpec) {
+            snapshotReader.withPartitionFilter(partitionSpec);
+            return this;
+        }
+
         public SnapshotReader withMode(ScanMode scanMode) {
             snapshotReader.withMode(scanMode);
             return this;
@@ -286,6 +292,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(batchScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+            batchScan.withMetricsRegistry(metricsRegistry);
             return this;
         }
 
@@ -354,6 +366,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
             streamScan.notifyCheckpointComplete(nextSnapshot);
+        }
+
+        @Override
+        public InnerStreamTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+            streamScan.withMetricsRegistry(metricsRegistry);
+            return this;
         }
     }
 

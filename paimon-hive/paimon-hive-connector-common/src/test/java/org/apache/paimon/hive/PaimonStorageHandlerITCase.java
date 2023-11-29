@@ -118,7 +118,7 @@ public class PaimonStorageHandlerITCase {
         hiveShell.execute("USE test_db");
 
         warehouse = folder.newFolder().toURI().toString();
-        tablePath = String.format("%s/default.db/%s", warehouse, TABLE_NAME);
+        tablePath = String.format("%s/test_db.db/%s", warehouse, TABLE_NAME);
         identifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
         externalTable = "test_table_" + UUID.randomUUID().toString().substring(0, 4);
         commitIdentifier = 0;

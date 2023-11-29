@@ -527,7 +527,8 @@ public class AppendOnlyWriterTest {
                                     ? Collections.emptyList()
                                     : Collections.singletonList(
                                             generateCompactAfter(compactBefore));
-                        });
+                        },
+                        null);
         CoreOptions options = new CoreOptions(new HashMap<>());
         AppendOnlyWriter writer =
                 new AppendOnlyWriter(
@@ -546,7 +547,8 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

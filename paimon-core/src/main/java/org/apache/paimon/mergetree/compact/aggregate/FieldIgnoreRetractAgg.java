@@ -34,12 +34,12 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         return aggregator.agg(accumulator, inputField);
     }
 
     @Override
-    Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField) {
         return accumulator;
     }
 }

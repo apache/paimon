@@ -204,7 +204,8 @@ public class MergeTreeCompactManagerTest {
                         comparator,
                         2,
                         Integer.MAX_VALUE,
-                        new TestRewriter(expectedDropDelete));
+                        new TestRewriter(expectedDropDelete),
+                        null);
         manager.triggerCompaction(false);
         manager.getCompactionResult(true);
         List<LevelMinMax> outputs =

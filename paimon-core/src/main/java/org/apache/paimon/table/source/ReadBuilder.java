@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowType;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * An interface for building the {@link TableScan} and {@link TableRead}.
@@ -94,6 +95,9 @@ public interface ReadBuilder extends Serializable {
      * complete filter.
      */
     ReadBuilder withFilter(Predicate predicate);
+
+    /** Push partition filter. */
+    ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
 
     /**
      * Apply projection to the reader.

@@ -129,12 +129,38 @@ public class SparkWriteITCase {
     @Test
     public void testTruncateTable() {
         spark.sql(
-                "CREATE TABLE T (a INT, b INT, c STRING) TBLPROPERTIES"
-                        + " ('primary-key'='a', 'file.format'='avro')");
-        spark.sql("INSERT INTO T VALUES (1, 11, '111'), (2, 22, '222')").collectAsList();
-        spark.sql("TRUNCATE TABLE T").collectAsList();
+                "CREATE TABLE T (a INT, b INT, c STRING)"
+                        + " TBLPROPERTIES ('primary-key'='a', 'file.format'='avro')");
+        spark.sql("INSERT INTO T VALUES (1, 11, '111'), (2, 22, '222')");
+        spark.sql("TRUNCATE TABLE T");
         List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
         assertThat(rows.toString()).isEqualTo("[]");
+    }
+
+    @Test
+    public void testTruncatePartition1() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c LONG) PARTITIONED BY (c)"
+                        + " TBLPROPERTIES ('primary-key'='a,c')");
+        spark.sql("INSERT INTO T VALUES (1, 11, 111), (2, 22, 222)");
+
+        spark.sql("TRUNCATE TABLE T PARTITION (c = 111)");
+        List<Row> rows = spark.sql("SELECT * FROM T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[2,22,222]]");
+    }
+
+    @Test
+    public void testTruncatePartition() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c LONG, d STRING)"
+                        + " PARTITIONED BY (c,d)"
+                        + " TBLPROPERTIES ('primary-key'='a,c,d')");
+        spark.sql(
+                "INSERT INTO T VALUES (1, 11, 111, 'a'), (2, 22, 222, 'b'), (3, 33, 333, 'b'), (4, 44, 444, 'a')");
+
+        spark.sql("TRUNCATE TABLE T PARTITION (d = 'a')");
+        List<Row> rows = spark.sql("SELECT * FROM T ORDER BY a").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[2,22,222,b], [3,33,333,b]]");
     }
 
     @Test

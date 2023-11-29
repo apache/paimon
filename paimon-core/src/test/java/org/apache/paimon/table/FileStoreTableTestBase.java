@@ -704,7 +704,8 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                        .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(15);
         // table-path
         // table-path/snapshot
@@ -755,7 +756,8 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                        .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // case 0 plus 1:
         // table-path/tag/tag-test3
@@ -795,7 +797,8 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                        .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(23);
         // case 0 plus 7:
         // table-path/manifest/manifest-list-2
@@ -847,7 +850,8 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         List<java.nio.file.Path> files =
-                Files.walk(new File(tablePath.getPath()).toPath()).collect(Collectors.toList());
+                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                        .collect(Collectors.toList());
         assertThat(files.size()).isEqualTo(16);
         // rollback snapshot case 0 plus 1:
         // table-path/tag/tag-test1

@@ -51,7 +51,6 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
 import java.util.function.BiFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -59,10 +58,9 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 /** Base lineage table for source and sink table lineage. */
 public abstract class TableLineageTable implements ReadonlyTable {
     protected final LineageMetaFactory lineageMetaFactory;
-    protected final Map<String, String> options;
+    protected final Options options;
 
-    protected TableLineageTable(
-            LineageMetaFactory lineageMetaFactory, Map<String, String> options) {
+    protected TableLineageTable(LineageMetaFactory lineageMetaFactory, Options options) {
         this.lineageMetaFactory = lineageMetaFactory;
         this.options = options;
     }
@@ -101,7 +99,7 @@ public abstract class TableLineageTable implements ReadonlyTable {
     /** Table lineage read with lineage meta query. */
     protected static class TableLineageRead implements InnerTableRead {
         private final LineageMetaFactory lineageMetaFactory;
-        private final Map<String, String> options;
+        private final Options options;
         private final BiFunction<LineageMeta, Predicate, Iterator<TableLineageEntity>>
                 tableLineageQuery;
         @Nullable private Predicate predicate;
@@ -109,7 +107,7 @@ public abstract class TableLineageTable implements ReadonlyTable {
 
         protected TableLineageRead(
                 LineageMetaFactory lineageMetaFactory,
-                Map<String, String> options,
+                Options options,
                 BiFunction<LineageMeta, Predicate, Iterator<TableLineageEntity>>
                         tableLineageQuery) {
             this.lineageMetaFactory = lineageMetaFactory;
@@ -137,8 +135,7 @@ public abstract class TableLineageTable implements ReadonlyTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
-            try (LineageMeta lineageMeta =
-                    lineageMetaFactory.create(() -> Options.fromMap(options))) {
+            try (LineageMeta lineageMeta = lineageMetaFactory.create(() -> options)) {
                 Iterator<TableLineageEntity> sourceTableLineages =
                         tableLineageQuery.apply(lineageMeta, predicate);
                 return new IteratorRecordReader<>(

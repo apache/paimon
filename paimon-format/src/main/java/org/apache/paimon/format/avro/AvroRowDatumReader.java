@@ -31,15 +31,13 @@ import java.io.IOException;
 /** A {@link DatumReader} for reading {@link InternalRow}. */
 public class AvroRowDatumReader implements DatumReader<InternalRow> {
 
-    private final RowType rowType;
-    private final int[] projection;
+    private final RowType projectedRowType;
 
     private RowReader reader;
     private boolean isUnion;
 
-    public AvroRowDatumReader(RowType rowType, int[] projection) {
-        this.rowType = rowType;
-        this.projection = projection;
+    public AvroRowDatumReader(RowType projectedRowType) {
+        this.projectedRowType = projectedRowType;
     }
 
     @Override
@@ -50,8 +48,7 @@ public class AvroRowDatumReader implements DatumReader<InternalRow> {
             schema = schema.getTypes().get(1);
         }
         this.reader =
-                new FieldReaderFactory()
-                        .createRowReader(schema, rowType.getFieldTypes(), projection);
+                new FieldReaderFactory().createRowReader(schema, projectedRowType.getFields());
     }
 
     @Override

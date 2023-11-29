@@ -132,6 +132,12 @@ This file is based on the checkstyle file of Apache Beam.
 			<property name="message"
 					  value="Use Flink's Preconditions instead of Guava's Preconditions"/>
 		</module>
+		<module name="Regexp">
+			<property name="format" value="org\.apache\.hadoop\.shaded"/>
+			<property name="illegalPattern" value="true"/>
+			<property name="message"
+				value="Use Paimon's shade instead of hadoop's shade"/>
+		</module>
 		<!-- forbid the use of com.google.common.annotations.VisibleForTesting -->
 		<module name="Regexp">
 			<property name="format"

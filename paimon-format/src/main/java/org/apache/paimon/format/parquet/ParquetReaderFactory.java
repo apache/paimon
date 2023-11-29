@@ -235,6 +235,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                     vectors[i] = writableVectors[i];
             }
         }
+
         return new VectorizedColumnBatch(vectors);
     }
 

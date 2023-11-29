@@ -21,6 +21,7 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -81,7 +82,11 @@ public class TagAutoCreation {
     }
 
     public boolean forceCreatingSnapshot() {
-        return timeExtractor.forceCreatingSnapshot();
+        return timeExtractor instanceof ProcessTimeExtractor
+                && (nextTag == null
+                        || isAfterOrEqual(
+                                LocalDateTime.now().minus(delay),
+                                periodHandler.nextTagTime(nextTag)));
     }
 
     public void run() {

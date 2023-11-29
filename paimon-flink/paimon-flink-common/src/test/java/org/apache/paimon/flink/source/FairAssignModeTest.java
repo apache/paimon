@@ -28,7 +28,6 @@ import java.util.Map;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SplitAssignMode;
-import static org.apache.paimon.flink.source.ContinuousFileSplitEnumeratorTest.createSnapshotSplit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link StaticFileStoreSplitEnumerator} with {@link SplitAssignMode#FAIR}. */

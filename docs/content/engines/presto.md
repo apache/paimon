@@ -38,23 +38,21 @@ Paimon currently supports Presto 0.236 and above.
 
 Download the jar file with corresponding version.
 
-| Version        | Jar                                                                                                                                                                                                            |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}.jar) |
-| [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}.jar) |
-| [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}.jar) |
-| Presto SQL 332  | [paimon-prestosql-332-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-prestosql-332/{{< version >}}/paimon-prestosql-332-{{< version >}}.jar)|
+| Version         | Jar                                                                                                                                                                                               |
+|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| [0.236, 0.268)  | [paimon-presto-0.236-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}-plugin.tar.gz) |
+| [0.268, 0.273)  | [paimon-presto-0.268-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}-plugin.tar.gz) |
+| [0.273, latest] | [paimon-presto-0.273-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}-plugin.tar.gz) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-| Version        | Jar                                                                                                                                                                                                            |
-|----------------|-------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236, 0.268) | [paimon-presto-0.236-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
-| [0.268, 0.273) | [paimon-presto-0.268-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
-| [0.273, latest] | [paimon-presto-0.273-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
-| Presto SQL 332  | [paimon-prestosql-332-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-prestosql-332/{{< version >}}/)                           |
+| Version         | Jar                                                                                                                                                 |
+|-----------------|-----------------------------------------------------------------------------------------------------------------------------------------------------|
+| [0.236, 0.268)  | [paimon-presto-0.236-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.236/{{< version >}}/) |
+| [0.268, 0.273)  | [paimon-presto-0.268-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.268/{{< version >}}/) |
+| [0.273, latest] | [paimon-presto-0.273-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-presto-0.273/{{< version >}}/) |
 
 {{< /unstable >}}
 
@@ -62,15 +60,35 @@ You can also manually build a bundled jar from the source code.
 
 To build from the source code, [clone the git repository]({{< presto_github_repo >}}).
 
-Build bundled jar with the following command.
+Build presto connector plugin with the following command.
 
 ```
 mvn clean install -DskipTests
 ```
 
-You can find Presto connector jar in `./paimon-presto-<presto-version>/target/paimon-presto-*.jar`.
+After the packaging is complete, you can choose the corresponding connector based on your own Presto version:
 
-Then, copy `paimon-presto-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
+| Version         | Package                                                                          |
+|-----------------|----------------------------------------------------------------------------------|
+| [0.236, 0.268)  | `./paimon-presto-0.236/target/paimon-presto-0.236-{{< version >}}-plugin.tar.gz` |
+| [0.268, 0.273)  | `./paimon-presto-0.268/target/paimon-presto-0.268-{{< version >}}-plugin.tar.gz` |
+| [0.273, latest] | `./paimon-presto-0.273/target/paimon-presto-0.273-{{< version >}}-plugin.tar.gz` |
+
+Of course, we also support different versions of Hive and Hadoop. But note that we utilize
+Presto-shaded versions of Hive and Hadoop packages to address dependency conflicts.
+You can check the following two links to select the appropriate versions of Hive and Hadoop:
+
+[hadoop-apache2](https://mvnrepository.com/artifact/com.facebook.presto.hadoop/hadoop-apache2)
+
+[hive-apache](https://mvnrepository.com/artifact/com.facebook.presto.hive/hive-apache)
+
+Both Hive 2 and 3, as well as Hadoop 2 and 3, are supported.
+
+For example, if your presto version is 0.274, hive and hadoop version is 2.x, you could run:
+
+```bash
+mvn clean install -DskipTests -am -pl paimon-presto-0.273 -Dpresto.version=0.274 -Dhadoop.apache2.version=2.7.4-9 -Dhive.apache.version=1.2.2-2
+```
 
 ## Tmp Dir
 
@@ -86,18 +104,56 @@ Let Paimon use a secure temporary directory.
 
 ## Configure Paimon Catalog
 
-Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
+### Install Paimon Connector
 
+```bash
+tar -zxf paimon-presto-${PRESTO_VERSION}/target/paimon-presto-${PRESTO_VERSION}-${PAIMON_VERSION}-plugin.tar.gz -C ${PRESTO_HOME}/plugin
 ```
+
+Note that, the variable `PRESTO_VERSION` is module name, must be one of 0.236, 0.268, 0.273.
+
+### Configuration
+
+```bash
+cd ${PRESTO_HOME}
+mkdir -p etc/catalog
+```
+
+```properties
 connector.name=paimon
-warehouse=file:/tmp/warehouse
+# set your filesystem path, such as hdfs://namenode01:8020/path and s3://${YOUR_S3_BUCKET}/path
+warehouse=${YOUR_FS_PATH}
 ```
 
-If you are using HDFS, choose one of the following ways to configure your HDFS:
+If you are using HDFS FileSystem, you will also need to do one more thing: choose one of the following ways to configure your HDFS:
 
 - set environment variable HADOOP_HOME.
 - set environment variable HADOOP_CONF_DIR.
 - configure `hadoop-conf-dir` in the properties.
+
+If you are using S3 FileSystem, you need to add `paimon-s3-${PAIMON_VERSION}.jar` in `${PRESTO_HOME}/plugin/paimon` and additionally configure the following properties in `paimon.properties`:
+
+```properties
+s3.endpoint=${YOUR_ENDPOINTS}
+s3.access-key=${YOUR_AK}
+s3.secret-key=${YOUR_SK}
+```
+
+**Query HiveCatalog table:**
+
+```bash
+vim etc/catalog/paimon.properties
+```
+
+and set the following config:
+
+```properties
+connector.name=paimon
+# set your filesystem path, such as hdfs://namenode01:8020/path and s3://${YOUR_S3_BUCKET}/path
+warehouse=${YOUR_FS_PATH}
+metastore=hive
+uri=thrift://${YOUR_HIVE_METASTORE}:9083
+```
 
 ## Kerberos
 

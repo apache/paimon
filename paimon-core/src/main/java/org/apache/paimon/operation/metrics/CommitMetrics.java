@@ -26,7 +26,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 /** Metrics to measure a commit. */
 public class CommitMetrics {
 
-    private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
+    private static final int HISTOGRAM_WINDOW_SIZE = 100;
     private static final String GROUP_NAME = "commit";
 
     private final MetricGroup metricGroup;

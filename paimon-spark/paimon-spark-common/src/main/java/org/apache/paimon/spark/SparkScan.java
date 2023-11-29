@@ -25,8 +25,6 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 
 import org.apache.spark.sql.connector.read.Batch;
-import org.apache.spark.sql.connector.read.InputPartition;
-import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 import org.apache.spark.sql.connector.read.Scan;
 import org.apache.spark.sql.connector.read.Statistics;
 import org.apache.spark.sql.connector.read.SupportsReportStatistics;
@@ -66,19 +64,7 @@ public class SparkScan implements Scan, SupportsReportStatistics {
 
     @Override
     public Batch toBatch() {
-        return new Batch() {
-            @Override
-            public InputPartition[] planInputPartitions() {
-                return splits().stream()
-                        .map(SparkInputPartition::new)
-                        .toArray(InputPartition[]::new);
-            }
-
-            @Override
-            public PartitionReaderFactory createReaderFactory() {
-                return new SparkReaderFactory(readBuilder);
-            }
-        };
+        return new PaimonBatch(splits().toArray(new Split[0]), readBuilder);
     }
 
     @Override

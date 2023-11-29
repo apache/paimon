@@ -22,14 +22,20 @@ import org.apache.paimon.flink.source.FlinkTableSource;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.table.connector.source.LookupTableSource;
+import org.apache.flink.table.connector.source.abilities.SupportsDynamicFiltering;
 import org.apache.flink.table.connector.source.abilities.SupportsStatisticReport;
 import org.apache.flink.table.connector.source.abilities.SupportsWatermarkPushDown;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.plan.stats.TableStats;
 
-/** The {@link BaseTableSource} with Lookup and watermark. */
+import java.util.List;
+
+/** The {@link BaseTableSource} with lookup, watermark, statistic and dynamic filtering. */
 public class RichTableSource extends BaseTableSource
-        implements LookupTableSource, SupportsWatermarkPushDown, SupportsStatisticReport {
+        implements LookupTableSource,
+                SupportsWatermarkPushDown,
+                SupportsStatisticReport,
+                SupportsDynamicFiltering {
 
     private final FlinkTableSource source;
 
@@ -56,5 +62,15 @@ public class RichTableSource extends BaseTableSource
     @Override
     public TableStats reportStatistics() {
         return source.reportStatistics();
+    }
+
+    @Override
+    public List<String> listAcceptedFilterFields() {
+        return source.listAcceptedFilterFields();
+    }
+
+    @Override
+    public void applyDynamicFiltering(List<String> candidateFilterFields) {
+        source.applyDynamicFiltering(candidateFilterFields);
     }
 }

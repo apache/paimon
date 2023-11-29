@@ -131,4 +131,10 @@ public class VectorizedColumnBatch implements Serializable {
     public InternalMap getMap(int rowId, int colId) {
         return ((MapColumnVector) columns[colId]).getMap(rowId);
     }
+
+    public VectorizedColumnBatch copy(ColumnVector[] vectors) {
+        VectorizedColumnBatch vectorizedColumnBatch = new VectorizedColumnBatch(vectors);
+        vectorizedColumnBatch.setNumRows(numRows);
+        return vectorizedColumnBatch;
+    }
 }

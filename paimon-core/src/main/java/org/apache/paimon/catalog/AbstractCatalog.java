@@ -23,25 +23,35 @@ import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.system.SystemTableLoader;
 import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Common implementation of {@link Catalog}. */
 public abstract class AbstractCatalog implements Catalog {
@@ -51,7 +61,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
-    protected final Map<String, String> catalogOptions;
+    protected final Options catalogOptions;
 
     @Nullable protected final LineageMetaFactory lineageMetaFactory;
 
@@ -59,24 +69,16 @@ public abstract class AbstractCatalog implements Catalog {
         this.fileIO = fileIO;
         this.lineageMetaFactory = null;
         this.tableDefaultOptions = new HashMap<>();
-        this.catalogOptions = new HashMap<>();
+        this.catalogOptions = new Options();
     }
 
-    protected AbstractCatalog(FileIO fileIO, Map<String, String> options) {
+    protected AbstractCatalog(FileIO fileIO, Options options) {
         this.fileIO = fileIO;
         this.lineageMetaFactory =
-                findAndCreateLineageMeta(
-                        Options.fromMap(options), AbstractCatalog.class.getClassLoader());
-        this.tableDefaultOptions = new HashMap<>();
+                findAndCreateLineageMeta(options, AbstractCatalog.class.getClassLoader());
+        this.tableDefaultOptions =
+                convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
-
-        options.keySet().stream()
-                .filter(key -> key.startsWith(TABLE_DEFAULT_OPTION_PREFIX))
-                .forEach(
-                        key ->
-                                this.tableDefaultOptions.put(
-                                        key.substring(TABLE_DEFAULT_OPTION_PREFIX.length()),
-                                        options.get(key)));
     }
 
     @Override
@@ -104,6 +106,16 @@ public abstract class AbstractCatalog implements Catalog {
         }
 
         createDatabaseImpl(name);
+    }
+
+    @Override
+    public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
+            throws TableNotExistException {
+        Table table = getTable(identifier);
+        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
+        commit.dropPartitions(
+                Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
     protected abstract void createDatabaseImpl(String name);
@@ -139,7 +151,7 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(databaseName);
         }
 
-        return listTablesImpl(databaseName);
+        return listTablesImpl(databaseName).stream().sorted().collect(Collectors.toList());
     }
 
     protected abstract List<String> listTablesImpl(String databaseName);
@@ -164,6 +176,9 @@ public abstract class AbstractCatalog implements Catalog {
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)
             throws TableAlreadyExistException, DatabaseNotExistException {
         checkNotSystemTable(identifier, "createTable");
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
+
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
         }
@@ -187,6 +202,7 @@ public abstract class AbstractCatalog implements Catalog {
             throws TableNotExistException, TableAlreadyExistException {
         checkNotSystemTable(fromTable, "renameTable");
         checkNotSystemTable(toTable, "renameTable");
+        validateIdentifierNameCaseInsensitive(toTable);
 
         if (!tableExists(fromTable)) {
             if (ignoreIfNotExists) {
@@ -209,6 +225,9 @@ public abstract class AbstractCatalog implements Catalog {
             Identifier identifier, List<SchemaChange> changes, boolean ignoreIfNotExists)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         checkNotSystemTable(identifier, "alterTable");
+        validateIdentifierNameCaseInsensitive(identifier);
+        validateFieldNameCaseInsensitiveInSchemaChange(changes);
+
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
                 return;
@@ -276,8 +295,8 @@ public abstract class AbstractCatalog implements Catalog {
     }
 
     @VisibleForTesting
-    public Path databasePath(String database) {
-        return databasePath(warehouse(), database);
+    public Path newDatabasePath(String database) {
+        return newDatabasePath(warehouse(), database);
     }
 
     Map<String, Map<String, Path>> allTablePaths() {
@@ -287,9 +306,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Map<String, Path> tableMap =
                         allPaths.computeIfAbsent(database, d -> new HashMap<>());
                 for (String table : listTables(database)) {
-                    tableMap.put(
-                            table,
-                            dataTableLocation(warehouse(), Identifier.create(database, table)));
+                    tableMap.put(table, getDataTableLocation(Identifier.create(database, table)));
                 }
             }
             return allPaths;
@@ -301,7 +318,7 @@ public abstract class AbstractCatalog implements Catalog {
     public abstract String warehouse();
 
     public Map<String, String> options() {
-        return catalogOptions;
+        return catalogOptions.toMap();
     }
 
     protected abstract TableSchema getDataTableSchema(Identifier identifier)
@@ -309,7 +326,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        return dataTableLocation(warehouse(), identifier);
+        return newTableLocation(warehouse(), identifier);
     }
 
     private static boolean isSpecifiedSystemTable(Identifier identifier) {
@@ -333,6 +350,10 @@ public abstract class AbstractCatalog implements Catalog {
         tableDefaultOptions.forEach(options::putIfAbsent);
     }
 
+    public FileIO fileIO() {
+        return fileIO;
+    }
+
     private String[] tableAndSystemName(Identifier identifier) {
         String[] splits = StringUtils.split(identifier.getObjectName(), SYSTEM_TABLE_SPLITTER);
         if (splits.length != 2) {
@@ -343,7 +364,7 @@ public abstract class AbstractCatalog implements Catalog {
         return splits;
     }
 
-    public static Path dataTableLocation(String warehouse, Identifier identifier) {
+    public static Path newTableLocation(String warehouse, Identifier identifier) {
         if (isSpecifiedSystemTable(identifier)) {
             throw new IllegalArgumentException(
                     String.format(
@@ -351,14 +372,61 @@ public abstract class AbstractCatalog implements Catalog {
                             identifier.getObjectName(), SYSTEM_TABLE_SPLITTER));
         }
         return new Path(
-                databasePath(warehouse, identifier.getDatabaseName()), identifier.getObjectName());
+                newDatabasePath(warehouse, identifier.getDatabaseName()),
+                identifier.getObjectName());
     }
 
-    public static Path databasePath(String warehouse, String database) {
+    public static Path newDatabasePath(String warehouse, String database) {
         return new Path(warehouse, database + DB_SUFFIX);
     }
 
     private boolean isSystemDatabase(String database) {
         return SYSTEM_DATABASE_NAME.equals(database);
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, String... names) {
+        validateCaseInsensitive(caseSensitive, type, Arrays.asList(names));
+    }
+
+    /** Validate database, table and field names must be lowercase when not case-sensitive. */
+    public static void validateCaseInsensitive(
+            boolean caseSensitive, String type, List<String> names) {
+        if (caseSensitive) {
+            return;
+        }
+        List<String> illegalNames =
+                names.stream().filter(f -> !f.equals(f.toLowerCase())).collect(Collectors.toList());
+        checkArgument(
+                illegalNames.isEmpty(),
+                String.format(
+                        "%s name %s cannot contain upper case in the catalog.",
+                        type, illegalNames));
+    }
+
+    private void validateIdentifierNameCaseInsensitive(Identifier identifier) {
+        validateCaseInsensitive(caseSensitive(), "Database", identifier.getDatabaseName());
+        validateCaseInsensitive(caseSensitive(), "Table", identifier.getObjectName());
+    }
+
+    private void validateFieldNameCaseInsensitiveInSchemaChange(List<SchemaChange> changes) {
+        List<String> fieldNames = new ArrayList<>();
+        for (SchemaChange change : changes) {
+            if (change instanceof SchemaChange.AddColumn) {
+                SchemaChange.AddColumn addColumn = (SchemaChange.AddColumn) change;
+                fieldNames.add(addColumn.fieldName());
+            } else if (change instanceof SchemaChange.RenameColumn) {
+                SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
+                fieldNames.add(rename.newName());
+            } else {
+                // do nothing
+            }
+        }
+        validateFieldNameCaseInsensitive(fieldNames);
+    }
+
+    private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
+        validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
     }
 }

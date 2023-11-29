@@ -20,8 +20,6 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.action.cdc.format.debezium.JsonPrimaryKeyDeserializationSchema;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
@@ -36,6 +34,7 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.util.CollectionUtil;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -44,7 +43,6 @@ import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
@@ -67,14 +65,8 @@ public class KafkaActionUtils {
 
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
-    private static final String DEBEZIUM_JSON = "debezium-json";
 
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
-        return buildKafkaSource(kafkaConfig, new ArrayList<>());
-    }
-
-    public static KafkaSource<String> buildKafkaSource(
-            Configuration kafkaConfig, List<String> primaryKeys) {
         validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
 
@@ -85,11 +77,8 @@ public class KafkaActionUtils {
 
         kafkaSourceBuilder
                 .setTopics(topics)
-                .setGroupId(kafkaPropertiesGroupId(kafkaConfig))
-                .setValueOnlyDeserializer(
-                        DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
-                                ? new JsonPrimaryKeyDeserializationSchema(primaryKeys)
-                                : new SimpleStringSchema());
+                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = new Properties();
         for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
             String key = entry.getKey();
@@ -273,11 +262,6 @@ public class KafkaActionUtils {
 
     static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
             Configuration kafkaConfig, String topic) {
-        return getKafkaEarliestConsumer(kafkaConfig, topic, new ArrayList<>());
-    }
-
-    static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
-            Configuration kafkaConfig, String topic, List<String> primaryKeys) {
         Properties props = new Properties();
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
@@ -291,10 +275,14 @@ public class KafkaActionUtils {
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
+        // the return may be null in older versions of the Kafka client
         List<PartitionInfo> partitionInfos = consumer.partitionsFor(topic);
-        if (partitionInfos.isEmpty()) {
+        if (partitionInfos == null || partitionInfos.isEmpty()) {
             throw new IllegalArgumentException(
-                    "Failed to find partition information for topic " + topic);
+                    String.format(
+                            "Failed to find partition information for topic '%s'. Please check your "
+                                    + "'topic' and 'bootstrap.servers' config.",
+                            topic));
         }
         int firstPartition =
                 partitionInfos.stream().map(PartitionInfo::partition).sorted().findFirst().get();
@@ -302,24 +290,16 @@ public class KafkaActionUtils {
                 Collections.singletonList(new TopicPartition(topic, firstPartition));
         consumer.assign(topicPartitions);
         consumer.seekToBeginning(topicPartitions);
-        return new KafkaConsumerWrapper(
-                consumer,
-                DEBEZIUM_JSON.equals(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT))
-                        ? primaryKeys
-                        : new ArrayList<>());
+
+        return new KafkaConsumerWrapper(consumer);
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
-        private static final String PK_NAMES_KEY = "pkNames";
-
         private final KafkaConsumer<String, String> consumer;
 
-        private final List<String> pkNames;
-
-        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer, List<String> pkNames) {
+        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer) {
             this.consumer = kafkaConsumer;
-            this.pkNames = pkNames;
         }
 
         @Override
@@ -327,7 +307,7 @@ public class KafkaActionUtils {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
-                    .map(r -> JsonSerdeUtil.putArrayToJsonString(r.value(), PK_NAMES_KEY, pkNames))
+                    .map(ConsumerRecord::value)
                     .collect(Collectors.toList());
         }
 

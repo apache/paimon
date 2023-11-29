@@ -29,7 +29,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Projection;
 
 import java.util.List;
 import java.util.Optional;
@@ -53,10 +52,10 @@ public class ParquetFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType type, int[][] projection, List<Predicate> filters) {
+            RowType projectedRowType, List<Predicate> filters) {
         return new ParquetReaderFactory(
                 getParquetConfiguration(formatContext.formatOptions()),
-                Projection.of(projection).project(type),
+                projectedRowType,
                 formatContext.readBatchSize());
     }
 

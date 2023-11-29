@@ -209,6 +209,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         standardProps.put("max.partition.fetch.bytes", 256);
         standardProps.put("zookeeper.session.timeout.ms", zkTimeoutMills);
         standardProps.put("zookeeper.connection.timeout.ms", zkTimeoutMills);
+        standardProps.put("default.api.timeout.ms", "120000");
         return standardProps;
     }
 

@@ -86,12 +86,6 @@ public abstract class HiveCatalogITCaseBase {
     @Minio private static MinioTestContainer minioTestContainer;
 
     private void before(boolean locationInProperties) throws Exception {
-        hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
-        hiveShell.execute("USE test_db");
-        hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
-        hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
-        hiveShell.executeQuery("SHOW TABLES");
-
         Map<String, String> catalogProperties = new HashMap<>();
         catalogProperties.put("type", "paimon");
         catalogProperties.put("metastore", "hive");
@@ -122,7 +116,12 @@ public abstract class HiveCatalogITCaseBase {
                                 ")"))
                 .await();
         tEnv.executeSql("USE CATALOG my_hive").await();
+        tEnv.executeSql("DROP DATABASE IF EXISTS test_db CASCADE");
+        tEnv.executeSql("CREATE DATABASE test_db").await();
         tEnv.executeSql("USE test_db").await();
+        hiveShell.execute("USE test_db");
+        hiveShell.execute("CREATE TABLE hive_table ( a INT, b STRING )");
+        hiveShell.execute("INSERT INTO hive_table VALUES (100, 'Hive'), (200, 'Table')");
     }
 
     private void after() {
@@ -580,8 +579,7 @@ public abstract class HiveCatalogITCaseBase {
 
         // the target table name has upper case.
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE t1 RENAME TO T1"))
-                .hasMessage(
-                        "Could not execute ALTER TABLE my_hive.test_db.t1 RENAME TO my_hive.test_db.T1");
+                .hasMessage("Table name [T1] cannot contain upper case in the catalog.");
 
         tEnv.executeSql("ALTER TABLE t1 RENAME TO t3").await();
 
@@ -743,7 +741,7 @@ public abstract class HiveCatalogITCaseBase {
                                         .await())
                 .hasRootCauseMessage(
                         String.format(
-                                "Table name[%s] cannot contain upper case in hive catalog", "T"));
+                                "Table name [%s] cannot contain upper case in the catalog.", "T"));
 
         assertThatThrownBy(
                         () ->
@@ -752,7 +750,7 @@ public abstract class HiveCatalogITCaseBase {
                                         .await())
                 .hasRootCauseMessage(
                         String.format(
-                                "Field names %s cannot contain upper case in hive catalog",
+                                "Field name %s cannot contain upper case in the catalog.",
                                 "[A, C]"));
     }
 

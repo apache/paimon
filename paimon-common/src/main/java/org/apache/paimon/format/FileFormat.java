@@ -53,11 +53,11 @@ public abstract class FileFormat {
     /**
      * Create a {@link FormatReaderFactory} from the type, with projection pushed down.
      *
-     * @param type Type without projection.
+     * @param projectedRowType Type with projection.
      * @param filters A list of filters in conjunctive form for filtering on a best-effort basis.
      */
     public abstract FormatReaderFactory createReaderFactory(
-            RowType type, int[][] projection, @Nullable List<Predicate> filters);
+            RowType projectedRowType, @Nullable List<Predicate> filters);
 
     /** Create a {@link FormatWriterFactory} from the type. */
     public abstract FormatWriterFactory createWriterFactory(RowType type);
@@ -66,15 +66,7 @@ public abstract class FileFormat {
     public abstract void validateDataFields(RowType rowType);
 
     public FormatReaderFactory createReaderFactory(RowType rowType) {
-        int[][] projection = new int[rowType.getFieldCount()][];
-        for (int i = 0; i < projection.length; i++) {
-            projection[i] = new int[] {i};
-        }
-        return createReaderFactory(rowType, projection);
-    }
-
-    public FormatReaderFactory createReaderFactory(RowType rowType, int[][] projection) {
-        return createReaderFactory(rowType, projection, new ArrayList<>());
+        return createReaderFactory(rowType, new ArrayList<>());
     }
 
     public Optional<TableStatsExtractor> createStatsExtractor(

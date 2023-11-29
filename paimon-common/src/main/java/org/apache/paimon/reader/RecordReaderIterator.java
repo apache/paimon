@@ -76,6 +76,9 @@ public class RecordReaderIterator<T> implements CloseableIterator<T> {
                     break;
                 } else {
                     currentIterator.releaseBatch();
+                    // because reader#readBatch will be affected by interrupt, which will cause
+                    // currentIterator#releaseBatch to be executed twice.
+                    currentIterator = null;
                     currentIterator = reader.readBatch();
                     if (currentIterator == null) {
                         break;
@@ -89,9 +92,12 @@ public class RecordReaderIterator<T> implements CloseableIterator<T> {
 
     @Override
     public void close() throws Exception {
-        if (currentIterator != null) {
-            currentIterator.releaseBatch();
+        try {
+            if (currentIterator != null) {
+                currentIterator.releaseBatch();
+            }
+        } finally {
+            reader.close();
         }
-        reader.close();
     }
 }

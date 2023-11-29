@@ -37,6 +37,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
+import static org.apache.paimon.utils.ParameterUtils.parseKeyValueString;
+
 /** Factory to create {@link Action}. */
 public interface ActionFactory extends Factory {
 
@@ -145,24 +148,5 @@ public interface ActionFactory extends Factory {
     default String getRequiredValue(MultipleParameterTool params, String key) {
         checkRequiredArgument(params, key);
         return params.get(key);
-    }
-
-    static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
-        Map<String, String> kvs = new HashMap<>();
-        for (String kvString : keyValues.split(",")) {
-            parseKeyValueString(kvs, kvString);
-        }
-        return kvs;
-    }
-
-    static void parseKeyValueString(Map<String, String> map, String kvString) {
-        String[] kv = kvString.split("=", 2);
-        if (kv.length != 2) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "Invalid key-value string '%s'. Please use format 'key=value'",
-                            kvString));
-        }
-        map.put(kv[0].trim(), kv[1].trim());
     }
 }

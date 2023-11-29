@@ -93,6 +93,7 @@ Run the following command to submit a compaction job for the table.
     --database <database-name> \ 
     --table <table-name> \
     [--partition <partition-name>] \
+    [--table-conf <table-conf>] \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
 ```
 
@@ -107,6 +108,7 @@ Example: compact table
     --table test_table \
     --partition dt=20221126,hh=08 \
     --partition dt=20221127,hh=09 \
+    --table-conf sink.parallelism=10 \
     --catalog-conf s3.endpoint=https://****.com \
     --catalog-conf s3.access-key=***** \
     --catalog-conf s3.secret-key=*****

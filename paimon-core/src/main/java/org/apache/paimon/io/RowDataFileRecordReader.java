@@ -18,13 +18,18 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.PartitionSettedRow;
 import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.PartitionInfo;
+import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.FileUtils;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -35,6 +40,7 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
+    @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
     public RowDataFileRecordReader(
@@ -42,10 +48,12 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             Path path,
             FormatReaderFactory readerFactory,
             @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping)
+            @Nullable CastFieldGetter[] castMapping,
+            @Nullable PartitionInfo partitionInfo)
             throws IOException {
         this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
         this.indexMapping = indexMapping;
+        this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
     }
 
@@ -53,38 +61,34 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
         RecordIterator<InternalRow> iterator = reader.readBatch();
-        return iterator == null
-                ? null
-                : new RowDataFileRecordIterator(iterator, indexMapping, castMapping);
+        if (iterator == null) {
+            return null;
+        }
+
+        if (iterator instanceof ColumnarRowIterator) {
+            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
+        } else {
+            if (partitionInfo != null) {
+                final PartitionSettedRow partitionSettedRow =
+                        PartitionSettedRow.from(partitionInfo);
+                iterator = iterator.transform(partitionSettedRow::replaceRow);
+            }
+            if (indexMapping != null) {
+                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
+                iterator = iterator.transform(projectedRow::replaceRow);
+            }
+        }
+
+        if (castMapping != null) {
+            final CastedRow castedRow = CastedRow.from(castMapping);
+            iterator = iterator.transform(castedRow::replaceRow);
+        }
+
+        return iterator;
     }
 
     @Override
     public void close() throws IOException {
         reader.close();
-    }
-
-    private static class RowDataFileRecordIterator extends AbstractFileRecordIterator<InternalRow> {
-
-        private final RecordIterator<InternalRow> iterator;
-
-        private RowDataFileRecordIterator(
-                RecordIterator<InternalRow> iterator,
-                @Nullable int[] indexMapping,
-                @Nullable CastFieldGetter[] castMapping) {
-            super(indexMapping, castMapping);
-            this.iterator = iterator;
-        }
-
-        @Override
-        public InternalRow next() throws IOException {
-            InternalRow result = iterator.next();
-
-            return result == null ? null : mappingRowData(result);
-        }
-
-        @Override
-        public void releaseBatch() {
-            iterator.releaseBatch();
-        }
     }
 }

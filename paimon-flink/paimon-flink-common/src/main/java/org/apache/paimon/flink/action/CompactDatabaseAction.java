@@ -241,6 +241,6 @@ public class CompactDatabaseAction extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute(env, "Compact database job");
+        execute("Compact database job");
     }
 }

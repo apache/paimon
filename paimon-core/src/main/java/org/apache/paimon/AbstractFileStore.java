@@ -78,6 +78,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                         : new SegmentsCache<>(options.pageSize(), writeManifestCache);
     }
 
+    @Override
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
                 options.path(),

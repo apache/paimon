@@ -31,6 +31,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
@@ -66,6 +67,12 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
 
     @Override
     public FieldStats[] extract(FileIO fileIO, Path path) throws IOException {
+        return extractWithFileInfo(fileIO, path).getLeft();
+    }
+
+    @Override
+    public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
+            throws IOException {
         try (Reader reader = OrcReaderFactory.createReader(new Configuration(), fileIO, path)) {
             long rowCount = reader.getNumberOfRows();
             ColumnStatistics[] columnStatistics = reader.getStatistics();
@@ -76,16 +83,26 @@ public class OrcTableStatsExtractor implements TableStatsExtractor {
 
             FieldStatsCollector[] collectors = FieldStatsCollector.create(statsCollectors);
 
-            return IntStream.range(0, rowType.getFieldCount())
-                    .mapToObj(
-                            i -> {
-                                DataField field = rowType.getFields().get(i);
-                                int fieldIdx = columnNames.indexOf(field.name());
-                                int colId = columnTypes.get(fieldIdx).getId();
-                                return toFieldStats(
-                                        field, columnStatistics[colId], rowCount, collectors[i]);
-                            })
-                    .toArray(FieldStats[]::new);
+            return Pair.of(
+                    IntStream.range(0, rowType.getFieldCount())
+                            .mapToObj(
+                                    i -> {
+                                        DataField field = rowType.getFields().get(i);
+                                        int fieldIdx = columnNames.indexOf(field.name());
+                                        if (fieldIdx == -1) {
+                                            return collectors[i].convert(
+                                                    new FieldStats(null, null, null));
+                                        } else {
+                                            int colId = columnTypes.get(fieldIdx).getId();
+                                            return toFieldStats(
+                                                    field,
+                                                    columnStatistics[colId],
+                                                    rowCount,
+                                                    collectors[i]);
+                                        }
+                                    })
+                            .toArray(FieldStats[]::new),
+                    new FileInfo(rowCount));
         }
     }
 

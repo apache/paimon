@@ -192,7 +192,6 @@ Paimon supports that use Spark SQL to do the incremental query that implemented 
 To enable this needs these configs below:
 
 ```text
---conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
@@ -330,6 +329,18 @@ When stream read Paimon tables, the next snapshot id to be recorded into the fil
 {{< hint info >}}
 NOTE: The consumer will prevent expiration of the snapshot. You can specify 'consumer.expiration-time' to manage the 
 lifetime of consumers.
+{{< /hint >}}
+
+By default, the consumer uses `exactly-once` mode to record consumption progress, which strictly ensures that what is 
+recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed. You can set `consumer.mode` to 
+`at-least-once` to allow readers consume snapshots at different rates and record the slowest snapshot-id among all 
+readers into the consumer. This mode can provide more capabilities, such as watermark alignment.
+
+{{< hint warning >}}
+1. When there is no watermark definition, the consumer in `at-least-once` mode cannot provide the ability to pass the 
+watermark in the snapshot to the downstream. 
+2. Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
+flink is incompatible and cannot be restored from the state when switching modes.
 {{< /hint >}}
 
 You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.

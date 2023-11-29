@@ -45,12 +45,13 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
 
         MySqlSyncTableAction action =
                 new MySqlSyncTableAction(
-                                tablePath.f0,
-                                tablePath.f1,
-                                tablePath.f2,
-                                optionalConfigMap(params, "catalog-conf"),
-                                optionalConfigMap(params, "mysql-conf"))
-                        .withTableConfig(optionalConfigMap(params, "table-conf"));
+                        tablePath.f0,
+                        tablePath.f1,
+                        tablePath.f2,
+                        optionalConfigMap(params, "catalog-conf"),
+                        optionalConfigMap(params, "mysql-conf"));
+
+        action.withTableConfig(optionalConfigMap(params, "table-conf"));
 
         if (params.has("partition-keys")) {
             action.withPartitionKeys(params.get("partition-keys").split(","));
@@ -66,7 +67,8 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         }
 
         if (params.has("metadata-column")) {
-            action.withMetadataKeys(new ArrayList<>(params.getMultiParameter("metadata-column")));
+            action.withMetadataColumns(
+                    new ArrayList<>(params.getMultiParameter("metadata-column")));
         }
 
         if (params.has("type-mapping")) {

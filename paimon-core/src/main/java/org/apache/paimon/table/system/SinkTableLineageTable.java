@@ -20,6 +20,7 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.lineage.LineageMetaFactory;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 
@@ -42,8 +43,7 @@ public class SinkTableLineageTable extends TableLineageTable {
 
     public static final String SINK_TABLE_LINEAGE = "sink_table_lineage";
 
-    public SinkTableLineageTable(
-            LineageMetaFactory lineageMetaFactory, Map<String, String> options) {
+    public SinkTableLineageTable(LineageMetaFactory lineageMetaFactory, Options options) {
         super(lineageMetaFactory, options);
     }
 

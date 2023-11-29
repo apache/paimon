@@ -1072,4 +1072,93 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 rowType,
                 Arrays.asList("_id", "_year"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testSynchronizeIncompleteJson() throws Exception {
+        String topic = "incomplete";
+        createTestTopic(topic, 1, 1);
+        List<String> lines = readLines("kafka/canal/table/incomplete/canal-data-1.txt");
+        writeRecordsToKafka(topic, lines);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("k")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(),
+                        },
+                        new String[] {"k", "v"});
+        waitForResult(
+                Arrays.asList("+I[1, Hi]", "+I[2, Hello]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSynchronizeNonPkTable() throws Exception {
+        String topic = "non_pk";
+        createTestTopic(topic, 1, 1);
+        List<String> lines = readLines("kafka/canal/table/nonpk/canal-data-1.txt");
+        writeRecordsToKafka(topic, lines);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.VARCHAR(10), DataTypes.INT(),
+                        },
+                        new String[] {"v0", "v1"});
+        waitForResult(
+                Arrays.asList("+I[five, 50]", "+I[five, 50]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.emptyList());
+    }
+
+    @Test
+    @Timeout(60)
+    public void testMissingDecimalPrecision() throws Exception {
+        String topic = "missing-decimal-precision";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, readLines("kafka/canal/table/incomplete/canal-data-2.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put("topic", topic);
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DECIMAL(38, 18),
+                        },
+                        new String[] {"k", "v"});
+        waitForResult(
+                Collections.singletonList("+I[1, 1.200000000000000000]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("k"));
+    }
 }

@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
@@ -488,7 +488,7 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                         .withTableConfig(getBasicTableConfig())
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .build();
         runActionWithDefaultEnv(action);
 

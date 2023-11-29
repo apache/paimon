@@ -52,6 +52,16 @@ public final class TBPropertiesLocationHelper implements LocationHelper {
     }
 
     @Override
+    public String getTableLocation(Table table) {
+        String location = table.getParameters().get(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY);
+        if (location != null) {
+            return location;
+        }
+
+        return table.getSd().getLocation();
+    }
+
+    @Override
     public void specifyDatabaseLocation(Path path, Database database) {
         HashMap<String, String> properties = new HashMap<>();
         if (database.getParameters() != null) {
@@ -59,5 +69,16 @@ public final class TBPropertiesLocationHelper implements LocationHelper {
         }
         properties.put(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY, path.toString());
         database.setParameters(properties);
+    }
+
+    @Override
+    public String getDatabaseLocation(Database database) {
+        String location =
+                database.getParameters().get(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY);
+        if (location != null) {
+            return location;
+        }
+
+        return database.getLocationUri();
     }
 }

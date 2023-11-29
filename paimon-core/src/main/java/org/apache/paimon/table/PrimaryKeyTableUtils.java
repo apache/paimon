@@ -56,18 +56,17 @@ public class PrimaryKeyTableUtils {
     }
 
     public static MergeFunctionFactory<KeyValue> createMergeFunctionFactory(
-            TableSchema tableSchema) {
+            TableSchema tableSchema, KeyValueFieldsExtractor extractor) {
         RowType rowType = tableSchema.logicalRowType();
         Options conf = Options.fromMap(tableSchema.options());
         CoreOptions options = new CoreOptions(conf);
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-        KeyValueFieldsExtractor extractor = PrimaryKeyFieldsExtractor.EXTRACTOR;
 
         switch (mergeEngine) {
             case DEDUPLICATE:
                 return DeduplicateMergeFunction.factory();
             case PARTIAL_UPDATE:
-                return PartialUpdateMergeFunction.factory(conf, rowType);
+                return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case AGGREGATE:
                 return AggregateMergeFunction.factory(
                         conf,
@@ -76,7 +75,7 @@ public class PrimaryKeyTableUtils {
                         tableSchema.primaryKeys());
             case FIRST_ROW:
                 return FirstRowMergeFunction.factory(
-                        new RowType(extractor.keyFields(tableSchema)), rowType);
+                        new RowType(extractor.keyFields(tableSchema)), rowType, conf);
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
         }

@@ -279,8 +279,12 @@ public class InternalRowUtils {
             case VARBINARY:
                 ret = byteArrayCompare((byte[]) x, (byte[]) y);
                 break;
+            case VARCHAR:
+            case CHAR:
+                ret = ((BinaryString) x).compareTo((BinaryString) y);
+                break;
             default:
-                throw new IllegalArgumentException();
+                throw new IllegalArgumentException("Incomparable type: " + type);
         }
         return ret;
     }
