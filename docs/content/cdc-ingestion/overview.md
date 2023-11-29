@@ -87,9 +87,10 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 2. You can use type mapping option `to-nullable` (Use `--type-mapping`) to ignore all NOT NULL constraints (except primary keys).
 3. You can use type mapping option `to-string` (Use `--type-mapping`) to map all MySQL data type to STRING.
 4. You can use type mapping option `char-to-string` (Use `--type-mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
-5. MySQL BIT(1) type will be mapped to Boolean.
-6. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-7. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
+5. You can use type mapping option `longtext-to-bytes` (Use `--type-mapping`) to map MySQL LONGTEXT types to BYTES.
+6. MySQL BIT(1) type will be mapped to Boolean.
+7. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+8. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
    should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
 ## Setting Custom Job Name

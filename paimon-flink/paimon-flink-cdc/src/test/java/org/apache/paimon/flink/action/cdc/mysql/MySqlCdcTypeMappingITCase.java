@@ -503,7 +503,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    @Timeout(6000)
+    @Timeout(60)
     public void testLongtextToBytes() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "longtext_to_bytes_test");
