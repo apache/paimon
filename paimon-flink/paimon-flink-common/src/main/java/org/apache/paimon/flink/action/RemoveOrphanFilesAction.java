@@ -30,7 +30,7 @@ public class RemoveOrphanFilesAction extends TableActionBase {
 
     private final OrphanFilesClean orphanFilesClean;
 
-    RemoveOrphanFilesAction(
+    public RemoveOrphanFilesAction(
             String warehouse,
             String databaseName,
             String tableName,
