@@ -81,7 +81,8 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
         if (hasNext) {
             hasNext = false;
             StartingScanner.Result result = startingScanner.scan(snapshotReader);
-            return DataFilePlan.fromResult(result);
+            StartingScanner.Result limitedResult = applyPushDownLimit(result);
+            return DataFilePlan.fromResult(limitedResult);
         } else {
             throw new EndOfScanException();
         }
@@ -157,16 +158,17 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
         List<DataFileMeta> originalDataFiles = split.dataFiles();
         List<RawFile> originalRawFiles = split.convertToRawFiles().get();
-        for (int i = 0; i <= dataFiles.size(); i++) {
+        for (int i = 0; i < originalDataFiles.size(); i++) {
             if (scannedRowCount >= rowCountRequired) {
                 break;
             }
 
             dataFiles.add(originalDataFiles.get(i));
             rawFiles.add(originalRawFiles.get(i));
+            scannedRowCount += originalDataFiles.get(i).rowCount();
         }
 
-        DataSplit.Builder builder = DataSplit.copy(split);
+        DataSplit.Builder builder = DataSplit.builder(split);
         builder.withDataFiles(dataFiles);
         builder.rawFiles(rawFiles);
         return builder.build();

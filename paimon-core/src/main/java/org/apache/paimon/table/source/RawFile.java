@@ -82,7 +82,7 @@ public class RawFile {
 
     /** row count of the file. */
     public long rowCount() {
-        return schemaId;
+        return rowCount;
     }
 
     public void serialize(DataOutputView out) throws IOException {
