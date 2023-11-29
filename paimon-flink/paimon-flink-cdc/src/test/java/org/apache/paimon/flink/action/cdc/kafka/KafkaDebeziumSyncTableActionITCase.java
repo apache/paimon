@@ -157,7 +157,8 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put("topic", topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
-                        .withPrimaryKeys("id")
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("id", "_year")
                         .withComputedColumnArgs("_year=year(date)")
                         .withTableConfig(getBasicTableConfig())
                         .build();
@@ -166,13 +167,15 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.INT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
                         },
                         new String[] {"id", "date", "_year"});
         waitForResult(
                 Collections.singletonList("+I[101, 2023-03-23, 2023]"),
                 getFileStoreTable(tableName),
                 rowType,
-                Collections.singletonList("id"));
+                Arrays.asList("id", "_year"));
     }
 }
