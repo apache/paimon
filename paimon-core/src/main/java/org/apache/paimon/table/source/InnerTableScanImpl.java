@@ -19,7 +19,6 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
@@ -101,14 +100,8 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
 
                 DataSplit split = splits.get(i);
                 long splitRowCount = getRowCountForSplit(split);
-                if (scannedRowCount + splitRowCount <= pushDownLimit) {
-                    limitedSplits.add(split);
-                    scannedRowCount += splitRowCount;
-                } else {
-                    DataSplit newSplit = composeDataSplit(split, pushDownLimit - scannedRowCount);
-                    limitedSplits.add(newSplit);
-                    scannedRowCount += getRowCountForSplit(newSplit);
-                }
+                limitedSplits.add(split);
+                scannedRowCount += splitRowCount;
             }
 
             SnapshotReader.Plan newPlan =
@@ -149,28 +142,5 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
         } else {
             return 0L;
         }
-    }
-
-    private DataSplit composeDataSplit(DataSplit split, long rowCountRequired) {
-        List<DataFileMeta> dataFiles = new ArrayList<>();
-        List<RawFile> rawFiles = new ArrayList<>();
-        long scannedRowCount = 0;
-
-        List<DataFileMeta> originalDataFiles = split.dataFiles();
-        List<RawFile> originalRawFiles = split.convertToRawFiles().get();
-        for (int i = 0; i < originalDataFiles.size(); i++) {
-            if (scannedRowCount >= rowCountRequired) {
-                break;
-            }
-
-            dataFiles.add(originalDataFiles.get(i));
-            rawFiles.add(originalRawFiles.get(i));
-            scannedRowCount += originalDataFiles.get(i).rowCount();
-        }
-
-        DataSplit.Builder builder = DataSplit.builder(split);
-        builder.withDataFiles(dataFiles);
-        builder.rawFiles(rawFiles);
-        return builder.build();
     }
 }

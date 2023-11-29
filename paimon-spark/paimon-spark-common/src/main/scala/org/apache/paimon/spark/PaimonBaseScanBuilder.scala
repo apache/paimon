@@ -18,38 +18,38 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
-import org.apache.paimon.table.{AppendOnlyFileStoreTable, Table}
+import org.apache.paimon.table.Table
+import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.internal.Logging
-import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownLimit, SupportsPushDownRequiredColumns}
+import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns}
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.mutable
 
-class SparkScanBuilder(table: Table)
+abstract class PaimonBaseScanBuilder(table: Table)
   extends ScanBuilder
   with SupportsPushDownFilters
   with SupportsPushDownRequiredColumns
-  with SupportsPushDownLimit
   with Logging {
 
-  private var predicates: Option[Predicate] = None
+  protected var predicates: Option[Predicate] = None
 
-  private var pushed: Option[Array[Filter]] = None
+  protected var pushed: Option[Array[Filter]] = None
 
-  private var projectedIndexes: Option[Array[Int]] = None
+  protected var projectedIndexes: Option[Array[Int]] = None
 
-  private var pushDownLimit: Option[Int] = None
-
-  override def build(): Scan = {
+  protected def getReadBuilder(): ReadBuilder = {
     val readBuilder = table.newReadBuilder()
-
     projectedIndexes.foreach(readBuilder.withProjection)
     predicates.foreach(readBuilder.withFilter)
-    pushDownLimit.foreach(readBuilder.withLimit)
 
-    new SparkScan(table, readBuilder);
+    readBuilder
+  }
+
+  override def build(): Scan = {
+    new SparkScan(table, getReadBuilder());
   }
 
   /**
@@ -103,13 +103,5 @@ class SparkScanBuilder(table: Table)
     val fieldNames = table.rowType.getFieldNames
     val projected = pruneFields.map(field => fieldNames.indexOf(field))
     this.projectedIndexes = Some(projected)
-  }
-
-  override def pushLimit(limit: Int): Boolean = {
-    if (table.isInstanceOf[AppendOnlyFileStoreTable]) {
-      pushDownLimit = Some(limit)
-    }
-    // just make a best effort to push down limit
-    false
   }
 }

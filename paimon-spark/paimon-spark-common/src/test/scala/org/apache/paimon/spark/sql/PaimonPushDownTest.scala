@@ -109,9 +109,6 @@ class SparkPushDownTest extends PaimonSparkTestBase {
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
     val partitions = scanBuilder.build().toBatch.planInputPartitions()
     Assertions.assertEquals(1, partitions.length)
-    val dataFiles =
-      partitions.head.asInstanceOf[SparkInputPartition].split().asInstanceOf[DataSplit].dataFiles()
-    Assertions.assertEquals(1, dataFiles.size())
 
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
   }
