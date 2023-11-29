@@ -454,6 +454,7 @@ public class HiveCatalog extends AbstractCatalog {
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
         if (TableType.EXTERNAL.equals(tableType)) {
             table.getParameters().put("EXTERNAL", "TRUE");
+            table.setTableType(org.apache.hadoop.hive.metastore.TableType.EXTERNAL_TABLE.toString());
         }
         return table;
     }
