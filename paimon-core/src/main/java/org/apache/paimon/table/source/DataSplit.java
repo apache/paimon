@@ -42,7 +42,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 4L;
+    private static final long serialVersionUID = 5L;
 
     private long snapshotId = 0;
     private boolean isStreaming = false;
@@ -205,19 +205,6 @@ public class DataSplit implements Split {
 
     public static Builder builder() {
         return new Builder();
-    }
-
-    public static Builder builder(DataSplit split) {
-        Builder builder = builder();
-        builder.withSnapshot(split.snapshotId);
-        builder.withPartition(split.partition);
-        builder.withBucket(split.bucket);
-        builder.withBeforeFiles(split.beforeFiles);
-        builder.withDataFiles(split.dataFiles);
-        builder.isStreaming(split.isStreaming);
-        builder.rawFiles(split.rawFiles);
-
-        return builder;
     }
 
     /** Builder for {@link DataSplit}. */

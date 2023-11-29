@@ -145,7 +145,12 @@ public class FlinkSourceBuilder {
     }
 
     private ReadBuilder createReadBuilder() {
-        return table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
+        ReadBuilder readBuilder =
+                table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
+        if (limit != null) {
+            readBuilder.withLimit(limit.intValue());
+        }
+        return readBuilder;
     }
 
     private DataStream<RowData> buildStaticFileSource() {
