@@ -78,6 +78,10 @@ public abstract class ObjectsFile<T> {
         return read(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
+    public List<T> readWithIOException(String fileName) throws IOException {
+        return readWithIOException(fileName, Filter.alwaysTrue(), Filter.alwaysTrue());
+    }
+
     public boolean exists(String fileName) {
         try {
             return fileIO.exists(pathFactory.toPath(fileName));
@@ -89,21 +93,27 @@ public abstract class ObjectsFile<T> {
     public List<T> read(
             String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter) {
         try {
-            if (cache != null) {
-                return cache.read(fileName, loadFilter, readFilter);
-            }
-
-            RecordReader<InternalRow> reader =
-                    createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
-            if (readFilter != Filter.ALWAYS_TRUE) {
-                reader = reader.filter(readFilter);
-            }
-            List<T> result = new ArrayList<>();
-            reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
-            return result;
+            return readWithIOException(fileName, loadFilter, readFilter);
         } catch (IOException e) {
             throw new RuntimeException("Failed to read manifest list " + fileName, e);
         }
+    }
+
+    public List<T> readWithIOException(
+            String fileName, Filter<InternalRow> loadFilter, Filter<InternalRow> readFilter)
+            throws IOException {
+        if (cache != null) {
+            return cache.read(fileName, loadFilter, readFilter);
+        }
+
+        RecordReader<InternalRow> reader =
+                createFormatReader(fileIO, readerFactory, pathFactory.toPath(fileName));
+        if (readFilter != Filter.ALWAYS_TRUE) {
+            reader = reader.filter(readFilter);
+        }
+        List<T> result = new ArrayList<>();
+        reader.forEachRemaining(row -> result.add(serializer.fromRow(row)));
+        return result;
     }
 
     public String writeWithoutRolling(Collection<T> records) {

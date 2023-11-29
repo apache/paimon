@@ -110,11 +110,18 @@ public class FileStoreExpireTestBase {
     protected void assertSnapshot(
             int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
             throws Exception {
+        assertSnapshot(snapshotManager.snapshot(snapshotId), allData, snapshotPositions);
+    }
+
+    protected void assertSnapshot(
+            Snapshot snapshot, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        int snapshotId = (int) snapshot.id();
         Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
         List<KeyValue> actualKvs =
                 store.readKvsFromManifestEntries(
-                        store.newScan().withSnapshot(snapshotId).plan().files(), false);
+                        store.newScan().withSnapshot(snapshot).plan().files(), false);
         gen.sort(actualKvs);
         Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
         assertThat(actual).isEqualTo(expected);
