@@ -208,7 +208,6 @@ public class OrphanFilesCleanTest {
 
         // first check, nothing will be deleted because the default olderThan interval is 1 day
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
-        orphanFilesClean.clean();
         assertThat(orphanFilesClean.clean()).isEqualTo(0);
 
         // second check
@@ -217,7 +216,7 @@ public class OrphanFilesCleanTest {
         int deletedActual = orphanFilesClean.clean();
         try {
             validate(deletedActual, shouldBeDeleted, snapshotData);
-        } catch (Exception e) {
+        } catch (Throwable t) {
             String tableOptions = "Table options:\n" + table.options();
 
             String committed = "Committed data:";
@@ -245,7 +244,8 @@ public class OrphanFilesCleanTest {
             throw new Exception(
                     String.format(
                             "%s\n%s\n%s\n%s\n%s",
-                            tableOptions, committed, snapshot, tag, addedFile));
+                            tableOptions, committed, snapshot, tag, addedFile),
+                    t);
         }
     }
 
@@ -310,20 +310,18 @@ public class OrphanFilesCleanTest {
                 .forEach(m -> manifests.add(pathFactory.toManifestFilePath(m.fileName())));
 
         Path manifest = manifests.get(RANDOM.nextInt(manifests.size()));
-        Path newPath = new Path(manifestDir, UUID.randomUUID().toString());
-        fileIO.rename(manifest, newPath);
+        fileIO.deleteQuietly(manifest);
 
         OrphanFilesClean orphanFilesClean = new OrphanFilesClean(table);
         setOlderThan(orphanFilesClean);
         assertThat(orphanFilesClean.clean()).isGreaterThan(0);
     }
 
-    private void setOlderThan(OrphanFilesClean orphanFilesClean) throws InterruptedException {
-        TimeUnit.SECONDS.sleep(10);
+    private void setOlderThan(OrphanFilesClean orphanFilesClean) {
         String timestamp =
                 DateTimeUtils.formatLocalDateTime(
                         DateTimeUtils.toLocalDateTime(
-                                System.currentTimeMillis() - TimeUnit.SECONDS.toMillis(10)),
+                                System.currentTimeMillis() + TimeUnit.SECONDS.toMillis(2)),
                         3);
         orphanFilesClean.olderThan(timestamp);
     }

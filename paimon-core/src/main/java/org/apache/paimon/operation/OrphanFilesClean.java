@@ -109,7 +109,9 @@ public class OrphanFilesClean {
 
     public OrphanFilesClean olderThan(String timestamp) {
         // The FileStatus#getModificationTime returns milliseconds
-        this.olderThanMillis = DateTimeUtils.parseTimestampData(timestamp, 3).getMillisecond();
+        this.olderThanMillis =
+                DateTimeUtils.parseTimestampData(timestamp, 3, DateTimeUtils.LOCAL_TZ)
+                        .getMillisecond();
         return this;
     }
 
