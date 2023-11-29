@@ -129,7 +129,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             if (hasMaxFile) {
                 return files;
             } else {
-                // If none of the "max level" files match,
+                // If none of the max level files match,
                 // further checking if it is possible to skip the whole bucket.
                 return filterWholeFiles(files);
             }

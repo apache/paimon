@@ -308,7 +308,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 "1|20|120|binary|varbinary|mapKey:mapVal|multiset",
                 "1|30|100|binary|varbinary|mapKey:mapVal|multiset");
 
-        // Can't skip max level files by value filter if merge engine is not deduplicate.
+        // Can't skip max level files by value filter if max level is not the min sequence number.
         checkValueFilter(
                 conf -> {
                     conf.set(BUCKET, 1);
