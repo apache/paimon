@@ -25,25 +25,20 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
   Seq("parquet", "orc").foreach(
     format => {
       test(s"Paimon migrate table procedure: migrate $format non-partitioned table") {
-        val hiveTbl = s"${format}_hive_tbl"
-        withTable(hiveTbl) {
+        withTable("hive_tbl") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE $hiveTbl (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl (id STRING, name STRING, pt STRING)
                        |USING $format
                        |""".stripMargin)
 
-          spark.sql(s"INSERT INTO $hiveTbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
-
-          checkAnswer(
-            spark.sql(s"SELECT * FROM $hiveTbl ORDER BY id"),
-            Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+          spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_table(format => 'hive', table => '$hiveDbName.$hiveTbl', tblproperties => 'file.format=$format')")
+            s"CALL sys.migrate_table(format => 'hive', table => '$hiveDbName.hive_tbl', tblproperties => 'file.format=$format')")
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM $hiveTbl ORDER BY id"),
+            spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
         }
       }
@@ -52,26 +47,21 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
   Seq("parquet", "orc").foreach(
     format => {
       test(s"Paimon migrate table procedure: migrate $format partitioned table") {
-        val hiveTbl = s"${format}_hive_pt_tbl"
-        withTable(hiveTbl) {
+        withTable("hive_tbl") {
           // create hive table
           spark.sql(s"""
-                       |CREATE TABLE $hiveTbl (id STRING, name STRING, pt STRING)
+                       |CREATE TABLE hive_tbl (id STRING, name STRING, pt STRING)
                        |USING $format
                        |PARTITIONED BY (pt)
                        |""".stripMargin)
 
-          spark.sql(s"INSERT INTO $hiveTbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
-
-          checkAnswer(
-            spark.sql(s"SELECT * FROM $hiveTbl ORDER BY id"),
-            Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
+          spark.sql(s"INSERT INTO hive_tbl VALUES ('1', 'a', 'p1'), ('2', 'b', 'p2')")
 
           spark.sql(
-            s"CALL sys.migrate_table(format => 'hive', table => '$hiveDbName.$hiveTbl', tblproperties => 'file.format=$format')")
+            s"CALL sys.migrate_table(format => 'hive', table => '$hiveDbName.hive_tbl', tblproperties => 'file.format=$format')")
 
           checkAnswer(
-            spark.sql(s"SELECT * FROM $hiveTbl ORDER BY id"),
+            spark.sql(s"SELECT * FROM hive_tbl ORDER BY id"),
             Row("1", "a", "p1") :: Row("2", "b", "p2") :: Nil)
         }
       }

@@ -32,7 +32,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.sparkConf
       .set("spark.sql.warehouse.dir", tempDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
-      .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
+      .set("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog[_]].getName)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 
@@ -50,6 +50,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE $hiveDbName CASCADE")
     } finally {
+      super.afterAll()
       testHiveMetastore.stop()
     }
   }

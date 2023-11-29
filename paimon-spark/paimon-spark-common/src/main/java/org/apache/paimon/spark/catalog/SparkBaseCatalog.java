@@ -25,15 +25,18 @@ import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 
-public abstract class SparkBaseCatalog implements ProcedureCatalog, WithPaimonCatalog {
+/** Spark base catalog. */
+public abstract class SparkBaseCatalog
+        implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
     @Override
     public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
         if (Catalog.SYSTEM_DATABASE_NAME.equals(identifier.namespace()[0])) {
             ProcedureBuilder builder = SparkProcedures.newBuilder(identifier.name());
             if (builder != null) {
-                return builder.withTableCatalog((TableCatalog) this).build();
+                return builder.withTableCatalog(this).build();
             }
         }
         throw new NoSuchProcedureException(identifier);
