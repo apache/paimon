@@ -68,14 +68,20 @@ case class PaimonScan(table: Table, readBuilder: ReadBuilder)
   }
 
   override def filterAttributes(): Array[NamedReference] = {
-    table.partitionKeys().asScala.toArray.map(fieldReference)
+    val requiredFields = readBuilder.readType().getFieldNames.asScala
+    table
+      .partitionKeys()
+      .asScala
+      .toArray
+      .filter(requiredFields.contains)
+      .map(fieldReference)
   }
 
   override def filter(filters: Array[Filter]): Unit = {
     val converter = new SparkFilterConverter(table.rowType())
     val partitionFilter = filters.flatMap {
-      case In(attr, values) if table.partitionKeys().contains(attr) =>
-        Some(PredicateBuilder.or(values.map(value => converter.convert(EqualTo(attr, value))): _*))
+      case in @ In(attr, _) if table.partitionKeys().contains(attr) =>
+        Some(converter.convert(in))
       case _ => None
     }
     if (partitionFilter.nonEmpty) {
