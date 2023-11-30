@@ -76,7 +76,7 @@ public class MigrateTableProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         String format = args.getString(0);
         String sourceTable = args.getString(1);
-        String properties = args.getString(2);
+        String properties = args.isNullAt(2) ? null : args.getString(2);
 
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId = Identifier.fromString(sourceTable + TMP_TBL_SUFFIX);

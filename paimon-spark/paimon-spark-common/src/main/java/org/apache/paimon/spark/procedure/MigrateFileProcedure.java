@@ -48,7 +48,7 @@ public class MigrateFileProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("format", StringType),
                 ProcedureParameter.required("source_table", StringType),
-                ProcedureParameter.optional("target_table", StringType)
+                ProcedureParameter.required("target_table", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
