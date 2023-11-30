@@ -140,7 +140,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Default file compression format, can be overridden by "
+                            "Default file compression format, use the default compression algorithm of the format itself, for example orc is zlib and parquet is snappy. It can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
 
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
