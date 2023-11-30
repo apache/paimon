@@ -132,6 +132,11 @@ public class IndexFileHandler {
         return indexManifestFile.read(indexManifest);
     }
 
+    public List<IndexManifestEntry> readManifestWithIOException(String indexManifest)
+            throws IOException {
+        return indexManifestFile.readWithIOException(indexManifest);
+    }
+
     public boolean existsIndexFile(IndexManifestEntry file) {
         return hashIndex.exists(file.indexFile().fileName());
     }

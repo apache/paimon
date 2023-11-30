@@ -34,12 +34,14 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 
 /**
  * This file is the entrance to all data committed at some specific time point.
@@ -418,6 +420,15 @@ public class Snapshot {
             return Snapshot.fromJson(json);
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
+        }
+    }
+
+    public static Optional<Snapshot> safelyFromPath(FileIO fileIO, Path path) throws IOException {
+        try {
+            String json = fileIO.readFileUtf8(path);
+            return Optional.of(Snapshot.fromJson(json));
+        } catch (FileNotFoundException e) {
+            return Optional.empty();
         }
     }
 

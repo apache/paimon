@@ -20,14 +20,17 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 
 import javax.annotation.Nonnull;
 import javax.annotation.Nullable;
 
+import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashSet;
@@ -38,6 +41,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -197,6 +201,54 @@ public class SnapshotManager implements Serializable {
                 .map(this::snapshot)
                 .sorted(Comparator.comparingLong(Snapshot::id))
                 .iterator();
+    }
+
+    /**
+     * If {@link FileNotFoundException} is thrown when reading the snapshot file, this snapshot may
+     * be deleted by other processes, so just skip this snapshot.
+     */
+    public List<Snapshot> safelyGetAllSnapshots() throws IOException {
+        List<Path> paths =
+                listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX)
+                        .map(this::snapshotPath)
+                        .collect(Collectors.toList());
+
+        List<Snapshot> snapshots = new ArrayList<>();
+        for (Path path : paths) {
+            Snapshot.safelyFromPath(fileIO, path).ifPresent(snapshots::add);
+        }
+
+        return snapshots;
+    }
+
+    /**
+     * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
+     * result.
+     */
+    public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+        try {
+            FileStatus[] statuses = fileIO.listStatus(snapshotDirectory());
+            if (statuses == null) {
+                return Collections.emptyList();
+            }
+
+            return Arrays.stream(statuses)
+                    .filter(fileStatusFilter)
+                    .map(FileStatus::getPath)
+                    .filter(nonSnapshotFileFilter())
+                    .collect(Collectors.toList());
+        } catch (IOException ignored) {
+            return Collections.emptyList();
+        }
+    }
+
+    private Predicate<Path> nonSnapshotFileFilter() {
+        return path -> {
+            String name = path.getName();
+            return !name.startsWith(SNAPSHOT_PREFIX)
+                    && !name.equals(EARLIEST)
+                    && !name.equals(LATEST);
+        };
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {

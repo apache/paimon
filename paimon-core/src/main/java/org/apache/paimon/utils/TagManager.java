@@ -20,6 +20,7 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
@@ -34,6 +35,7 @@ import java.util.List;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.function.Predicate;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -179,14 +181,21 @@ public class TagManager {
     public SortedMap<Snapshot, String> tags() {
         TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
-            listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
-                    .forEach(
-                            status -> {
-                                Path path = status.getPath();
-                                tags.put(
-                                        Snapshot.fromPath(fileIO, path),
-                                        path.getName().substring(TAG_PREFIX.length()));
-                            });
+            List<Path> paths =
+                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                            .map(FileStatus::getPath)
+                            .collect(Collectors.toList());
+
+            for (Path path : paths) {
+                // If the tag file is not found, it might be deleted by
+                // other processes, so just skip this tag
+                Snapshot.safelyFromPath(fileIO, path)
+                        .ifPresent(
+                                snapshot ->
+                                        tags.put(
+                                                snapshot,
+                                                path.getName().substring(TAG_PREFIX.length())));
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
