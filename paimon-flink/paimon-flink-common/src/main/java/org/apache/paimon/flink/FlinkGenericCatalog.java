@@ -324,12 +324,18 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public CatalogTableStatistics getTableStatistics(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
+        if (isPaimonTable(tablePath)) {
+            return paimon.getTableStatistics(tablePath);
+        }
         return flink.getTableStatistics(tablePath);
     }
 
     @Override
     public CatalogColumnStatistics getTableColumnStatistics(ObjectPath tablePath)
             throws TableNotExistException, CatalogException {
+        if (isPaimonTable(tablePath)) {
+            return paimon.getTableColumnStatistics(tablePath);
+        }
         return flink.getTableColumnStatistics(tablePath);
     }
 
