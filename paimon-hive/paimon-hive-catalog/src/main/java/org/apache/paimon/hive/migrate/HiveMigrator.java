@@ -98,61 +98,82 @@ public class HiveMigrator implements Migrator {
         Map<String, String> properties = new HashMap<>(sourceHiveTable.getParameters());
         checkPrimaryKey();
 
-        AbstractFileStoreTable paimonTable =
-                createPaimonTableIfNotExists(
-                        client.getSchema(sourceDatabase, sourceTable),
-                        sourceHiveTable.getPartitionKeys(),
-                        properties);
-        checkPaimonTable(paimonTable);
-
-        List<String> partitionsNames =
-                client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
-        checkCompatible(sourceHiveTable, paimonTable);
-
-        List<MigrateTask> tasks = new ArrayList<>();
-        Map<Path, Path> rollBack = new ConcurrentHashMap<>();
-        if (partitionsNames.isEmpty()) {
-            tasks.add(importUnPartitionedTableTask(fileIO, sourceHiveTable, paimonTable, rollBack));
-        } else {
-            tasks.addAll(
-                    importPartitionedTableTask(
-                            client,
-                            fileIO,
-                            partitionsNames,
-                            sourceHiveTable,
-                            paimonTable,
-                            rollBack));
+        // create paimon table if not exists
+        Identifier identifier = Identifier.create(targetDatabase, targetTable);
+        boolean alreadyExist = hiveCatalog.tableExists(identifier);
+        if (!alreadyExist) {
+            Schema schema =
+                    from(
+                            client.getSchema(sourceDatabase, sourceTable),
+                            sourceHiveTable.getPartitionKeys(),
+                            properties);
+            hiveCatalog.createTable(identifier, schema, false);
         }
 
-        List<Future<CommitMessage>> futures =
-                tasks.stream().map(COMMON_IO_FORK_JOIN_POOL::submit).collect(Collectors.toList());
-        List<CommitMessage> commitMessages = new ArrayList<>();
         try {
-            for (Future<CommitMessage> future : futures) {
-                commitMessages.add(future.get());
-            }
-        } catch (Exception e) {
-            futures.forEach(f -> f.cancel(true));
-            for (Future<?> future : futures) {
-                // wait all task cancelled or finished
-                while (!future.isDone()) {
-                    //noinspection BusyWait
-                    Thread.sleep(100);
-                }
-            }
-            // roll back all renamed path
-            for (Map.Entry<Path, Path> entry : rollBack.entrySet()) {
-                Path newPath = entry.getKey();
-                Path origin = entry.getValue();
-                if (fileIO.exists(newPath)) {
-                    fileIO.rename(newPath, origin);
-                }
+            AbstractFileStoreTable paimonTable =
+                    (AbstractFileStoreTable) hiveCatalog.getTable(identifier);
+            checkPaimonTable(paimonTable);
+
+            List<String> partitionsNames =
+                    client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
+            checkCompatible(sourceHiveTable, paimonTable);
+
+            List<MigrateTask> tasks = new ArrayList<>();
+            Map<Path, Path> rollBack = new ConcurrentHashMap<>();
+            if (partitionsNames.isEmpty()) {
+                tasks.add(
+                        importUnPartitionedTableTask(
+                                fileIO, sourceHiveTable, paimonTable, rollBack));
+            } else {
+                tasks.addAll(
+                        importPartitionedTableTask(
+                                client,
+                                fileIO,
+                                partitionsNames,
+                                sourceHiveTable,
+                                paimonTable,
+                                rollBack));
             }
 
-            throw new RuntimeException("Migrating failed because exception happens", e);
+            List<Future<CommitMessage>> futures =
+                    tasks.stream()
+                            .map(COMMON_IO_FORK_JOIN_POOL::submit)
+                            .collect(Collectors.toList());
+            List<CommitMessage> commitMessages = new ArrayList<>();
+            try {
+                for (Future<CommitMessage> future : futures) {
+                    commitMessages.add(future.get());
+                }
+            } catch (Exception e) {
+                futures.forEach(f -> f.cancel(true));
+                for (Future<?> future : futures) {
+                    // wait all task cancelled or finished
+                    while (!future.isDone()) {
+                        //noinspection BusyWait
+                        Thread.sleep(100);
+                    }
+                }
+                // roll back all renamed path
+                for (Map.Entry<Path, Path> entry : rollBack.entrySet()) {
+                    Path newPath = entry.getKey();
+                    Path origin = entry.getValue();
+                    if (fileIO.exists(newPath)) {
+                        fileIO.rename(newPath, origin);
+                    }
+                }
+
+                throw new RuntimeException("Migrating failed because exception happens", e);
+            }
+            paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
+        } catch (Exception e) {
+            if (!alreadyExist) {
+                hiveCatalog.dropTable(identifier, true);
+            }
+            throw new RuntimeException("Migrating failed", e);
         }
 
-        paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
+        // if all success, drop the origin table
         client.dropTable(sourceDatabase, sourceTable, true, true);
     }
 
@@ -175,26 +196,16 @@ public class HiveMigrator implements Migrator {
         }
     }
 
-    private AbstractFileStoreTable createPaimonTableIfNotExists(
-            List<FieldSchema> fields,
-            List<FieldSchema> partitionFields,
-            Map<String, String> hiveTableOptions)
-            throws Exception {
-
-        Identifier identifier = Identifier.create(targetDatabase, targetTable);
-        if (!hiveCatalog.tableExists(identifier)) {
-            Schema schema = from(fields, partitionFields, hiveTableOptions);
-            hiveCatalog.createTable(identifier, schema, false);
-        }
-        return (AbstractFileStoreTable) hiveCatalog.getTable(identifier);
-    }
-
     public Schema from(
             List<FieldSchema> fields,
             List<FieldSchema> partitionFields,
             Map<String, String> hiveTableOptions) {
         HashMap<String, String> paimonOptions = new HashMap<>(this.options);
         paimonOptions.put(CoreOptions.BUCKET.key(), "-1");
+        // for compatible with hive comment system
+        if (hiveTableOptions.get("comment") != null) {
+            paimonOptions.put("hive.comment", hiveTableOptions.get("comment"));
+        }
 
         Schema.Builder schemaBuilder =
                 Schema.newBuilder()
@@ -334,6 +345,9 @@ public class HiveMigrator implements Migrator {
 
         @Override
         public CommitMessage call() throws Exception {
+            if (!fileIO.exists(newDir)) {
+                fileIO.mkdirs(newDir);
+            }
             List<DataFileMeta> fileMetas =
                     FileMetaUtils.construct(
                             fileIO,
