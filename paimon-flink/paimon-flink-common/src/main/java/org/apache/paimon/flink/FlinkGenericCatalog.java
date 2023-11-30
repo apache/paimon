@@ -129,6 +129,7 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public List<String> listTables(String databaseName)
             throws DatabaseNotExistException, CatalogException {
+        // flink list tables contains all paimon tables
         return flink.listTables(databaseName);
     }
 
@@ -150,7 +151,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
 
     @Override
     public boolean tableExists(ObjectPath tablePath) throws CatalogException {
-        return flink.tableExists(tablePath);
+        if (isPaimonTable(tablePath)) {
+            return true;
+        } else {
+            return flink.tableExists(tablePath);
+        }
     }
 
     @Override
@@ -225,7 +230,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
     @Override
     public List<CatalogPartitionSpec> listPartitions(ObjectPath tablePath)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
-        return flink.listPartitions(tablePath);
+        if (isPaimonTable(tablePath)) {
+            return paimon.listPartitions(tablePath);
+        } else {
+            return flink.listPartitions(tablePath);
+        }
     }
 
     @Override
@@ -233,26 +242,42 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws TableNotExistException, TableNotPartitionedException,
                     PartitionSpecInvalidException, CatalogException {
-        return flink.listPartitions(tablePath, partitionSpec);
+        if (isPaimonTable(tablePath)) {
+            return paimon.listPartitions(tablePath, partitionSpec);
+        } else {
+            return flink.listPartitions(tablePath, partitionSpec);
+        }
     }
 
     @Override
     public List<CatalogPartitionSpec> listPartitionsByFilter(
             ObjectPath tablePath, List<Expression> filters)
             throws TableNotExistException, TableNotPartitionedException, CatalogException {
-        return flink.listPartitionsByFilter(tablePath, filters);
+        if (isPaimonTable(tablePath)) {
+            return paimon.listPartitionsByFilter(tablePath, filters);
+        } else {
+            return flink.listPartitionsByFilter(tablePath, filters);
+        }
     }
 
     @Override
     public CatalogPartition getPartition(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        return flink.getPartition(tablePath, partitionSpec);
+        if (isPaimonTable(tablePath)) {
+            return paimon.getPartition(tablePath, partitionSpec);
+        } else {
+            return flink.getPartition(tablePath, partitionSpec);
+        }
     }
 
     @Override
     public boolean partitionExists(ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws CatalogException {
-        return flink.partitionExists(tablePath, partitionSpec);
+        if (isPaimonTable(tablePath)) {
+            return paimon.partitionExists(tablePath, partitionSpec);
+        } else {
+            return flink.partitionExists(tablePath, partitionSpec);
+        }
     }
 
     @Override
@@ -264,14 +289,22 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             throws TableNotExistException, TableNotPartitionedException,
                     PartitionSpecInvalidException, PartitionAlreadyExistsException,
                     CatalogException {
-        flink.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
+        } else {
+            flink.createPartition(tablePath, partitionSpec, partition, ignoreIfExists);
+        }
     }
 
     @Override
     public void dropPartition(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec, boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        flink.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
+        } else {
+            flink.dropPartition(tablePath, partitionSpec, ignoreIfNotExists);
+        }
     }
 
     @Override
@@ -281,7 +314,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogPartition newPartition,
             boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        flink.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
+        } else {
+            flink.alterPartition(tablePath, partitionSpec, newPartition, ignoreIfNotExists);
+        }
     }
 
     @Override
@@ -326,8 +363,9 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             throws TableNotExistException, CatalogException {
         if (isPaimonTable(tablePath)) {
             return paimon.getTableStatistics(tablePath);
+        } else {
+            return flink.getTableStatistics(tablePath);
         }
-        return flink.getTableStatistics(tablePath);
     }
 
     @Override
@@ -335,29 +373,42 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             throws TableNotExistException, CatalogException {
         if (isPaimonTable(tablePath)) {
             return paimon.getTableColumnStatistics(tablePath);
+        } else {
+            return flink.getTableColumnStatistics(tablePath);
         }
-        return flink.getTableColumnStatistics(tablePath);
     }
 
     @Override
     public CatalogTableStatistics getPartitionStatistics(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        return flink.getPartitionStatistics(tablePath, partitionSpec);
+        if (isPaimonTable(tablePath)) {
+            return paimon.getPartitionStatistics(tablePath, partitionSpec);
+        } else {
+            return flink.getPartitionStatistics(tablePath, partitionSpec);
+        }
     }
 
     @Override
     public CatalogColumnStatistics getPartitionColumnStatistics(
             ObjectPath tablePath, CatalogPartitionSpec partitionSpec)
             throws PartitionNotExistException, CatalogException {
-        return flink.getPartitionColumnStatistics(tablePath, partitionSpec);
+        if (isPaimonTable(tablePath)) {
+            return paimon.getPartitionColumnStatistics(tablePath, partitionSpec);
+        } else {
+            return flink.getPartitionColumnStatistics(tablePath, partitionSpec);
+        }
     }
 
     @Override
     public void alterTableStatistics(
             ObjectPath tablePath, CatalogTableStatistics tableStatistics, boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException {
-        flink.alterTableStatistics(tablePath, tableStatistics, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.alterTableStatistics(tablePath, tableStatistics, ignoreIfNotExists);
+        } else {
+            flink.alterTableStatistics(tablePath, tableStatistics, ignoreIfNotExists);
+        }
     }
 
     @Override
@@ -366,7 +417,11 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
             throws TableNotExistException, CatalogException, TablePartitionedException {
-        flink.alterTableColumnStatistics(tablePath, columnStatistics, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.alterTableColumnStatistics(tablePath, columnStatistics, ignoreIfNotExists);
+        } else {
+            flink.alterTableColumnStatistics(tablePath, columnStatistics, ignoreIfNotExists);
+        }
     }
 
     @Override
@@ -376,8 +431,13 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogTableStatistics partitionStatistics,
             boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        flink.alterPartitionStatistics(
-                tablePath, partitionSpec, partitionStatistics, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.alterPartitionStatistics(
+                    tablePath, partitionSpec, partitionStatistics, ignoreIfNotExists);
+        } else {
+            flink.alterPartitionStatistics(
+                    tablePath, partitionSpec, partitionStatistics, ignoreIfNotExists);
+        }
     }
 
     @Override
@@ -387,21 +447,34 @@ public class FlinkGenericCatalog extends AbstractCatalog {
             CatalogColumnStatistics columnStatistics,
             boolean ignoreIfNotExists)
             throws PartitionNotExistException, CatalogException {
-        flink.alterPartitionColumnStatistics(
-                tablePath, partitionSpec, columnStatistics, ignoreIfNotExists);
+        if (isPaimonTable(tablePath)) {
+            paimon.alterPartitionColumnStatistics(
+                    tablePath, partitionSpec, columnStatistics, ignoreIfNotExists);
+        } else {
+            flink.alterPartitionColumnStatistics(
+                    tablePath, partitionSpec, columnStatistics, ignoreIfNotExists);
+        }
     }
 
     @Override
     public List<CatalogTableStatistics> bulkGetPartitionStatistics(
             ObjectPath tablePath, List<CatalogPartitionSpec> partitionSpecs)
             throws PartitionNotExistException, CatalogException {
-        return flink.bulkGetPartitionStatistics(tablePath, partitionSpecs);
+        if (isPaimonTable(tablePath)) {
+            return paimon.bulkGetPartitionStatistics(tablePath, partitionSpecs);
+        } else {
+            return flink.bulkGetPartitionStatistics(tablePath, partitionSpecs);
+        }
     }
 
     @Override
     public List<CatalogColumnStatistics> bulkGetPartitionColumnStatistics(
             ObjectPath tablePath, List<CatalogPartitionSpec> partitionSpecs)
             throws PartitionNotExistException, CatalogException {
-        return flink.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
+        if (isPaimonTable(tablePath)) {
+            return paimon.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
+        } else {
+            return flink.bulkGetPartitionColumnStatistics(tablePath, partitionSpecs);
+        }
     }
 }
