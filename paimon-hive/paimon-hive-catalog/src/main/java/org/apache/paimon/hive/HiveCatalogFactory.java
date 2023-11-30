@@ -27,10 +27,16 @@ import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
+import org.apache.hadoop.hive.conf.HiveConf.ConfVars;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
@@ -56,19 +62,56 @@ public class HiveCatalogFactory implements CatalogFactory {
     }
 
     @Override
+    public Catalog create(CatalogContext context) {
+        HiveConf hiveConf = createHiveConf(context);
+        Path warehouse =
+                new Path(
+                        hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal));
+        FileIO fileIO;
+        try {
+            fileIO = FileIO.get(warehouse, context);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return create(fileIO, warehouse, context, hiveConf);
+    }
+
+    @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+        return create(fileIO, warehouse, context, createHiveConf(context));
+    }
+
+    private Catalog create(
+            FileIO fileIO, Path warehouse, CatalogContext context, HiveConf hiveConf) {
+        if (warehouse.toUri().getScheme() == null) {
+            try {
+                fileIO = FileIO.get(new Path(FileSystem.getDefaultUri(hiveConf)), context);
+            } catch (IOException e) {
+                throw new UncheckedIOException(e);
+            }
+        }
+        return new HiveCatalog(
+                fileIO,
+                hiveConf,
+                context.options().get(METASTORE_CLIENT_CLASS),
+                context.options(),
+                warehouse.toUri().toString());
+    }
+
+    private static HiveConf createHiveConf(CatalogContext context) {
         String uri = context.options().get(CatalogOptions.URI);
         String hiveConfDir = context.options().get(HIVE_CONF_DIR);
         String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
-        HiveConf hiveConf = createHiveConf(hiveConfDir, hadoopConfDir);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(hiveConfDir, hadoopConfDir, context.hadoopConf());
 
         // always using user-set parameters overwrite hive-site.xml parameters
         context.options().toMap().forEach(hiveConf::set);
         if (uri != null) {
-            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+            hiveConf.set(ConfVars.METASTOREURIS.varname, uri);
         }
 
-        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+        if (hiveConf.get(ConfVars.METASTOREURIS.varname) == null) {
             LOG.error(
                     "Can't find hive metastore uri to connect: "
                             + " either set "
@@ -79,9 +122,6 @@ public class HiveCatalogFactory implements CatalogFactory {
                             + " Will use empty metastore uris, which means we may use a embedded metastore. The may cause unpredictable consensus problem.");
         }
 
-        String clientClassName = context.options().get(METASTORE_CLIENT_CLASS);
-
-        return new HiveCatalog(
-                fileIO, hiveConf, clientClassName, context.options(), warehouse.toUri().toString());
+        return hiveConf;
     }
 }

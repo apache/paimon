@@ -551,17 +551,16 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     public static HiveConf createHiveConf(
-            @Nullable String hiveConfDir, @Nullable String hadoopConfDir) {
+            @Nullable String hiveConfDir,
+            @Nullable String hadoopConfDir,
+            Configuration defaultHadoopConf) {
         // try to load from system env.
         if (isNullOrWhitespaceOnly(hiveConfDir)) {
             hiveConfDir = possibleHiveConfPath();
         }
-        if (isNullOrWhitespaceOnly(hadoopConfDir)) {
-            hadoopConfDir = possibleHadoopConfPath();
-        }
 
         // create HiveConf from hadoop configuration with hadoop conf directory configured.
-        Configuration hadoopConf = null;
+        Configuration hadoopConf = defaultHadoopConf;
         if (!isNullOrWhitespaceOnly(hadoopConfDir)) {
             hadoopConf = getHadoopConfiguration(hadoopConfDir);
             if (hadoopConf == null) {
@@ -574,9 +573,6 @@ public class HiveCatalog extends AbstractCatalog {
                                         + possiableUsedConfFiles
                                         + ") exist in the folder."));
             }
-        }
-        if (hadoopConf == null) {
-            hadoopConf = new Configuration();
         }
 
         LOG.info("Setting hive conf dir as {}", hiveConfDir);
@@ -657,22 +653,6 @@ public class HiveCatalog extends AbstractCatalog {
             }
         }
         return null;
-    }
-
-    public static String possibleHadoopConfPath() {
-        String possiblePath = null;
-        if (System.getenv("HADOOP_CONF_DIR") != null) {
-            possiblePath = System.getenv("HADOOP_CONF_DIR");
-        } else if (System.getenv("HADOOP_HOME") != null) {
-            String possiblePath1 = System.getenv("HADOOP_HOME") + "/conf";
-            String possiblePath2 = System.getenv("HADOOP_HOME") + "/etc/hadoop";
-            if (new File(possiblePath1).exists()) {
-                possiblePath = possiblePath1;
-            } else if (new File(possiblePath2).exists()) {
-                possiblePath = possiblePath2;
-            }
-        }
-        return possiblePath;
     }
 
     public static String possibleHiveConfPath() {

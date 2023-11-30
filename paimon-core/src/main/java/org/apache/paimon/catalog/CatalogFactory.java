@@ -23,6 +23,7 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -42,6 +43,11 @@ public interface CatalogFactory extends Factory {
 
     Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
 
+    default Catalog create(CatalogContext context) {
+        throw new UnsupportedOperationException(
+                "Please provide 'warehouse' for catalog: " + this.getClass().getSimpleName());
+    }
+
     static Path warehouse(CatalogContext context) {
         String warehouse =
                 Preconditions.checkNotNull(
@@ -59,14 +65,19 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
+        Options options = context.options();
+        String metastore = options.get(METASTORE);
+        CatalogFactory catalogFactory =
+                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
+
+        if (!options.contains(WAREHOUSE)) {
+            return catalogFactory.create(context);
+        }
+
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
         String warehouse = warehouse(context).toUri().toString();
-
-        String metastore = context.options().get(METASTORE);
-        CatalogFactory catalogFactory =
-                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
 
         Path warehousePath = new Path(warehouse);
         FileIO fileIO;
