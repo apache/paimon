@@ -31,6 +31,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITCaseBase {
 
@@ -54,9 +57,9 @@ public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITC
             throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
         kafkaConfig.put("value.debezium-json.schema-include", "true");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -159,9 +162,9 @@ public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITC
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
         kafkaConfig.put("value.debezium-json.schema-include", "true");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")

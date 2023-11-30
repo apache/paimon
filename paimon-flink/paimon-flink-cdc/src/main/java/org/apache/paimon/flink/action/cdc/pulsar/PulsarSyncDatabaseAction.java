@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.kafka;
+package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
@@ -26,37 +26,37 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.Map;
 
-/** Synchronize database from Kafka. */
-public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
+/** Synchronize database from Pulsar. */
+public class PulsarSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
 
-    public KafkaSyncDatabaseAction(
+    public PulsarSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(warehouse, database, catalogConfig, kafkaConfig);
+            Map<String, String> pulsarConfig) {
+        super(warehouse, database, catalogConfig, pulsarConfig);
     }
 
     @Override
     protected DataStreamSource<String> buildSource() throws Exception {
         return env.fromSource(
-                KafkaActionUtils.buildKafkaSource(cdcSourceConfig),
+                PulsarActionUtils.buildPulsarSource(cdcSourceConfig),
                 WatermarkStrategy.noWatermarks(),
                 sourceName());
     }
 
     @Override
-    protected String sourceName() {
-        return "Kafka Source";
+    protected DataFormat getDataFormat() {
+        return PulsarActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override
-    protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
+    protected String sourceName() {
+        return "Pulsar Source";
     }
 
     @Override
     protected String jobName() {
-        return String.format("Kafka-Paimon Database Sync: %s", database);
+        return String.format("Pulsar-Paimon Database Sync: %s", database);
     }
 }

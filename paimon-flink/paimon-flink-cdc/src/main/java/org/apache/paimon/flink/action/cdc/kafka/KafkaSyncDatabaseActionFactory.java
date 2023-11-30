@@ -106,11 +106,11 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
         System.out.println("kafka source conf syntax:");
         System.out.println("  key=value");
         System.out.println(
-                "'topic', 'properties.bootstrap.servers', 'properties.group.id'"
+                "'topic', 'properties.bootstrap.servers', 'properties.group.id', 'value.format' "
                         + "are required configurations, others are optional.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/");
+                        + "see https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/kafka/#connector-options");
         System.out.println();
         System.out.println();
 

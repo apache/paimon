@@ -38,6 +38,8 @@ We currently support the following sync ways:
 5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
 6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table.
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
+8. Pulsar Synchronizing Table: synchronize one Pulsar topic's table into one Paimon table.
+9. Pulsar Synchronizing Database: synchronize one Pulsar topic containing multiple tables or multiple topics containing one table each into one Paimon database.
 
 ## What is Schema Evolution
 
@@ -76,7 +78,7 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 ## Computed Functions
 
-`--computed-column` are the definitions of computed columns. The argument field is from Kafka topic's table field name. Supported expressions are:
+`--computed-column` are the definitions of computed columns. The argument field is from source table field name. Supported expressions are:
 
 {{< generated/compute_column >}}
 
