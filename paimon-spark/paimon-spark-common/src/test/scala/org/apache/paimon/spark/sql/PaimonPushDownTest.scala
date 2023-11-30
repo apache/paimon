@@ -29,7 +29,7 @@ import org.junit.jupiter.api.Assertions
 
 import scala.collection.JavaConverters._
 
-class SparkPushDownTest extends PaimonSparkTestBase {
+class PaimonPushDownTest extends PaimonSparkTestBase {
 
   import testImplicits._
 
