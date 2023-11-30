@@ -22,7 +22,6 @@ import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.pulsar.client.api.PulsarClientException;
 
@@ -42,10 +41,7 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected DataStreamSource<String> buildSource() {
-        return env.fromSource(
-                PulsarActionUtils.buildPulsarSource(cdcSourceConfig),
-                WatermarkStrategy.noWatermarks(),
-                sourceName());
+        return buildDataStreamSource(PulsarActionUtils.buildPulsarSource(cdcSourceConfig));
     }
 
     @Override

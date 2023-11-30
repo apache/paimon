@@ -31,10 +31,13 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -209,6 +212,17 @@ public abstract class SyncTableActionBase extends ActionBase {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
         }
         sinkBuilder.build();
+    }
+
+    protected DataStreamSource<String> buildDataStreamSource(Object source) {
+        if (source instanceof Source) {
+            return env.fromSource(
+                    (Source<String, ?, ?>) source, WatermarkStrategy.noWatermarks(), sourceName());
+        }
+        if (source instanceof SourceFunction) {
+            return env.addSource((SourceFunction<String>) source, sourceName());
+        }
+        throw new UnsupportedOperationException("Unrecognized source type");
     }
 
     protected void validateCaseInsensitive(boolean caseSensitive) {

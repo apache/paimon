@@ -27,9 +27,7 @@ import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
@@ -121,8 +119,7 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                 mySqlSchemasInfo.pkTables().stream()
                         .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
                         .collect(Collectors.joining("|"));
-        MySqlSource<String> source = MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList);
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
+        return buildDataStreamSource(MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList));
     }
 
     @Override

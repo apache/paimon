@@ -22,9 +22,7 @@ import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
@@ -83,9 +81,8 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
                 cdcSourceConfig.get(MongoDBSourceOptions.DATABASE)
                         + "\\."
                         + cdcSourceConfig.get(MongoDBSourceOptions.COLLECTION);
-        MongoDBSource<String> source =
-                MongoDBActionUtils.buildMongodbSource(cdcSourceConfig, tableList);
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
+        return buildDataStreamSource(
+                MongoDBActionUtils.buildMongodbSource(cdcSourceConfig, tableList));
     }
 
     @Override
