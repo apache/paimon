@@ -85,7 +85,7 @@ This configuration will generate more files during peak write periods and gradua
 performance during low write periods.
 
 In the case of `'changelog-producer' = 'lookup'`, by default, the lookup will be completed at checkpointing, which
-will block the checkpoint. If you want an asynchronous lookup, you can enable `'changelog-producer.lookup-wait' = 'true'`.
+will block the checkpoint. If you want an asynchronous lookup, you can use `'changelog-producer.lookup-wait' = 'false'`.
 
 ### Number of Sorted Runs to Pause Writing
 
