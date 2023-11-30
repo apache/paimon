@@ -286,15 +286,15 @@ public class MySqlTypeUtils {
                 return DataTypes.STRING();
                 // MySQL BINARY and VARBINARY are stored as bytes in JSON. We convert them to
                 // DataTypes.VARBINARY to retain the length information
-            case LONGTEXT:
-                return typeMapping.containsMode(LONGTEXT_TO_BYTES)
-                        ? DataTypes.BYTES()
-                        : DataTypes.STRING();
             case BINARY:
             case VARBINARY:
                 return length == null || length == 0
                         ? DataTypes.VARBINARY(VarBinaryType.DEFAULT_LENGTH)
                         : DataTypes.VARBINARY(length);
+            case LONGTEXT:
+                return typeMapping.containsMode(LONGTEXT_TO_BYTES)
+                        ? DataTypes.BYTES()
+                        : DataTypes.STRING();
             case TINYBLOB:
             case BLOB:
             case MEDIUMBLOB:
