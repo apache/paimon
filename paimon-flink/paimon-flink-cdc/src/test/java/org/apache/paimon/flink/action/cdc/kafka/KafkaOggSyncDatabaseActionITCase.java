@@ -37,6 +37,8 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
@@ -68,8 +70,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())
@@ -104,8 +106,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())
@@ -205,7 +207,7 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     public void testTopicIsEmpty() {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
 
         KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
@@ -255,8 +257,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("TEST_PREFIX_")
@@ -308,8 +310,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("TEST_PREFIX_")
@@ -454,8 +456,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .includingTables(includingTables)
@@ -480,8 +482,8 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, readLines("kafka/ogg/database/case-insensitive/ogg-data-1.txt"));
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)

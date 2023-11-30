@@ -31,6 +31,16 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_TIMESTAMP_MILLIS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.EARLIEST_OFFSET;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.GROUP_OFFSETS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.LATEST_OFFSET;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.SPECIFIC_OFFSETS;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.TIMESTAMP;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -55,8 +65,8 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -154,8 +164,8 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "togg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "togg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -182,8 +192,8 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
 
         // create an incompatible table
         createFileStoreTable(
@@ -222,10 +232,10 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
-        kafkaConfig.put("scan.startup.mode", "specific-offsets");
-        kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), SPECIFIC_OFFSETS.toString());
+        kafkaConfig.put(SCAN_STARTUP_SPECIFIC_OFFSETS.key(), "partition:0,offset:1");
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -264,9 +274,9 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
-        kafkaConfig.put("scan.startup.mode", "latest-offset");
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), LATEST_OFFSET.toString());
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -314,11 +324,11 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
-        kafkaConfig.put("scan.startup.mode", "timestamp");
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), TIMESTAMP.toString());
         kafkaConfig.put(
-                "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
+                SCAN_STARTUP_TIMESTAMP_MILLIS.key(), String.valueOf(System.currentTimeMillis()));
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -365,9 +375,9 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
-        kafkaConfig.put("scan.startup.mode", "earliest-offset");
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), EARLIEST_OFFSET.toString());
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -416,9 +426,9 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write maxwell data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
-        kafkaConfig.put("scan.startup.mode", "group-offsets");
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), GROUP_OFFSETS.toString());
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -467,8 +477,8 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "maxwell-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPartitionKeys("_year")

@@ -81,6 +81,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
     private PulsarAdmin admin;
     private PulsarClient client;
+    protected List<String> topics = new ArrayList<>();
 
     @RegisterExtension
     public static final PulsarContainerExtension PULSAR_CONTAINER =
@@ -191,7 +192,6 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void deleteTopics() throws Exception {
-        List<String> topics = admin.topics().getList("public/default");
         for (String topic : topics) {
             String topicName = topicName(topic);
             PartitionedTopicMetadata metadata =
@@ -260,6 +260,11 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
         return new PulsarSyncTableActionBuilder(pulsarConfig);
     }
 
+    protected PulsarSyncDatabaseActionBuilder syncDatabaseActionBuilder(
+            Map<String, String> pulsarConfig) {
+        return new PulsarSyncDatabaseActionBuilder(pulsarConfig);
+    }
+
     /** Builder to build {@link PulsarSyncTableAction} from action arguments. */
     protected class PulsarSyncTableActionBuilder
             extends SyncTableActionBuilder<PulsarSyncTableAction> {
@@ -293,6 +298,51 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
                     MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
             return (PulsarSyncTableAction)
                     new PulsarSyncTableActionFactory()
+                            .create(params)
+                            .orElseThrow(RuntimeException::new);
+        }
+    }
+
+    /** Builder to build {@link PulsarSyncDatabaseAction} from action arguments. */
+    protected class PulsarSyncDatabaseActionBuilder
+            extends SyncDatabaseActionBuilder<PulsarSyncDatabaseAction> {
+
+        public PulsarSyncDatabaseActionBuilder(Map<String, String> pulsarConfig) {
+            super(pulsarConfig);
+        }
+
+        public PulsarSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
+            throw new UnsupportedOperationException();
+        }
+
+        public PulsarSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
+            throw new UnsupportedOperationException();
+        }
+
+        public PulsarSyncDatabaseActionBuilder withMode(String mode) {
+            throw new UnsupportedOperationException();
+        }
+
+        public PulsarSyncDatabaseAction build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList("--warehouse", warehouse, "--database", database));
+
+            args.addAll(mapToArgs("--pulsar-conf", sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
+            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
+            args.addAll(nullableToArgs("--including-tables", includingTables));
+            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
+
+            args.addAll(listToArgs("--type-mapping", typeMappingModes));
+
+            MultipleParameterTool params =
+                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            return (PulsarSyncDatabaseAction)
+                    new PulsarSyncDatabaseActionFactory()
                             .create(params)
                             .orElseThrow(RuntimeException::new);
         }
