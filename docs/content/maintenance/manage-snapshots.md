@@ -243,7 +243,7 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --snapshot <snapshot-id> \
+    --version <snapshot-id> \
     [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
 ```
 
