@@ -33,8 +33,8 @@ public class PulsarSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(warehouse, database, catalogConfig, kafkaConfig);
+            Map<String, String> pulsarConfig) {
+        super(warehouse, database, catalogConfig, pulsarConfig);
     }
 
     @Override

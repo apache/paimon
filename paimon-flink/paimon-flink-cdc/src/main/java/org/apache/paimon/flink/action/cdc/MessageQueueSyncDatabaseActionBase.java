@@ -192,6 +192,6 @@ public abstract class MessageQueueSyncDatabaseActionBase extends ActionBase {
     @Override
     public void run() throws Exception {
         build();
-        execute(String.format("KAFKA-Paimon Database Sync: %s", database));
+        execute(jobName());
     }
 }
