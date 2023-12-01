@@ -26,7 +26,7 @@ import java.util.Optional;
 /** Action Factory for {@link MigrateTableAction}. */
 public class MigrateTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "migrate-table";
+    public static final String IDENTIFIER = "migrate_table";
 
     @Override
     public String identifier() {
