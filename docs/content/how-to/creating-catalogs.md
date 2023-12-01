@@ -103,10 +103,10 @@ hadoop-conf-dir parameter to the hive-site.xml file path.
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    'warehouse' = 'hdfs:///path/to/warehouse'
+    -- 'warehouse' = 'hdfs:///path/to/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
 );
 
 USE CATALOG my_hive;
