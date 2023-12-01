@@ -49,7 +49,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
   }
 
   override def build(): Scan = {
-    new SparkScan(table, getReadBuilder());
+    new PaimonScan(table, getReadBuilder());
   }
 
   /**
