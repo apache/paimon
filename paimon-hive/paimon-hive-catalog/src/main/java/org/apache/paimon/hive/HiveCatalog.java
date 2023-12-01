@@ -21,12 +21,15 @@ package org.apache.paimon.hive;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.Lock;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
@@ -39,6 +42,7 @@ import org.apache.paimon.types.DataTypes;
 
 import org.apache.flink.table.hive.LegacyHiveClasses;
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Database;
@@ -58,6 +62,7 @@ import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.UncheckedIOException;
 import java.net.URL;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -71,8 +76,12 @@ import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
+import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
+import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
@@ -613,6 +622,60 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static boolean isEmbeddedMetastore(HiveConf hiveConf) {
         return isNullOrWhitespaceOnly(hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS));
+    }
+
+    public static Catalog createHiveCatalog(CatalogContext context) {
+        HiveConf hiveConf = createHiveConf(context);
+        String warehouseStr = context.options().get(CatalogOptions.WAREHOUSE);
+        if (warehouseStr == null) {
+            warehouseStr =
+                    hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal);
+        }
+        Path warehouse = new Path(warehouseStr);
+        Path uri =
+                warehouse.toUri().getScheme() == null
+                        ? new Path(FileSystem.getDefaultUri(hiveConf))
+                        : warehouse;
+        FileIO fileIO;
+        try {
+            fileIO = FileIO.get(uri, context);
+            fileIO.checkOrMkdirs(warehouse);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+        return new HiveCatalog(
+                fileIO,
+                hiveConf,
+                context.options().get(HiveCatalogFactory.METASTORE_CLIENT_CLASS),
+                context.options(),
+                warehouse.toUri().toString());
+    }
+
+    public static HiveConf createHiveConf(CatalogContext context) {
+        String uri = context.options().get(CatalogOptions.URI);
+        String hiveConfDir = context.options().get(HIVE_CONF_DIR);
+        String hadoopConfDir = context.options().get(HADOOP_CONF_DIR);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(hiveConfDir, hadoopConfDir, context.hadoopConf());
+
+        // always using user-set parameters overwrite hive-site.xml parameters
+        context.options().toMap().forEach(hiveConf::set);
+        if (uri != null) {
+            hiveConf.set(HiveConf.ConfVars.METASTOREURIS.varname, uri);
+        }
+
+        if (hiveConf.get(HiveConf.ConfVars.METASTOREURIS.varname) == null) {
+            LOG.error(
+                    "Can't find hive metastore uri to connect: "
+                            + " either set "
+                            + CatalogOptions.URI.key()
+                            + " for paimon "
+                            + IDENTIFIER
+                            + " catalog or set hive.metastore.uris in hive-site.xml or hadoop configurations."
+                            + " Will use empty metastore uris, which means we may use a embedded metastore. The may cause unpredictable consensus problem.");
+        }
+
+        return hiveConf;
     }
 
     /**
