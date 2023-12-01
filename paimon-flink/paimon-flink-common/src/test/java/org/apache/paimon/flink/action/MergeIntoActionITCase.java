@@ -754,7 +754,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
             args.add("--not_matched_insert_values");
             args.add(notMatchedInsertValues);
             if (notMatchedInsertCondition != null) {
-                args.add("not_matched_insert_condition");
+                args.add("--not_matched_insert_condition");
                 args.add(notMatchedInsertCondition);
             }
             return this;
