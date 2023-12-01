@@ -322,7 +322,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
             List<String> args =
                     new ArrayList<>(
                             Arrays.asList(
-                                    "pulsar_sync-database",
+                                    "pulsar_sync_database",
                                     "--warehouse",
                                     warehouse,
                                     "--database",

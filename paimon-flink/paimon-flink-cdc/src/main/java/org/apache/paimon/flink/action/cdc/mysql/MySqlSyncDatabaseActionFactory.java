@@ -41,7 +41,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "mysql_sync_database";
 
     private static final String IGNORE_INCOMPATIBLE = "ignore_incompatible";
-    private static final String MERGE_SHARDS = "merge-shards";
+    private static final String MERGE_SHARDS = "merge_shards";
     private static final String MODE = "mode";
 
     @Override

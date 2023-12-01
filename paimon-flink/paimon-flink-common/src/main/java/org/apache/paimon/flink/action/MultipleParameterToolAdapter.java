@@ -22,7 +22,7 @@ import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Collection;
 
-/** */
+/** An adapter of {@link MultipleParameterTool} that can deal old style key. */
 public class MultipleParameterToolAdapter {
 
     private final MultipleParameterTool params;
