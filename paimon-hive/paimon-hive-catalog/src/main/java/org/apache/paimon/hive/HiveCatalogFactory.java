@@ -37,7 +37,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
-import static org.apache.paimon.hive.HiveCatalog.createHiveConf;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
@@ -64,31 +63,22 @@ public class HiveCatalogFactory implements CatalogFactory {
     @Override
     public Catalog create(CatalogContext context) {
         HiveConf hiveConf = createHiveConf(context);
-        Path warehouse =
-                new Path(
-                        hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal));
+        String warehouseStr = context.options().get(CatalogOptions.WAREHOUSE);
+        if (warehouseStr == null) {
+            warehouseStr =
+                    hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal);
+        }
+        Path warehouse = new Path(warehouseStr);
+        Path uri =
+                warehouse.toUri().getScheme() == null
+                        ? new Path(FileSystem.getDefaultUri(hiveConf))
+                        : warehouse;
         FileIO fileIO;
         try {
-            fileIO = FileIO.get(warehouse, context);
+            fileIO = FileIO.get(uri, context);
+            fileIO.checkOrMkdirs(warehouse);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        }
-        return create(fileIO, warehouse, context, hiveConf);
-    }
-
-    @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        return create(fileIO, warehouse, context, createHiveConf(context));
-    }
-
-    private Catalog create(
-            FileIO fileIO, Path warehouse, CatalogContext context, HiveConf hiveConf) {
-        if (warehouse.toUri().getScheme() == null) {
-            try {
-                fileIO = FileIO.get(new Path(FileSystem.getDefaultUri(hiveConf)), context);
-            } catch (IOException e) {
-                throw new UncheckedIOException(e);
-            }
         }
         return new HiveCatalog(
                 fileIO,

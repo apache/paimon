@@ -31,7 +31,6 @@ import java.io.UncheckedIOException;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Factory to create {@link Catalog}. Each factory should have a unique identifier.
@@ -41,11 +40,14 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public interface CatalogFactory extends Factory {
 
-    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
+    default Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+        throw new UnsupportedOperationException(
+                "Use  create(context) for " + this.getClass().getSimpleName());
+    }
 
     default Catalog create(CatalogContext context) {
         throw new UnsupportedOperationException(
-                "Please provide 'warehouse' for catalog: " + this.getClass().getSimpleName());
+                "Use create(fileIO, warehouse, context) for " + this.getClass().getSimpleName());
     }
 
     static Path warehouse(CatalogContext context) {
@@ -70,8 +72,9 @@ public interface CatalogFactory extends Factory {
         CatalogFactory catalogFactory =
                 FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
 
-        if (!options.contains(WAREHOUSE)) {
+        try {
             return catalogFactory.create(context);
+        } catch (UnsupportedOperationException ignore) {
         }
 
         // manual validation
@@ -84,15 +87,7 @@ public interface CatalogFactory extends Factory {
 
         try {
             fileIO = FileIO.get(warehousePath, context);
-            if (fileIO.exists(warehousePath)) {
-                checkArgument(
-                        fileIO.isDir(warehousePath),
-                        "The %s path '%s' should be a directory.",
-                        WAREHOUSE.key(),
-                        warehouse);
-            } else {
-                fileIO.mkdirs(warehousePath);
-            }
+            fileIO.checkOrMkdirs(warehousePath);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
