@@ -74,7 +74,7 @@ migrate_table
 --src-type hive \
 --table <database.table-name> \
 [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+[--options <paimon-table-conf  [,paimon-table-conf ...]> ]
 ```
 
 Example:

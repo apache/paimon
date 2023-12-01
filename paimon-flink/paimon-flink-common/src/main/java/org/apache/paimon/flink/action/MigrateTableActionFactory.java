@@ -39,7 +39,7 @@ public class MigrateTableActionFactory implements ActionFactory {
         String connector = params.get("src-type");
         String sourceHiveTable = params.get("table");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tableConf = params.get("tblproperties");
+        String tableConf = params.get("options");
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
@@ -57,6 +57,6 @@ public class MigrateTableActionFactory implements ActionFactory {
                 "  migrate_table --warehouse <warehouse-path> --src-type hive "
                         + "--table <database.table_name> "
                         + "[--catalog-conf <key>=<value] "
-                        + "[--tblproperties <key>=<value>,<key>=<value>,...]");
+                        + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

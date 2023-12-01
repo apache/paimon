@@ -49,7 +49,7 @@ public class MigrateTableProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("src_type", StringType),
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("tblproperties", StringType)
+                ProcedureParameter.optional("options", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
