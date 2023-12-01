@@ -140,7 +140,7 @@ public interface ActionFactory extends Factory {
     }
 
     default Map<String, String> optionalConfigMap(MultipleParameterToolAdapter params, String key) {
-        if (params.has(key)) {
+        if (!params.has(key)) {
             return Collections.emptyMap();
         }
 
