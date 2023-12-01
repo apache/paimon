@@ -51,7 +51,7 @@ fully compatible with Hive.
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
@@ -112,7 +112,7 @@ need to query the latest data. Therefore, Paimon provides a preview feature:
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
