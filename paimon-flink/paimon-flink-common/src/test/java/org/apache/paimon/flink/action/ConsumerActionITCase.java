@@ -82,8 +82,19 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
         // reset consumer
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new ResetConsumerAction(warehouse, database, tableName, Collections.emptyMap(), "myid")
-                    .withNextSnapshotIds(1L)
+            createAction(
+                            ResetConsumerAction.class,
+                            "reset_consumer",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--consumer_id",
+                            "myid",
+                            "--next_snapshot",
+                            "1")
                     .run();
         } else {
             callProcedure(
@@ -96,7 +107,17 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
         // delete consumer
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new ResetConsumerAction(warehouse, database, tableName, Collections.emptyMap(), "myid")
+            createAction(
+                            ResetConsumerAction.class,
+                            "reset_consumer",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--consumer_id",
+                            "myid")
                     .run();
         } else {
             callProcedure(

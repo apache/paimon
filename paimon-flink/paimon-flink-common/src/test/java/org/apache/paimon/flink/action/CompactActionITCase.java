@@ -250,14 +250,17 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                 Arrays.asList("dt", "hh"), Arrays.asList("dt", "hh", "k"), Collections.emptyMap());
 
         CompactAction compactAction =
-                new CompactAction(
-                                warehouse,
-                                database,
-                                tableName,
-                                Collections.emptyMap(),
-                                Collections.singletonMap(
-                                        FlinkConnectorOptions.SCAN_PARALLELISM.key(), "6"))
-                        .withPartitions(getSpecifiedPartitions());
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--table_conf",
+                        FlinkConnectorOptions.SCAN_PARALLELISM.key() + "=6");
 
         assertThat(compactAction.table.options().get(FlinkConnectorOptions.SCAN_PARALLELISM.key()))
                 .isEqualTo("6");
@@ -288,10 +291,21 @@ public class CompactActionITCase extends CompactActionITCaseBase {
     private void runAction(boolean isStreaming) throws Exception {
         StreamExecutionEnvironment env = buildDefaultEnv(isStreaming);
 
-        new CompactAction(warehouse, database, tableName)
-                .withPartitions(getSpecifiedPartitions())
-                .withStreamExecutionEnvironment(env)
-                .build();
+        CompactAction action =
+                createAction(
+                        CompactAction.class,
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--partition",
+                        "dt=20221208,hh=15",
+                        "--partition",
+                        "dt=20221209,hh=15");
+        action.withStreamExecutionEnvironment(env).build();
         if (isStreaming) {
             env.executeAsync();
         } else {
@@ -306,17 +320,5 @@ public class CompactActionITCase extends CompactActionITCaseBase {
                         database, tableName, "dt=20221208,hh=15;dt=20221209,hh=15"),
                 isStreaming,
                 !isStreaming);
-    }
-
-    private List<Map<String, String>> getSpecifiedPartitions() {
-        Map<String, String> partition1 = new HashMap<>();
-        partition1.put("dt", "20221208");
-        partition1.put("hh", "15");
-
-        Map<String, String> partition2 = new HashMap<>();
-        partition2.put("dt", "20221209");
-        partition2.put("hh", "15");
-
-        return Arrays.asList(partition1, partition2);
     }
 }

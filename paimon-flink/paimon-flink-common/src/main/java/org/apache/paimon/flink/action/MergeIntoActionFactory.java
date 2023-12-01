@@ -48,12 +48,12 @@ public class MergeIntoActionFactory implements ActionFactory {
     private static final String NOT_MATCHED_BY_SOURCE_UPSERT_SET =
             "not_matched_by_source_upsert_set";
     private static final String NOT_MATCHED_BY_SOURCE_UPSERT_CONDITION =
-            "not-matched-by-source-upsert-condition";
-    private static final String MATCHED_DELETE_CONDITION = "matched-delete-condition";
+            "not_matched_by_source_upsert_condition";
+    private static final String MATCHED_DELETE_CONDITION = "matched_delete_condition";
     private static final String NOT_MATCHED_BY_SOURCE_DELETE_CONDITION =
-            "not-matched-by-source-delete-condition";
-    private static final String NOT_MATCHED_INSERT_VALUES = "not-matched-insert-values";
-    private static final String NOT_MATCHED_INSERT_CONDITION = "not-matched-insert-condition";
+            "not_matched_by_source_delete_condition";
+    private static final String NOT_MATCHED_INSERT_VALUES = "not_matched_insert_values";
+    private static final String NOT_MATCHED_INSERT_CONDITION = "not_matched_insert_condition";
 
     @Override
     public String identifier() {

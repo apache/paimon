@@ -132,8 +132,13 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             StreamExecutionEnvironment env = buildDefaultEnv(false);
-            new CompactDatabaseAction(warehouse, Collections.emptyMap())
-                    .withDatabaseCompactMode(mode)
+            createAction(
+                            CompactDatabaseAction.class,
+                            "compact_database",
+                            "--warehouse",
+                            warehouse,
+                            "--mode",
+                            mode)
                     .withStreamExecutionEnvironment(env)
                     .build();
             env.execute();
@@ -207,22 +212,30 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            CompactDatabaseAction action;
             if (mode.equals("divided")) {
-                new CompactDatabaseAction(warehouse, new HashMap<>())
-                        .withStreamExecutionEnvironment(env)
-                        .build();
+                action =
+                        createAction(
+                                CompactDatabaseAction.class,
+                                "compact_database",
+                                "--warehouse",
+                                warehouse);
             } else {
                 // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost
                 // time in combined mode will be over 1 min
-                new CompactDatabaseAction(warehouse, new HashMap<>())
-                        .withDatabaseCompactMode("combined")
-                        .withTableOptions(
-                                Collections.singletonMap(
-                                        CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"))
-                        .withStreamExecutionEnvironment(env)
-                        .build();
+                action =
+                        createAction(
+                                CompactDatabaseAction.class,
+                                "compact_database",
+                                "--warehouse",
+                                warehouse,
+                                "--mode",
+                                "combined",
+                                "--table_conf",
+                                CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
             }
+            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            action.withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         } else {
             if (mode.equals("divided")) {
@@ -426,8 +439,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
     private void includingAndExcludingTablesImpl(
             String mode,
-            String includingPattern,
-            String excludesPattern,
+            @Nullable String includingPattern,
+            @Nullable String excludesPattern,
             List<Identifier> includeTables,
             List<Identifier> excludeTables)
             throws Exception {
@@ -477,18 +490,29 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
-            CompactDatabaseAction action =
-                    new CompactDatabaseAction(warehouse, Collections.emptyMap())
-                            .includingTables(includingPattern)
-                            .excludingTables(excludesPattern)
-                            .withDatabaseCompactMode(mode);
-            if (mode.equals("combined")) {
-                action.withTableOptions(
-                        Collections.singletonMap(
-                                CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key(), "1s"));
+            List<String> args = new ArrayList<>();
+            args.add("compact_database");
+            args.add("--warehouse");
+            args.add(warehouse);
+            if (includingPattern != null) {
+                args.add("--including_tables");
+                args.add(includingPattern);
             }
-            action.withStreamExecutionEnvironment(env).build();
+            if (excludesPattern != null) {
+                args.add("--excluding_tables");
+                args.add(excludesPattern);
+            }
+            args.add("--mode");
+            args.add(mode);
+            if (mode.equals("combined")) {
+                args.add("--table_conf");
+                args.add(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
+            }
+
+            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            createAction(CompactDatabaseAction.class, args.toArray(new String[0]))
+                    .withStreamExecutionEnvironment(env)
+                    .build();
             env.execute();
         } else {
             if (mode.equals("divided")) {
@@ -588,7 +612,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             StreamExecutionEnvironment env = buildDefaultEnv(true);
-            new CompactDatabaseAction(warehouse, new HashMap<>())
+            createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
             env.executeAsync();
@@ -661,7 +685,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
 
         if (ThreadLocalRandom.current().nextBoolean()) {
             StreamExecutionEnvironment env = buildDefaultEnv(false);
-            new CompactDatabaseAction(warehouse, new HashMap<>())
+            createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
             env.execute();

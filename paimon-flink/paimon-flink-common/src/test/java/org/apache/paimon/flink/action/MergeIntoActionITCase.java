@@ -32,6 +32,9 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -40,6 +43,11 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.table.planner.factories.TestValuesTableFactory.changelogRow;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_DELETE;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.MATCHED_UPSERT;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_DELETE;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_BY_SOURCE_UPSERT;
+import static org.apache.paimon.flink.action.MergeIntoActionFactory.NOT_MATCHED_INSERT;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.bEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildDdl;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.buildSimpleQuery;
@@ -99,7 +107,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         // WHEN NOT MATCHED BY SOURCE AND (dt < '02-28') THEN UPDATE
         //   SET v = v || '_nmu', last_action = 'not_matched_upsert'
         // WHEN NOT MATCHED BY SOURCE AND (dt >= '02-28') THEN DELETE
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         // here test if it works when table S is in default and qualified both
         action.withSourceTable("default.S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
@@ -112,7 +120,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withNotMatchedBySourceDelete("dt >= '02-28'");
 
         validateActionRunResult(
-                action,
+                action.build(),
                 expected,
                 Arrays.asList(
                         changelogRow("+I", 1, "v_1", "creation", "02-27"),
@@ -150,7 +158,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "in-default = {0}")
     @ValueSource(booleans = {true, false})
     public void testTargetAlias(boolean inDefault) throws Exception {
-        MergeIntoAction action;
+        MergeIntoActionBuilder action;
 
         if (!inDefault) {
             // create target table in a new database
@@ -160,9 +168,9 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
             bEnv.executeSql("USE test_db");
             prepareTargetTable(CoreOptions.ChangelogProducer.NONE);
 
-            action = new MergeIntoAction(warehouse, "test_db", "T");
+            action = new MergeIntoActionBuilder(warehouse, "test_db", "T");
         } else {
-            action = new MergeIntoAction(warehouse, database, "T");
+            action = new MergeIntoActionBuilder(warehouse, database, "T");
         }
 
         action.withTargetAlias("TT")
@@ -192,7 +200,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            validateActionRunResult(action, streamingExpected, batchExpected);
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
@@ -201,7 +209,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     @ParameterizedTest(name = "in-default = {0}")
     @ValueSource(booleans = {true, false})
     public void testSourceName(boolean inDefault) throws Exception {
-        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, "default", "T");
         String sourceTableName = "S";
 
         if (!inDefault) {
@@ -245,7 +253,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            validateActionRunResult(action, streamingExpected, batchExpected);
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
@@ -275,7 +283,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         useCatalog ? "S" : "test_cat.`default`.S", id);
         String escapeDdl = ddl.replaceAll("'", "''");
 
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
 
         if (useCatalog) {
             action.withSourceSqls(catalog, "USE CATALOG test_cat", ddl);
@@ -316,7 +324,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            validateActionRunResult(action, streamingExpected, batchExpected);
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
@@ -326,7 +334,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     @ValueSource(booleans = {true, false})
     public void testMatchedUpsertSetAll(boolean qualified) throws Exception {
         // build MergeIntoAction
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
                 .withSourceTable(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
@@ -364,7 +372,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 10, "v_10", "creation", "02-28"));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            validateActionRunResult(action, streamingExpected, batchExpected);
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
@@ -374,7 +382,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     @ValueSource(booleans = {true, false})
     public void testNotMatchedInsertAll(boolean qualified) throws Exception {
         // build MergeIntoAction
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceSqls("CREATE TEMPORARY VIEW SS AS SELECT k, v, 'unknown', dt FROM S")
                 .withSourceTable(qualified ? "default.SS" : "SS")
                 .withMergeCondition("T.k = SS.k AND T.dt = SS.dt")
@@ -408,7 +416,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 11, "v_11", "unknown", "02-29"));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            validateActionRunResult(action, streamingExpected, batchExpected);
+            validateActionRunResult(action.build(), streamingExpected, batchExpected);
         } else {
             validateProcedureResult(procedureStatement, streamingExpected, batchExpected);
         }
@@ -449,7 +457,8 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         Collections.emptyList(),
                         Collections.emptyList());
 
-        assertThatThrownBy(() -> new MergeIntoAction(warehouse, database, nonPkTable))
+        assertThatThrownBy(
+                        () -> new MergeIntoActionBuilder(warehouse, database, nonPkTable).build())
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "merge-into action doesn't support table with no primary keys defined.");
@@ -458,12 +467,12 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
     @Test
     public void testIncompatibleSchema() {
         // build MergeIntoAction
-        MergeIntoAction action = new MergeIntoAction(warehouse, database, "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
         action.withSourceTable("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withNotMatchedInsert(null, "S.k, S.v, 0, S.dt");
 
-        assertThatThrownBy(action::run)
+        assertThatThrownBy(() -> action.build().run())
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage(
                         "The schema of result in action 'not-matched-insert' is invalid.\n"
@@ -479,13 +488,13 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         sEnv.executeSql("USE test_db");
         prepareSourceTable();
 
-        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, "default", "T");
         // the qualified path of source table is absent
         action.withSourceTable("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
-        assertThatThrownBy(action::run)
+        assertThatThrownBy(() -> action.build().run())
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 ValidationException.class, "Object 'S' not found"));
@@ -496,7 +505,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         // drop table S
         sEnv.executeSql("DROP TABLE S");
 
-        MergeIntoAction action = new MergeIntoAction(warehouse, "default", "T");
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, "default", "T");
         action.withSourceSqls(
                         "CREATE DATABASE test_db",
                         "CREATE TEMPORARY TABLE test_db.S (k INT, v STRING, dt STRING) WITH ('connector' = 'values', 'bounded' = 'true')")
@@ -505,7 +514,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedDelete("S.v IS NULL");
 
-        assertThatThrownBy(action::run)
+        assertThatThrownBy(() -> action.build().run())
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 ValidationException.class, "Object 'S' not found"));
@@ -644,5 +653,115 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                                 changelogRow("-D", 6, "v_6", "creation", "02-28"),
                                 changelogRow("-D", 9, "v_9", "creation", "02-28"),
                                 changelogRow("-D", 10, "v_10", "creation", "02-28"))));
+    }
+
+    private class MergeIntoActionBuilder {
+
+        private final List<String> args;
+        private final List<String> mergeActions;
+
+        public MergeIntoActionBuilder(String warehouse, String database, String table) {
+            this.args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    "merge_into",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    table));
+            this.mergeActions = new ArrayList<>();
+        }
+
+        public MergeIntoActionBuilder withTargetAlias(String targetAlias) {
+            if (targetAlias != null) {
+                args.add("--target_as");
+                args.add(targetAlias);
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withSourceTable(String sourceTable) {
+            args.add("--source_table");
+            args.add(sourceTable);
+            return this;
+        }
+
+        public MergeIntoActionBuilder withSourceSqls(String... sourceSqls) {
+            if (sourceSqls != null) {
+                for (String sql : sourceSqls) {
+                    args.add("--source_sql");
+                    args.add(sql);
+                }
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withMergeCondition(String mergeCondition) {
+            args.add("--on");
+            args.add(mergeCondition);
+            return this;
+        }
+
+        public MergeIntoActionBuilder withMatchedUpsert(
+                @Nullable String matchedUpsertCondition, String matchedUpsertSet) {
+            mergeActions.add(MATCHED_UPSERT);
+            args.add("--matched_upsert_set");
+            args.add(matchedUpsertSet);
+            if (matchedUpsertCondition != null) {
+                args.add("--matched_upsert_condition");
+                args.add(matchedUpsertCondition);
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withNotMatchedBySourceUpsert(
+                @Nullable String notMatchedBySourceUpsertCondition,
+                String notMatchedBySourceUpsertSet) {
+            mergeActions.add(NOT_MATCHED_BY_SOURCE_UPSERT);
+            args.add("--not_matched_by_source_upsert_set");
+            args.add(notMatchedBySourceUpsertSet);
+            if (notMatchedBySourceUpsertCondition != null) {
+                args.add("--not_matched_by_source_upsert_condition");
+                args.add(notMatchedBySourceUpsertCondition);
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withMatchedDelete(@Nullable String matchedDeleteCondition) {
+            mergeActions.add(MATCHED_DELETE);
+            if (matchedDeleteCondition != null) {
+                args.add("--matched_delete_condition");
+                args.add(matchedDeleteCondition);
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withNotMatchedBySourceDelete(
+                @Nullable String notMatchedBySourceDeleteCondition) {
+            mergeActions.add(NOT_MATCHED_BY_SOURCE_DELETE);
+            if (notMatchedBySourceDeleteCondition != null) {
+                args.add("--not_matched_by_source_delete_condition");
+                args.add(notMatchedBySourceDeleteCondition);
+            }
+            return this;
+        }
+
+        public MergeIntoActionBuilder withNotMatchedInsert(
+                @Nullable String notMatchedInsertCondition, String notMatchedInsertValues) {
+            mergeActions.add(NOT_MATCHED_INSERT);
+            args.add("--not_matched_insert_values");
+            args.add(notMatchedInsertValues);
+            if (notMatchedInsertCondition != null) {
+                args.add("not_matched_insert_condition");
+                args.add(notMatchedInsertCondition);
+            }
+            return this;
+        }
+
+        MergeIntoAction build() {
+            return createAction(MergeIntoAction.class, args.toArray(new String[0]));
+        }
     }
 }

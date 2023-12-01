@@ -29,7 +29,7 @@ public class ResetConsumerActionFactory implements ActionFactory {
     public static final String IDENTIFIER = "reset_consumer";
 
     private static final String CONSUMER_ID = "consumer_id";
-    private static final String NEXT_SNAPSHOT = "next-snapshot";
+    private static final String NEXT_SNAPSHOT = "next_snapshot";
 
     @Override
     public String identifier() {
