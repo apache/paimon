@@ -372,6 +372,12 @@ To avoid deleting files that are newly added by other writing jobs, this action 
 
 {{< /tab >}}
 
+{{< tab "Spark" >}}
+```sql
+CALL sys.remove_orphan_files(table => "tableId", [older_then => "2023-10-31 12:00:00"])
+```
+{{< /tab >}}
+
 {{< /tabs >}}
 
 
