@@ -109,7 +109,7 @@ public class HiveLocationTest {
         fileIO.mkdirs(warehouse);
 
         HiveCatalogFactory hiveCatalogFactory = new HiveCatalogFactory();
-        catalog = (HiveCatalog) hiveCatalogFactory.create(fileIO, warehouse, catalogContext);
+        catalog = (HiveCatalog) hiveCatalogFactory.create(catalogContext);
 
         hmsClient = catalog.getHmsClient();
 

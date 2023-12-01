@@ -54,7 +54,7 @@ CREATE CATALOG my_hive WITH (
     'uri' = 'thrift://<hive-metastore-host-name>:<port>',
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    'warehouse' = 'hdfs:///path/to/warehouse'
+    -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
 );
 
 USE CATALOG my_hive;
@@ -115,7 +115,7 @@ CREATE CATALOG my_hive WITH (
     'uri' = 'thrift://<hive-metastore-host-name>:<port>',
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    'warehouse' = 'hdfs:///path/to/warehouse'
+    -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
 );
 
 USE CATALOG my_hive;
