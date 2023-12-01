@@ -26,7 +26,7 @@ import java.util.Optional;
 /** Action Factory for {@link MigrateTableAction}. */
 public class MigrateTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "migrate_table";
+    public static final String IDENTIFIER = "migrate-table";
 
     @Override
     public String identifier() {
@@ -36,10 +36,10 @@ public class MigrateTableActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         String warehouse = params.get("warehouse");
-        String connector = params.get("source-table-type");
-        String sourceHiveTable = params.get("source-table-id");
+        String connector = params.get("src-type");
+        String sourceHiveTable = params.get("table");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tableConf = params.get("table-properties");
+        String tableConf = params.get("tblproperties");
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
@@ -54,9 +54,9 @@ public class MigrateTableActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse-path> --source-table-type hive "
-                        + "--source-table-id <database.table_name> "
+                "  migrate_table --warehouse <warehouse-path> --src-type hive "
+                        + "--table <database.table_name> "
                         + "[--catalog-conf <key>=<value] "
-                        + "[--table-properties <key>=<value>,<key>=<value>,...]");
+                        + "[--tblproperties <key>=<value>,<key>=<value>,...]");
     }
 }

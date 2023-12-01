@@ -71,8 +71,8 @@ If your flink version is below 1.17, you can use flink action to achieve this:
 /path/to/paimon-flink-action-{{< version >}}.jar \
 migrate_table
 --warehouse <warehouse-path> \
---source-table-type hive \
---source-table-id <database.table-name> \
+--src-type hive \
+--table <database.table-name> \
 [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
 [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
 ```
@@ -83,8 +83,8 @@ Example:
 --warehouse /path/to/warehouse \
 --catalog-conf uri=thrift://localhost:9083 \
 --catalog-conf metastore=hive \
---source-table-type hive \
---source-table-id default.hive_or_paimon \
+--src-type hive \
+--table default.hive_or_paimon \
 ```
 
 **Migrate Hive File**
