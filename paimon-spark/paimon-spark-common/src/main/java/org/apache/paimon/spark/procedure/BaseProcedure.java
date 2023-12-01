@@ -123,6 +123,10 @@ abstract class BaseProcedure implements Procedure {
         return spark;
     }
 
+    protected TableCatalog tableCatalog() {
+        return tableCatalog;
+    }
+
     protected abstract static class Builder<T extends BaseProcedure> implements ProcedureBuilder {
         private TableCatalog tableCatalog;
 

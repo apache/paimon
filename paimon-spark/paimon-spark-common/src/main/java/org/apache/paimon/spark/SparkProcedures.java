@@ -21,6 +21,8 @@ package org.apache.paimon.spark;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.MigrateFileProcedure;
+import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
@@ -50,6 +52,8 @@ public class SparkProcedures {
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
+        procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
         return procedureBuilders.build();
     }
 }

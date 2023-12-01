@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -18,20 +18,27 @@
 
 package org.apache.paimon.spark.catalog;
 
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.spark.SparkProcedures;
 import org.apache.paimon.spark.analysis.NoSuchProcedureException;
 import org.apache.paimon.spark.procedure.Procedure;
+import org.apache.paimon.spark.procedure.ProcedureBuilder;
 
 import org.apache.spark.sql.connector.catalog.Identifier;
+import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
+import org.apache.spark.sql.connector.catalog.TableCatalog;
 
-/** An interface that loads stored procedures called via CALL statements. */
-public interface ProcedureCatalog {
-
-    /**
-     * Loads a {@link Procedure stored procedure} by {@link Identifier identifier}.
-     *
-     * @param identifier A stored procedure identifier.
-     * @return The procedure's metadata of given identifier.
-     * @throws NoSuchProcedureException Thrown, if there is no matching procedure stored.
-     */
-    Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException;
+/** Spark base catalog. */
+public abstract class SparkBaseCatalog
+        implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
+    @Override
+    public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
+        if (Catalog.SYSTEM_DATABASE_NAME.equals(identifier.namespace()[0])) {
+            ProcedureBuilder builder = SparkProcedures.newBuilder(identifier.name());
+            if (builder != null) {
+                return builder.withTableCatalog(this).build();
+            }
+        }
+        throw new NoSuchProcedureException(identifier);
+    }
 }
