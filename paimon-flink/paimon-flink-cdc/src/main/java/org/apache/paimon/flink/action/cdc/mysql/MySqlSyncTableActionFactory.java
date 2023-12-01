@@ -38,7 +38,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPI
 /** Factory to create {@link MySqlSyncTableAction}. */
 public class MySqlSyncTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "mysql-sync-table";
+    public static final String IDENTIFIER = "mysql_sync_table";
 
     @Override
     public String identifier() {
