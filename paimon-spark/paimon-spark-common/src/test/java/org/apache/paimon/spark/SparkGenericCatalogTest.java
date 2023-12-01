@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;
@@ -91,6 +92,29 @@ public class SparkGenericCatalogTest {
                                 spark.sql(
                                         "CREATE TABLE my_db.DB_PT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
                                                 + " ('file.format'='avro')"))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
+    public void testCallCommand() {
+        spark.sql("CREATE DATABASE my_db");
+        spark.close();
+
+        spark =
+                SparkSession.builder()
+                        .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        .master("local[2]")
+                        .config(
+                                "spark.sql.extensions",
+                                PaimonSparkSessionExtensions.class.getName())
+                        .config(
+                                "spark.sql.catalog.spark_catalog",
+                                SparkGenericCatalog.class.getName())
+                        .getOrCreate();
+        spark.sql(
+                "CREATE TABLE my_db.DB_Compaction (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+        assertThatCode(() -> spark.sql("CALL sys.compact(table => 'my_db.DB_Compaction')"))
                 .doesNotThrowAnyException();
     }
 

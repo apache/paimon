@@ -24,6 +24,9 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.spark.analysis.NoSuchProcedureException;
+import org.apache.paimon.spark.catalog.ProcedureCatalog;
+import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
@@ -69,7 +72,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * @param <T> CatalogPlugin class to avoid casting to TableCatalog and SupportsNamespaces.
  */
 public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
-        implements CatalogExtension {
+        implements ProcedureCatalog, CatalogExtension {
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
@@ -313,5 +316,10 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         } catch (Exception exception) {
             throw e;
         }
+    }
+
+    @Override
+    public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
+        return paimonCatalog.loadProcedure(identifier);
     }
 }
