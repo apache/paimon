@@ -58,9 +58,9 @@ public class DeleteActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --where <filter_spec>");
-        System.out.println("  delete --path <table-path> --where <filter_spec>");
+                "  delete --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --where <filter_spec>");
+        System.out.println("  delete --path <table_path> --where <filter_spec>");
         System.out.println();
 
         System.out.println(
@@ -69,7 +69,7 @@ public class DeleteActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  delete --path hdfs:///path/to/warehouse/test_db.db/test_table --where id > (SELECT count(*) FROM employee)");
+                "  delete --path hdfs:///path/to/warehouse/test_db.db/test_table --where 'id > (SELECT count(*) FROM employee)'");
         System.out.println(
                 "  It's equal to 'DELETE FROM test_table WHERE id > (SELECT count(*) FROM employee)");
     }

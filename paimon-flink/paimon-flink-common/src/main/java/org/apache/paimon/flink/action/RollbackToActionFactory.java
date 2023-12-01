@@ -53,15 +53,15 @@ public class RollbackToActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"rollback-to\" roll back a table to a specific snapshot ID or tag.");
+                "Action \"rollback_to\" roll back a table to a specific snapshot ID or tag.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  rollback-to --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --version <version-string>");
+                "  rollback_to --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --version <version_string>");
         System.out.println(
-                "  'version-string can be a long value representing a snapshot ID or a tag name.'");
+                "  <version_string> can be a long value representing a snapshot ID or a tag name.");
         System.out.println();
     }
 }

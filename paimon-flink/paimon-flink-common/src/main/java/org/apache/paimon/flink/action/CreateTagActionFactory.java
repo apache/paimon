@@ -52,13 +52,13 @@ public class CreateTagActionFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"create-tag\" creates a tag from given snapshot.");
+        System.out.println("Action \"create_tag\" creates a tag from given snapshot.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create-tag --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --tag-name <tag-name> --snapshot <snapshot-id>");
+                "  create_tag --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --tag_name <tag_name> --snapshot <snapshot_id>");
         System.out.println();
     }
 }

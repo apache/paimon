@@ -78,15 +78,15 @@ public class CompactActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--partition <partition-name>]"
-                        + "[--order-strategy <order-strategy>]"
-                        + "[--table-conf <key>=<value>]"
-                        + "[--order-by <order-columns>]");
+                "  compact --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> [--partition <partition_name>]"
+                        + "[--order_strategy <order_strategy>]"
+                        + "[--table_conf <key>=<value>]"
+                        + "[--order_by <order_columns>]");
         System.out.println(
-                "  compact --warehouse s3://path/to/warehouse --database <database-name> "
-                        + "--table <table-name> [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]");
-        System.out.println("  compact --path <table-path> [--partition <partition-name>]");
+                "  compact --warehouse s3://path/to/warehouse --database <database_name> "
+                        + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
+        System.out.println("  compact --path <table_path> [--partition <partition_name>]");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -95,8 +95,8 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println();
         System.out.println("Note:");
         System.out.println(
-                "  order compact now only support append-only table with bucket=-1, please don't specify --order-strategy parameter if your table does not meet the request");
-        System.out.println("  order-strategy now only support zorder in batch mode");
+                "  order compact now only support append-only table with bucket=-1, please don't specify --order_strategy parameter if your table does not meet the request");
+        System.out.println("  order_strategy now only support zorder in batch mode");
         System.out.println();
 
         System.out.println("Examples:");
@@ -111,11 +111,11 @@ public class CompactActionFactory implements ActionFactory {
                 "  compact --warehouse s3:///path/to/warehouse "
                         + "--database test_db "
                         + "--table test_table "
-                        + "--order-strategy zorder "
-                        + "--order-by a,b,c "
-                        + "--table-conf sink.parallelism=9 "
-                        + "--catalog-conf s3.endpoint=https://****.com "
-                        + "--catalog-conf s3.access-key=***** "
-                        + "--catalog-conf s3.secret-key=***** ");
+                        + "--order_strategy zorder "
+                        + "--order_by a,b,c "
+                        + "--table_conf sink.parallelism=9 "
+                        + "--catalog_conf s3.endpoint=https://****.com "
+                        + "--catalog_conf s3.access-key=***** "
+                        + "--catalog_conf s3.secret-key=***** ");
     }
 }

@@ -53,18 +53,18 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"remove-orphan-files\" remove files which are not used by any snapshots or tags of a Paimon table.");
+                "Action \"remove_orphan_files\" remove files which are not used by any snapshots or tags of a Paimon table.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  remove-orphan-files --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--older-than <timestamp>]");
+                "  remove_orphan_files --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> [--older_than <timestamp>]");
 
         System.out.println();
         System.out.println(
                 "To avoid deleting newly written files, this action only deletes orphan files older than 1 day by default. "
-                        + "The interval can be modified by '--older-than'. <timestamp> format: yyyy-MM-dd HH:mm:ss");
+                        + "The interval can be modified by '--older_than'. <timestamp> format: yyyy-MM-dd HH:mm:ss");
         System.out.println();
     }
 }

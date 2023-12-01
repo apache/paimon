@@ -54,9 +54,9 @@ public class MigrateTableActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  migrate_table --warehouse <warehouse-path> --source_type hive "
+                "  migrate_table --warehouse <warehouse_path> --source_type hive "
                         + "--table <database.table_name> "
-                        + "[--catalog-conf <key>=<value] "
+                        + "[--catalog_conf <key>=<value] "
                         + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

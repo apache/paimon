@@ -52,15 +52,15 @@ public class DropPartitionActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"drop-partition\" drops data of specified partitions for a table.");
+                "Action \"drop_partition\" drops data of specified partitions for a table.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  drop-partition --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --partition <partition-name> [--partition <partition-name> ...]");
+                "  drop_partition --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --partition <partition_name> [--partition <partition_name> ...]");
         System.out.println(
-                "  drop-partition --path <table-path> --partition <partition-name> [--partition <partition-name> ...]");
+                "  drop_partition --path <table_path> --partition <partition_name> [--partition <partition_name> ...]");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -69,8 +69,8 @@ public class DropPartitionActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  drop-partition --warehouse hdfs:///path/to/warehouse --database test_db --table test_table --partition dt=20221126,hh=08");
+                "  drop_partition --warehouse hdfs:///path/to/warehouse --database test_db --table test_table --partition dt=20221126,hh=08");
         System.out.println(
-                "  drop-partition --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+                "  drop_partition --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
     }
 }
