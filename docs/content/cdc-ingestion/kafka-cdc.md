@@ -90,7 +90,7 @@ To use this feature through `flink run`, run the following shell command.
     [--type_mapping to-string] \
     [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
-    [--catalog_conf <paimon-catalog_conf> [--catalog_conf <paimon-catalog_conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
@@ -173,7 +173,7 @@ To use this feature through `flink run`, run the following shell command.
     [--excluding_tables <table-name|name-regular-expr>] \
     [--type_mapping to-string] \
     [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
-    [--catalog_conf <paimon-catalog_conf> [--catalog_conf <paimon-catalog_conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
     [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
