@@ -266,7 +266,7 @@ Currently, Paimon supports two ways to purge partitions.
 
 1. Like purging tables, you can use `INSERT OVERWRITE` to purge data of partitions by inserting empty value to them.
 
-2. Method #1 does not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop-partition job through `flink run`.
+2. Method #1 does not support to drop multiple partitions. In case that you need to drop multiple partitions, you can submit the drop_partition job through `flink run`.
 
 {{< tabs "purge-partitions-syntax" >}}
 
@@ -298,28 +298,28 @@ PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false;
 
 {{< tab "Flink Job" >}}
 
-Run the following command to submit a drop-partition job for the table.
+Run the following command to submit a drop_partition job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    drop-partition \
+    drop_partition \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
     [--partition <partition_spec> [--partition <partition_spec> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 
 partition_spec:
 key1=value1,key2=value2...
 ```
 
-For more information of drop-partition, see
+For more information of drop_partition, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    drop-partition --help
+    drop_partition --help
 ```
 
 {{< /tab >}}
@@ -415,7 +415,7 @@ Run the following command to submit a 'delete' job for the table.
     --database <database-name> \
     --table <table-name> \
     --where <filter_spec> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
     
 filter_spec is equal to the 'WHERE' clause in SQL DELETE statement. Examples:
     age >= 18 AND age <= 60
@@ -489,7 +489,7 @@ DELETE FROM MyTable WHERE currency = 'UNKNOWN';
 
 ## Merging into table
 
-Paimon supports "MERGE INTO" via submitting the 'merge-into' job through `flink run`.
+Paimon supports "MERGE INTO" via submitting the 'merge_into' job through `flink run`.
 
 {{< hint info >}}
 Important table properties setting:
@@ -500,142 +500,142 @@ Important table properties setting:
 The design referenced such syntax:
 ```sql
 MERGE INTO target-table
-  USING source-table | source-expr AS source-alias
+  USING source_table | source-expr AS source-alias
   ON merge-condition
   WHEN MATCHED [AND matched-condition]
     THEN UPDATE SET xxx
   WHEN MATCHED [AND matched-condition]
     THEN DELETE
-  WHEN NOT MATCHED [AND not-matched-condition]
+  WHEN NOT MATCHED [AND not_matched_condition]
     THEN INSERT VALUES (xxx)
   WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
     THEN UPDATE SET xxx
   WHEN NOT MATCHED BY SOURCE [AND not-matched-by-source-condition]
     THEN DELETE
 ```
-The merge-into action use "upsert" semantics instead of "update", which means if the row exists, 
+The merge_into action use "upsert" semantics instead of "update", which means if the row exists, 
 then do update, else do insert. For example, for non-primary-key table, you can update every column,
 but for primary key table, if you want to update primary keys, you have to insert a new row which has 
 different primary keys from rows in the table. In this scenario, "upsert" is useful.
 
-{{< tabs "merge-into" >}}
+{{< tabs "merge_into" >}}
 
 {{< tab "Flink Job" >}}
 
-Run the following command to submit a 'merge-into' job for the table.
+Run the following command to submit a 'merge_into' job for the table.
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into \
+    merge_into \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <target-table> \
-    [--target-as <target-table-alias>] \
-    --source-table <source-table-name> \
-    [--source-sql <sql> ...]\
+    [--target_as <target-table-alias>] \
+    --source_table <source_table-name> \
+    [--source_sql <sql> ...]\
     --on <merge-condition> \
-    --merge-actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
-    --matched-upsert-condition <matched-condition> \
-    --matched-upsert-set <upsert-changes> \
-    --matched-delete-condition <matched-condition> \
-    --not-matched-insert-condition <not-matched-condition> \
-    --not-matched-insert-values <insert-values> \
-    --not-matched-by-source-upsert-condition <not-matched-by-source-condition> \
-    --not-matched-by-source-upsert-set <not-matched-upsert-changes> \
-    --not-matched-by-source-delete-condition <not-matched-by-source-condition> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    --merge_actions <matched-upsert,matched-delete,not-matched-insert,not_matched_by_source_upsert,not_matched_by_source_delete> \
+    --matched_upsert_condition <matched-condition> \
+    --matched_upsert_set <upsert-changes> \
+    --matched_delete_condition <matched-condition> \
+    --not_matched_insert_condition <not-matched-condition> \
+    --not_matched_insert_values <insert-values> \
+    --not_matched_by_source_upsert_condition <not-matched-by-source-condition> \
+    --not_matched_by_source_upsert_set <not-matched-upsert-changes> \
+    --not_matched_by_source_delete_condition <not-matched-by-source-condition> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
     
-You can pass sqls by '--source-sql <sql> [, --source-sql <sql> ...]' to config environment and create source table at runtime.
+You can pass sqls by '--source_sql <sql> [, --source_sql <sql> ...]' to config environment and create source table at runtime.
     
 -- Examples:
 -- Find all orders mentioned in the source table, then mark as important if the price is above 100 
 -- or delete if the price is under 10.
 ./flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into \
+    merge_into \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-table S \
+    --source_table S \
     --on "T.id = S.order_id" \
-    --merge-actions \
-    matched-upsert,matched-delete \
-    --matched-upsert-condition "T.price > 100" \
-    --matched-upsert-set "mark = 'important'" \
-    --matched-delete-condition "T.price < 10" 
+    --merge_actions \
+    matched_upsert,matched_delete \
+    --matched_upsert_condition "T.price > 100" \
+    --matched_upsert_set "mark = 'important'" \
+    --matched_delete_condition "T.price < 10" 
     
 -- For matched order rows, increase the price, and if there is no match, insert the order from the 
 -- source table:
 ./flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into \
+    merge_into \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-table S \
+    --source_table S \
     --on "T.id = S.order_id" \
-    --merge-actions \
-    matched-upsert,not-matched-insert \
-    --matched-upsert-set "price = T.price + 20" \
-    --not-matched-insert-values * 
+    --merge_actions \
+    matched_upsert,not_matched_insert \
+    --matched_upsert_set "price = T.price + 20" \
+    --not_matched_insert_values * 
 
 -- For not matched by source order rows (which are in the target table and does not match any row in the
 -- source table based on the merge-condition), decrease the price or if the mark is 'trivial', delete them:
 ./flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into \
+    merge_into \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-table S \
+    --source_table S \
     --on "T.id = S.order_id" \
-    --merge-actions \
-    not-matched-by-source-upsert,not-matched-by-source-delete \
-    --not-matched-by-source-upsert-condition "T.mark <> 'trivial'" \
-    --not-matched-by-source-upsert-set "price = T.price - 20" \
-    --not-matched-by-source-delete-condition "T.mark = 'trivial'"
+    --merge_actions \
+    not_matched_by_source_upsert,not_matched_by_source_delete \
+    --not_matched_by_source_upsert_condition "T.mark <> 'trivial'" \
+    --not_matched_by_source_upsert_set "price = T.price - 20" \
+    --not_matched_by_source_delete_condition "T.mark = 'trivial'"
     
--- A --source-sql example: 
+-- A --source_sql example: 
 -- Create a temporary view S in new catalog and use it as source table
 ./flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into \
+    merge_into \
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table T \
-    --source-sql "CREATE CATALOG test_cat WITH (...)" \
-    --source-sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
-    --source-table test_cat.default.S \
+    --source_sql "CREATE CATALOG test_cat WITH (...)" \
+    --source_sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
+    --source_table test_cat.default.S \
     --on "T.id = S.order_id" \
-    --merge-actions not-matched-insert\
-    --not-matched-insert-values *
+    --merge_actions not_matched_insert\
+    --not_matched_insert_values *
 ```
 
 The term 'matched' explanation:
 1. matched: changed rows are from target table and each can match a source table row based on 
 merge-condition and optional matched-condition (source ∩ target).
 2. not-matched: changed rows are from source table and all rows cannot match any target table 
-row based on merge-condition and optional not-matched-condition (source - target).
+row based on merge-condition and optional not_matched_condition (source - target).
 3. not-matched-by-source: changed rows are from target table and all row cannot match any source 
 table row based on merge-condition and optional not-matched-by-source-condition (target - source).
 
 Parameters format:
-1. matched-upsert-changes:\
-col = \<source-table>.col | expression [, ...] (Means setting \<target-table>.col with given value. Do not 
-add '\<target-table>.' before 'col'.)\
+1. matched_upsert_changes:\
+col = \<source_table>.col | expression [, ...] (Means setting \<target_table>.col with given value. Do not 
+add '\<target_table>.' before 'col'.)\
 Especially, you can use '*' to set columns with all source columns (require target table's 
 schema is equal to source's).
-2. not-matched-upsert-changes is similar to matched-upsert-changes, but you cannot reference 
+2. not_matched_upsert_changes is similar to matched_upsert_changes, but you cannot reference 
 source table's column or use '*'.
-3. insert-values:\
+3. insert_values:\
 col1, col2, ..., col_end\
-Must specify values of all columns. For each column, you can reference \<source-table>.col or 
+Must specify values of all columns. For each column, you can reference \<source_table>.col or 
 use an expression.\
 Especially, you can use '*' to insert with all source columns (require target table's schema 
 is equal to source's).
-4. not-matched-condition cannot use target table's columns to construct condition expression.
-5. not-matched-by-source-condition cannot use source table's columns to construct condition expression.
+4. not_matched_condition cannot use target table's columns to construct condition expression.
+5. not_matched_by_source_condition cannot use source table's columns to construct condition expression.
 
 {{< hint warning >}}
 1. Target alias cannot be duplicated with existed table name. 
@@ -643,36 +643,36 @@ is equal to source's).
 qualified (database.table or catalog.database.table if created a new catalog). 
 For examples:\
 (1) If source table 'my_source' is in 'my_db', qualify it:\
-\--source-table "my_db.my_source"\
+\--source_table "my_db.my_source"\
 (2) Example for sqls:\
 When sqls changed current catalog and database, it's OK to not qualify the source table name:\
-\--source-sql "CREATE CATALOG my_cat WITH (...)"\
-\--source-sql "USE CATALOG my_cat"\
-\--source-sql "CREATE DATABASE my_db"\
-\--source-sql "USE my_db"\
-\--source-sql "CREATE TABLE S ..."\
-\--source-table S\
+\--source_sql "CREATE CATALOG my_cat WITH (...)"\
+\--source_sql "USE CATALOG my_cat"\
+\--source_sql "CREATE DATABASE my_db"\
+\--source_sql "USE my_db"\
+\--source_sql "CREATE TABLE S ..."\
+\--source_table S\
 but you must qualify it in the following case:\
-\--source-sql "CREATE CATALOG my_cat WITH (...)"\
-\--source-sql "CREATE TABLE my_cat.\`default`.S ..."\
-\--source-table my_cat.default.S\
+\--source_sql "CREATE CATALOG my_cat WITH (...)"\
+\--source_sql "CREATE TABLE my_cat.\`default`.S ..."\
+\--source_table my_cat.default.S\
 You can use just 'S' as source table name in following arguments.
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
-(same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
+(same to not_matched_by_source_upsert and not_matched_by_source_delete). Otherwise, all conditions are optional.
 5. All conditions, set changes and values should use Flink SQL syntax. To ensure the whole command runs normally
 in Shell, please quote them with \"\" to escape blank spaces and use '\\' to escape special characters in statement. 
 For example:\
-\--source-sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
+\--source_sql "CREATE TABLE T (k INT) WITH ('special-key' = '123\\!')"
 
 {{< /hint >}}
 
-For more information of 'merge-into', see
+For more information of 'merge_into', see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    merge-into --help
+    merge_into --help
 ```
 {{< /tab >}}
 

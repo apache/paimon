@@ -81,17 +81,17 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-table
+    kafka_sync_table
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    [--partition-keys <partition-keys>] \
-    [--primary-keys <primary-keys>] \
-    [--type-mapping to-string] \
-    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
-    [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
+    [--type_mapping to-string] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog_conf> [--catalog_conf <paimon-catalog_conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/kafka_sync_table >}}
@@ -103,29 +103,29 @@ Example 1:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-table \
+    kafka_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --primary-keys pt,uid \
-    --computed-column '_year=year(age)' \
-    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka-conf topic=order \
-    --kafka-conf properties.group.id=123456 \
-    --kafka-conf value.format=canal-json \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --primary_keys pt,uid \
+    --computed_column '_year=year(age)' \
+    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka_conf topic=order \
+    --kafka_conf properties.group.id=123456 \
+    --kafka_conf value.format=canal-json \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 If the kafka topic doesn't contain message when you start the synchronization job, you must manually create the table
 before submitting the job. You can define the partition keys and primary keys only, and the left columns will be added
 by the synchronization job.
 
-NOTE: In this case you shouldn't use --partition-keys or --primary-keys, because those keys are defined when creating
+NOTE: In this case you shouldn't use --partition_keys or --primary_keys, because those keys are defined when creating
 the table and can not be modified. Additionally, if you specified computed columns, you should also define all the argument
 columns used for computed columns.
 
@@ -147,11 +147,11 @@ Then you can submit synchronization job:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-table \
+    kafka_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --computed-column 'part=date_format(create_time,yyyy-MM-dd)' \
+    --computed_column 'part=date_format(create_time,yyyy-MM-dd)' \
     ... (other conf)
 ```
 
@@ -164,17 +164,17 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-database
+    kafka_sync_database
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--table-prefix <paimon-table-prefix>] \
-    [--table-suffix <paimon-table-suffix>] \
-    [--including-tables <table-name|name-regular-expr>] \
-    [--excluding-tables <table-name|name-regular-expr>] \
-    [--type-mapping to-string] \
-    [--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <table-name|name-regular-expr>] \
+    [--excluding_tables <table-name|name-regular-expr>] \
+    [--type_mapping to-string] \
+    [--kafka_conf <kafka-source-conf> [--kafka_conf <kafka-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog_conf> [--catalog_conf <paimon-catalog_conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/kafka_sync_database >}}
@@ -193,18 +193,18 @@ Synchronization from one Kafka topic to Paimon database.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-database \
+    kafka_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka-conf topic=order \
-    --kafka-conf properties.group.id=123456 \
-    --kafka-conf value.format=canal-json \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka_conf topic=order \
+    --kafka_conf properties.group.id=123456 \
+    --kafka_conf value.format=canal-json \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 Synchronization from multiple Kafka topics to Paimon database.
@@ -212,16 +212,16 @@ Synchronization from multiple Kafka topics to Paimon database.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    kafka-sync-database \
+    kafka_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \
-    --kafka-conf topic=order\;logistic_order\;user \
-    --kafka-conf properties.group.id=123456 \
-    --kafka-conf value.format=canal-json \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \
+    --kafka_conf topic=order\;logistic_order\;user \
+    --kafka_conf properties.group.id=123456 \
+    --kafka_conf value.format=canal-json \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
