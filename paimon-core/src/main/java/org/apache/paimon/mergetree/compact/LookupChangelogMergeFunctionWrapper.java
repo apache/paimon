@@ -86,7 +86,10 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         reusedResult.reset();
 
         KeyValue result = mergeFunction.getResult();
-        checkArgument(result != null);
+        if (result == null) {
+            return reusedResult;
+        }
+
         KeyValue highLevel = mergeFunction.highLevel;
         boolean containLevel0 = mergeFunction.containLevel0;
 
