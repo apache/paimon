@@ -46,7 +46,7 @@ public class MigrateFileProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                ProcedureParameter.required("src_type", StringType),
+                ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("source_table", StringType),
                 ProcedureParameter.required("target_table", StringType)
             };

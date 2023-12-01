@@ -36,7 +36,7 @@ public class MigrateTableActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterTool params) {
         String warehouse = params.get("warehouse");
-        String connector = params.get("src-type");
+        String connector = params.get("source_type");
         String sourceHiveTable = params.get("table");
         Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
         String tableConf = params.get("options");
@@ -54,7 +54,7 @@ public class MigrateTableActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  migrate_table --warehouse <warehouse-path> --src-type hive "
+                "  migrate_table --warehouse <warehouse-path> --source_type hive "
                         + "--table <database.table_name> "
                         + "[--catalog-conf <key>=<value] "
                         + "[--options <key>=<value>,<key>=<value>,...]");

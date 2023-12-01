@@ -47,7 +47,7 @@ public class MigrateTableProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                ProcedureParameter.required("src_type", StringType),
+                ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.optional("options", StringType)
             };
