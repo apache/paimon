@@ -39,14 +39,14 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Migrate file procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.migrate_file(format => 'hive', source_table => 'db.source_tbl', target_table => 'db.target_tbl')
+ *  CALL sys.migrate_file(source_type => 'hive', source_table => 'db.source_tbl', target_table => 'db.target_tbl')
  * </code></pre>
  */
 public class MigrateFileProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
-                ProcedureParameter.required("format", StringType),
+                ProcedureParameter.required("source_type", StringType),
                 ProcedureParameter.required("source_table", StringType),
                 ProcedureParameter.required("target_table", StringType)
             };

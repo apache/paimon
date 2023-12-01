@@ -71,20 +71,20 @@ If your flink version is below 1.17, you can use flink action to achieve this:
 /path/to/paimon-flink-action-{{< version >}}.jar \
 migrate_table
 --warehouse <warehouse-path> \
---source-table-type hive \
---source-table-id <database.table-name> \
-[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+--source_type hive \
+--table <database.table-name> \
+[--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+[--options <paimon-table-conf  [,paimon-table-conf ...]> ]
 ```
 
 Example:
 ```bash
 <FLINK_HOME>/flink run ./paimon-flink-action-0.7-SNAPSHOT.jar migrate_table \
 --warehouse /path/to/warehouse \
---catalog-conf uri=thrift://localhost:9083 \
---catalog-conf metastore=hive \
---source-table-type hive \
---source-table-id default.hive_or_paimon \
+--catalog_conf uri=thrift://localhost:9083 \
+--catalog_conf metastore=hive \
+--source_type hive \
+--table default.hive_or_paimon \
 ```
 
 **Migrate Hive File**
