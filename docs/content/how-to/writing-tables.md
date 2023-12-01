@@ -535,7 +535,7 @@ Run the following command to submit a 'merge_into' job for the table.
     --source_table <source_table-name> \
     [--source_sql <sql> ...]\
     --on <merge-condition> \
-    --merge_actions <matched-upsert,matched-delete,not-matched-insert,not_matched_by_source_upsert,not_matched_by_source_delete> \
+    --merge_actions <matched-upsert,matched-delete,not-matched-insert,not-matched-by-source-upsert,not-matched-by-source-delete> \
     --matched_upsert_condition <matched-condition> \
     --matched_upsert_set <upsert-changes> \
     --matched_delete_condition <matched-condition> \
@@ -560,7 +560,7 @@ You can pass sqls by '--source_sql <sql> [, --source_sql <sql> ...]' to config e
     --source_table S \
     --on "T.id = S.order_id" \
     --merge_actions \
-    matched_upsert,matched_delete \
+    matched-upsert,matched-delete \
     --matched_upsert_condition "T.price > 100" \
     --matched_upsert_set "mark = 'important'" \
     --matched_delete_condition "T.price < 10" 
@@ -576,7 +576,7 @@ You can pass sqls by '--source_sql <sql> [, --source_sql <sql> ...]' to config e
     --source_table S \
     --on "T.id = S.order_id" \
     --merge_actions \
-    matched_upsert,not_matched_insert \
+    matched-upsert,not-matched-insert \
     --matched_upsert_set "price = T.price + 20" \
     --not_matched_insert_values * 
 
@@ -591,7 +591,7 @@ You can pass sqls by '--source_sql <sql> [, --source_sql <sql> ...]' to config e
     --source_table S \
     --on "T.id = S.order_id" \
     --merge_actions \
-    not_matched_by_source_upsert,not_matched_by_source_delete \
+    not-matched-by-source-upsert,not-matched-by-source-delete \
     --not_matched_by_source_upsert_condition "T.mark <> 'trivial'" \
     --not_matched_by_source_upsert_set "price = T.price - 20" \
     --not_matched_by_source_delete_condition "T.mark = 'trivial'"
@@ -608,16 +608,16 @@ You can pass sqls by '--source_sql <sql> [, --source_sql <sql> ...]' to config e
     --source_sql "CREATE TEMPORARY VIEW test_cat.`default`.S AS SELECT order_id, price, 'important' FROM important_order" \
     --source_table test_cat.default.S \
     --on "T.id = S.order_id" \
-    --merge_actions not_matched_insert\
+    --merge_actions not-matched-insert\
     --not_matched_insert_values *
 ```
 
 The term 'matched' explanation:
 1. matched: changed rows are from target table and each can match a source table row based on 
 merge-condition and optional matched-condition (source ∩ target).
-2. not-matched: changed rows are from source table and all rows cannot match any target table 
+2. not matched: changed rows are from source table and all rows cannot match any target table 
 row based on merge-condition and optional not_matched_condition (source - target).
-3. not-matched-by-source: changed rows are from target table and all row cannot match any source 
+3. not matched by source: changed rows are from target table and all row cannot match any source 
 table row based on merge-condition and optional not-matched-by-source-condition (target - source).
 
 Parameters format:
@@ -659,7 +659,7 @@ but you must qualify it in the following case:\
 You can use just 'S' as source table name in following arguments.
 3. At least one merge action must be specified.
 4. If both matched-upsert and matched-delete actions are present, their conditions must both be present too 
-(same to not_matched_by_source_upsert and not_matched_by_source_delete). Otherwise, all conditions are optional.
+(same to not-matched-by-source-upsert and not-matched-by-source-delete). Otherwise, all conditions are optional.
 5. All conditions, set changes and values should use Flink SQL syntax. To ensure the whole command runs normally
 in Shell, please quote them with \"\" to escape blank spaces and use '\\' to escape special characters in statement. 
 For example:\
