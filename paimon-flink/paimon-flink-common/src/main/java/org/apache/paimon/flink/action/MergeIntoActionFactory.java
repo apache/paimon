@@ -32,11 +32,11 @@ public class MergeIntoActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "merge_into";
 
-    public static final String MATCHED_UPSERT = "matched_upsert";
-    public static final String NOT_MATCHED_BY_SOURCE_UPSERT = "not_matched_by_source_upsert";
-    public static final String MATCHED_DELETE = "matched_delete";
-    public static final String NOT_MATCHED_BY_SOURCE_DELETE = "not_matched_by_source_delete";
-    public static final String NOT_MATCHED_INSERT = "not_matched_insert";
+    public static final String MATCHED_UPSERT = "matched-upsert";
+    public static final String NOT_MATCHED_BY_SOURCE_UPSERT = "not-matched-by-source-upsert";
+    public static final String MATCHED_DELETE = "matched-delete";
+    public static final String NOT_MATCHED_BY_SOURCE_DELETE = "not-matched-by-source-delete";
+    public static final String NOT_MATCHED_INSERT = "not-matched-insert";
 
     private static final String TARGET_AS = "target_as";
     private static final String SOURCE_SQL = "source_sql";
