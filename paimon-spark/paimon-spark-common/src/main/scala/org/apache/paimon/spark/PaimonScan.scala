@@ -17,55 +17,19 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.PredicateBuilder
-import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.table.{DataTable, Table}
-import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.Table
+import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.sql.Utils.fieldReference
 import org.apache.spark.sql.connector.expressions.NamedReference
-import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics, SupportsRuntimeFiltering}
-import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
-import org.apache.spark.sql.sources.{EqualTo, Filter, In}
-import org.apache.spark.sql.types.StructType
-
-import java.util.OptionalLong
+import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
+import org.apache.spark.sql.sources.{Filter, In}
 
 import scala.collection.JavaConverters._
 
 case class PaimonScan(table: Table, readBuilder: ReadBuilder)
-  extends Scan
-  with SupportsReportStatistics
+  extends PaimonBaseScan(table, readBuilder)
   with SupportsRuntimeFiltering {
-
-  private var splits: Array[Split] = _
-
-  override def description(): String = {
-    s"paimon(${readBuilder.tableName()})"
-  }
-
-  override def readSchema(): StructType = {
-    SparkTypeUtils.fromPaimonRowType(readBuilder.readType())
-  }
-
-  override def toBatch: Batch = {
-    PaimonBatch(getSplits, readBuilder)
-  }
-
-  override def toMicroBatchStream(checkpointLocation: String): MicroBatchStream = {
-    new PaimonMicroBatchStream(table.asInstanceOf[DataTable], readBuilder, checkpointLocation)
-  }
-
-  override def estimateStatistics(): Statistics = {
-    val rowCount = getSplits.map(_.rowCount).sum
-    val scannedTotalSize = rowCount * readSchema().defaultSize
-
-    new Statistics {
-      override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
-
-      override def numRows(): OptionalLong = OptionalLong.of(rowCount)
-    }
-  }
 
   override def filterAttributes(): Array[NamedReference] = {
     val requiredFields = readBuilder.readType().getFieldNames.asScala
@@ -88,13 +52,6 @@ case class PaimonScan(table: Table, readBuilder: ReadBuilder)
       readBuilder.withFilter(partitionFilter.head)
       splits = readBuilder.newScan().plan().splits().asScala.toArray
     }
-  }
-
-  private def getSplits: Array[Split] = {
-    if (splits == null) {
-      splits = readBuilder.newScan().plan().splits().asScala.toArray
-    }
-    splits
   }
 
 }
