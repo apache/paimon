@@ -18,10 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -113,6 +111,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             List<String> args =
                     new ArrayList<>(
                             Arrays.asList(
+                                    "mysql_sync_table",
                                     "--warehouse",
                                     warehouse,
                                     "--database",
@@ -131,14 +130,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
             args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
 
-            MultipleParameterToolAdapter params =
-                    new MultipleParameterToolAdapter(
-                            MultipleParameterTool.fromArgs(
-                                    args.toArray(args.toArray(new String[0]))));
-            return (MySqlSyncTableAction)
-                    new MySqlSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(MySqlSyncTableAction.class, args);
         }
     }
 
@@ -153,7 +145,12 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
         public MySqlSyncDatabaseAction build() {
             List<String> args =
                     new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
+                            Arrays.asList(
+                                    "mysql_sync_database",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database));
 
             args.addAll(mapToArgs("--mysql-conf", sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
@@ -170,14 +167,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
 
-            MultipleParameterToolAdapter params =
-                    new MultipleParameterToolAdapter(
-                            MultipleParameterTool.fromArgs(
-                                    args.toArray(args.toArray(new String[0]))));
-            return (MySqlSyncDatabaseAction)
-                    new MySqlSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(MySqlSyncDatabaseAction.class, args);
         }
     }
 }

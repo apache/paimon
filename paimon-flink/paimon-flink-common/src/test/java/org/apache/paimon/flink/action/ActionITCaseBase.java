@@ -159,6 +159,10 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         return env;
     }
 
+    protected <T extends ActionBase> T createAction(Class<T> clazz, List<String> args) {
+        return createAction(clazz, args.toArray(new String[0]));
+    }
+
     protected <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
         if (ThreadLocalRandom.current().nextBoolean()) {
             confuseArgs(args, "_", "-");

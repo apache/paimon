@@ -761,7 +761,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         }
 
         MergeIntoAction build() {
-            return createAction(MergeIntoAction.class, args.toArray(new String[0]));
+            return createAction(MergeIntoAction.class, args);
         }
     }
 }

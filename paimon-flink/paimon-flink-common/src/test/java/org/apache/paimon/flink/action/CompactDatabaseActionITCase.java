@@ -510,7 +510,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             }
 
             StreamExecutionEnvironment env = buildDefaultEnv(false);
-            createAction(CompactDatabaseAction.class, args.toArray(new String[0]))
+            createAction(CompactDatabaseAction.class, args)
                     .withStreamExecutionEnvironment(env)
                     .build();
             env.execute();

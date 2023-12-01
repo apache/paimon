@@ -18,13 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Producer;
@@ -278,6 +276,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
             List<String> args =
                     new ArrayList<>(
                             Arrays.asList(
+                                    "pulsar_sync_table",
                                     "--warehouse",
                                     warehouse,
                                     "--database",
@@ -295,14 +294,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
-            MultipleParameterToolAdapter params =
-                    new MultipleParameterToolAdapter(
-                            MultipleParameterTool.fromArgs(
-                                    args.toArray(args.toArray(new String[0]))));
-            return (PulsarSyncTableAction)
-                    new PulsarSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(PulsarSyncTableAction.class, args);
         }
     }
 
@@ -329,7 +321,12 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
         public PulsarSyncDatabaseAction build() {
             List<String> args =
                     new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
+                            Arrays.asList(
+                                    "pulsar_sync-database",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database));
 
             args.addAll(mapToArgs("--pulsar-conf", sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
@@ -342,14 +339,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
-            MultipleParameterToolAdapter params =
-                    new MultipleParameterToolAdapter(
-                            MultipleParameterTool.fromArgs(
-                                    args.toArray(args.toArray(new String[0]))));
-            return (PulsarSyncDatabaseAction)
-                    new PulsarSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(PulsarSyncDatabaseAction.class, args);
         }
     }
 

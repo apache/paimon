@@ -67,14 +67,12 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
                                 database,
                                 "--table",
                                 tableName));
-        RemoveOrphanFilesAction action1 =
-                createAction(RemoveOrphanFilesAction.class, args.toArray(new String[0]));
+        RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action1::run).doesNotThrowAnyException();
 
         args.add("--older_than");
         args.add("2023-12-31 23:59:59");
-        RemoveOrphanFilesAction action2 =
-                createAction(RemoveOrphanFilesAction.class, args.toArray(new String[0]));
+        RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
         assertThatCode(action2::run).doesNotThrowAnyException();
 
         String withoutOlderThan =
