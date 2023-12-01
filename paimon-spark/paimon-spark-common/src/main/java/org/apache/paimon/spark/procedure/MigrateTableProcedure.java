@@ -38,7 +38,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Migrate table procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.migrate_table(format => 'hive', table => 'db.tbl', tblproperties => 'x1=y1,x2=y2')
+ *  CALL sys.migrate_table(source_type => 'hive', table => 'db.tbl', options => 'x1=y1,x2=y2')
  * </code></pre>
  */
 public class MigrateTableProcedure extends BaseProcedure {
