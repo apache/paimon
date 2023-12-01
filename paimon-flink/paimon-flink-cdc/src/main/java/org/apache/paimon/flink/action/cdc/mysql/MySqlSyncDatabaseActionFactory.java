@@ -21,17 +21,28 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Arrays;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
+
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
 public class MySqlSyncDatabaseActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "mysql-sync-database";
+    public static final String IDENTIFIER = "mysql_sync_database";
+
+    private static final String IGNORE_INCOMPATIBLE = "ignore_incompatible";
+    private static final String MERGE_SHARDS = "merge-shards";
+    private static final String MODE = "mode";
 
     @Override
     public String identifier() {
@@ -39,32 +50,31 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "mysql-conf");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, MYSQL_CONF);
 
         MySqlSyncDatabaseAction action =
                 new MySqlSyncDatabaseAction(
-                        getRequiredValue(params, "warehouse"),
-                        getRequiredValue(params, "database"),
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "mysql-conf"));
+                        getRequiredValue(params, WAREHOUSE),
+                        getRequiredValue(params, DATABASE),
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, MYSQL_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, "table-conf"))
-                .ignoreIncompatible(Boolean.parseBoolean(params.get("ignore-incompatible")))
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF))
+                .ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
                 .mergeShards(
-                        !params.has("merge-shards")
-                                || Boolean.parseBoolean(params.get("merge-shards")))
-                .withTablePrefix(params.get("table-prefix"))
-                .withTableSuffix(params.get("table-suffix"))
-                .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"))
-                .withMode(MultiTablesSinkMode.fromString(params.get("mode")));
-        if (params.has("metadata-column")) {
-            action.withMetadataKeys(Arrays.asList(params.get("metadata-column").split(",")));
+                        !params.has(MERGE_SHARDS) || Boolean.parseBoolean(params.get(MERGE_SHARDS)))
+                .withTablePrefix(params.get(TABLE_PREFIX))
+                .withTableSuffix(params.get(TABLE_SUFFIX))
+                .includingTables(params.get(INCLUDING_TABLES))
+                .excludingTables(params.get(EXCLUDING_TABLES))
+                .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
+        if (params.has(METADATA_COLUMN)) {
+            action.withMetadataKeys(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
         }
 
-        if (params.has("type-mapping")) {
-            String[] options = params.get("type-mapping").split(",");
+        if (params.has(TYPE_MAPPING)) {
+            String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
         }
 

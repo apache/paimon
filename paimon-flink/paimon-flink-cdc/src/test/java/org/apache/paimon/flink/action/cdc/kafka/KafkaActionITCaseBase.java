@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 import org.apache.paimon.utils.StringUtils;
 
@@ -264,8 +265,10 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (KafkaSyncTableAction)
                     new KafkaSyncTableActionFactory()
                             .create(params)
@@ -309,8 +312,10 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (KafkaSyncDatabaseAction)
                     new KafkaSyncDatabaseActionFactory()
                             .create(params)

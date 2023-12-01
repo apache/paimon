@@ -20,17 +20,21 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
+
 /** Factory to create {@link MongoDBSyncTableAction}. */
 public class MongoDBSyncTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "mongodb-sync-table";
+    public static final String IDENTIFIER = "mongodb_sync_table";
 
     @Override
     public String identifier() {
@@ -38,27 +42,27 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        checkRequiredArgument(params, "mongodb-conf");
+        checkRequiredArgument(params, MONGODB_CONF);
 
         MongoDBSyncTableAction action =
                 new MongoDBSyncTableAction(
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "mongodb-conf"));
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, MONGODB_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, "table-conf"));
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
 
-        if (params.has("partition-keys")) {
-            action.withPartitionKeys(params.get("partition-keys").split(","));
+        if (params.has(PARTITION_KEYS)) {
+            action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
         }
 
-        if (params.has("computed-column")) {
+        if (params.has(COMPUTED_COLUMN)) {
             action.withComputedColumnArgs(
-                    new ArrayList<>(params.getMultiParameter("computed-column")));
+                    new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
 
         return Optional.of(action);

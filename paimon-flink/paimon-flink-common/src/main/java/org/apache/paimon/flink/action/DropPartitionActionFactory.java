@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,7 @@ import java.util.Optional;
 /** Factory to create {@link DropPartitionAction}. */
 public class DropPartitionActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "drop-partition";
+    public static final String IDENTIFIER = "drop_partition";
 
     @Override
     public String identifier() {
@@ -36,13 +35,13 @@ public class DropPartitionActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        checkRequiredArgument(params, "partition");
+        checkRequiredArgument(params, PARTITION);
         List<Map<String, String>> partitions = getPartitions(params);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         return Optional.of(
                 new DropPartitionAction(

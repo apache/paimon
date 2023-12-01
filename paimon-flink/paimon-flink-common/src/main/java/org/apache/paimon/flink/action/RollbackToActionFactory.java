@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -27,7 +26,9 @@ import java.util.Optional;
 /** Factory to create {@link RollbackToAction}. */
 public class RollbackToActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "rollback-to";
+    public static final String IDENTIFIER = "rollback_to";
+
+    private static final String VERSION = "version";
 
     @Override
     public String identifier() {
@@ -35,13 +36,13 @@ public class RollbackToActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        checkRequiredArgument(params, "version");
-        String version = params.get("version");
+        checkRequiredArgument(params, VERSION);
+        String version = params.get(VERSION);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         RollbackToAction action =
                 new RollbackToAction(

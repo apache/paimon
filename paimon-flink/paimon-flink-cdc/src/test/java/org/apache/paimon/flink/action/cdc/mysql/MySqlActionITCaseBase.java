@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
@@ -130,8 +131,10 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
             args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (MySqlSyncTableAction)
                     new MySqlSyncTableActionFactory()
                             .create(params)
@@ -167,8 +170,10 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
             args.addAll(listToArgs("--metadata-column", metadataColumn));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (MySqlSyncDatabaseAction)
                     new MySqlSyncDatabaseActionFactory()
                             .create(params)

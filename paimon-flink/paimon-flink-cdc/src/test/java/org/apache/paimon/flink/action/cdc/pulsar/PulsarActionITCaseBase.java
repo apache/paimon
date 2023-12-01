@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 import org.apache.paimon.utils.StringUtils;
 
@@ -294,8 +295,10 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (PulsarSyncTableAction)
                     new PulsarSyncTableActionFactory()
                             .create(params)
@@ -339,8 +342,10 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (PulsarSyncDatabaseAction)
                     new PulsarSyncDatabaseActionFactory()
                             .create(params)

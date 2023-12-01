@@ -45,10 +45,20 @@ public interface ActionFactory extends Factory {
 
     Logger LOG = LoggerFactory.getLogger(ActionFactory.class);
 
-    Optional<Action> create(MultipleParameterTool params);
+    String HELP = "help";
+    String WAREHOUSE = "warehouse";
+    String DATABASE = "database";
+    String TABLE = "table";
+    String PATH = "path";
+    String CATALOG_CONF = "catalog_conf";
+    String TABLE_CONF = "table_conf";
+    String PARTITION = "partition";
+
+    Optional<Action> create(MultipleParameterToolAdapter params);
 
     static Optional<Action> createAction(String[] args) {
-        String action = args[0].toLowerCase();
+        // to be compatible with old usage
+        String action = args[0].toLowerCase().replaceAll("-", "_");
         String[] actionArgs = Arrays.copyOfRange(args, 1, args.length);
         ActionFactory actionFactory;
         try {
@@ -62,8 +72,9 @@ public interface ActionFactory extends Factory {
 
         LOG.info("{} job args: {}", actionFactory.identifier(), String.join(" ", actionArgs));
 
-        MultipleParameterTool params = MultipleParameterTool.fromArgs(actionArgs);
-        if (params.has("help")) {
+        MultipleParameterToolAdapter params =
+                new MultipleParameterToolAdapter(MultipleParameterTool.fromArgs(actionArgs));
+        if (params.has(HELP)) {
             actionFactory.printHelp();
             return Optional.empty();
         }
@@ -85,11 +96,11 @@ public interface ActionFactory extends Factory {
         System.out.println("For detailed options of each action, run <action> --help");
     }
 
-    default Tuple3<String, String, String> getTablePath(MultipleParameterTool params) {
-        String warehouse = params.get("warehouse");
-        String database = params.get("database");
-        String table = params.get("table");
-        String path = params.get("path");
+    default Tuple3<String, String, String> getTablePath(MultipleParameterToolAdapter params) {
+        String warehouse = params.get(WAREHOUSE);
+        String database = params.get(DATABASE);
+        String table = params.get(TABLE);
+        String path = params.get(PATH);
 
         Tuple3<String, String, String> tablePath = null;
         int count = 0;
@@ -118,9 +129,9 @@ public interface ActionFactory extends Factory {
         return tablePath;
     }
 
-    default List<Map<String, String>> getPartitions(MultipleParameterTool params) {
+    default List<Map<String, String>> getPartitions(MultipleParameterToolAdapter params) {
         List<Map<String, String>> partitions = new ArrayList<>();
-        for (String partition : params.getMultiParameter("partition")) {
+        for (String partition : params.getMultiParameter(PARTITION)) {
             Map<String, String> kvs = parseCommaSeparatedKeyValues(partition);
             partitions.add(kvs);
         }
@@ -128,8 +139,8 @@ public interface ActionFactory extends Factory {
         return partitions;
     }
 
-    default Map<String, String> optionalConfigMap(MultipleParameterTool params, String key) {
-        if (!params.has(key)) {
+    default Map<String, String> optionalConfigMap(MultipleParameterToolAdapter params, String key) {
+        if (params.has(key)) {
             return Collections.emptyMap();
         }
 
@@ -140,12 +151,12 @@ public interface ActionFactory extends Factory {
         return config;
     }
 
-    default void checkRequiredArgument(MultipleParameterTool params, String key) {
+    default void checkRequiredArgument(MultipleParameterToolAdapter params, String key) {
         Preconditions.checkArgument(
                 params.has(key), "Argument '%s' is required. Run '<action> --help' for help.", key);
     }
 
-    default String getRequiredValue(MultipleParameterTool params, String key) {
+    default String getRequiredValue(MultipleParameterToolAdapter params, String key) {
         checkRequiredArgument(params, key);
         return params.get(key);
     }

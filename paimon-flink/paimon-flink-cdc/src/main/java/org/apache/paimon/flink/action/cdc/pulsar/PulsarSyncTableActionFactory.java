@@ -20,18 +20,24 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
+
 /** Factory to create {@link PulsarSyncTableAction}. */
 public class PulsarSyncTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "pulsar-sync-table";
+    public static final String IDENTIFIER = "pulsar_sync_table";
 
     @Override
     public String identifier() {
@@ -39,34 +45,34 @@ public class PulsarSyncTableActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        checkRequiredArgument(params, "pulsar-conf");
+        checkRequiredArgument(params, PULSAR_CONF);
 
         PulsarSyncTableAction action =
                 new PulsarSyncTableAction(
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "pulsar-conf"));
-        action.withTableConfig(optionalConfigMap(params, "table-conf"));
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, PULSAR_CONF));
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
 
-        if (params.has("partition-keys")) {
-            action.withPartitionKeys(params.get("partition-keys").split(","));
+        if (params.has(PARTITION_KEYS)) {
+            action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
         }
 
-        if (params.has("primary-keys")) {
-            action.withPrimaryKeys(params.get("primary-keys").split(","));
+        if (params.has(PRIMARY_KEYS)) {
+            action.withPrimaryKeys(params.get(PRIMARY_KEYS).split(","));
         }
 
-        if (params.has("computed-column")) {
+        if (params.has(COMPUTED_COLUMN)) {
             action.withComputedColumnArgs(
-                    new ArrayList<>(params.getMultiParameter("computed-column")));
+                    new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
 
-        if (params.has("type-mapping")) {
-            String[] options = params.get("type-mapping").split(",");
+        if (params.has(TYPE_MAPPING)) {
+            String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
         }
 

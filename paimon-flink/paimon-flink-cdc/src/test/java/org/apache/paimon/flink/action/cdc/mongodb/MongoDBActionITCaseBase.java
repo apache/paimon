@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import com.mongodb.ConnectionString;
@@ -125,8 +126,10 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--partition-keys", partitionKeys));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (MongoDBSyncTableAction)
                     new MongoDBSyncTableActionFactory()
                             .create(params)
@@ -172,8 +175,10 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(nullableToArgs("--including-tables", includingTables));
             args.addAll(nullableToArgs("--excluding-tables", excludingTables));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
+            MultipleParameterToolAdapter params =
+                    new MultipleParameterToolAdapter(
+                            MultipleParameterTool.fromArgs(
+                                    args.toArray(args.toArray(new String[0]))));
             return (MongoDBSyncDatabaseAction)
                     new MongoDBSyncDatabaseActionFactory()
                             .create(params)
