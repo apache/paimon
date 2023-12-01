@@ -44,7 +44,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
 
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, "kafka-conf");
+        checkRequiredArgument(params, KAFKA_CONF);
 
         KafkaSyncDatabaseAction action =
                 new KafkaSyncDatabaseAction(
