@@ -362,12 +362,12 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --consumer-id <consumer-id> \
-    [--next-snapshot <next-snapshot-id>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    --consumer_id <consumer-id> \
+    [--next_snapshot <next-snapshot-id>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
-please don't specify --next-snapshot parameter if you want to delete the consumer.
+please don't specify --next_snapshot parameter if you want to delete the consumer.
 
 {{< /tab >}}
 

@@ -81,17 +81,17 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-table
+    pulsar_sync_table
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    [--partition-keys <partition-keys>] \
-    [--primary-keys <primary-keys>] \
-    [--type-mapping to-string] \
-    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
-    [--pulsar-conf <pulsar-source-conf> [--pulsar-conf <pulsar-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
+    [--type_mapping to-string] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--pulsar_conf <pulsar-source-conf> [--pulsar_conf <pulsar-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/pulsar_sync_table >}}
@@ -103,30 +103,30 @@ Example 1:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-table \
+    pulsar_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --primary-keys pt,uid \
-    --computed-column '_year=year(age)' \
-    --pulsar-conf topic=order \
-    --pulsar-conf value.format=canal-json \
-    --pulsar-conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
-    --pulsar-conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
-    --pulsar-conf pulsar.consumer.subscriptionName=paimon-tests \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --primary_keys pt,uid \
+    --computed_column '_year=year(age)' \
+    --pulsar_conf topic=order \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 If the Pulsar topic doesn't contain message when you start the synchronization job, you must manually create the table
 before submitting the job. You can define the partition keys and primary keys only, and the left columns will be added
 by the synchronization job.
 
-NOTE: In this case you shouldn't use --partition-keys or --primary-keys, because those keys are defined when creating
+NOTE: In this case you shouldn't use --partition_keys or --primary_keys, because those keys are defined when creating
 the table and can not be modified. Additionally, if you specified computed columns, you should also define all the argument
 columns used for computed columns.
 
@@ -148,11 +148,11 @@ Then you can submit synchronization job:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-table \
+    pulsar_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --computed-column 'part=date_format(create_time,yyyy-MM-dd)' \
+    --computed_column 'part=date_format(create_time,yyyy-MM-dd)' \
     ... (other conf)
 ```
 
@@ -165,17 +165,17 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-database
+    pulsar_sync_database
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--table-prefix <paimon-table-prefix>] \
-    [--table-suffix <paimon-table-suffix>] \
-    [--including-tables <table-name|name-regular-expr>] \
-    [--excluding-tables <table-name|name-regular-expr>] \
-    [--type-mapping to-string] \
-    [--pulsar-conf <pulsar-source-conf> [--pulsar-conf <pulsar-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <table-name|name-regular-expr>] \
+    [--excluding_tables <table-name|name-regular-expr>] \
+    [--type_mapping to-string] \
+    [--pulsar_conf <pulsar-source-conf> [--pulsar_conf <pulsar-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/pulsar_sync_database >}}
@@ -194,19 +194,19 @@ Synchronization from one Pulsar topic to Paimon database.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-database \
+    pulsar_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --pulsar-conf topic=order \
-    --pulsar-conf value.format=canal-json \
-    --pulsar-conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
-    --pulsar-conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
-    --pulsar-conf pulsar.consumer.subscriptionName=paimon-tests \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --pulsar_conf topic=order \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 Synchronization from multiple Pulsar topics to Paimon database.
@@ -214,17 +214,17 @@ Synchronization from multiple Pulsar topics to Paimon database.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    pulsar-sync-database \
+    pulsar_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --pulsar-conf topic=order,logistic_order,user \
-    --pulsar-conf value.format=canal-json \
-    --pulsar-conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
-    --pulsar-conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
-    --pulsar-conf pulsar.consumer.subscriptionName=paimon-tests \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --pulsar_conf topic=order,logistic_order,user \
+    --pulsar_conf value.format=canal-json \
+    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \
+    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \
+    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```

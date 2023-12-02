@@ -273,7 +273,7 @@ ALTER TABLE my_table DROP COLUMN c1;
 
 The following SQL drops the partitions of the paimon table.
 
-{{< tabs "drop-partitions" >}}
+{{< tabs "drop_partitions" >}}
 
 {{< tab "Flink" >}}
 
