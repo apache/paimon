@@ -82,21 +82,21 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"kafka-sync-table\" creates a streaming job "
+                "Action \"kafka_sync_table\" creates a streaming job "
                         + "with a Flink Kafka Canal CDC source and a Paimon table sink to consume CDC events.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  kafka-sync-table --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> "
-                        + "[--partition-keys <partition-keys>] "
-                        + "[--primary-keys <primary-keys>] "
-                        + "[--type-mapping <option1,option2...>] "
-                        + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
-                        + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
-                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                "  kafka_sync_table --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> "
+                        + "[--partition_keys <partition_keys>] "
+                        + "[--primary_keys <primary_keys>] "
+                        + "[--type_mapping <option1,option2...>] "
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
+                        + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -112,10 +112,10 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
-        System.out.println("Please see doc for usage of --computed-column.");
+        System.out.println("Please see doc for usage of --computed_column.");
         System.out.println();
 
         System.out.println("kafka source conf syntax:");
@@ -137,20 +137,20 @@ public class KafkaSyncTableActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  kafka-sync-table \\\n"
+                "  kafka_sync_table \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
                         + "    --table test_table \\\n"
-                        + "    --partition-keys pt \\\n"
-                        + "    --primary-keys pt,uid \\\n"
-                        + "    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
-                        + "    --kafka-conf topic=order \\\n"
-                        + "    --kafka-conf properties.group.id=123456 \\\n"
-                        + "    --kafka-conf value.format=canal-json \\\n"
-                        + "    --catalog-conf metastore=hive \\\n"
-                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
-                        + "    --table-conf bucket=4 \\\n"
-                        + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --partition_keys pt \\\n"
+                        + "    --primary_keys pt,uid \\\n"
+                        + "    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
+                        + "    --kafka_conf topic=order \\\n"
+                        + "    --kafka_conf properties.group.id=123456 \\\n"
+                        + "    --kafka_conf value.format=canal-json \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }

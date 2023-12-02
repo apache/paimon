@@ -71,19 +71,19 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"mongodb-sync-table\" creates a streaming job "
+                "Action \"mongodb_sync_table\" creates a streaming job "
                         + "with a Flink mongodb CDC source and a Paimon table sink to consume CDC events.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mongodb-sync-table --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> "
-                        + "[--partition-keys <partition-keys>] "
-                        + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
-                        + "[--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] "
-                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                "  mongodb_sync_table --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> "
+                        + "[--partition_keys <partition_keys>] "
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
+                        + "[--mongodb_conf <mongodb_cdc_source_conf> [--mongodb_conf <mongodb_cdc_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -93,7 +93,7 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                         + "this action will automatically create an unpartitioned Paimon table.");
         System.out.println();
 
-        System.out.println("Please see doc for usage of --computed-column.");
+        System.out.println("Please see doc for usage of --computed_column.");
         System.out.println();
 
         System.out.println("mongodb CDC source conf syntax:");
@@ -102,7 +102,7 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
                 "'hosts', 'username', 'password', 'database' and 'collection' "
                         + "are required configurations, others are optional.");
         System.out.println(
-                "The 'mongodb-conf' introduces the 'schema.start.mode' parameter on top of the MongoDB CDC source configuration. 'schema.start.mode' provides two modes: 'dynamic' (default) and 'specified'."
+                "The 'mongodb_conf' introduces the 'schema.start.mode' parameter on top of the MongoDB CDC source configuration. 'schema.start.mode' provides two modes: 'dynamic' (default) and 'specified'."
                         + "In 'dynamic' mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution."
                         + "In 'specified' mode, synchronization takes place according to specified criteria."
                         + "This can be done by configuring 'field.name' to specify the synchronization fields and 'parser.path' to specify the JSON parsing path for those fields.");
@@ -120,20 +120,20 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  mongodb-sync-table \\\n"
+                "  mongodb_sync_table \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
                         + "    --table test_table \\\n"
-                        + "    --partition-keys pt \\\n"
-                        + "    --mongodb-conf hosts=127.0.0.1:27017 \\\n"
-                        + "    --mongodb-conf username=root \\\n"
-                        + "    --mongodb-conf password=123456 \\\n"
-                        + "    --mongodb-conf database=source_db \\\n"
-                        + "    --mongodb-conf collection='source_table' \\\n"
-                        + "    --catalog-conf metastore=hive \\\n"
-                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
-                        + "    --table-conf bucket=4 \\\n"
-                        + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --partition_keys pt \\\n"
+                        + "    --mongodb_conf hosts=127.0.0.1:27017 \\\n"
+                        + "    --mongodb_conf username=root \\\n"
+                        + "    --mongodb_conf password=123456 \\\n"
+                        + "    --mongodb_conf database=source_db \\\n"
+                        + "    --mongodb_conf collection='source_table' \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }

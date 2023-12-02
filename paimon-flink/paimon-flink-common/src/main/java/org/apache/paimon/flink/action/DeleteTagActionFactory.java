@@ -51,13 +51,13 @@ public class DeleteTagActionFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"delete-tag\" deletes a tag by name.");
+        System.out.println("Action \"delete_tag\" deletes a tag by name.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete-tag --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --tag-name <tag-name>");
+                "  delete_tag --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --tag_name <tag_name>");
         System.out.println();
     }
 }
