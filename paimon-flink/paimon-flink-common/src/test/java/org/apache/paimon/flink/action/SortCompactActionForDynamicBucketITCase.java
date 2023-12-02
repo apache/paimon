@@ -41,7 +41,6 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -155,15 +154,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
     private void zorder(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
-            new SortCompactAction(
-                            warehouse,
-                            database,
-                            tableName,
-                            Collections.emptyMap(),
-                            Collections.emptyMap())
-                    .withOrderStrategy("zorder")
-                    .withOrderColumns(columns)
-                    .run();
+            createAction("zorder", columns).run();
         } else {
             callProcedure("zorder", columns);
         }
@@ -171,18 +162,26 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
     private void order(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
-            new SortCompactAction(
-                            warehouse,
-                            database,
-                            tableName,
-                            Collections.emptyMap(),
-                            Collections.emptyMap())
-                    .withOrderStrategy("order")
-                    .withOrderColumns(columns)
-                    .run();
+            createAction("order", columns).run();
         } else {
             callProcedure("order", columns);
         }
+    }
+
+    private SortCompactAction createAction(String orderStrategy, List<String> columns) {
+        return createAction(
+                SortCompactAction.class,
+                "compact",
+                "--warehouse",
+                warehouse,
+                "--database",
+                database,
+                "--table",
+                tableName,
+                "--order_strategy",
+                orderStrategy,
+                "--order_by",
+                String.join(",", columns));
     }
 
     private void callProcedure(String orderStrategy, List<String> orderByColumns) {

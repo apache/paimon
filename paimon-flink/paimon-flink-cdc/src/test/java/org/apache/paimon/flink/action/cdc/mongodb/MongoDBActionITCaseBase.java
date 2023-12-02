@@ -24,7 +24,6 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -111,6 +110,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             List<String> args =
                     new ArrayList<>(
                             Arrays.asList(
+                                    "mongodb_sync_table",
                                     "--warehouse",
                                     warehouse,
                                     "--database",
@@ -125,12 +125,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--partition-keys", partitionKeys));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (MongoDBSyncTableAction)
-                    new MongoDBSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(MongoDBSyncTableAction.class, args);
         }
     }
 
@@ -161,7 +156,12 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
         public MongoDBSyncDatabaseAction build() {
             List<String> args =
                     new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
+                            Arrays.asList(
+                                    "mongodb_sync_database",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database));
 
             args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
@@ -172,12 +172,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(nullableToArgs("--including-tables", includingTables));
             args.addAll(nullableToArgs("--excluding-tables", excludingTables));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (MongoDBSyncDatabaseAction)
-                    new MongoDBSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(MongoDBSyncDatabaseAction.class, args);
         }
     }
 }

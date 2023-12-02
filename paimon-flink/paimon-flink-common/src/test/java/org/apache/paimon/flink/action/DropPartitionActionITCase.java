@@ -56,12 +56,18 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         FileStoreTable table = prepareTable(hasPk);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new DropPartitionAction(
+
+            createAction(
+                            DropPartitionAction.class,
+                            "drop_partition",
+                            "--warehouse",
                             warehouse,
+                            "--database",
                             database,
+                            "--table",
                             tableName,
-                            Collections.singletonList(Collections.singletonMap("partKey0", "0")),
-                            Collections.emptyMap())
+                            "--partition",
+                            "partKey0=0")
                     .run();
         } else {
             callProcedure(
@@ -115,12 +121,19 @@ public class DropPartitionActionITCase extends ActionITCaseBase {
         partitions1.put("partKey1", "0");
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new DropPartitionAction(
+            createAction(
+                            DropPartitionAction.class,
+                            "drop_partition",
+                            "--warehouse",
                             warehouse,
+                            "--database",
                             database,
+                            "--table",
                             tableName,
-                            Arrays.asList(partitions0, partitions1),
-                            Collections.emptyMap())
+                            "--partition",
+                            "partKey0=0,partKey1=1",
+                            "--partition",
+                            "partKey0=1,partKey1=0")
                     .run();
         } else {
             callProcedure(

@@ -27,7 +27,10 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 
@@ -54,11 +57,23 @@ public class RemoveOrphanFilesActionITCase extends ActionITCaseBase {
 
         writeData(rowData(1L, BinaryString.fromString("Hi")));
 
-        RemoveOrphanFilesAction action =
-                new RemoveOrphanFilesAction(warehouse, database, tableName, Collections.emptyMap());
-        assertThatCode(action::run).doesNotThrowAnyException();
-        assertThatCode(() -> action.olderThan("2023-12-31 23:59:59").run())
-                .doesNotThrowAnyException();
+        List<String> args =
+                new ArrayList<>(
+                        Arrays.asList(
+                                "remove_orphan_files",
+                                "--warehouse",
+                                warehouse,
+                                "--database",
+                                database,
+                                "--table",
+                                tableName));
+        RemoveOrphanFilesAction action1 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action1::run).doesNotThrowAnyException();
+
+        args.add("--older_than");
+        args.add("2023-12-31 23:59:59");
+        RemoveOrphanFilesAction action2 = createAction(RemoveOrphanFilesAction.class, args);
+        assertThatCode(action2::run).doesNotThrowAnyException();
 
         String withoutOlderThan =
                 String.format("CALL sys.remove_orphan_files('%s.%s')", database, tableName);

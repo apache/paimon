@@ -18,14 +18,17 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-
 import java.util.Optional;
 
 /** Factory to create {@link CompactDatabaseAction}. */
 public class CompactDatabaseActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "compact-database";
+    public static final String IDENTIFIER = "compact_database";
+
+    private static final String INCLUDING_DATABASES = "including_databases";
+    private static final String INCLUDING_TABLES = "including_tables";
+    private static final String EXCLUDING_TABLES = "excluding_tables";
+    private static final String MODE = "mode";
 
     @Override
     public String identifier() {
@@ -33,17 +36,17 @@ public class CompactDatabaseActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         CompactDatabaseAction action =
                 new CompactDatabaseAction(
-                        getRequiredValue(params, "warehouse"),
-                        optionalConfigMap(params, "catalog-conf"));
+                        getRequiredValue(params, WAREHOUSE),
+                        optionalConfigMap(params, CATALOG_CONF));
 
-        action.includingDatabases(params.get("including-databases"))
-                .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"))
-                .withDatabaseCompactMode(params.get("mode"))
-                .withTableOptions(optionalConfigMap(params, "table-conf"));
+        action.includingDatabases(params.get(INCLUDING_DATABASES))
+                .includingTables(params.get(INCLUDING_TABLES))
+                .excludingTables(params.get(EXCLUDING_TABLES))
+                .withDatabaseCompactMode(params.get(MODE))
+                .withTableOptions(optionalConfigMap(params, TABLE_CONF));
 
         return Optional.of(action);
     }

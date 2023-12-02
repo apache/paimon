@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -31,7 +30,7 @@ import java.util.stream.Collectors;
 /** Factory to create {@link MergeIntoAction}. */
 public class MergeIntoActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "merge-into";
+    public static final String IDENTIFIER = "merge_into";
 
     public static final String MATCHED_UPSERT = "matched-upsert";
     public static final String NOT_MATCHED_BY_SOURCE_UPSERT = "not-matched-by-source-upsert";
@@ -39,62 +38,78 @@ public class MergeIntoActionFactory implements ActionFactory {
     public static final String NOT_MATCHED_BY_SOURCE_DELETE = "not-matched-by-source-delete";
     public static final String NOT_MATCHED_INSERT = "not-matched-insert";
 
+    private static final String TARGET_AS = "target_as";
+    private static final String SOURCE_SQL = "source_sql";
+    private static final String SOURCE_TABLE = "source_table";
+    private static final String ON = "on";
+    private static final String MERGE_ACTIONS = "merge_actions";
+    private static final String MATCHED_UPSERT_SET = "matched_upsert_set";
+    private static final String MATCHED_UPSERT_CONDITION = "matched_upsert_condition";
+    private static final String NOT_MATCHED_BY_SOURCE_UPSERT_SET =
+            "not_matched_by_source_upsert_set";
+    private static final String NOT_MATCHED_BY_SOURCE_UPSERT_CONDITION =
+            "not_matched_by_source_upsert_condition";
+    private static final String MATCHED_DELETE_CONDITION = "matched_delete_condition";
+    private static final String NOT_MATCHED_BY_SOURCE_DELETE_CONDITION =
+            "not_matched_by_source_delete_condition";
+    private static final String NOT_MATCHED_INSERT_VALUES = "not_matched_insert_values";
+    private static final String NOT_MATCHED_INSERT_CONDITION = "not_matched_insert_condition";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         MergeIntoAction action =
                 new MergeIntoAction(tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
 
-        if (params.has("target-as")) {
-            action.withTargetAlias(params.get("target-as"));
+        if (params.has(TARGET_AS)) {
+            action.withTargetAlias(params.get(TARGET_AS));
         }
 
-        if (params.has("source-sql")) {
-            Collection<String> sourceSqls = params.getMultiParameter("source-sql");
+        if (params.has(SOURCE_SQL)) {
+            Collection<String> sourceSqls = params.getMultiParameter(SOURCE_SQL);
             action.withSourceSqls(sourceSqls.toArray(new String[0]));
         }
 
-        checkRequiredArgument(params, "source-table");
-        action.withSourceTable(params.get("source-table"));
+        checkRequiredArgument(params, SOURCE_TABLE);
+        action.withSourceTable(params.get(SOURCE_TABLE));
 
-        checkRequiredArgument(params, "on");
-        action.withMergeCondition(params.get("on"));
+        checkRequiredArgument(params, ON);
+        action.withMergeCondition(params.get(ON));
 
         List<String> actions =
-                Arrays.stream(params.get("merge-actions").split(","))
+                Arrays.stream(params.get(MERGE_ACTIONS).split(","))
                         .map(String::trim)
                         .collect(Collectors.toList());
         if (actions.contains(MATCHED_UPSERT)) {
-            checkRequiredArgument(params, "matched-upsert-set");
+            checkRequiredArgument(params, MATCHED_UPSERT_SET);
             action.withMatchedUpsert(
-                    params.get("matched-upsert-condition"), params.get("matched-upsert-set"));
+                    params.get(MATCHED_UPSERT_CONDITION), params.get(MATCHED_UPSERT_SET));
         }
         if (actions.contains(NOT_MATCHED_BY_SOURCE_UPSERT)) {
-            checkRequiredArgument(params, "not-matched-by-source-upsert-set");
+            checkRequiredArgument(params, NOT_MATCHED_BY_SOURCE_UPSERT_SET);
             action.withNotMatchedBySourceUpsert(
-                    params.get("not-matched-by-source-upsert-condition"),
-                    params.get("not-matched-by-source-upsert-set"));
+                    params.get(NOT_MATCHED_BY_SOURCE_UPSERT_CONDITION),
+                    params.get(NOT_MATCHED_BY_SOURCE_UPSERT_SET));
         }
         if (actions.contains(MATCHED_DELETE)) {
-            action.withMatchedDelete(params.get("matched-delete-condition"));
+            action.withMatchedDelete(params.get(MATCHED_DELETE_CONDITION));
         }
         if (actions.contains(NOT_MATCHED_BY_SOURCE_DELETE)) {
-            action.withNotMatchedBySourceDelete(
-                    params.get("not-matched-by-source-delete-condition"));
+            action.withNotMatchedBySourceDelete(params.get(NOT_MATCHED_BY_SOURCE_DELETE_CONDITION));
         }
         if (actions.contains(NOT_MATCHED_INSERT)) {
-            checkRequiredArgument(params, "not-matched-insert-values");
+            checkRequiredArgument(params, NOT_MATCHED_INSERT_VALUES);
             action.withNotMatchedInsert(
-                    params.get("not-matched-insert-condition"),
-                    params.get("not-matched-insert-values"));
+                    params.get(NOT_MATCHED_INSERT_CONDITION),
+                    params.get(NOT_MATCHED_INSERT_VALUES));
         }
 
         validate(action);
