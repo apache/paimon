@@ -70,7 +70,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"kafka-sync-database\" creates a streaming job "
+                "Action \"kafka_sync_database\" creates a streaming job "
                         + "with a Flink Kafka source and multiple Paimon table sinks "
                         + "to synchronize multiple tables into one Paimon database.\n"
                         + "Only tables with primary keys will be considered. ");
@@ -78,35 +78,35 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  kafka-sync-database --warehouse <warehouse-path> --database <database-name> "
-                        + "[--table-prefix <paimon-table-prefix>] "
-                        + "[--table-suffix <paimon-table-suffix>] "
-                        + "[--including-tables <table-name|name-regular-expr>] "
-                        + "[--excluding-tables <table-name|name-regular-expr>] "
-                        + "[--type-mapping <option1,option2...>] "
-                        + "[--kafka-conf <kafka-source-conf> [--kafka-conf <kafka-source-conf> ...]] "
-                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                "  kafka_sync_database --warehouse <warehouse_path> --database <database_name> "
+                        + "[--table_prefix <paimon_table_prefix>] "
+                        + "[--table_suffix <paimon_table_suffix>] "
+                        + "[--including_tables <table_name|name_regular_expr>] "
+                        + "[--excluding_tables <table_name|name_regular_expr>] "
+                        + "[--type_mapping <option1,option2...>] "
+                        + "[--kafka_conf <kafka_source_conf> [--kafka_conf <kafka_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
         System.out.println(
-                "--table-prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
-                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table-prefix ods_`.");
-        System.out.println("The usage of --table-suffix is same as `--table-prefix`");
+                "--table_prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
+                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table_prefix ods_`.");
+        System.out.println("The usage of --table_suffix is same as `--table_prefix`");
         System.out.println();
 
         System.out.println(
-                "--including-tables is used to specify which source tables are to be synchronized. "
+                "--including_tables is used to specify which source tables are to be synchronized. "
                         + "You must use '|' to separate multiple tables. Regular expression is supported.");
         System.out.println(
-                "--excluding-tables is used to specify which source tables are not to be synchronized. "
-                        + "The usage is same as --including-tables.");
+                "--excluding_tables is used to specify which source tables are not to be synchronized. "
+                        + "The usage is same as --including_tables.");
         System.out.println(
-                "--excluding-tables has higher priority than --including-tables if you specified both.");
+                "--excluding_tables has higher priority than --including_tables if you specified both.");
         System.out.println();
 
         System.out.println(
-                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("kafka source conf syntax:");
@@ -130,17 +130,17 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  kafka-sync-database \\\n"
+                "  kafka_sync_database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
-                        + "    --kafka-conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
-                        + "    --kafka-conf topic=order\\;logistic\\;user \\\n"
-                        + "    --kafka-conf properties.group.id=123456 \\\n"
-                        + "    --kafka-conf value.format=canal-json \\\n"
-                        + "    --catalog-conf metastore=hive \\\n"
-                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
-                        + "    --table-conf bucket=4 \\\n"
-                        + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --kafka_conf properties.bootstrap.servers=127.0.0.1:9020 \\\n"
+                        + "    --kafka_conf topic=order\\;logistic\\;user \\\n"
+                        + "    --kafka_conf properties.group.id=123456 \\\n"
+                        + "    --kafka_conf value.format=canal-json \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }

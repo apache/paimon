@@ -58,18 +58,18 @@ public class ResetConsumerActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"reset-consumer\" reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.");
+                "Action \"reset_consumer\" reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  reset-consumer --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --consumer-id <consumer-id> [--next-snapshot <next-snapshot-id>]");
+                "  reset_consumer --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --consumer_id <consumer_id> [--next_snapshot <next_snapshot_id>]");
 
         System.out.println();
         System.out.println("Note:");
         System.out.println(
-                "  please don't specify --next-snapshot parameter if you want to delete the consumer.");
+                "  please don't specify --next_snapshot parameter if you want to delete the consumer.");
         System.out.println();
     }
 }

@@ -88,22 +88,22 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"mysql-sync-table\" creates a streaming job "
+                "Action \"mysql_sync_table\" creates a streaming job "
                         + "with a Flink MySQL CDC source and a Paimon table sink to consume CDC events.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  mysql-sync-table --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> "
-                        + "[--partition-keys <partition-keys>] "
-                        + "[--primary-keys <primary-keys>] "
-                        + "[--type-mapping <option1,option2...>] "
-                        + "[--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] "
-                        + "[--metadata-column <metadata-column>] "
-                        + "[--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] "
-                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                "  mysql_sync_table --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> "
+                        + "[--partition_keys <partition_keys>] "
+                        + "[--primary_keys <primary_keys>] "
+                        + "[--type_mapping <option1,option2...>] "
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
+                        + "[--metadata_column <metadata_column>] "
+                        + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
         System.out.println("Partition keys syntax:");
@@ -119,14 +119,14 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
-        System.out.println("Please see doc for usage of --computed-column.");
+        System.out.println("Please see doc for usage of --computed_column.");
         System.out.println();
 
         System.out.println(
-                "--metadata-column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
+                "--metadata_column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");
@@ -148,21 +148,21 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  mysql-sync-table \\\n"
+                "  mysql_sync_table \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
                         + "    --table test_table \\\n"
-                        + "    --partition-keys pt \\\n"
-                        + "    --primary-keys pt,uid \\\n"
-                        + "    --mysql-conf hostname=127.0.0.1 \\\n"
-                        + "    --mysql-conf username=root \\\n"
-                        + "    --mysql-conf password=123456 \\\n"
-                        + "    --mysql-conf database-name=source_db \\\n"
-                        + "    --mysql-conf table-name='source_table' \\\n"
-                        + "    --catalog-conf metastore=hive \\\n"
-                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
-                        + "    --table-conf bucket=4 \\\n"
-                        + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --partition_keys pt \\\n"
+                        + "    --primary_keys pt,uid \\\n"
+                        + "    --mysql_conf hostname=127.0.0.1 \\\n"
+                        + "    --mysql_conf username=root \\\n"
+                        + "    --mysql_conf password=123456 \\\n"
+                        + "    --mysql_conf database-name=source_db \\\n"
+                        + "    --mysql_conf table-name='source_table' \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }
