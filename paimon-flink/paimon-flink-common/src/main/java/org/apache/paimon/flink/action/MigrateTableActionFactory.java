@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-
 import java.util.Map;
 import java.util.Optional;
 
@@ -28,18 +26,21 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "migrate_table";
 
+    private static final String SOURCE_TYPE = "source_type";
+    private static final String OPTIONS = "options";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        String warehouse = params.get("warehouse");
-        String connector = params.get("source_type");
-        String sourceHiveTable = params.get("table");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tableConf = params.get("options");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        String warehouse = params.get(WAREHOUSE);
+        String connector = params.get(SOURCE_TYPE);
+        String sourceHiveTable = params.get(TABLE);
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String tableConf = params.get(OPTIONS);
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(

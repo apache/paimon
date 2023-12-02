@@ -20,36 +20,41 @@ package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
-
-import org.apache.flink.api.java.utils.MultipleParameterTool;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 
 import java.util.Optional;
+
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
 
 /** Factory to create {@link MongoDBSyncDatabaseAction}. */
 public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "mongodb-sync-database";
+    public static final String IDENTIFIER = "mongodb_sync_database";
 
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "mongodb-conf");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, MONGODB_CONF);
 
         MongoDBSyncDatabaseAction action =
                 new MongoDBSyncDatabaseAction(
-                        getRequiredValue(params, "warehouse"),
-                        getRequiredValue(params, "database"),
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "mongodb-conf"));
+                        getRequiredValue(params, WAREHOUSE),
+                        getRequiredValue(params, DATABASE),
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, MONGODB_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, "table-conf"))
-                .withTablePrefix(params.get("table-prefix"))
-                .withTableSuffix(params.get("table-suffix"))
-                .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"));
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF))
+                .withTablePrefix(params.get(TABLE_PREFIX))
+                .withTableSuffix(params.get(TABLE_SUFFIX))
+                .includingTables(params.get(INCLUDING_TABLES))
+                .excludingTables(params.get(EXCLUDING_TABLES));
 
         return Optional.of(action);
     }

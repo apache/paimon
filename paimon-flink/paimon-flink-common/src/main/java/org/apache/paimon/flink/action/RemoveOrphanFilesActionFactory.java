@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -27,7 +26,9 @@ import java.util.Optional;
 /** Factory to create {@link RemoveOrphanFilesAction}. */
 public class RemoveOrphanFilesActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "remove-orphan-files";
+    public static final String IDENTIFIER = "remove_orphan_files";
+
+    private static final String OLDER_THAN = "older_than";
 
     @Override
     public String identifier() {
@@ -35,16 +36,16 @@ public class RemoveOrphanFilesActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         RemoveOrphanFilesAction action =
                 new RemoveOrphanFilesAction(
                         tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig);
 
-        if (params.has("older-than")) {
-            action.olderThan(params.get("olderThan"));
+        if (params.has(OLDER_THAN)) {
+            action.olderThan(params.get(OLDER_THAN));
         }
 
         return Optional.of(action);
