@@ -244,7 +244,7 @@ Run the following command:
     --database <database-name> \ 
     --table <table-name> \
     --version <snapshot-id> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
 {{< /tab >}}

@@ -78,18 +78,18 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 ## Computed Functions
 
-`--computed-column` are the definitions of computed columns. The argument field is from source table field name. Supported expressions are:
+`--computed_column` are the definitions of computed columns. The argument field is from source table field name. Supported expressions are:
 
 {{< generated/compute_column >}}
 
 ## Special Data Type Mapping
 
 1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL,
-   you can specify type mapping option `tinyint1-not-bool` (Use `--type-mapping`), then the column will be mapped to TINYINT in Paimon table.
-2. You can use type mapping option `to-nullable` (Use `--type-mapping`) to ignore all NOT NULL constraints (except primary keys).
-3. You can use type mapping option `to-string` (Use `--type-mapping`) to map all MySQL data type to STRING.
-4. You can use type mapping option `char-to-string` (Use `--type-mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
-5. You can use type mapping option `longtext-to-bytes` (Use `--type-mapping`) to map MySQL LONGTEXT types to BYTES.
+   you can specify type mapping option `tinyint1-not-bool` (Use `--type_mapping`), then the column will be mapped to TINYINT in Paimon table.
+2. You can use type mapping option `to-nullable` (Use `--type_mapping`) to ignore all NOT NULL constraints (except primary keys).
+3. You can use type mapping option `to-string` (Use `--type_mapping`) to map all MySQL data type to STRING.
+4. You can use type mapping option `char-to-string` (Use `--type_mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
+5. You can use type mapping option `longtext-to-bytes` (Use `--type_mapping`) to map MySQL LONGTEXT types to BYTES.
 6. MySQL BIT(1) type will be mapped to Boolean.
 7. When using Hive catalog, MySQL TIME type will be mapped to STRING.
 8. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
