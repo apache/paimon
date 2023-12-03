@@ -76,6 +76,12 @@ public class TableWriteImpl<T>
     }
 
     @Override
+    public TableWriteImpl<T> setOverwrite(boolean overwrite) {
+        write.setOverwrite(overwrite);
+        return this;
+    }
+
+    @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         write.withIOManager(ioManager);
         return this;

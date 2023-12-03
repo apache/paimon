@@ -25,4 +25,6 @@ public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
 
     // we detect whether in streaming mode, and do some optimization
     InnerTableWrite isStreamingMode(boolean isStreamingMode);
+
+    InnerTableWrite setOverwrite(boolean overwrite);
 }

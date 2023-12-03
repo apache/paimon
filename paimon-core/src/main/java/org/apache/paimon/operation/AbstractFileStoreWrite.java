@@ -79,6 +79,7 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
     private MetricRegistry metricRegistry = null;
+    protected boolean overwrite = false;
 
     protected final String tableName;
     private final FileStorePathFactory pathFactory;
@@ -354,6 +355,11 @@ public abstract class AbstractFileStoreWrite<T>
     @Override
     public void isStreamingMode(boolean isStreamingMode) {
         this.isStreamingMode = isStreamingMode;
+    }
+
+    @Override
+    public void setOverwrite(boolean overwrite) {
+        this.overwrite = overwrite;
     }
 
     @Override

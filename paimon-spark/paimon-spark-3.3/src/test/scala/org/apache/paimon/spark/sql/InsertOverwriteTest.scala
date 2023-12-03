@@ -37,7 +37,8 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |'num-sorted-run.compaction-trigger'='1')
                          |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
@@ -66,7 +67,8 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |'num-sorted-run.compaction-trigger'='1')
                          |PARTITIONED BY (a)
                          |""".stripMargin)
 
@@ -104,7 +106,8 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |'num-sorted-run.compaction-trigger'='1')
                          |PARTITIONED BY (pt1, pt2)
                          |""".stripMargin)
 
@@ -187,6 +190,7 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
         spark.sql(s"""
                      |CREATE TABLE T (a INT, b STRING, pt $ptField)
+                     |TBLPROPERTIES ('num-sorted-run.compaction-trigger'='1')
                      |PARTITIONED BY (pt)
                      |""".stripMargin)
 
@@ -224,7 +228,8 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b INT, c STRING)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |'num-sorted-run.compaction-trigger'='1')
                          |PARTITIONED BY (a)
                          |""".stripMargin)
 
@@ -264,7 +269,8 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
 
             spark.sql(s"""
                          |CREATE TABLE T (a INT, b STRING, pt1 STRING, pt2 INT)
-                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket',
+                         |'num-sorted-run.compaction-trigger'='1')
                          |PARTITIONED BY (pt1, pt2)
                          |""".stripMargin)
 
