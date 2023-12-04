@@ -21,15 +21,23 @@ package org.apache.paimon.operation;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
+import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
+import org.apache.paimon.utils.Restorable;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
 
 /**
  * Write operation which provides {@link RecordWriter} creation and writes {@link SinkRecord} to
@@ -37,7 +45,7 @@ import java.util.List;
  *
  * @param <T> type of record to write.
  */
-public interface FileStoreWrite<T> {
+public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<T>>> {
 
     FileStoreWrite<T> withIOManager(IOManager ioManager);
 
@@ -63,6 +71,18 @@ public interface FileStoreWrite<T> {
      * @param ignorePreviousFiles whether the write operation should ignore previously stored files.
      */
     void withIgnorePreviousFiles(boolean ignorePreviousFiles);
+
+    /**
+     * We detect whether it is in batch mode, if so, we do some optimization.
+     *
+     * @param isStreamingMode whether in streaming mode
+     */
+    void withExecutionMode(boolean isStreamingMode);
+
+    /** With metrics to measure compaction. */
+    FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
+
+    void withCompactExecutor(ExecutorService compactExecutor);
 
     /**
      * Write the data to the store according to the partition and bucket.
@@ -110,19 +130,52 @@ public interface FileStoreWrite<T> {
             throws Exception;
 
     /**
-     * We detect whether it is in batch mode, if so, we do some optimization.
-     *
-     * @param isStreamingMode whether in streaming mode
-     */
-    void isStreamingMode(boolean isStreamingMode);
-
-    /**
      * Close the writer.
      *
      * @throws Exception the thrown exception
      */
     void close() throws Exception;
 
-    /** With metrics to measure compaction. */
-    FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry);
+    /** Recoverable state of {@link FileStoreWrite}. */
+    class State<T> {
+
+        protected final BinaryRow partition;
+        protected final int bucket;
+
+        protected final long baseSnapshotId;
+        protected final long lastModifiedCommitIdentifier;
+        protected final List<DataFileMeta> dataFiles;
+        @Nullable protected final IndexMaintainer<T> indexMaintainer;
+        protected final CommitIncrement commitIncrement;
+
+        protected State(
+                BinaryRow partition,
+                int bucket,
+                long baseSnapshotId,
+                long lastModifiedCommitIdentifier,
+                Collection<DataFileMeta> dataFiles,
+                @Nullable IndexMaintainer<T> indexMaintainer,
+                CommitIncrement commitIncrement) {
+            this.partition = partition;
+            this.bucket = bucket;
+            this.baseSnapshotId = baseSnapshotId;
+            this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
+            this.dataFiles = new ArrayList<>(dataFiles);
+            this.indexMaintainer = indexMaintainer;
+            this.commitIncrement = commitIncrement;
+        }
+
+        @Override
+        public String toString() {
+            return String.format(
+                    "{%s, %d, %d, %d, %s, %s, %s}",
+                    partition,
+                    bucket,
+                    baseSnapshotId,
+                    lastModifiedCommitIdentifier,
+                    dataFiles,
+                    indexMaintainer,
+                    commitIncrement);
+        }
+    }
 }

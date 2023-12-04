@@ -28,6 +28,7 @@ import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -686,7 +687,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         List<ExecutorService> compactExecutors = new ArrayList<>();
         for (StoreSinkWrite storeSinkWrite : storeSinkWrites) {
             StoreSinkWriteImpl storeSinkWriteImpl = (StoreSinkWriteImpl) storeSinkWrite;
-            compactExecutors.add(storeSinkWriteImpl.getWrite().getWrite().getCompactExecutor());
+            compactExecutors.add(
+                    ((AbstractFileStoreWrite<?>) storeSinkWriteImpl.getWrite().getWrite())
+                            .getCompactExecutor());
         }
         assertThat(compactExecutors.get(0) == compactExecutors.get(1)).isTrue();
 
