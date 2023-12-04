@@ -35,6 +35,7 @@ Paimon offers the following core capabilities:
 - Append Only Tables: Paimon supports Append Only tables, automatically compact small files, and provides orderly stream reading. You can use this to replace message queues.
 
 {{< columns >}}
+
 ## Try Paimon
 
 If you’re interested in playing around with Paimon, check out our

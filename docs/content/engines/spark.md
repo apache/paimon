@@ -605,7 +605,7 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 
 ## Spark 2
 
-Paimon supports Spark 2.4+.
+Paimon supports Spark 2.4+. We highly recommend using versions above Spark3, as Spark2 only provides reading capabilities.
 
 {{< stable >}}
 
