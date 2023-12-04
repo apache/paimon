@@ -64,14 +64,6 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
-    public BatchTableWrite newWrite(boolean overwrite) {
-        return table.newWrite(commitUser)
-                .withIgnorePreviousFiles(staticPartition != null)
-                .setOverwrite(overwrite)
-                .isStreamingMode(false);
-    }
-
-    @Override
     public BatchTableCommit newCommit() {
         InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(true);

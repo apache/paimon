@@ -68,9 +68,6 @@ public interface BatchWriteBuilder extends WriteBuilder {
     @Override
     BatchTableWrite newWrite();
 
-    /** Create a {@link TableWrite} to write {@link InternalRow}s with overwrite indicator. */
-    BatchTableWrite newWrite(boolean overwrite);
-
     /** Create a {@link TableCommit} to commit {@link CommitMessage}s. */
     @Override
     BatchTableCommit newCommit();

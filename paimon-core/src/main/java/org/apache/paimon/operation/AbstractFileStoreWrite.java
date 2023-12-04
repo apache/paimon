@@ -358,11 +358,6 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public void setOverwrite(boolean overwrite) {
-        this.overwrite = overwrite;
-    }
-
-    @Override
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
         this.metricRegistry = metricRegistry;
         return this;

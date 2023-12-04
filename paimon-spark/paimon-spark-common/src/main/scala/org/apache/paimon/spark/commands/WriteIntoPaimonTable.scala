@@ -133,12 +133,12 @@ case class WriteIntoPaimonTable(
     val commitMessages = df
       .mapPartitions {
         iter =>
-          var overwrite = false
           if (overwritePartition != null) {
-            overwrite = true
+            writeBuilder.withOverwrite(overwritePartition.asJava)
           }
+
           val ioManager = createIOManager
-          val write = writeBuilder.newWrite(overwrite)
+          val write = writeBuilder.newWrite()
           write.withIOManager(ioManager)
           try {
             iter.foreach {
