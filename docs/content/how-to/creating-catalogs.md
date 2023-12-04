@@ -140,7 +140,7 @@ After `spark-sql` is started, you can switch to the `default` database of the `p
 USE paimon.default;
 ```
 
-Also, you can create [SparkGenericCatalog]({{< ref "engines/spark3" >}}).
+Also, you can create [SparkGenericCatalog]({{< ref "engines/spark" >}}).
 
 {{< /tab >}}
 

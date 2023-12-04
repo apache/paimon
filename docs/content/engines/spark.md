@@ -1,9 +1,9 @@
 ---
-title: "Spark3"
+title: "Spark"
 weight: 3
 type: docs
 aliases:
-- /engines/spark3.html
+- /engines/spark.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -602,3 +602,51 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 - Conversion between Spark's `UserDefinedType` and Paimon's `UserDefinedType` is not supported.
 
 {{< /hint >}}
+
+## Spark 2
+
+Paimon supports Spark 2.4+.
+
+{{< stable >}}
+
+Download [paimon-spark-2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-2/{{< version >}}/paimon-spark-2-{{< version >}}.jar).
+
+{{< /stable >}}
+
+{{< unstable >}}
+
+Download [paimon-spark-2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-2/{{< version >}}/).
+
+{{< /unstable >}}
+
+{{< hint info >}}
+
+If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+
+{{< /hint >}}
+
+**Step 1: Prepare Test Data**
+
+Paimon currently only supports reading tables through Spark2. To create a Paimon table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
+
+After the guide, all table files should be stored under the path `/tmp/paimon`, or the warehouse path you've specified.
+
+**Step 2: Specify Paimon Jar File**
+
+You can append path to paimon jar file to the `--jars` argument when starting `spark-shell`.
+
+```bash
+spark-shell ... --jars /path/to/paimon-spark-2-{{< version >}}.jar
+```
+
+Alternatively, you can copy `paimon-spark-2-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
+
+**Step 3: Query Table**
+
+Paimon with Spark 2.4 does not support DDL. You can use the `Dataset` reader and register the `Dataset` as a temporary table. In spark shell:
+
+```scala
+val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/word_count")
+dataset.createOrReplaceTempView("word_count")
+spark.sql("SELECT * FROM word_count").show()
+```
