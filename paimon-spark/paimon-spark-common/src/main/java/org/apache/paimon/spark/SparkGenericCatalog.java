@@ -29,6 +29,7 @@ import org.apache.paimon.spark.catalog.SparkBaseCatalog;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.fs.Path;
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.analysis.NamespaceAlreadyExistsException;
 import org.apache.spark.sql.catalyst.analysis.NoSuchFunctionException;
@@ -47,13 +48,13 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.catalog.functions.UnboundFunction;
 import org.apache.spark.sql.connector.expressions.Transform;
-import org.apache.spark.sql.internal.SQLConf;
 import org.apache.spark.sql.internal.StaticSQLConf;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.Callable;
@@ -244,21 +245,30 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         this.sparkCatalog = new SparkCatalog();
 
         this.sparkCatalog.initialize(
-                name, autoFillConfigurations(options, SparkSession.active().sessionState().conf()));
+                name,
+                autoFillConfigurations(
+                        options, SparkSession.active().sessionState().newHadoopConf()));
     }
 
     private CaseInsensitiveStringMap autoFillConfigurations(
-            CaseInsensitiveStringMap options, SQLConf conf) {
+            CaseInsensitiveStringMap options, Configuration conf) {
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
         if (!options.containsKey(WAREHOUSE.key())) {
-            String warehouse = conf.warehousePath();
-            newOptions.put(WAREHOUSE.key(), warehouse);
+            String warehouse = conf.get(StaticSQLConf.WAREHOUSE_PATH().key());
+            Path realWarehousePath = new Path(warehouse);
+            try {
+                realWarehousePath =
+                        realWarehousePath.getFileSystem(conf).resolvePath(realWarehousePath);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            newOptions.put(WAREHOUSE.key(), realWarehousePath.toUri().toString());
         }
-        String metastore = conf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
+        String metastore = conf.get(StaticSQLConf.CATALOG_IMPLEMENTATION().key());
         if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
             newOptions.put(METASTORE.key(), metastore);
             String uri;
-            if ((uri = conf.getConfString("spark.sql.catalog.spark_catalog.uri", null)) != null
+            if ((uri = conf.get("spark.sql.catalog.spark_catalog.uri", null)) != null
                     && !options.containsKey(URI.key())) {
                 newOptions.put(URI.key(), uri);
             }
