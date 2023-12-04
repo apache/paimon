@@ -327,4 +327,22 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
       }
   }
 
+  test(s"insert overwrite partitioned table with compaction") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, value STRING, pt STRING)
+                 |TBLPROPERTIES ('primary-key'='id, pt', 'num-sorted-run.compaction-trigger' = '1')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T values (1, 'a', 'p1'), (2, 'b', 'p2')")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Row(1, "a", "p1") :: Row(2, "b", "p2") :: Nil)
+
+    spark.sql("INSERT OVERWRITE T PARTITION (pt = 'p1') SELECT 3, 'c'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Row(2, "b", "p2") :: Row(3, "c", "p1") :: Nil)
+  }
+
 }
