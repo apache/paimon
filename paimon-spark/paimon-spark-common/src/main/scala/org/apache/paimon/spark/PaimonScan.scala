@@ -27,8 +27,8 @@ import org.apache.spark.sql.sources.{Filter, In}
 
 import scala.collection.JavaConverters._
 
-case class PaimonScan(table: Table, readBuilder: ReadBuilder)
-  extends PaimonBaseScan(table, readBuilder)
+case class PaimonScan(table: Table, readBuilder: ReadBuilder, desc: String)
+  extends PaimonBaseScan(table, readBuilder, desc)
   with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {

@@ -20,5 +20,5 @@ package org.apache.paimon.spark
 import org.apache.paimon.table.Table
 import org.apache.paimon.table.source.ReadBuilder
 
-case class PaimonScan(table: Table, readBuilder: ReadBuilder)
-  extends PaimonBaseScan(table, readBuilder)
+case class PaimonScan(table: Table, readBuilder: ReadBuilder, desc: String)
+  extends PaimonBaseScan(table, readBuilder, desc)
