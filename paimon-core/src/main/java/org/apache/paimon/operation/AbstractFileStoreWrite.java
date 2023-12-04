@@ -38,7 +38,6 @@ import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
-import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -60,8 +59,7 @@ import java.util.concurrent.Executors;
  *
  * @param <T> type of record to write.
  */
-public abstract class AbstractFileStoreWrite<T>
-        implements FileStoreWrite<T>, Restorable<List<AbstractFileStoreWrite.State<T>>> {
+public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
@@ -116,6 +114,7 @@ public abstract class AbstractFileStoreWrite<T>
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
+    @Override
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
@@ -352,7 +351,7 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public void isStreamingMode(boolean isStreamingMode) {
+    public void withExecutionMode(boolean isStreamingMode) {
         this.isStreamingMode = isStreamingMode;
     }
 
@@ -443,48 +442,6 @@ public abstract class AbstractFileStoreWrite<T>
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
-        }
-    }
-
-    /** Recoverable state of {@link AbstractFileStoreWrite}. */
-    public static class State<T> {
-        protected final BinaryRow partition;
-        protected final int bucket;
-
-        protected final long baseSnapshotId;
-        protected final long lastModifiedCommitIdentifier;
-        protected final List<DataFileMeta> dataFiles;
-        @Nullable protected final IndexMaintainer<T> indexMaintainer;
-        protected final CommitIncrement commitIncrement;
-
-        protected State(
-                BinaryRow partition,
-                int bucket,
-                long baseSnapshotId,
-                long lastModifiedCommitIdentifier,
-                Collection<DataFileMeta> dataFiles,
-                @Nullable IndexMaintainer<T> indexMaintainer,
-                CommitIncrement commitIncrement) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.baseSnapshotId = baseSnapshotId;
-            this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
-            this.dataFiles = new ArrayList<>(dataFiles);
-            this.indexMaintainer = indexMaintainer;
-            this.commitIncrement = commitIncrement;
-        }
-
-        @Override
-        public String toString() {
-            return String.format(
-                    "{%s, %d, %d, %d, %s, %s, %s}",
-                    partition,
-                    bucket,
-                    baseSnapshotId,
-                    lastModifiedCommitIdentifier,
-                    dataFiles,
-                    indexMaintainer,
-                    commitIncrement);
         }
     }
 }

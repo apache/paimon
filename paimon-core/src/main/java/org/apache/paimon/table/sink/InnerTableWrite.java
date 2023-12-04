@@ -24,5 +24,5 @@ public interface InnerTableWrite extends StreamTableWrite, BatchTableWrite {
     InnerTableWrite withIgnorePreviousFiles(boolean ignorePreviousFiles);
 
     // we detect whether in streaming mode, and do some optimization
-    InnerTableWrite isStreamingMode(boolean isStreamingMode);
+    InnerTableWrite withExecutionMode(boolean isStreamingMode);
 }
