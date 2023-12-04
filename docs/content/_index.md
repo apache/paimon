@@ -38,7 +38,7 @@ Paimon offers the following core capabilities:
 ## Try Paimon
 
 If you’re interested in playing around with Paimon, check out our
-quick start guide with [Flink]({{< ref "engines/flink" >}}), [Spark]({{< ref "engines/spark3" >}}) or [Hive]({{< ref "engines/hive" >}}). It provides a step by
+quick start guide with [Flink]({{< ref "engines/flink" >}}), [Spark]({{< ref "engines/spark" >}}) or [Hive]({{< ref "engines/hive" >}}). It provides a step by
 step introduction to the APIs and guides you through real applications.
 
 <--->
