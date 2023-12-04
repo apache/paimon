@@ -101,7 +101,7 @@ Example: compact table
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-0.6-SNAPSHOT.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse s3:///path/to/warehouse \
     --database test_db \
