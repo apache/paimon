@@ -287,3 +287,46 @@ CALL rollback(table => 'test.T', version => '2');
 {{< /tab >}}
 
 {{< /tabs >}}
+
+## Remove Orphan Files
+
+Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred
+when deleting files, so that there may exist files that are not used by Paimon snapshots (so-called "orphan files"). You can
+submit a `remove_orphan_files` job to clean them:
+
+{{< tabs "remove_orphan_files" >}}
+
+{{< tab "Flink" >}}
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    remove_orphan_files \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table <table-name> \
+    [--older_than <timestamp>] 
+```
+
+To avoid deleting files that are newly added by other writing jobs, this action only deletes orphan files older than
+1 day by default. The interval can be modified by `--older_than`. For example:
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    remove_orphan_files \
+    --warehouse <warehouse-path> \
+    --database <database-name> \ 
+    --table T \
+    --older_than '2023-10-31 12:00:00'
+```
+
+{{< /tab >}}
+
+{{< tab "Spark" >}}
+```sql
+CALL sys.remove_orphan_files(table => "tableId", [older_then => "2023-10-31 12:00:00"])
+```
+{{< /tab >}}
+
+{{< /tabs >}}
