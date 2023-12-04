@@ -79,7 +79,7 @@ migrate_table
 
 Example:
 ```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-0.7-SNAPSHOT.jar migrate_table \
+<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar migrate_table \
 --warehouse /path/to/warehouse \
 --catalog_conf uri=thrift://localhost:9083 \
 --catalog_conf metastore=hive \
