@@ -36,9 +36,9 @@ class InsertOverwriteTest extends PaimonSparkTestBase {
             }
 
             spark.sql(s"""
-                 |CREATE TABLE T (a INT, b INT, c STRING)
-                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket', 'file.format'='parquet')
-                 |""".stripMargin)
+                         |CREATE TABLE T (a INT, b INT, c STRING)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
             spark.sql("INSERT INTO T values (1, 1, '1'), (2, 2, '2')")
             checkAnswer(
