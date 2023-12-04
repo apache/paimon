@@ -117,7 +117,7 @@ public interface FileStoreWrite<T> {
     void isStreamingMode(boolean isStreamingMode);
 
     /**
-     *  set whether it is an overwrite operation for write
+     * set whether it is an overwrite operation for write.
      *
      * @param overwrite
      */
