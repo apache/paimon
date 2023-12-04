@@ -20,7 +20,6 @@ package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -37,8 +36,6 @@ import org.apache.spark.sql.connector.write.WriteBuilder;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
 
-import javax.annotation.Nullable;
-
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -53,7 +50,6 @@ public class SparkTable
                 PaimonPartitionManagement {
 
     private final Table table;
-    @Nullable protected Predicate deletePredicate;
 
     public SparkTable(Table table) {
         this.table = table;

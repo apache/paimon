@@ -40,7 +40,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
   protected var projectedIndexes: Option[Array[Int]] = None
 
-  protected def getReadBuilder(): ReadBuilder = {
+  protected def getReadBuilder: ReadBuilder = {
     val readBuilder = table.newReadBuilder()
     projectedIndexes.foreach(readBuilder.withProjection)
     predicates.foreach(readBuilder.withFilter)
@@ -48,8 +48,15 @@ abstract class PaimonBaseScanBuilder(table: Table)
     readBuilder
   }
 
+  protected def getDescription: String = {
+    val description = s"PaimonTable: [${table.name()}]"
+    description + pushed
+      .map(filters => s" PushedFilters: [${filters.mkString(", ")}]")
+      .getOrElse("")
+  }
+
   override def build(): Scan = {
-    new PaimonScan(table, getReadBuilder());
+    PaimonScan(table, getReadBuilder, getDescription)
   }
 
   /**
@@ -85,15 +92,6 @@ abstract class PaimonBaseScanBuilder(table: Table)
     postScan.toArray
   }
 
-  /**
-   * Returns the filters that are pushed to the data source via {@link # pushFilters ( Filter [ ]
-   * )}. <p> There are 3 kinds of filters: <ol> <li>pushable filters which don't need to be
-   * evaluated again after scanning.</li> <li>pushable filters which still need to be evaluated
-   * after scanning, e.g. parquet row group filter.</li> <li>non-pushable filters.</li> </ol> <p>
-   * Both case 1 and 2 should be considered as pushed filters and should be returned by this method.
-   * <p> It's possible that there is no filters in the query and {@link # pushFilters ( Filter [ ]
-   * )} is never called, empty array should be returned for this case.
-   */
   override def pushedFilters(): Array[Filter] = {
     pushed.getOrElse(Array.empty)
   }

@@ -29,15 +29,13 @@ import java.util.OptionalLong
 
 import scala.collection.JavaConverters._
 
-abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder)
+abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: String)
   extends Scan
   with SupportsReportStatistics {
 
   protected var splits: Array[Split] = _
 
-  override def description(): String = {
-    s"paimon(${readBuilder.tableName()})"
-  }
+  override def description(): String = desc
 
   override def readSchema(): StructType = {
     SparkTypeUtils.fromPaimonRowType(readBuilder.readType())
