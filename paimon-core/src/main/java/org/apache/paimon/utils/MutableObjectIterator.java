@@ -33,21 +33,10 @@ import java.io.IOException;
  * @param <E> The element type of the collection iterated over.
  */
 public interface MutableObjectIterator<E> {
-
-    /**
-     * Gets the next element from the collection. The contents of that next element is put into the
-     * given reuse object, if the type is mutable.
-     *
-     * @param reuse The target object into which to place next element if E is mutable.
-     * @return The filled object or <code>null</code> if the iterator is exhausted.
-     * @throws IOException Thrown, if a problem occurred in the underlying I/O layer or in the
-     *     serialization / deserialization logic
-     */
-    E next(E reuse) throws IOException;
-
     /**
      * Gets the next element from the collection. The iterator implementation must obtain a new
-     * instance.
+     * instance. The method should use reuse object itself, which means, the return value point to
+     * the same object always.
      *
      * @return The object or <code>null</code> if the iterator is exhausted.
      * @throws IOException Thrown, if a problem occurred in the underlying I/O layer or in the

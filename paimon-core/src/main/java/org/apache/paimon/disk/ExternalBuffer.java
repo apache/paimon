@@ -189,7 +189,6 @@ public class ExternalBuffer implements RowBuffer {
     public class BufferIterator implements RowBufferIterator {
 
         private MutableObjectIterator<BinaryRow> currentIterator;
-        private final BinaryRow reuse = binaryRowSerializer.createInstance();
 
         private int currentChannelID = -1;
         private BinaryRow row;
@@ -228,7 +227,7 @@ public class ExternalBuffer implements RowBuffer {
             try {
                 // get from curr iterator or new iterator.
                 while (true) {
-                    if (currentIterator != null && (row = currentIterator.next(reuse)) != null) {
+                    if (currentIterator != null && (row = currentIterator.next()) != null) {
                         return true;
                     } else {
                         if (!nextIterator()) {

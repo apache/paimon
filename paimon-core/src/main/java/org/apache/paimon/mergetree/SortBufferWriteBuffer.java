@@ -225,7 +225,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         private boolean readOnce() throws IOException {
             try {
-                currentRow = kvIter.next(currentRow);
+                BinaryRow next = kvIter.next();
+                currentRow = next == null ? null : currentRow.share(next);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }

@@ -84,8 +84,8 @@ public class BinaryExternalMerger extends AbstractBinaryExternalMerger<BinaryRow
             MutableObjectIterator<BinaryRow> mergeIterator, AbstractPagedOutputView output)
             throws IOException {
         // read the merged stream and write the data back
-        BinaryRow rec = serializer.createInstance();
-        while ((rec = mergeIterator.next(rec)) != null) {
+        BinaryRow rec;
+        while ((rec = mergeIterator.next()) != null) {
             serializer.serialize(rec, output);
         }
     }

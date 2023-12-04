@@ -109,9 +109,9 @@ public class BinaryExternalSortBufferTest {
 
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
-            next = iterator.next(next);
+            next = iterator.next();
             assertThat(next.getInt(0)).isEqualTo(i);
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
@@ -134,9 +134,9 @@ public class BinaryExternalSortBufferTest {
 
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
-            next = iterator.next(next);
+            next = iterator.next();
             assertThat(next.getInt(0)).isEqualTo(i);
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
@@ -161,10 +161,10 @@ public class BinaryExternalSortBufferTest {
 
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
             for (int j = 0; j < 3; j++) {
-                next = iterator.next(next);
+                next = iterator.next();
                 assertThat(next.getInt(0)).isEqualTo(i);
                 assertThat(next.getString(1).toString()).isEqualTo(getString(i));
             }
@@ -195,9 +195,9 @@ public class BinaryExternalSortBufferTest {
 
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
-            next = iterator.next(next);
+            next = iterator.next();
             assertThat(next.getInt(0)).isEqualTo(i);
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
@@ -217,9 +217,9 @@ public class BinaryExternalSortBufferTest {
 
         MutableObjectIterator<BinaryRow> iterator = sorter.sortedIterator();
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
-            next = iterator.next(next);
+            next = iterator.next();
             assertThat(next.getInt(0)).isEqualTo(i);
             assertThat(next.getString(1).toString()).isEqualTo(getString(i));
         }
@@ -236,9 +236,9 @@ public class BinaryExternalSortBufferTest {
         BinaryExternalSortBuffer sorter = createBuffer(8);
 
         List<BinaryRow> data = new ArrayList<>();
-        BinaryRow row = serializer.createInstance();
+        BinaryRow row;
         for (int i = 0; i < size; i++) {
-            row = reader.next(row);
+            row = reader.next();
             data.add(row.copy());
         }
 
@@ -252,9 +252,9 @@ public class BinaryExternalSortBufferTest {
 
         data.sort(Comparator.comparingInt(o -> o.getInt(0)));
 
-        BinaryRow next = serializer.createInstance();
+        BinaryRow next;
         for (int i = 0; i < size; i++) {
-            next = iterator.next(next);
+            next = iterator.next();
             assertThat(next.getInt(0)).isEqualTo(data.get(i).getInt(0));
             assertThat(next.getString(1).toString()).isEqualTo(data.get(i).getString(1).toString());
         }
@@ -296,11 +296,6 @@ public class BinaryExternalSortBufferTest {
             this.size = size;
             this.row = new BinaryRow(2);
             this.writer = new BinaryRowWriter(row);
-        }
-
-        @Override
-        public BinaryRow next(BinaryRow reuse) {
-            return next();
         }
 
         @Override

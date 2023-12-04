@@ -35,6 +35,8 @@ public class ChannelReaderInputViewIterator implements MutableObjectIterator<Bin
 
     private final List<MemorySegment> freeMemTarget;
 
+    private final BinaryRow reuse;
+
     public ChannelReaderInputViewIterator(
             ChannelReaderInputView inView,
             List<MemorySegment> freeMemTarget,
@@ -42,25 +44,13 @@ public class ChannelReaderInputViewIterator implements MutableObjectIterator<Bin
         this.inView = inView;
         this.freeMemTarget = freeMemTarget;
         this.accessors = accessors;
-    }
-
-    @Override
-    public BinaryRow next(BinaryRow reuse) throws IOException {
-        try {
-            return this.accessors.deserialize(reuse, this.inView);
-        } catch (EOFException eofex) {
-            final List<MemorySegment> freeMem = this.inView.close();
-            if (this.freeMemTarget != null) {
-                this.freeMemTarget.addAll(freeMem);
-            }
-            return null;
-        }
+        this.reuse = new BinaryRow(accessors.getArity());
     }
 
     @Override
     public BinaryRow next() throws IOException {
         try {
-            return this.accessors.deserialize(this.inView);
+            return this.accessors.deserialize(reuse, this.inView);
         } catch (EOFException eofex) {
             final List<MemorySegment> freeMem = this.inView.close();
             if (this.freeMemTarget != null) {

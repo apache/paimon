@@ -78,9 +78,8 @@ public class SortOperatorTest {
         BinaryExternalSortBuffer externalSortBuffer = sortOperator.getBuffer();
         MutableObjectIterator<BinaryRow> iterator = externalSortBuffer.sortedIterator();
         BinaryRow row;
-        BinaryRow reuse = new BinaryRow(3);
         long i = 1;
-        while ((row = iterator.next(reuse)) != null) {
+        while ((row = iterator.next()) != null) {
             Assertions.assertThat(row.getLong(0)).isEqualTo(i++);
         }
 

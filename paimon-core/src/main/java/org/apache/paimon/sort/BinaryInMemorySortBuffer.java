@@ -50,6 +50,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
     private final AbstractRowDataSerializer<InternalRow> inputSerializer;
     private final ArrayList<MemorySegment> recordBufferSegments;
     private final SimpleCollectingOutputView recordCollector;
+    private final BinaryRow reuse;
 
     private long currentDataBufferOffset;
     private long sortIndexBytes;
@@ -89,6 +90,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
         this.inputSerializer = inputSerializer;
         this.recordBufferSegments = recordBufferSegments;
         this.recordCollector = recordCollector;
+        this.reuse = new BinaryRow(inputSerializer.getArity());
         // The memory will be initialized in super()
         this.isInitialized = true;
         this.clear();
@@ -214,7 +216,7 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
             private MemorySegment currentIndexSegment = sortIndex.get(0);
 
             @Override
-            public BinaryRow next(BinaryRow target) {
+            public BinaryRow next() {
                 if (this.current < this.size) {
                     this.current++;
                     if (this.currentOffset > lastIndexEntryOffset) {
@@ -226,18 +228,13 @@ public class BinaryInMemorySortBuffer extends BinaryIndexedSortable implements S
                     this.currentOffset += indexEntrySize;
 
                     try {
-                        return getRecordFromBuffer(target, pointer);
+                        return getRecordFromBuffer(reuse, pointer);
                     } catch (IOException ioe) {
                         throw new RuntimeException(ioe);
                     }
                 } else {
                     return null;
                 }
-            }
-
-            @Override
-            public BinaryRow next() {
-                throw new RuntimeException("Not support!");
             }
         };
     }

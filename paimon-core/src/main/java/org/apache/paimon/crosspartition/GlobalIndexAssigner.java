@@ -202,7 +202,6 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         boolean isEmpty = true;
         if (bootstrapKeys.size() > 0) {
             MutableObjectIterator<BinaryRow> keyIterator = bootstrapKeys.sortedIterator();
-            BinaryRow row = new BinaryRow(2);
             KeyValueIterator<byte[], byte[]> kvIter =
                     new KeyValueIterator<byte[], byte[]>() {
 
@@ -211,7 +210,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         @Override
                         public boolean advanceNext() {
                             try {
-                                current = keyIterator.next(row);
+                                current = keyIterator.next();
                             } catch (IOException e) {
                                 throw new UncheckedIOException(e);
                             }
@@ -347,7 +346,6 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         throw new RuntimeException(e);
                     }
 
-                    BinaryRow reuseBinaryRow = new BinaryRow(keyWithRowType.getFieldCount());
                     OffsetRow row =
                             new OffsetRow(rowType.getFieldCount(), keyWithIdType.getFieldCount());
                     return new RowIterator() {
@@ -356,7 +354,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         public InternalRow next() {
                             BinaryRow keyWithRow;
                             try {
-                                keyWithRow = iterator.next(reuseBinaryRow);
+                                keyWithRow = iterator.next();
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }

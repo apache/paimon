@@ -76,24 +76,21 @@ public class BufferFileReaderInputView extends AbstractPagedInputView {
 
         protected final BinaryRowSerializer serializer;
 
+        private final BinaryRow reuse;
+
         public BinaryRowChannelInputViewIterator(BinaryRowSerializer serializer) {
             this.serializer = serializer;
+            this.reuse = new BinaryRow(serializer.getArity());
         }
 
         @Override
-        public BinaryRow next(BinaryRow reuse) throws IOException {
+        public BinaryRow next() throws IOException {
             try {
                 return this.serializer.deserializeFromPages(reuse, BufferFileReaderInputView.this);
             } catch (EOFException e) {
                 close();
                 return null;
             }
-        }
-
-        @Override
-        public BinaryRow next() throws IOException {
-            throw new UnsupportedOperationException(
-                    "This method is disabled due to performance issue!");
         }
     }
 }

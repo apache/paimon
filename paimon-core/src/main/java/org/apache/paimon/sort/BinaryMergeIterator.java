@@ -49,12 +49,6 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
     }
 
     @Override
-    public Entry next(Entry reuse) throws IOException {
-        // Ignore reuse, because each HeadStream has its own reuse BinaryRow.
-        return next();
-    }
-
-    @Override
     public Entry next() throws IOException {
         if (currHead != null) {
             if (currHead.noMoreHead()) {
@@ -90,7 +84,7 @@ public class BinaryMergeIterator<Entry> implements MutableObjectIterator<Entry> 
         }
 
         private boolean noMoreHead() throws IOException {
-            return (this.head = this.iterator.next(head)) == null;
+            return (this.head = this.iterator.next()) == null;
         }
     }
 }

@@ -157,8 +157,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @VisibleForTesting
     public void write(MutableObjectIterator<BinaryRow> iterator) throws IOException {
-        BinaryRow row = serializer.createInstance();
-        while ((row = iterator.next(row)) != null) {
+        BinaryRow row;
+        while ((row = iterator.next()) != null) {
             write(row);
         }
     }
@@ -202,19 +202,10 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                 merger.getMergingIterator(spillChannelIDs, openChannels);
         channelManager.addOpenChannels(openChannels);
 
-        return new MutableObjectIterator<BinaryRow>() {
-            @Override
-            public BinaryRow next(BinaryRow reuse) throws IOException {
-                // BinaryMergeIterator ignore reuse object argument, use its own reusing object
-                return next();
-            }
-
-            @Override
-            public BinaryRow next() throws IOException {
-                BinaryRow row = iterator.next();
-                // BinaryMergeIterator reuse object anyway, here we need to copy it to do compaction
-                return row == null ? null : row.copy();
-            }
+        return () -> {
+            BinaryRow row = iterator.next();
+            // BinaryMergeIterator reuse object anyway, here we need to copy it to do compaction
+            return row == null ? null : row.copy();
         };
     }
 

@@ -158,7 +158,6 @@ public class InMemoryBuffer implements RowBuffer {
         private final RandomAccessInputView recordBuffer;
         private final AbstractRowDataSerializer<InternalRow> serializer;
         private final BinaryRow reuse;
-        private BinaryRow row;
 
         private InMemoryBufferIterator(
                 RandomAccessInputView recordBuffer,
@@ -171,8 +170,7 @@ public class InMemoryBuffer implements RowBuffer {
         @Override
         public boolean advanceNext() {
             try {
-                row = next(reuse);
-                return row != null;
+                return next() != null;
             } catch (IOException ioException) {
                 throw new RuntimeException(ioException);
             }
@@ -180,21 +178,16 @@ public class InMemoryBuffer implements RowBuffer {
 
         @Override
         public BinaryRow getRow() {
-            return row;
+            return reuse;
         }
 
         @Override
-        public BinaryRow next(BinaryRow reuse) throws IOException {
+        public BinaryRow next() throws IOException {
             try {
                 return (BinaryRow) serializer.mapFromPages(reuse, recordBuffer);
             } catch (EOFException e) {
                 return null;
             }
-        }
-
-        @Override
-        public BinaryRow next() throws IOException {
-            return next(reuse);
         }
 
         @Override
@@ -217,11 +210,6 @@ public class InMemoryBuffer implements RowBuffer {
         @Override
         public BinaryRow getRow() {
             throw new UnsupportedOperationException();
-        }
-
-        @Override
-        public BinaryRow next(BinaryRow reuse) {
-            return null;
         }
 
         @Override

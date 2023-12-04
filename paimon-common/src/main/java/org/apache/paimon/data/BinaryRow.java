@@ -26,6 +26,7 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.utils.Preconditions;
 
 import java.nio.ByteOrder;
 
@@ -412,6 +413,14 @@ public final class BinaryRow extends BinarySection implements InternalRow, DataS
 
     public BinaryRow copy(BinaryRow reuse) {
         return copyInternal(reuse);
+    }
+
+    public BinaryRow share(BinaryRow reuse) {
+        Preconditions.checkArgument(reuse != null);
+        this.segments = reuse.segments;
+        this.offset = reuse.offset;
+        this.sizeInBytes = reuse.sizeInBytes;
+        return this;
     }
 
     private BinaryRow copyInternal(BinaryRow reuse) {
