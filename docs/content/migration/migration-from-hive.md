@@ -35,8 +35,8 @@ Now, we can use paimon hive catalog with Migrate Table Procedure and Migrate Fil
 * Migrate Table Procedure: Paimon table does not exist, use the procedure upgrade hive table to paimon table. Hive table will disappear after action done.
 * Migrate File Procedure:  Paimon table already exists, use the procedure to migrate files from hive table to paimon table. **Notice that, Hive table will also disappear after action done.**
 
-These two actions now only support file format of hive "orc" and "parquet", if your table partition formatted by other format like avro, these procedures will fail.
-But we will support avro format in the future. Please make sure your table partition format is in "orc" and "parquet" now.
+These two actions now only support file format of hive "orc" and "parquet", if your table file is formatted in other format like avro, these procedures will fail.
+But we will support avro format in the future. Please make sure your table file format is in "orc" and "parquet" now.
 
 <span style="color: red; "> **We highly recommend to back up hive table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
 
@@ -71,20 +71,20 @@ If your flink version is below 1.17, you can use flink action to achieve this:
 /path/to/paimon-flink-action-{{< version >}}.jar \
 migrate_table
 --warehouse <warehouse-path> \
---source-table-type hive \
---source-table-id <database.table-name> \
-[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+--source_type hive \
+--table <database.table-name> \
+[--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+[--options <paimon-table-conf  [,paimon-table-conf ...]> ]
 ```
 
 Example:
 ```bash
-<FLINK_HOME>/flink run ./paimon-flink-action-0.7-SNAPSHOT.jar migrate_table \
+<FLINK_HOME>/flink run ./paimon-flink-action-{{< version >}}.jar migrate_table \
 --warehouse /path/to/warehouse \
---catalog-conf uri=thrift://localhost:9083 \
---catalog-conf metastore=hive \
---source-table-type hive \
---source-table-id default.hive_or_paimon \
+--catalog_conf uri=thrift://localhost:9083 \
+--catalog_conf metastore=hive \
+--source_type hive \
+--table default.hive_or_paimon \
 ```
 
 **Migrate Hive File**

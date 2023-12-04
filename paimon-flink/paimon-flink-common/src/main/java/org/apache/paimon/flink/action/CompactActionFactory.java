@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.List;
 import java.util.Map;
@@ -30,28 +29,31 @@ public class CompactActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "compact";
 
+    private static final String ORDER_STRATEGY = "order_strategy";
+    private static final String ORDER_BY = "order_by";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         CompactAction action;
-        if (params.has("order-strategy")) {
+        if (params.has(ORDER_STRATEGY)) {
             action =
                     new SortCompactAction(
                                     tablePath.f0,
                                     tablePath.f1,
                                     tablePath.f2,
                                     catalogConfig,
-                                    optionalConfigMap(params, "table-conf"))
-                            .withOrderStrategy(params.get("order-strategy"))
-                            .withOrderColumns(getRequiredValue(params, "order-by").split(","));
+                                    optionalConfigMap(params, TABLE_CONF))
+                            .withOrderStrategy(params.get(ORDER_STRATEGY))
+                            .withOrderColumns(getRequiredValue(params, ORDER_BY).split(","));
         } else {
             action =
                     new CompactAction(
@@ -59,10 +61,10 @@ public class CompactActionFactory implements ActionFactory {
                             tablePath.f1,
                             tablePath.f2,
                             catalogConfig,
-                            optionalConfigMap(params, "table-conf"));
+                            optionalConfigMap(params, TABLE_CONF));
         }
 
-        if (params.has("partition")) {
+        if (params.has(PARTITION)) {
             List<Map<String, String>> partitions = getPartitions(params);
             action.withPartitions(partitions);
         }
@@ -78,15 +80,15 @@ public class CompactActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> [--partition <partition-name>]"
-                        + "[--order-strategy <order-strategy>]"
-                        + "[--table-conf <key>=<value>]"
-                        + "[--order-by <order-columns>]");
+                "  compact --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> [--partition <partition_name>]"
+                        + "[--order_strategy <order_strategy>]"
+                        + "[--table_conf <key>=<value>]"
+                        + "[--order_by <order_columns>]");
         System.out.println(
-                "  compact --warehouse s3://path/to/warehouse --database <database-name> "
-                        + "--table <table-name> [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]");
-        System.out.println("  compact --path <table-path> [--partition <partition-name>]");
+                "  compact --warehouse s3://path/to/warehouse --database <database_name> "
+                        + "--table <table_name> [--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]]");
+        System.out.println("  compact --path <table_path> [--partition <partition_name>]");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -95,8 +97,8 @@ public class CompactActionFactory implements ActionFactory {
         System.out.println();
         System.out.println("Note:");
         System.out.println(
-                "  order compact now only support append-only table with bucket=-1, please don't specify --order-strategy parameter if your table does not meet the request");
-        System.out.println("  order-strategy now only support zorder in batch mode");
+                "  order compact now only support append-only table with bucket=-1, please don't specify --order_strategy parameter if your table does not meet the request");
+        System.out.println("  order_strategy now only support zorder in batch mode");
         System.out.println();
 
         System.out.println("Examples:");
@@ -111,11 +113,11 @@ public class CompactActionFactory implements ActionFactory {
                 "  compact --warehouse s3:///path/to/warehouse "
                         + "--database test_db "
                         + "--table test_table "
-                        + "--order-strategy zorder "
-                        + "--order-by a,b,c "
-                        + "--table-conf sink.parallelism=9 "
-                        + "--catalog-conf s3.endpoint=https://****.com "
-                        + "--catalog-conf s3.access-key=***** "
-                        + "--catalog-conf s3.secret-key=***** ");
+                        + "--order_strategy zorder "
+                        + "--order_by a,b,c "
+                        + "--table_conf sink.parallelism=9 "
+                        + "--catalog_conf s3.endpoint=https://****.com "
+                        + "--catalog_conf s3.access-key=***** "
+                        + "--catalog_conf s3.secret-key=***** ");
     }
 }

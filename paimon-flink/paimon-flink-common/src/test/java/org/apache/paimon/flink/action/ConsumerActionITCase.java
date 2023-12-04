@@ -31,6 +31,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.ThreadLocalRandom;
 
@@ -80,11 +81,22 @@ public class ConsumerActionITCase extends ActionITCaseBase {
         assertThat(consumer1).isPresent();
         assertThat(consumer1.get().nextSnapshot()).isEqualTo(4);
 
+        List<String> args =
+                Arrays.asList(
+                        "reset_consumer",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--consumer_id",
+                        "myid",
+                        "--next_snapshot",
+                        "1");
         // reset consumer
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new ResetConsumerAction(warehouse, database, tableName, Collections.emptyMap(), "myid")
-                    .withNextSnapshotIds(1L)
-                    .run();
+            createAction(ResetConsumerAction.class, args).run();
         } else {
             callProcedure(
                     String.format(
@@ -96,8 +108,7 @@ public class ConsumerActionITCase extends ActionITCaseBase {
 
         // delete consumer
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new ResetConsumerAction(warehouse, database, tableName, Collections.emptyMap(), "myid")
-                    .run();
+            createAction(ResetConsumerAction.class, args.subList(0, 9)).run();
         } else {
             callProcedure(
                     String.format("CALL sys.reset_consumer('%s.%s', 'myid')", database, tableName));

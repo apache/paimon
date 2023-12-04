@@ -159,6 +159,31 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         return env;
     }
 
+    protected <T extends ActionBase> T createAction(Class<T> clazz, List<String> args) {
+        return createAction(clazz, args.toArray(new String[0]));
+    }
+
+    protected <T extends ActionBase> T createAction(Class<T> clazz, String... args) {
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            confuseArgs(args, "_", "-");
+        } else {
+            confuseArgs(args, "-", "_");
+        }
+        return ActionFactory.createAction(args)
+                .filter(clazz::isInstance)
+                .map(clazz::cast)
+                .orElseThrow(() -> new RuntimeException("Failed to create action"));
+    }
+
+    // to test compatibility with old usage
+    private void confuseArgs(String[] args, String regex, String replacement) {
+        args[0] = args[0].replaceAll(regex, replacement);
+        for (int i = 1; i < args.length; i += 2) {
+            String arg = args[i].substring(2);
+            args[i] = "--" + arg.replaceAll(regex, replacement);
+        }
+    }
+
     protected void callProcedure(String procedureStatement) {
         // default execution mode
         callProcedure(procedureStatement, true, false);

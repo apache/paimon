@@ -20,16 +20,22 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-
 import java.util.Optional;
+
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Factory to create {@link PulsarSyncDatabaseAction}. */
 public class PulsarSyncDatabaseActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "pulsar-sync-database";
+    public static final String IDENTIFIER = "pulsar_sync_database";
 
     @Override
     public String identifier() {
@@ -37,24 +43,24 @@ public class PulsarSyncDatabaseActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "pulsar-conf");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, PULSAR_CONF);
 
         PulsarSyncDatabaseAction action =
                 new PulsarSyncDatabaseAction(
-                        getRequiredValue(params, "warehouse"),
-                        getRequiredValue(params, "database"),
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "pulsar-conf"));
+                        getRequiredValue(params, WAREHOUSE),
+                        getRequiredValue(params, DATABASE),
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, PULSAR_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, "table-conf"))
-                .withTablePrefix(params.get("table-prefix"))
-                .withTableSuffix(params.get("table-suffix"))
-                .includingTables(params.get("including-tables"))
-                .excludingTables(params.get("excluding-tables"));
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF))
+                .withTablePrefix(params.get(TABLE_PREFIX))
+                .withTableSuffix(params.get(TABLE_SUFFIX))
+                .includingTables(params.get(INCLUDING_TABLES))
+                .excludingTables(params.get(EXCLUDING_TABLES));
 
-        if (params.has("type-mapping")) {
-            String[] options = params.get("type-mapping").split(",");
+        if (params.has(TYPE_MAPPING)) {
+            String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
@@ -64,7 +70,7 @@ public class PulsarSyncDatabaseActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"pulsar-sync-database\" creates a streaming job "
+                "Action \"pulsar_sync_database\" creates a streaming job "
                         + "with a Flink Pulsar source and multiple Paimon table sinks "
                         + "to synchronize multiple tables into one Paimon database.\n"
                         + "Only tables with primary keys will be considered. ");
@@ -72,35 +78,35 @@ public class PulsarSyncDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  pulsar-sync-database --warehouse <warehouse-path> --database <database-name> "
-                        + "[--table-prefix <paimon-table-prefix>] "
-                        + "[--table-suffix <paimon-table-suffix>] "
-                        + "[--including-tables <table-name|name-regular-expr>] "
-                        + "[--excluding-tables <table-name|name-regular-expr>] "
-                        + "[--type-mapping <option1,option2...>] "
-                        + "[--pulsar-conf <pulsar-source-conf> [--pulsar-conf <pulsar-source-conf> ...]] "
-                        + "[--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] "
-                        + "[--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]");
+                "  pulsar_sync_database --warehouse <warehouse_path> --database <database_name> "
+                        + "[--table_prefix <paimon_table_prefix>] "
+                        + "[--table_suffix <paimon_table_suffix>] "
+                        + "[--including_tables <table_name|name_regular_expr>] "
+                        + "[--excluding_tables <table_name|name_regular_expr>] "
+                        + "[--type_mapping <option1,option2...>] "
+                        + "[--pulsar_conf <pulsar_source_conf> [--pulsar_conf <pulsar_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
 
         System.out.println(
-                "--table-prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
-                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table-prefix ods_`.");
-        System.out.println("The usage of --table-suffix is same as `--table-prefix`");
+                "--table_prefix is the prefix of all Paimon tables to be synchronized. For example, if you want all "
+                        + "synchronized tables to have \"ods_\" as prefix, you can specify `--table_prefix ods_`.");
+        System.out.println("The usage of --table_suffix is same as `--table_prefix`");
         System.out.println();
 
         System.out.println(
-                "--including-tables is used to specify which source tables are to be synchronized. "
+                "--including_tables is used to specify which source tables are to be synchronized. "
                         + "You must use '|' to separate multiple tables. Regular expression is supported.");
         System.out.println(
-                "--excluding-tables is used to specify which source tables are not to be synchronized. "
-                        + "The usage is same as --including-tables.");
+                "--excluding_tables is used to specify which source tables are not to be synchronized. "
+                        + "The usage is same as --including_tables.");
         System.out.println(
-                "--excluding-tables has higher priority than --including-tables if you specified both.");
+                "--excluding_tables has higher priority than --including_tables if you specified both.");
         System.out.println();
 
         System.out.println(
-                "--type-mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+                "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("pulsar source conf syntax:");
@@ -124,18 +130,18 @@ public class PulsarSyncDatabaseActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  pulsar-sync-database \\\n"
+                "  pulsar_sync_database \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
-                        + "    --pulsar-conf topic=order,logistic,user \\\n"
-                        + "    --pulsar-conf value.format=canal-json \\\n"
-                        + "    --pulsar-conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \\\n"
-                        + "    --pulsar-conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \\\n"
-                        + "    --pulsar-conf pulsar.consumer.subscriptionName=paimon-tests \\\n"
-                        + "    --catalog-conf metastore=hive \\\n"
-                        + "    --catalog-conf uri=thrift://hive-metastore:9083 \\\n"
-                        + "    --table-conf bucket=4 \\\n"
-                        + "    --table-conf changelog-producer=input \\\n"
-                        + "    --table-conf sink.parallelism=4");
+                        + "    --pulsar_conf topic=order,logistic,user \\\n"
+                        + "    --pulsar_conf value.format=canal-json \\\n"
+                        + "    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \\\n"
+                        + "    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \\\n"
+                        + "    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }

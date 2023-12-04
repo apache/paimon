@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
@@ -61,7 +62,11 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate filter) {
-        this.filter = filter;
+        if (this.filter == null) {
+            this.filter = filter;
+        } else {
+            this.filter = PredicateBuilder.and(this.filter, filter);
+        }
         return this;
     }
 

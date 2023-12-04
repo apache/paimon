@@ -1,9 +1,9 @@
 ---
 title: "Understand Files"
-weight: 99
+weight: 1
 type: docs
 aliases:
-- /maintenance/understand-files.html
+- /learn-paimon/understand-files.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -254,8 +254,8 @@ Let's trigger the full-compaction now, and run a dedicated compaction job throug
     --database <database-name> \ 
     --table <table-name> \
     [--partition <partition-name>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-dynamic-conf> [--table-conf <paimon-table-dynamic-conf>] ...]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
 
 an example would be (suppose you're already in Flink home)
@@ -336,44 +336,6 @@ expiration looks like:
 {{< img src="/img/file-operations-4.png">}}
 
 As a result, partition `20230503` to `20230510` are physically deleted.
-
-### Remove Orphan Files
-
-Paimon files are deleted physically only when expiring snapshots. However, it is possible that some unexpected errors occurred
-when deleting files, so that there may exist files that are not used by Paimon table (so-called "orphan files"). You can 
-submit a `remove-orphan-files` job to clean them:
-
-{{< tabs "remove-orphan-files" >}}
-
-{{< tab "Flink" >}}
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    remove-orphan-files \
-    --warehouse <warehouse-path> \
-    --database <database-name> \ 
-    --table <table-name> \
-    [--older-than <timestamp>] 
-```
-
-To avoid deleting files that are newly added by other writing jobs, this action only deletes orphan files older than 
-1 day by default. The interval can be modified by `--older-than`. For example:
-
-```bash
-<FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-{{< version >}}.jar \
-    remove-orphan-files \
-    --warehouse <warehouse-path> \
-    --database <database-name> \ 
-    --table T \
-    --older-than '2023-10-31 12:00:00'
-```
-
-{{< /tab >}}
-
-{{< /tabs >}}
-
 
 ### Flink Stream Write
 

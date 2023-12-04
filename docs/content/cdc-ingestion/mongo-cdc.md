@@ -42,29 +42,29 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb-sync-table
+    mongodb_sync_table
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    [--partition-keys <partition-keys>] \
-    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
-    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--partition_keys <partition_keys>] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--mongodb_conf <mongodb-cdc-source-conf> [--mongodb_conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mongodb_sync_table >}}
 
 Here are a few points to take note of:
 
-1. The `mongodb-conf` introduces the `schema.start.mode` parameter on top of the MongoDB CDC source configuration.`schema.start.mode` provides two modes: `dynamic` (default) and `specified`.
+1. The `mongodb_conf` introduces the `schema.start.mode` parameter on top of the MongoDB CDC source configuration.`schema.start.mode` provides two modes: `dynamic` (default) and `specified`.
    In `dynamic` mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution.
    In `specified` mode, synchronization takes place according to specified criteria.
    This can be done by configuring `field.name` to specify the synchronization fields and `parser.path` to specify the JSON parsing path for those fields.
    The difference between the two is that the `specify` mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
    Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
    Further processing of the data table is required when using values from nested fields.
-2. The `mongodb-conf` introduces the `default.id.generation` parameter as an enhancement to the MongoDB CDC source configuration. The `default.id.generation` setting offers two distinct behaviors: when set to true and when set to false.
+2. The `mongodb_conf` introduces the `default.id.generation` parameter as an enhancement to the MongoDB CDC source configuration. The `default.id.generation` setting offers two distinct behaviors: when set to true and when set to false.
    When `default.id.generation` is set to true, the MongoDB CDC source adheres to the default `_id` generation strategy, which involves stripping the outer $oid nesting to provide a more straightforward identifier. This mode simplifies the `_id` representation, making it more direct and user-friendly.
    On the contrary, when `default.id.generation` is set to false, the MongoDB CDC source retains the original `_id` structure, without any additional processing. This mode offers users the flexibility to work with the raw `_id` format as provided by MongoDB, preserving any nested elements like `$oid`.
    The choice between the two hinges on the user's preference: the former for a cleaner, simplified `_id` and the latter for a direct representation of MongoDB's `_id` structure.
@@ -135,22 +135,22 @@ Example 1: synchronize collection into one Paimon table
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb-sync-table \
+    mongodb_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --computed-column '_year=year(age)' \
-    --mongodb-conf hosts=127.0.0.1:27017 \
-    --mongodb-conf username=root \
-    --mongodb-conf password=123456 \
-    --mongodb-conf database=source_db \
-    --mongodb-conf collection=source_table1 \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --computed_column '_year=year(age)' \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --mongodb_conf collection=source_table1 \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 Example 2: Synchronize collection into a Paimon table according to the specified field mapping.
@@ -158,24 +158,24 @@ Example 2: Synchronize collection into a Paimon table according to the specified
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb-sync-table \
+    mongodb_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --mongodb-conf hosts=127.0.0.1:27017 \
-    --mongodb-conf username=root \
-    --mongodb-conf password=123456 \
-    --mongodb-conf database=source_db \
-    --mongodb-conf collection=source_table1 \
-    --mongodb-conf schema.start.mode=specified \
-    --mongodb-conf field.name=_id,name,description \
-    --mongodb-conf parser.path=$._id,$.name,$.description \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --mongodb_conf collection=source_table1 \
+    --mongodb_conf schema.start.mode=specified \
+    --mongodb_conf field.name=_id,name,description \
+    --mongodb_conf parser.path=$._id,$.name,$.description \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 ## Synchronizing Databases
@@ -187,16 +187,16 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb-sync-database
+    mongodb_sync_database
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--table-prefix <paimon-table-prefix>] \
-    [--table-suffix <paimon-table-suffix>] \
-    [--including-tables <mongodb-table-name|name-regular-expr>] \
-    [--excluding-tables <mongodb-table-name|name-regular-expr>] \
-    [--mongodb-conf <mongodb-cdc-source-conf> [--mongodb-conf <mongodb-cdc-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <mongodb-table-name|name-regular-expr>] \
+    [--excluding_tables <mongodb-table-name|name-regular-expr>] \
+    [--mongodb_conf <mongodb-cdc-source-conf> [--mongodb_conf <mongodb-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mongodb_sync_database >}}
@@ -211,18 +211,18 @@ Example 1: synchronize entire database
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mongodb-sync-database \
+    mongodb_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --mongodb-conf hosts=127.0.0.1:27017 \
-    --mongodb-conf username=root \
-    --mongodb-conf password=123456 \
-    --mongodb-conf database=source_db \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --mongodb_conf hosts=127.0.0.1:27017 \
+    --mongodb_conf username=root \
+    --mongodb_conf password=123456 \
+    --mongodb_conf database=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 Example 2: Synchronize the specified table.
@@ -231,15 +231,15 @@ Example 2: Synchronize the specified table.
 <FLINK_HOME>/bin/flink run \
 --fromSavepoint savepointPath \
 /path/to/paimon-flink-action-{{< version >}}.jar \
-mongodb-sync-database \
+mongodb_sync_database \
 --warehouse hdfs:///path/to/warehouse \
 --database test_db \
---mongodb-conf hosts=127.0.0.1:27017 \
---mongodb-conf username=root \
---mongodb-conf password=123456 \
---mongodb-conf database=source_db \
---catalog-conf metastore=hive \
---catalog-conf uri=thrift://hive-metastore:9083 \
---table-conf bucket=4 \
---including-tables 'product|user|address|order|custom'
+--mongodb_conf hosts=127.0.0.1:27017 \
+--mongodb_conf username=root \
+--mongodb_conf password=123456 \
+--mongodb_conf database=source_db \
+--catalog_conf metastore=hive \
+--catalog_conf uri=thrift://hive-metastore:9083 \
+--table_conf bucket=4 \
+--including_tables 'product|user|address|order|custom'
 ```

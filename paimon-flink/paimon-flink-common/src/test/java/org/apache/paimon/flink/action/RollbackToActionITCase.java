@@ -67,7 +67,18 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         writeData(rowData(2L, BinaryString.fromString("Flink")));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new RollbackToAction(warehouse, database, tableName, "2", Collections.emptyMap()).run();
+            createAction(
+                            RollbackToAction.class,
+                            "rollback_to",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--version",
+                            "2")
+                    .run();
         } else {
             callProcedure(String.format("CALL sys.rollback_to('%s.%s', 2)", database, tableName));
         }
@@ -98,7 +109,17 @@ public class RollbackToActionITCase extends ActionITCaseBase {
         table.createTag("tag3", 3);
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new RollbackToAction(warehouse, database, tableName, "tag2", Collections.emptyMap())
+            createAction(
+                            RollbackToAction.class,
+                            "rollback_to",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--version",
+                            "tag2")
                     .run();
         } else {
             callProcedure(

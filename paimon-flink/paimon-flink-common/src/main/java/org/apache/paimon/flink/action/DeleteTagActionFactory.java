@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -27,7 +26,9 @@ import java.util.Optional;
 /** Factory to create {@link DeleteTagAction}. */
 public class DeleteTagActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "delete-tag";
+    public static final String IDENTIFIER = "delete_tag";
+
+    private static final String TAG_NAME = "tag_name";
 
     @Override
     public String identifier() {
@@ -35,12 +36,12 @@ public class DeleteTagActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "tag-name");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, TAG_NAME);
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tagName = params.get("tag-name");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String tagName = params.get(TAG_NAME);
 
         DeleteTagAction action =
                 new DeleteTagAction(
@@ -50,13 +51,13 @@ public class DeleteTagActionFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"delete-tag\" deletes a tag by name.");
+        System.out.println("Action \"delete_tag\" deletes a tag by name.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete-tag --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --tag-name <tag-name>");
+                "  delete_tag --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --tag_name <tag_name>");
         System.out.println();
     }
 }

@@ -24,9 +24,13 @@ import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 /** Migrate procedure to migrate hive table to paimon table. */
 public class MigrateTableProcedure extends ProcedureBase {
+
+    private static final Logger LOG = LoggerFactory.getLogger(MigrateTableProcedure.class);
 
     private static final String PAIMON_SUFFIX = "_paimon_";
 
@@ -66,6 +70,7 @@ public class MigrateTableProcedure extends ProcedureBase {
                         ParameterUtils.parseCommaSeparatedKeyValues(properties))
                 .executeMigrate();
 
+        LOG.info("Last step: rename " + targetTableId + " to " + sourceTableId);
         catalog.renameTable(targetTableId, sourceTableId, false);
         return new String[] {"Success"};
     }

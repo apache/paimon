@@ -18,8 +18,6 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-
 import java.util.Map;
 import java.util.Optional;
 
@@ -28,18 +26,21 @@ public class MigrateTableActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "migrate_table";
 
+    private static final String SOURCE_TYPE = "source_type";
+    private static final String OPTIONS = "options";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        String warehouse = params.get("warehouse");
-        String connector = params.get("source-table-type");
-        String sourceHiveTable = params.get("source-table-id");
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tableConf = params.get("table-properties");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        String warehouse = params.get(WAREHOUSE);
+        String connector = params.get(SOURCE_TYPE);
+        String sourceHiveTable = params.get(TABLE);
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String tableConf = params.get(OPTIONS);
 
         MigrateTableAction migrateTableAction =
                 new MigrateTableAction(
@@ -54,9 +55,9 @@ public class MigrateTableActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  compact --warehouse <warehouse-path> --source-table-type hive "
-                        + "--source-table-id <database.table_name> "
-                        + "[--catalog-conf <key>=<value] "
-                        + "[--table-properties <key>=<value>,<key>=<value>,...]");
+                "  migrate_table --warehouse <warehouse_path> --source_type hive "
+                        + "--table <database.table_name> "
+                        + "[--catalog_conf <key>=<value] "
+                        + "[--options <key>=<value>,<key>=<value>,...]");
     }
 }

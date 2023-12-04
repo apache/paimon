@@ -21,8 +21,11 @@ package org.apache.paimon.spark;
 import org.apache.paimon.spark.procedure.CompactProcedure;
 import org.apache.paimon.spark.procedure.CreateTagProcedure;
 import org.apache.paimon.spark.procedure.DeleteTagProcedure;
+import org.apache.paimon.spark.procedure.MigrateFileProcedure;
+import org.apache.paimon.spark.procedure.MigrateTableProcedure;
 import org.apache.paimon.spark.procedure.Procedure;
 import org.apache.paimon.spark.procedure.ProcedureBuilder;
+import org.apache.paimon.spark.procedure.RemoveOrphanFilesProcedure;
 import org.apache.paimon.spark.procedure.RollbackProcedure;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
@@ -50,6 +53,9 @@ public class SparkProcedures {
         procedureBuilders.put("create_tag", CreateTagProcedure::builder);
         procedureBuilders.put("delete_tag", DeleteTagProcedure::builder);
         procedureBuilders.put("compact", CompactProcedure::builder);
+        procedureBuilders.put("migrate_table", MigrateTableProcedure::builder);
+        procedureBuilders.put("migrate_file", MigrateFileProcedure::builder);
+        procedureBuilders.put("remove_orphan_files", RemoveOrphanFilesProcedure::builder);
         return procedureBuilders.build();
     }
 }

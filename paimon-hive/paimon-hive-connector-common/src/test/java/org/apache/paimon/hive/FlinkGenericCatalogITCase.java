@@ -117,4 +117,24 @@ public class FlinkGenericCatalogITCase extends AbstractTestBase {
         sql("CREATE TABLE bh (f0 INT, f1 INT) WITH ('connector'='blackhole')");
         sql("INSERT INTO bh SELECT * FROM paimon_t");
     }
+
+    @Test
+    public void testReadPaimonSystemTable() {
+        sql(
+                "CREATE TABLE paimon_t (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    PRIMARY KEY (dt, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt) "
+                        + " WITH ('connector'='paimon', 'file.format' = 'avro' )");
+        sql("INSERT INTO paimon_t VALUES (1, 2, 'click', '2023-11-01')");
+        sql("INSERT INTO paimon_t VALUES (2, 3, 'click', '2023-11-02')");
+
+        List<Row> result =
+                sql("SELECT snapshot_id, schema_id, commit_kind FROM paimon_t$snapshots");
+
+        assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
+    }
 }
