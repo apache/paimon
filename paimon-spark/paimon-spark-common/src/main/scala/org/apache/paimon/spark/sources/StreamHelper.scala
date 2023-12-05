@@ -35,7 +35,7 @@ import scala.collection.mutable
 
 case class IndexedDataSplit(snapshotId: Long, index: Long, entry: DataSplit)
 
-trait StreamHelper {
+private[spark] trait StreamHelper {
 
   def table: DataTable
 

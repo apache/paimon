@@ -26,7 +26,7 @@ import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-trait SchemaHelper extends WithFileStoreTable {
+private[spark] trait SchemaHelper extends WithFileStoreTable {
 
   val originTable: FileStoreTable
 
