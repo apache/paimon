@@ -57,9 +57,9 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
-public class PaimonCatalog extends BaseCatalog {
+public class SparkCatalog extends BaseCatalog {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PaimonCatalog.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 

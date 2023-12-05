@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.PaimonCatalog
+import org.apache.paimon.spark.SparkCatalog
 import org.apache.paimon.spark.catalog.Catalogs
 
 import org.apache.spark.sql.SparkSession
@@ -60,20 +60,20 @@ object PaimonTableValuedFunctions {
     val sessionState = spark.sessionState
     val catalogManager = sessionState.catalogManager
 
-    val paimonCatalog = new PaimonCatalog()
+    val sparkCatalog = new SparkCatalog()
     val currentCatalog = catalogManager.currentCatalog.name()
-    paimonCatalog.initialize(
+    sparkCatalog.initialize(
       currentCatalog,
       Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
 
     val tableId = sessionState.sqlParser.parseTableIdentifier(args.head.eval().toString)
     val namespace = tableId.database.map(Array(_)).getOrElse(catalogManager.currentNamespace)
     val ident = Identifier.of(namespace, tableId.table)
-    val sparkTable = paimonCatalog.loadTable(ident)
+    val sparkTable = sparkCatalog.loadTable(ident)
     val options = tvf.parseArgs(args.tail)
     DataSourceV2Relation.create(
       sparkTable,
-      Some(paimonCatalog),
+      Some(sparkCatalog),
       Some(ident),
       new CaseInsensitiveStringMap(options.asJava))
   }

@@ -98,7 +98,7 @@ When starting `spark-sql`, use the following command to register Paimon’s Spar
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.PaimonCatalog \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon
 ```
 
@@ -127,7 +127,7 @@ Hive conf from Spark session, you just need to configure Spark's Hive conf.
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.PaimonGenericCatalog
+    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 ```
 
 Using `SparkGenericCatalog`, you can use Paimon tables in this Catalog or non-Paimon tables such as Spark's csv,

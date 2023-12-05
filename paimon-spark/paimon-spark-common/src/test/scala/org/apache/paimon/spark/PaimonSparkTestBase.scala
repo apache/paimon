@@ -45,7 +45,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   override protected def sparkConf: SparkConf = {
     super.sparkConf
-      .set("spark.sql.catalog.paimon", classOf[PaimonCatalog].getName)
+      .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }

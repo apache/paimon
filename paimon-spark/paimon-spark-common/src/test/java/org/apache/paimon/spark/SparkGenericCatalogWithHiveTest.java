@@ -30,7 +30,7 @@ import org.junit.jupiter.api.io.TempDir;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base tests for spark read. */
-public class PaimonGenericCatalogWithHiveTest {
+public class SparkGenericCatalogWithHiveTest {
     private static TestHiveMetastore testHiveMetastore;
 
     @BeforeAll
@@ -55,7 +55,7 @@ public class PaimonGenericCatalogWithHiveTest {
                         .config("spark.sql.catalogImplementation", "hive")
                         .config(
                                 "spark.sql.catalog.spark_catalog",
-                                PaimonGenericCatalog.class.getName())
+                                SparkGenericCatalog.class.getName())
                         .master("local[2]")
                         .getOrCreate();
 
@@ -81,7 +81,7 @@ public class PaimonGenericCatalogWithHiveTest {
                 SparkSession.builder()
                         .config("spark.sql.catalog.paimon.warehouse", warehousePath.toString())
                         .config("spark.sql.catalogImplementation", "in-memory")
-                        .config("spark.sql.catalog.paimon", PaimonCatalog.class.getName())
+                        .config("spark.sql.catalog.paimon", SparkCatalog.class.getName())
                         .master("local[2]")
                         .getOrCreate();
         spark2.sql("USE paimon");

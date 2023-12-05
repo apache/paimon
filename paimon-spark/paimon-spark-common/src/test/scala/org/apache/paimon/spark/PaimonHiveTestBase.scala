@@ -32,7 +32,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.sparkConf
       .set("spark.sql.warehouse.dir", tempDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
-      .set("spark.sql.catalog.spark_catalog", classOf[PaimonGenericCatalog[_]].getName)
+      .set("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog[_]].getName)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 

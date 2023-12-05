@@ -54,7 +54,7 @@ public class SparkGenericCatalogTest {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         .master("local[2]")
                         .getOrCreate();
-        spark.conf().set("spark.sql.catalog.spark_catalog", PaimonGenericCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
     }
 
     @AfterAll

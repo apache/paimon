@@ -60,7 +60,7 @@ The following shell command registers a paimon catalog named `paimon`. Metadata 
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.PaimonCatalog \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse
 ```
 
@@ -126,7 +126,7 @@ The following shell command registers a Paimon Hive catalog named `paimon`. Meta
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.PaimonCatalog \
+    --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
     --conf spark.sql.catalog.paimon.warehouse=hdfs:///path/to/warehouse \
     --conf spark.sql.catalog.paimon.metastore=hive \
     --conf spark.sql.catalog.paimon.uri=thrift://<hive-metastore-host-name>:<port>

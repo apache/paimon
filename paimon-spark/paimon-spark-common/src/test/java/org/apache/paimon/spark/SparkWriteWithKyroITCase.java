@@ -40,7 +40,7 @@ public class SparkWriteWithKyroITCase extends SparkWriteITCase {
                                 PaimonSparkSessionExtensions.class.getName())
                         .master("local[2]")
                         .getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", PaimonCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         spark.sql("CREATE DATABASE paimon.db");
         spark.sql("USE paimon.db");

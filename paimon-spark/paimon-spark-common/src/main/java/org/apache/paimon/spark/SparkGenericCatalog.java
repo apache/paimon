@@ -70,20 +70,20 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  *
  * @param <T> CatalogPlugin class to avoid casting to TableCatalog and SupportsNamespaces.
  */
-public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> extends BaseCatalog
+public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces> extends BaseCatalog
         implements CatalogExtension {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PaimonGenericCatalog.class);
+    private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
     private static final String[] DEFAULT_NAMESPACE = new String[] {"default"};
 
     private String catalogName = null;
-    private PaimonCatalog paimonCatalog = null;
+    private SparkCatalog sparkCatalog = null;
     private T sessionCatalog = null;
 
     @Override
     public Catalog paimonCatalog() {
-        return this.paimonCatalog.paimonCatalog();
+        return this.sparkCatalog.paimonCatalog();
     }
 
     @Override
@@ -139,7 +139,7 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
     @Override
     public Table loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return paimonCatalog.loadTable(ident);
+            return sparkCatalog.loadTable(ident);
         } catch (NoSuchTableException e) {
             return throwsOldIfExceptionHappens(() -> getSessionCatalog().loadTable(ident), e);
         }
@@ -148,7 +148,7 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
     @Override
     public Table loadTable(Identifier ident, String version) throws NoSuchTableException {
         try {
-            return paimonCatalog.loadTable(ident, version);
+            return sparkCatalog.loadTable(ident, version);
         } catch (NoSuchTableException e) {
             return throwsOldIfExceptionHappens(
                     () -> getSessionCatalog().loadTable(ident, version), e);
@@ -158,7 +158,7 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
     @Override
     public Table loadTable(Identifier ident, long timestamp) throws NoSuchTableException {
         try {
-            return paimonCatalog.loadTable(ident, timestamp);
+            return sparkCatalog.loadTable(ident, timestamp);
         } catch (NoSuchTableException e) {
             return throwsOldIfExceptionHappens(
                     () -> getSessionCatalog().loadTable(ident, timestamp), e);
@@ -169,7 +169,7 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
     public void invalidateTable(Identifier ident) {
         // We do not need to check whether the table exists and whether
         // it is an Paimon table to reduce remote service requests.
-        paimonCatalog.invalidateTable(ident);
+        sparkCatalog.invalidateTable(ident);
         getSessionCatalog().invalidateTable(ident);
     }
 
@@ -182,7 +182,7 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         String provider = properties.get("provider");
         if (usePaimon(provider)) {
-            return paimonCatalog.createTable(ident, schema, partitions, properties);
+            return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
             // delegate to the session catalog
             return getSessionCatalog().createTable(ident, schema, partitions, properties);
@@ -191,8 +191,8 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
 
     @Override
     public Table alterTable(Identifier ident, TableChange... changes) throws NoSuchTableException {
-        if (paimonCatalog.tableExists(ident)) {
-            return paimonCatalog.alterTable(ident, changes);
+        if (sparkCatalog.tableExists(ident)) {
+            return sparkCatalog.alterTable(ident, changes);
         } else {
             return getSessionCatalog().alterTable(ident, changes);
         }
@@ -200,19 +200,19 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
 
     @Override
     public boolean dropTable(Identifier ident) {
-        return paimonCatalog.dropTable(ident) || getSessionCatalog().dropTable(ident);
+        return sparkCatalog.dropTable(ident) || getSessionCatalog().dropTable(ident);
     }
 
     @Override
     public boolean purgeTable(Identifier ident) {
-        return paimonCatalog.purgeTable(ident) || getSessionCatalog().purgeTable(ident);
+        return sparkCatalog.purgeTable(ident) || getSessionCatalog().purgeTable(ident);
     }
 
     @Override
     public void renameTable(Identifier from, Identifier to)
             throws NoSuchTableException, TableAlreadyExistsException {
-        if (paimonCatalog.tableExists(from)) {
-            paimonCatalog.renameTable(from, to);
+        if (sparkCatalog.tableExists(from)) {
+            sparkCatalog.renameTable(from, to);
         } else {
             getSessionCatalog().renameTable(from, to);
         }
@@ -241,9 +241,9 @@ public class PaimonGenericCatalog<T extends TableCatalog & SupportsNamespaces> e
         }
 
         this.catalogName = name;
-        this.paimonCatalog = new PaimonCatalog();
+        this.sparkCatalog = new SparkCatalog();
 
-        this.paimonCatalog.initialize(
+        this.sparkCatalog.initialize(
                 name, autoFillConfigurations(options, SparkSession.active().sessionState().conf()));
     }
 

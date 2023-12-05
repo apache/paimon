@@ -60,7 +60,7 @@ public class SparkS3ITCase {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         warehousePath = new Path(path);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", PaimonCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         MINIO_CONTAINER
                 .getS3ConfigOptions()

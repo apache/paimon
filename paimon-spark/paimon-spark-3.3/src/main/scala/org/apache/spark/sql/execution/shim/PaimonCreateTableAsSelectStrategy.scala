@@ -18,7 +18,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.PaimonCatalog
+import org.apache.paimon.spark.SparkCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedDBObjectName
@@ -38,7 +38,7 @@ case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
     case CreateTableAsSelect(
-          ResolvedDBObjectName(catalog: PaimonCatalog, ident),
+          ResolvedDBObjectName(catalog: SparkCatalog, ident),
           parts,
           query,
           tableSpec: TableSpec,

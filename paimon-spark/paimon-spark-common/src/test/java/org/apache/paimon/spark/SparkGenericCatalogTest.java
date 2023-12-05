@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Base tests for spark read. */
-public class PaimonGenericCatalogTest {
+public class SparkGenericCatalogTest {
 
     protected SparkSession spark = null;
 
@@ -47,7 +47,7 @@ public class PaimonGenericCatalogTest {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         .master("local[2]")
                         .getOrCreate();
-        spark.conf().set("spark.sql.catalog.spark_catalog", PaimonGenericCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
     }
 
     @AfterEach
@@ -85,7 +85,7 @@ public class PaimonGenericCatalogTest {
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
                         .master("local[2]")
                         .getOrCreate();
-        spark.conf().set("spark.sql.catalog.spark_catalog", PaimonGenericCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());
         assertThatCode(
                         () ->
                                 spark.sql(
