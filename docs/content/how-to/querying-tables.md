@@ -310,6 +310,20 @@ SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL
 
 {{< /tabs >}}
 
+Time travel's stream read rely on snapshots, but by default, snapshot only retains data within 1 hour, which can 
+prevent you from reading older incremental data. So, Paimon also provides another mode for streaming reads, 
+`scan.file-creation-time-millis`, which provides a rough filtering to retain files generated after `timeMillis`.
+
+{{< tabs "file-creation-time-millis" >}}
+
+{{< tab "Flink (dynamic option)" >}}
+```sql
+SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') */;
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ### Consumer ID
 
 You can specify the `consumer-id` when streaming read table:
