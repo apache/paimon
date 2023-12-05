@@ -15,23 +15,29 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.spark.commands.UpdatePaimonTableCommand
 
-import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, UpdateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 
-object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
+object PaimonUpdateTable extends Rule[LogicalPlan] with RowLevelHelper {
 
-  override val operation: RowLevelOp = Delete
+  override val operation: RowLevelOp = Update
 
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
-      case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
+      case u @ UpdateTable(PaimonRelation(table), assignments, _) if u.resolved =>
         checkPaimonTable(table)
 
-        DeleteFromPaimonTableCommand(table, d)
+        val primaryKeys = table.properties().get(CoreOptions.PRIMARY_KEY.key).split(",")
+        if (!validUpdateAssignment(u.table.outputSet, primaryKeys, assignments)) {
+          throw new RuntimeException("Can't update the primary key column.")
+        }
+
+        UpdatePaimonTableCommand(u)
     }
   }
 }

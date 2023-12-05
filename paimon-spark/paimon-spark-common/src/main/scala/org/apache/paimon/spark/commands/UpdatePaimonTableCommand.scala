@@ -19,13 +19,13 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, SparkTable}
+import org.apache.paimon.spark.catalyst.analysis.{AssignmentAlignmentHelper, PaimonRelation}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.Utils.createDataset
-import org.apache.spark.sql.catalyst.analysis.{AssignmentAlignmentHelper, PaimonRelation}
 import org.apache.spark.sql.catalyst.expressions.Alias
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, Project, UpdateTable}

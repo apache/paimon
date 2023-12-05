@@ -15,15 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
 import org.apache.paimon.spark.commands.{PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
+import PaimonRelation.isPaimonTable
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.PaimonRelation.isPaimonTable
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeIntoTable, OverwritePartitionsDynamic, PaimonTableValuedFunctions, PaimonTableValueFunction, TruncatePartition, TruncateTable}
+import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeIntoTable, OverwritePartitionsDynamic, TruncatePartition, TruncateTable}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 

@@ -15,26 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.execution
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.catalog.CatalogUtils
-import org.apache.spark.sql.catalyst.plans.logical.TableSpec
-import org.apache.spark.sql.internal.StaticSQLConf.WAREHOUSE_PATH
+import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 
-trait StrategyHelper {
+import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
+import org.apache.spark.sql.catalyst.rules.Rule
 
-  def spark: SparkSession
+object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
-  protected def makeQualifiedDBObjectPath(location: String): String = {
-    CatalogUtils.makeQualifiedDBObjectPath(
-      spark.sharedState.conf.get(WAREHOUSE_PATH),
-      location,
-      spark.sharedState.hadoopConf)
+  override val operation: RowLevelOp = Delete
+
+  override def apply(plan: LogicalPlan): LogicalPlan = {
+    plan.resolveOperators {
+      case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
+        checkPaimonTable(table)
+
+        DeleteFromPaimonTableCommand(table, d)
+    }
   }
-
-  protected def qualifyLocInTableSpec(tableSpec: TableSpec): TableSpec = {
-    tableSpec.copy(location = tableSpec.location.map(makeQualifiedDBObjectPath(_)))
-  }
-
 }

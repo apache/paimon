@@ -15,10 +15,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
+
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
-import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, CreateNamedStruct, Expression, GetStructField, Literal, NamedExpression}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
 import org.apache.spark.sql.types.StructType

@@ -15,11 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.spark.procedure.Procedure
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
+import org.apache.spark.sql.catalyst.plans.logical.LeafCommand
 import org.apache.spark.sql.catalyst.util.truncatedString
 
 /** A CALL command that resolves stored procedure from SQL. */

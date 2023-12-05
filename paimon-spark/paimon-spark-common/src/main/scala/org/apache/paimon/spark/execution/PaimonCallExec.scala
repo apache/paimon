@@ -15,30 +15,23 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.execution
 
-import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.spark.procedure.Procedure
 
-sealed trait RowLevelOp {
-  val supportedMergeEngine: Seq[MergeEngine]
-}
+import org.apache.spark.sql.catalyst.InternalRow
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.util.truncatedString
+import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
 
-case object Delete extends RowLevelOp {
-  override def toString: String = "delete"
+case class PaimonCallExec(output: Seq[Attribute], procedure: Procedure, input: InternalRow)
+  extends LeafV2CommandExec {
 
-  override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
-}
+  override protected def run(): Seq[InternalRow] = {
+    procedure.call(input)
+  }
 
-case object Update extends RowLevelOp {
-  override def toString: String = "update"
-
-  override val supportedMergeEngine: Seq[MergeEngine] =
-    Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
-}
-
-case object MergeInto extends RowLevelOp {
-  override def toString: String = "merge into"
-
-  override val supportedMergeEngine: Seq[MergeEngine] =
-    Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+  override def simpleString(maxFields: Int): String = {
+    s"CallExec${truncatedString(output, "[", ", ", "]", maxFields)} ${procedure.description}"
+  }
 }
