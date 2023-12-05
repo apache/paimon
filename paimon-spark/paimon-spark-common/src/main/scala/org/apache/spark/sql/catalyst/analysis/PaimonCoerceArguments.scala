@@ -19,7 +19,7 @@ package org.apache.spark.sql.catalyst.analysis
 
 import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.catalyst.expressions.Cast
-import org.apache.spark.sql.catalyst.plans.logical.{CallCommand, LogicalPlan}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, PaimonCallCommand}
 import org.apache.spark.sql.catalyst.rules.Rule
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
@@ -31,10 +31,10 @@ import org.apache.spark.sql.catalyst.rules.Rule
  *
  * <p>Most of the content of this class is referenced from Iceberg's ProcedureArgumentCoercion.
  */
-object CoerceArguments extends Rule[LogicalPlan] {
+object PaimonCoerceArguments extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
-    case call @ CallCommand(procedure, arguments) if call.resolved =>
+    case call @ PaimonCallCommand(procedure, arguments) if call.resolved =>
       val parameters = procedure.parameters
       val newArguments = arguments.zipWithIndex.map {
         case (argument, index) =>

@@ -20,7 +20,7 @@ package org.apache.spark.sql.execution
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CallCommand, CreateTableAsSelect, LogicalPlan, TableSpec}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, PaimonCallCommand, TableSpec}
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
 case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHelper {
@@ -30,9 +30,9 @@ case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHe
     case ctas: CreateTableAsSelect =>
       PaimonCreateTableAsSelectStrategy(spark)(ctas)
 
-    case c @ CallCommand(procedure, args) =>
+    case c @ PaimonCallCommand(procedure, args) =>
       val input = buildInternalRow(args)
-      CallExec(c.output, procedure, input) :: Nil
+      PaimonCallExec(c.output, procedure, input) :: Nil
     case _ => Nil
   }
 

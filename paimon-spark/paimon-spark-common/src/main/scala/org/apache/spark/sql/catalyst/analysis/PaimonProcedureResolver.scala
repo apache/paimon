@@ -40,20 +40,20 @@ import java.util.Locale
  * @param sparkSession
  *   The Spark session.
  */
-case class ResolveProcedures(sparkSession: SparkSession)
+case class PaimonProcedureResolver(sparkSession: SparkSession)
   extends Rule[LogicalPlan]
   with LookupCatalog {
 
   protected lazy val catalogManager: CatalogManager = sparkSession.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
-    case CallStatement(CatalogAndIdentifier(catalog, identifier), arguments) =>
+    case PaimonCallStatement(CatalogAndIdentifier(catalog, identifier), arguments) =>
       val procedure = catalog.asProcedureCatalog.loadProcedure(identifier)
       val parameters = procedure.parameters
       val normalizedParameters = normalizeParameters(parameters)
       validateParameters(normalizedParameters)
       val normalizedArguments = normalizeArguments(arguments)
-      CallCommand(
+      PaimonCallCommand(
         procedure,
         args = buildArgumentExpressions(normalizedParameters, normalizedArguments))
   }
@@ -107,9 +107,9 @@ case class ResolveProcedures(sparkSession: SparkSession)
    * @return
    *   Normalized arguments.
    */
-  private def normalizeArguments(arguments: Seq[CallArgument]): Seq[CallArgument] = {
+  private def normalizeArguments(arguments: Seq[PaimonCallArgument]): Seq[PaimonCallArgument] = {
     arguments.map {
-      case a @ NamedArgument(name, _) => a.copy(name = name.toLowerCase(Locale.ROOT))
+      case a @ PaimonNamedArgument(name, _) => a.copy(name = name.toLowerCase(Locale.ROOT))
       case other => other
     }
   }
@@ -126,7 +126,7 @@ case class ResolveProcedures(sparkSession: SparkSession)
    */
   private def buildArgumentExpressions(
       parameters: Seq[ProcedureParameter],
-      arguments: Seq[CallArgument]): Seq[Expression] = {
+      arguments: Seq[PaimonCallArgument]): Seq[Expression] = {
     val nameToPositionMap = parameters.map(_.name).zipWithIndex.toMap
     val nameToArgumentMap = buildNameToArgumentMap(parameters, arguments, nameToPositionMap)
     val missingParamNames = parameters.filter(_.required).collect {
@@ -163,17 +163,17 @@ case class ResolveProcedures(sparkSession: SparkSession)
    */
   private def buildNameToArgumentMap(
       parameters: Seq[ProcedureParameter],
-      arguments: Seq[CallArgument],
-      nameToPositionMap: Map[String, Int]): Map[String, CallArgument] = {
-    val isNamedArgument = arguments.exists(_.isInstanceOf[NamedArgument])
-    val isPositionalArgument = arguments.exists(_.isInstanceOf[PositionalArgument])
+      arguments: Seq[PaimonCallArgument],
+      nameToPositionMap: Map[String, Int]): Map[String, PaimonCallArgument] = {
+    val isNamedArgument = arguments.exists(_.isInstanceOf[PaimonNamedArgument])
+    val isPositionalArgument = arguments.exists(_.isInstanceOf[PaimonPositionalArgument])
 
     if (isNamedArgument && isPositionalArgument) {
       throw new AnalysisException("Cannot mix named and positional arguments.")
     }
 
     if (isNamedArgument) {
-      val namedArguments = arguments.asInstanceOf[Seq[NamedArgument]]
+      val namedArguments = arguments.asInstanceOf[Seq[PaimonNamedArgument]]
       val validationErrors = namedArguments.groupBy(_.name).collect {
         case (name, procedureArguments) if procedureArguments.size > 1 =>
           s"Procedure argument $name is duplicated."

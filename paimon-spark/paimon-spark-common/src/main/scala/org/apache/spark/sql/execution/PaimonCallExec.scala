@@ -24,7 +24,7 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.util.truncatedString
 import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
 
-case class CallExec(output: Seq[Attribute], procedure: Procedure, input: InternalRow)
+case class PaimonCallExec(output: Seq[Attribute], procedure: Procedure, input: InternalRow)
   extends LeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {

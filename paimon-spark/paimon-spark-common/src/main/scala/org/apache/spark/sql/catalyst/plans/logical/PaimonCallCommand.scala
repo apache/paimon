@@ -23,7 +23,7 @@ import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference,
 import org.apache.spark.sql.catalyst.util.truncatedString
 
 /** A CALL command that resolves stored procedure from SQL. */
-case class CallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
+case class PaimonCallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
 
   override lazy val output: Seq[Attribute] =
     procedure.outputType.map(
