@@ -52,25 +52,25 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
     visit(ctx.statement).asInstanceOf[LogicalPlan]
   }
 
-  /** Creates a [[CallStatement]] for a stored procedure call. */
-  override def visitCall(ctx: CallContext): CallStatement = withOrigin(ctx) {
+  /** Creates a [[PaimonCallStatement]] for a stored procedure call. */
+  override def visitCall(ctx: CallContext): PaimonCallStatement = withOrigin(ctx) {
     val name = toSeq(ctx.multipartIdentifier.parts).map(_.getText)
-    val args = toSeq(ctx.callArgument).map(typedVisit[CallArgument])
-    CallStatement(name, args)
+    val args = toSeq(ctx.callArgument).map(typedVisit[PaimonCallArgument])
+    PaimonCallStatement(name, args)
   }
 
   /** Creates a positional argument in a stored procedure call. */
-  override def visitPositionalArgument(ctx: PositionalArgumentContext): CallArgument =
+  override def visitPositionalArgument(ctx: PositionalArgumentContext): PaimonCallArgument =
     withOrigin(ctx) {
       val expression = typedVisit[Expression](ctx.expression)
-      PositionalArgument(expression)
+      PaimonPositionalArgument(expression)
     }
 
   /** Creates a named argument in a stored procedure call. */
-  override def visitNamedArgument(ctx: NamedArgumentContext): CallArgument = withOrigin(ctx) {
+  override def visitNamedArgument(ctx: NamedArgumentContext): PaimonCallArgument = withOrigin(ctx) {
     val name = ctx.identifier.getText
     val expression = typedVisit[Expression](ctx.expression)
-    NamedArgument(name, expression)
+    PaimonNamedArgument(name, expression)
   }
 
   /** Creates a [[Expression]] in a positional and named argument. */

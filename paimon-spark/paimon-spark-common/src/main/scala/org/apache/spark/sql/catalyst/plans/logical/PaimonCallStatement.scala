@@ -20,16 +20,17 @@ package org.apache.spark.sql.catalyst.plans.logical
 import org.apache.spark.sql.catalyst.expressions.Expression
 
 /** A CALL statement parsed from SQL. */
-case class CallStatement(name: Seq[String], args: Seq[CallArgument]) extends LeafParsedStatement
+case class PaimonCallStatement(name: Seq[String], args: Seq[PaimonCallArgument])
+  extends LeafParsedStatement
 
 /** An argument of a CALL statement. */
-sealed trait CallArgument {
+sealed trait PaimonCallArgument {
 
   def expr: Expression
 }
 
 /** An argument identified by name. */
-case class NamedArgument(name: String, expr: Expression) extends CallArgument
+case class PaimonNamedArgument(name: String, expr: Expression) extends PaimonCallArgument
 
 /** An argument identified by position. */
-case class PositionalArgument(expr: Expression) extends CallArgument
+case class PaimonPositionalArgument(expr: Expression) extends PaimonCallArgument
