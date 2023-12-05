@@ -101,6 +101,18 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                                         time1)))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111), Row.of(2, 22, 222));
 
+        assertThat(
+                        batchSql(
+                                "SELECT * FROM T /*+ OPTIONS('scan.file-creation-time-millis'='%s') */",
+                                time1))
+                .containsExactlyInAnyOrder(
+                        Row.of(3, 33, 333),
+                        Row.of(4, 44, 444),
+                        Row.of(5, 55, 555),
+                        Row.of(6, 66, 666),
+                        Row.of(7, 77, 777),
+                        Row.of(8, 88, 888));
+
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='2') */"))
                 .containsExactlyInAnyOrder(
                         Row.of(1, 11, 111),
@@ -125,6 +137,15 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222),
                         Row.of(3, 33, 333),
                         Row.of(4, 44, 444));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.file-creation-time-millis'='%s') */",
+                                        time2)))
+                .containsExactlyInAnyOrder(
+                        Row.of(5, 55, 555), Row.of(6, 66, 666),
+                        Row.of(7, 77, 777), Row.of(8, 88, 888));
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
                 .containsExactlyInAnyOrder(
@@ -156,6 +177,13 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         Row.of(4, 44, 444),
                         Row.of(5, 55, 555),
                         Row.of(6, 66, 666));
+
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM T /*+ OPTIONS('scan.file-creation-time-millis'='%s') */",
+                                        time3)))
+                .containsExactlyInAnyOrder(Row.of(7, 77, 777), Row.of(8, 88, 888));
 
         assertThatThrownBy(
                         () ->

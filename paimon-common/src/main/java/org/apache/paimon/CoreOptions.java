@@ -460,7 +460,17 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDeprecatedKeys("log.scan.timestamp-millis")
                     .withDescription(
-                            "Optional timestamp used in case of \"from-timestamp\" scan mode.");
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode. "
+                                    + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen.");
+
+    public static final ConfigOption<Long> SCAN_FILE_CREATION_TIME_MILLIS =
+            key("scan.file-creation-time-millis")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "After configuring this time, only the data files created after this time will be read. "
+                                    + "It is independent of snapshots, but it is imprecise filtering (depending on whether "
+                                    + "or not compaction occurs).");
 
     public static final ConfigOption<Long> SCAN_SNAPSHOT_ID =
             key("scan.snapshot-id")
@@ -1231,6 +1241,8 @@ public class CoreOptions implements Serializable {
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
+            } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
+                return StartupMode.FROM_FILE_CREATION_TIME;
             } else if (options.getOptional(INCREMENTAL_BETWEEN).isPresent()
                     || options.getOptional(INCREMENTAL_BETWEEN_TIMESTAMP).isPresent()) {
                 return StartupMode.INCREMENTAL;
@@ -1246,6 +1258,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanTimestampMills() {
         return options.get(SCAN_TIMESTAMP_MILLIS);
+    }
+
+    public Long scanFileCreationTimeMills() {
+        return options.get(SCAN_FILE_CREATION_TIME_MILLIS);
     }
 
     public Long scanBoundedWatermark() {
@@ -1512,6 +1528,11 @@ public class CoreOptions implements Serializable {
                         + "without producing a snapshot at the beginning. "
                         + "For batch sources, produces a snapshot at timestamp specified by \"scan.timestamp-millis\" "
                         + "but does not read new changes."),
+
+        FROM_FILE_CREATION_TIME(
+                "from-file-creation-time",
+                "For streaming and batch sources, produces a snapshot and filters the data files by creation time. "
+                        + "For streaming sources, upon first startup, and continue to read the latest changes."),
 
         FROM_SNAPSHOT(
                 "from-snapshot",
@@ -1809,6 +1830,10 @@ public class CoreOptions implements Serializable {
     public static void setDefaultValues(Options options) {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
+        }
+
+        if (options.contains(SCAN_FILE_CREATION_TIME_MILLIS) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_FILE_CREATION_TIME);
         }
 
         if (options.contains(SCAN_SNAPSHOT_ID) && !options.contains(SCAN_MODE)) {

@@ -57,6 +57,8 @@ public interface SnapshotReader {
 
     SnapshotReader withLevelFilter(Filter<Integer> levelFilter);
 
+    SnapshotReader withDataFileTimeMills(long dataFileTimeMills);
+
     SnapshotReader withBucket(int bucket);
 
     SnapshotReader withBucketFilter(Filter<Integer> bucketFilter);

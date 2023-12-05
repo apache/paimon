@@ -61,6 +61,8 @@ public interface FileStoreScan {
 
     FileStoreScan withLevelFilter(Filter<Integer> levelFilter);
 
+    FileStoreScan withDataFileTimeMills(long dataFileTimeMills);
+
     FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter);
 
     FileStoreScan withMetrics(ScanMetrics metrics);
