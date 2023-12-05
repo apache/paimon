@@ -297,3 +297,20 @@ CREATE TABLE t1 (
 );
 
 INSERT INTO t1 VALUES (1, '1');
+
+-- ################################################################################
+--  testBigIntUnsignedToBigInt
+-- ################################################################################
+
+CREATE DATABASE bigint_unsigned_to_bigint_test;
+USE bigint_unsigned_to_bigint_test;
+
+CREATE TABLE t1 (
+    pk INT,
+    v1 BIGINT UNSIGNED,
+    v2 BIGINT UNSIGNED ZEROFILL,
+    v3 SERIAL,
+    PRIMARY KEY (pk)
+);
+
+INSERT INTO t1 VALUES (1, 12345, 56789, 123456789);

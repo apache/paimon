@@ -36,6 +36,7 @@ import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.BIGINT_UNSIGNED_TO_BIGINT;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.CHAR_TO_STRING;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.LONGTEXT_TO_BYTES;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
@@ -435,8 +436,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         }
     }
 
-    // --------------------------------------- char-to-string
-    // ---------------------------------------
+    // -------------------------------------- char-to-string --------------------------------------
 
     @Test
     @Timeout(60)
@@ -502,6 +502,8 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         }
     }
 
+    // ------------------------------------- longtext-to-bytes -------------------------------------
+
     @Test
     @Timeout(60)
     public void testLongtextToBytes() throws Exception {
@@ -564,6 +566,79 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                     getFileStoreTable("_new_table"),
                     RowType.of(
                             new DataType[] {DataTypes.INT().notNull(), DataTypes.BYTES()},
+                            new String[] {"pk", "v"}),
+                    Collections.singletonList("pk"));
+        }
+    }
+
+    // --------------------------------- bigint-unsigned-to-bigint ---------------------------------
+
+    @Test
+    @Timeout(60)
+    public void testBigintUnsignedToBigint() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "bigint_unsigned_to_bigint_test");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(BIGINT_UNSIGNED_TO_BIGINT.configString())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable("t1");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT().notNull()
+                        },
+                        new String[] {"pk", "v1", "v2", "v3"});
+        waitForResult(
+                Collections.singletonList("+I[1, 12345, 56789, 123456789]"),
+                table,
+                rowType,
+                Collections.singletonList("pk"));
+
+        try (Statement statement = getStatement()) {
+            statement.executeUpdate("USE bigint_unsigned_to_bigint_test");
+
+            // test schema evolution
+            statement.executeUpdate("ALTER TABLE t1 ADD COLUMN v4 BIGINT UNSIGNED");
+            statement.executeUpdate(
+                    "INSERT INTO t1 VALUES (2, 23456, 67890, 234567890, 1234567890)");
+
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(),
+                                DataTypes.BIGINT(),
+                                DataTypes.BIGINT(),
+                                DataTypes.BIGINT().notNull(),
+                                DataTypes.BIGINT(),
+                            },
+                            new String[] {"pk", "v1", "v2", "v3", "v4"});
+            waitForResult(
+                    Arrays.asList(
+                            "+I[1, 12345, 56789, 123456789, NULL]",
+                            "+I[2, 23456, 67890, 234567890, 1234567890]"),
+                    table,
+                    rowType,
+                    Collections.singletonList("pk"));
+
+            // test newly created table
+            statement.executeUpdate(
+                    "CREATE TABLE _new_table (pk INT, v BIGINT UNSIGNED, PRIMARY KEY (pk))");
+            statement.executeUpdate("INSERT INTO _new_table VALUES (1, 1234567890)");
+
+            waitingTables("_new_table");
+            waitForResult(
+                    Collections.singletonList("+I[1, 1234567890]"),
+                    getFileStoreTable("_new_table"),
+                    RowType.of(
+                            new DataType[] {DataTypes.INT().notNull(), DataTypes.BIGINT()},
                             new String[] {"pk", "v"}),
                     Collections.singletonList("pk"));
         }
