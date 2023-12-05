@@ -19,7 +19,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.catalog.Catalogs
+import org.apache.paimon.spark.catalog.{Catalogs, PaimonCatalog}
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.table.AbstractFileStoreTable
 
@@ -43,7 +43,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession {
 
   override protected def sparkConf = {
     super.sparkConf
-      .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
+      .set("spark.sql.catalog.paimon", classOf[PaimonCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }

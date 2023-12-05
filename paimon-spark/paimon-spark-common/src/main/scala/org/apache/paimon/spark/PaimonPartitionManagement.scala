@@ -34,7 +34,7 @@ import java.util.{Map => JMap}
 import scala.collection.JavaConverters._
 
 trait PaimonPartitionManagement extends SupportsPartitionManagement {
-  self: SparkTable =>
+  self: PaimonTable =>
 
   def partitionKeys() = getTable.partitionKeys
 
@@ -101,8 +101,8 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
     binaryRows
       .map(
         binaryRow => {
-          val sparkInternalRow: SparkInternalRow =
-            new SparkInternalRow(SparkTypeUtils.toPaimonType(schema).asInstanceOf[RowType])
+          val sparkInternalRow: PaimonInternalRow =
+            new PaimonInternalRow(SparkTypeUtils.toPaimonType(schema).asInstanceOf[RowType])
           sparkInternalRow.replace(binaryRow)
         })
       .filter(

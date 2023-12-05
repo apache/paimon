@@ -23,10 +23,8 @@ import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper}
-import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 import java.io.IOException

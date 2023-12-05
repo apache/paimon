@@ -19,7 +19,7 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor
-import org.apache.paimon.spark.{InsertInto, SparkTable}
+import org.apache.paimon.spark.{InsertInto, PaimonTable}
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -36,7 +36,7 @@ import java.util.{Collections, UUID}
 
 import scala.util.control.NonFatal
 
-case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromTable)
+case class DeleteFromPaimonTableCommand(v2Table: PaimonTable, delete: DeleteFromTable)
   extends LeafRunnableCommand
   with PaimonCommand {
 

@@ -25,9 +25,9 @@ import org.apache.spark.sql.connector.read.{Batch, InputPartition, PartitionRead
 case class PaimonBatch(splits: Array[Split], readBuilder: ReadBuilder) extends Batch {
 
   override def planInputPartitions(): Array[InputPartition] =
-    splits.map(new SparkInputPartition(_).asInstanceOf[InputPartition])
+    splits.map(new PaimonInputPartition(_).asInstanceOf[InputPartition])
 
-  override def createReaderFactory(): PartitionReaderFactory = new SparkReaderFactory(readBuilder)
+  override def createReaderFactory(): PartitionReaderFactory = new PaimonReaderFactory(readBuilder)
 
   override def equals(obj: Any): Boolean = {
     obj match {

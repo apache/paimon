@@ -18,26 +18,26 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.SparkCatalog
+import org.apache.paimon.spark.catalog.PaimonCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier
 import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, TableSpec}
 import org.apache.spark.sql.connector.catalog.StagingTableCatalog
-import org.apache.spark.sql.execution.{SparkPlan, StrategyHelper}
+import org.apache.spark.sql.execution.{PaimonStrategyHelper, SparkPlan}
 import org.apache.spark.sql.execution.datasources.v2.CreateTableAsSelectExec
 
 import scala.collection.JavaConverters._
 
 case class PaimonCreateTableAsSelectStrategy(spark: SparkSession)
   extends Strategy
-  with StrategyHelper {
+  with PaimonStrategyHelper {
 
   import org.apache.spark.sql.connector.catalog.CatalogV2Implicits._
 
   override def apply(plan: LogicalPlan): Seq[SparkPlan] = plan match {
     case CreateTableAsSelect(
-          ResolvedIdentifier(catalog: SparkCatalog, ident),
+          ResolvedIdentifier(catalog: PaimonCatalog, ident),
           parts,
           query,
           tableSpec: TableSpec,

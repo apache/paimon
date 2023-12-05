@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.PaimonTable
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 
@@ -29,7 +29,7 @@ import java.util.{Collections, UUID}
 
 import scala.collection.JavaConverters._
 
-case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TablePartitionSpec)
+case class PaimonTruncateTableCommand(v2Table: PaimonTable, partitionSpec: TablePartitionSpec)
   extends LeafRunnableCommand
   with PaimonCommand {
 

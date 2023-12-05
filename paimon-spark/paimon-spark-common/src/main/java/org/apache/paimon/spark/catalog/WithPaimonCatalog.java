@@ -21,6 +21,6 @@ package org.apache.paimon.spark.catalog;
 import org.apache.paimon.catalog.Catalog;
 
 /** With paimon catalog. */
-public interface WithPaimonCatalog {
+interface WithPaimonCatalog {
     Catalog paimonCatalog();
 }

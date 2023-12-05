@@ -18,7 +18,7 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.spark.SparkTable;
+import org.apache.paimon.spark.PaimonTable;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.utils.Preconditions;
 
@@ -82,7 +82,7 @@ abstract class BaseProcedure implements Procedure {
             Identifier ident,
             boolean refreshSparkCache,
             Function<org.apache.paimon.table.Table, T> func) {
-        SparkTable sparkTable = loadSparkTable(ident);
+        PaimonTable sparkTable = loadSparkTable(ident);
         org.apache.paimon.table.Table table = sparkTable.getTable();
 
         T result = func.apply(table);
@@ -94,12 +94,15 @@ abstract class BaseProcedure implements Procedure {
         return result;
     }
 
-    protected SparkTable loadSparkTable(Identifier ident) {
+    protected PaimonTable loadSparkTable(Identifier ident) {
         try {
             Table table = tableCatalog.loadTable(ident);
             Preconditions.checkArgument(
-                    table instanceof SparkTable, "%s is not %s", ident, SparkTable.class.getName());
-            return (SparkTable) table;
+                    table instanceof PaimonTable,
+                    "%s is not %s",
+                    ident,
+                    PaimonTable.class.getName());
+            return (PaimonTable) table;
         } catch (NoSuchTableException e) {
             String errMsg =
                     String.format(

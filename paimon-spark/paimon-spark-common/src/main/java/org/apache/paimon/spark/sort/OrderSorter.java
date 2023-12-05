@@ -27,7 +27,7 @@ import org.apache.spark.sql.Row;
 import java.util.List;
 
 /** Order sort by alphabetical order. */
-public class OrderSorter extends TableSorter {
+class OrderSorter extends TableSorter {
 
     public OrderSorter(FileStoreTable table, List<String> orderColNames) {
         super(table, orderColNames);

@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.migrate.Migrator;
-import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.spark.catalog.BaseCatalog;
 import org.apache.paimon.spark.utils.TableMigrationUtils;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -80,7 +80,7 @@ public class MigrateFileProcedure extends BaseProcedure {
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier targetTableId = Identifier.fromString(targetTable);
 
-        Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
+        Catalog paimonCatalog = ((BaseCatalog) tableCatalog()).paimonCatalog();
 
         if (!(paimonCatalog.tableExists(targetTableId))) {
             throw new IllegalArgumentException(

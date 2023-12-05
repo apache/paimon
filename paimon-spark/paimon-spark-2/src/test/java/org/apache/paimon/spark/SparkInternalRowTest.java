@@ -48,7 +48,7 @@ import static org.apache.paimon.data.BinaryString.fromString;
 import static org.apache.paimon.spark.SparkTypeTest.ALL_TYPES;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test for {@link SparkInternalRow}. */
+/** Test for {@link PaimonInternalRow}. */
 public class SparkInternalRowTest {
 
     @Test
@@ -87,7 +87,7 @@ public class SparkInternalRowTest {
                         SparkTypeUtils.fromPaimonType(ALL_TYPES));
         org.apache.spark.sql.Row sparkRow =
                 (org.apache.spark.sql.Row)
-                        sparkConverter.apply(new SparkInternalRow(ALL_TYPES).replace(rowData));
+                        sparkConverter.apply(new PaimonInternalRow(ALL_TYPES).replace(rowData));
 
         assertThat(sparkRow.getInt(0)).isEqualTo(1);
         assertThat(sparkRow.getString(1)).isEqualTo("jingsong");

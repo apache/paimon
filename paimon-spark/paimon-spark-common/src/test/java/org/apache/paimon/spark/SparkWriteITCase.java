@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.spark.catalog.PaimonCatalog;
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 
 import org.apache.spark.sql.Row;
@@ -51,7 +52,7 @@ public class SparkWriteITCase {
                                 "spark.sql.extensions",
                                 PaimonSparkSessionExtensions.class.getName())
                         .getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon", PaimonCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         spark.sql("CREATE DATABASE paimon.db");
         spark.sql("USE paimon.db");

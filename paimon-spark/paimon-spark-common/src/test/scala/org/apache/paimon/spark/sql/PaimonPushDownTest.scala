@@ -100,7 +100,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
     Assertions.assertTrue(scanBuilder.isInstanceOf[SupportsPushDownLimit])
 
     val dataFilesWithoutLimit = scanBuilder.build().toBatch.planInputPartitions().flatMap {
-      case partition: SparkInputPartition =>
+      case partition: PaimonInputPartition =>
         partition.split() match {
           case dataSplit: DataSplit => dataSplit.dataFiles().asScala
           case _ => Seq.empty
@@ -173,7 +173,7 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
   }
 
   private def getScanBuilder(tableName: String = "T"): ScanBuilder = {
-    new SparkTable(loadTable(tableName))
+    new PaimonTable(loadTable(tableName))
       .newScanBuilder(CaseInsensitiveStringMap.empty())
   }
 

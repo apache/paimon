@@ -21,7 +21,7 @@ package org.apache.paimon.spark.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.migrate.Migrator;
-import org.apache.paimon.spark.catalog.WithPaimonCatalog;
+import org.apache.paimon.spark.catalog.BaseCatalog;
 import org.apache.paimon.spark.utils.TableMigrationUtils;
 import org.apache.paimon.utils.ParameterUtils;
 
@@ -81,7 +81,7 @@ public class MigrateTableProcedure extends BaseProcedure {
         Identifier sourceTableId = Identifier.fromString(sourceTable);
         Identifier tmpTableId = Identifier.fromString(sourceTable + TMP_TBL_SUFFIX);
 
-        Catalog paimonCatalog = ((WithPaimonCatalog) tableCatalog()).paimonCatalog();
+        Catalog paimonCatalog = ((BaseCatalog) tableCatalog()).paimonCatalog();
 
         try {
             Migrator migrator =

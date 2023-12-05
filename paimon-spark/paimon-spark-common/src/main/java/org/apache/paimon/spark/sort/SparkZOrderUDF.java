@@ -50,7 +50,7 @@ import scala.collection.JavaConverters;
 import scala.collection.Seq;
 
 /** Spark udf to calculate zorder bytes. Copied from iceberg. */
-public class SparkZOrderUDF implements Serializable {
+class SparkZOrderUDF implements Serializable {
     private static final byte[] PRIMITIVE_EMPTY = new byte[ZOrderByteUtils.PRIMITIVE_BUFFER_SIZE];
 
     /**

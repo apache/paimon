@@ -17,6 +17,9 @@
  */
 package org.apache.spark.sql.catalyst.parser.extensions
 
+import org.apache.paimon.spark.catalyst.plans.logical
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
+
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}

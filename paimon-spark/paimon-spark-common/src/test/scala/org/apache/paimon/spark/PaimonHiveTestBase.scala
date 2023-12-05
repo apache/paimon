@@ -18,6 +18,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
+import org.apache.paimon.spark.catalog.PaimonGenericCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
@@ -32,7 +33,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.sparkConf
       .set("spark.sql.warehouse.dir", tempDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
-      .set("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog[_]].getName)
+      .set("spark.sql.catalog.spark_catalog", classOf[PaimonGenericCatalog[_]].getName)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 

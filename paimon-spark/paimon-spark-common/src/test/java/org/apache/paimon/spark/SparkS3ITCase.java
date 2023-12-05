@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIOTest;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.s3.MinioTestContainer;
+import org.apache.paimon.spark.catalog.PaimonCatalog;
 import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
 import org.apache.paimon.testutils.junit.parameterized.Parameters;
 
@@ -60,7 +61,7 @@ public class SparkS3ITCase {
         String path = MINIO_CONTAINER.getS3UriForDefaultBucket() + "/" + UUID.randomUUID();
         warehousePath = new Path(path);
         spark = SparkSession.builder().master("local[2]").getOrCreate();
-        spark.conf().set("spark.sql.catalog.paimon", SparkCatalog.class.getName());
+        spark.conf().set("spark.sql.catalog.paimon", PaimonCatalog.class.getName());
         spark.conf().set("spark.sql.catalog.paimon.warehouse", warehousePath.toString());
         MINIO_CONTAINER
                 .getS3ConfigOptions()
