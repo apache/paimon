@@ -18,7 +18,7 @@
 package org.apache.spark.sql.execution.shim
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.catalog.PaimonCatalog
+import org.apache.paimon.spark.PaimonCatalog
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.analysis.ResolvedIdentifier

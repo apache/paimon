@@ -18,7 +18,6 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
-import org.apache.paimon.spark.catalog.PaimonGenericCatalog
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf

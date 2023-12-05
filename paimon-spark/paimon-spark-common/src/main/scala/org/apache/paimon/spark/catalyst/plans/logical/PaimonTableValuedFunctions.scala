@@ -18,7 +18,8 @@
 package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.paimon.CoreOptions
-import org.apache.paimon.spark.catalog.{Catalogs, PaimonCatalog}
+import org.apache.paimon.spark.PaimonCatalog
+import org.apache.paimon.spark.catalog.Catalogs
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.FunctionIdentifier

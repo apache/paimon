@@ -19,7 +19,6 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.spark.catalog.PaimonGenericCatalog;
 
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.SparkSession;

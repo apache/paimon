@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.catalog;
+package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
@@ -25,7 +25,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.spark.PaimonTable;
+import org.apache.paimon.spark.catalog.BaseCatalog;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
 

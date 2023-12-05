@@ -19,7 +19,7 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.catalog.{Catalog, CatalogContext, CatalogFactory, Identifier}
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.catalog.{Catalogs, PaimonCatalog}
+import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.table.AbstractFileStoreTable
 

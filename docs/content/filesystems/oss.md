@@ -71,7 +71,7 @@ Place `paimon-oss-{{< version >}}.jar` together with `paimon-spark-{{< version >
 
 ```shell
 spark-sql \ 
-  --conf spark.sql.catalog.paimon=org.apache.paimon.spark.catalog.PaimonCatalog \
+  --conf spark.sql.catalog.paimon=org.apache.paimon.spark.PaimonCatalog \
   --conf spark.sql.catalog.paimon.warehouse=oss://<bucket>/<path> \
   --conf spark.sql.catalog.paimon.fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com \
   --conf spark.sql.catalog.paimon.fs.oss.accessKeyId=xxx \
