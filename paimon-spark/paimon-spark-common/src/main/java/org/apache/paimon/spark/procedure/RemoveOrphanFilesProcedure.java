@@ -37,7 +37,7 @@ import static org.apache.spark.sql.types.DataTypes.StringType;
  * Remove orphan files procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.remove_orphan_files(table => 'tableId', [older_then => '2023-10-31 12:00:00'])
+ *  CALL sys.remove_orphan_files(table => 'tableId', [older_than => '2023-10-31 12:00:00'])
  * </code></pre>
  */
 public class RemoveOrphanFilesProcedure extends BaseProcedure {
@@ -45,7 +45,7 @@ public class RemoveOrphanFilesProcedure extends BaseProcedure {
     private static final ProcedureParameter[] PARAMETERS =
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
-                ProcedureParameter.optional("older_then", StringType)
+                ProcedureParameter.optional("older_than", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =

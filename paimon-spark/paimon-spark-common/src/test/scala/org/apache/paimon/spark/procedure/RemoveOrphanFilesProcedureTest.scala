@@ -51,22 +51,22 @@ class RemoveOrphanFilesProcedureTest extends PaimonSparkTestBase {
     checkAnswer(spark.sql(s"CALL sys.remove_orphan_files(table => 'T')"), Row("Deleted=0") :: Nil)
 
     val orphanFile2ModTime = fileIO.getFileStatus(orphanFile2).getModificationTime
-    val older_then1 = DateTimeUtils.formatLocalDateTime(
+    val older_than1 = DateTimeUtils.formatLocalDateTime(
       DateTimeUtils.toLocalDateTime(
         orphanFile2ModTime -
           TimeUnit.SECONDS.toMillis(1)),
       3)
 
     checkAnswer(
-      spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_then => '$older_then1')"),
+      spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than1')"),
       Row("Deleted=1") :: Nil)
 
-    val older_then2 = DateTimeUtils.formatLocalDateTime(
+    val older_than2 = DateTimeUtils.formatLocalDateTime(
       DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
       3)
 
     checkAnswer(
-      spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_then => '$older_then2')"),
+      spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than2')"),
       Row("Deleted=1") :: Nil)
   }
 }
