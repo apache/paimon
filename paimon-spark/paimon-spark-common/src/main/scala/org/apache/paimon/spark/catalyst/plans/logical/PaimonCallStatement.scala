@@ -15,9 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.plans.logical
+package org.apache.paimon.spark.catalyst.plans.logical
 
 import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.plans.logical.LeafParsedStatement
 
 /** A CALL statement parsed from SQL. */
 case class PaimonCallStatement(name: Seq[String], args: Seq[PaimonCallArgument])

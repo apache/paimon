@@ -19,8 +19,8 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.analysis.Delete
 
-import org.apache.spark.sql.catalyst.analysis.Delete
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 class DeleteFromTableTest extends PaimonSparkTestBase {

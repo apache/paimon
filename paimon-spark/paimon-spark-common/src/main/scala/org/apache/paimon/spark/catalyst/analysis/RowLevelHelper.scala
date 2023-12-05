@@ -15,7 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.CoreOptions.MERGE_ENGINE
 import org.apache.paimon.options.Options

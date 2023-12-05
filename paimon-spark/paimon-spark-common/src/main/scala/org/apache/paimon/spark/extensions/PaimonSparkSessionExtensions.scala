@@ -17,11 +17,12 @@
  */
 package org.apache.paimon.spark.extensions
 
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
+import org.apache.paimon.spark.execution.PaimonStrategy
+
 import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.analysis.{PaimonAnalysis, PaimonCoerceArguments, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
-import org.apache.spark.sql.catalyst.plans.logical.PaimonTableValuedFunctions
-import org.apache.spark.sql.execution.PaimonStrategy
 
 /** Spark session extension to extends the syntax and adds the rules. */
 class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
@@ -33,7 +34,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     // analyzer extensions
     extensions.injectResolutionRule(sparkSession => new PaimonAnalysis(sparkSession))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
-    extensions.injectResolutionRule(_ => PaimonCoerceArguments)
 
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
 

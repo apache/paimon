@@ -18,15 +18,16 @@
 
 package org.apache.paimon.spark.extensions;
 
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallArgument;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallStatement;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonNamedArgument;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonPositionalArgument;
+
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.expressions.Literal$;
 import org.apache.spark.sql.catalyst.parser.ParseException;
 import org.apache.spark.sql.catalyst.parser.ParserInterface;
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParseException;
-import org.apache.spark.sql.catalyst.plans.logical.PaimonCallArgument;
-import org.apache.spark.sql.catalyst.plans.logical.PaimonCallStatement;
-import org.apache.spark.sql.catalyst.plans.logical.PaimonNamedArgument;
-import org.apache.spark.sql.catalyst.plans.logical.PaimonPositionalArgument;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.junit.jupiter.api.AfterEach;

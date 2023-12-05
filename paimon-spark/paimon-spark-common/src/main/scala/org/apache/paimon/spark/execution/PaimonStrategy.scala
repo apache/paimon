@@ -15,12 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.execution
+package org.apache.paimon.spark.execution
+
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallCommand
 
 import org.apache.spark.sql.{SparkSession, Strategy}
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.{Expression, GenericInternalRow, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan, PaimonCallCommand, TableSpec}
+import org.apache.spark.sql.catalyst.plans.logical.{CreateTableAsSelect, LogicalPlan}
+import org.apache.spark.sql.execution.SparkPlan
 import org.apache.spark.sql.execution.shim.PaimonCreateTableAsSelectStrategy
 
 case class PaimonStrategy(spark: SparkSession) extends Strategy with PredicateHelper {

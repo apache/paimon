@@ -15,16 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.catalog.ProcedureCatalog
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallCommand, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
 import org.apache.paimon.spark.procedure.ProcedureParameter
 
-import org.apache.spark.sql.{AnalysisException, SparkSession}
-import org.apache.spark.sql.catalyst.expressions.{Expression, Literal}
-import org.apache.spark.sql.catalyst.plans.logical._
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.expressions.{Cast, Expression, Literal}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.catalyst.rules.Rule
-import org.apache.spark.sql.connector.catalog.{CatalogManager, CatalogPlugin, LookupCatalog}
+import org.apache.spark.sql.connector.catalog.{CatalogPlugin, PaimonLookupCatalog}
 
 import java.util.Locale
 
@@ -42,9 +43,9 @@ import java.util.Locale
  */
 case class PaimonProcedureResolver(sparkSession: SparkSession)
   extends Rule[LogicalPlan]
-  with LookupCatalog {
+  with PaimonLookupCatalog {
 
-  protected lazy val catalogManager: CatalogManager = sparkSession.sessionState.catalogManager
+  protected lazy val catalogManager = sparkSession.sessionState.catalogManager
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperators {
     case PaimonCallStatement(CatalogAndIdentifier(catalog, identifier), arguments) =>
@@ -56,6 +57,30 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
       PaimonCallCommand(
         procedure,
         args = buildArgumentExpressions(normalizedParameters, normalizedArguments))
+
+    case call @ PaimonCallCommand(procedure, arguments) if call.resolved =>
+      val parameters = procedure.parameters
+      val newArguments = arguments.zipWithIndex.map {
+        case (argument, index) =>
+          val parameter = parameters(index)
+          val parameterType = parameter.dataType
+          val argumentType = argument.dataType
+          if (parameterType != argumentType && !Cast.canUpCast(argumentType, parameterType)) {
+            throw new RuntimeException(
+              s"Cannot cast $argumentType to $parameterType of ${parameter.name}.")
+          }
+          if (parameterType != argumentType) {
+            Cast(argument, parameterType)
+          } else {
+            argument
+          }
+      }
+
+      if (newArguments != arguments) {
+        call.copy(args = newArguments)
+      } else {
+        call
+      }
   }
 
   /**
@@ -88,12 +113,12 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
       case (name, matchingParams) if matchingParams.length > 1 => name
     }
     if (duplicateParamNames.nonEmpty) {
-      throw new AnalysisException(
+      throw new RuntimeException(
         s"Parameter names ${duplicateParamNames.mkString("[", ",", "]")} are duplicated.")
     }
     parameters.sliding(2).foreach {
       case Seq(previousParam, currentParam) if !previousParam.required && currentParam.required =>
-        throw new AnalysisException(
+        throw new RuntimeException(
           s"Optional parameters should be after required ones but $currentParam is after $previousParam.")
       case _ =>
     }
@@ -133,7 +158,7 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
       case parameter if !nameToArgumentMap.contains(parameter.name) => parameter.name
     }
     if (missingParamNames.nonEmpty) {
-      throw new AnalysisException(
+      throw new RuntimeException(
         s"Required parameters ${missingParamNames.mkString("[", ",", "]")} is missed.")
     }
     val argumentExpressions = new Array[Expression](parameters.size)
@@ -169,7 +194,7 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
     val isPositionalArgument = arguments.exists(_.isInstanceOf[PaimonPositionalArgument])
 
     if (isNamedArgument && isPositionalArgument) {
-      throw new AnalysisException("Cannot mix named and positional arguments.")
+      throw new RuntimeException("Cannot mix named and positional arguments.")
     }
 
     if (isNamedArgument) {
@@ -180,13 +205,13 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
         case (name, _) if !nameToPositionMap.contains(name) => s"Argument $name is unknown."
       }
       if (validationErrors.nonEmpty) {
-        throw new AnalysisException(
+        throw new RuntimeException(
           s"Builds name to argument map ${validationErrors.mkString(", ")} error.")
       }
       namedArguments.map(arg => arg.name -> arg).toMap
     } else {
       if (arguments.size > parameters.size) {
-        throw new AnalysisException("Too many arguments for procedure")
+        throw new RuntimeException("Too many arguments for procedure")
       }
       arguments.zipWithIndex.map {
         case (argument, position) =>
@@ -207,7 +232,7 @@ case class PaimonProcedureResolver(sparkSession: SparkSession)
       case procedureCatalog: ProcedureCatalog =>
         procedureCatalog
       case _ =>
-        throw new AnalysisException(s"${catalogPlugin.name} is not a ProcedureCatalog.")
+        throw new RuntimeException(s"${catalogPlugin.name} is not a ProcedureCatalog.")
     }
   }
 }
