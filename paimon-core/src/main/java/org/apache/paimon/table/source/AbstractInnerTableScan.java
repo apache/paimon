@@ -32,6 +32,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartin
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
+import org.apache.paimon.table.source.snapshot.FileCreationTimeStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
@@ -132,6 +133,9 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousFromTimestampStartingScanner(snapshotManager, startupMillis)
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
+            case FROM_FILE_CREATION_TIME:
+                Long fileCreationTimeMills = options.scanFileCreationTimeMills();
+                return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming

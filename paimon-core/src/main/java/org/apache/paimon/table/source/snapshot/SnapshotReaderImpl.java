@@ -199,6 +199,12 @@ public class SnapshotReaderImpl implements SnapshotReader {
     }
 
     @Override
+    public SnapshotReader withDataFileTimeMills(long dataFileTimeMills) {
+        scan.withDataFileTimeMills(dataFileTimeMills);
+        return this;
+    }
+
+    @Override
     public SnapshotReader withBucket(int bucket) {
         scan.withBucket(bucket);
         return this;
