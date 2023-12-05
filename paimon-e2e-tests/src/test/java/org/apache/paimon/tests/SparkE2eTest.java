@@ -60,7 +60,7 @@ public class SparkE2eTest extends E2eReaderTestBase {
                                             "--master",
                                             "spark://spark-master:7077",
                                             "--conf",
-                                            "spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog",
+                                            "spark.sql.catalog.paimon=org.apache.paimon.spark.PaimonCatalog",
                                             "--conf",
                                             "spark.sql.catalog.paimon.warehouse=file:"
                                                     + warehousePath,
