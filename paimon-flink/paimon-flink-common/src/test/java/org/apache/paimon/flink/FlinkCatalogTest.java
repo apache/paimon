@@ -73,6 +73,7 @@ import java.util.UUID;
 import java.util.stream.Stream;
 
 import static org.apache.flink.table.factories.FactoryUtil.CONNECTOR;
+import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.flink.FlinkCatalogOptions.DISABLE_CREATE_TABLE_IN_DEFAULT_DB;
 import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGISTER;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
@@ -289,10 +290,7 @@ public class FlinkCatalogTest {
     public void testDropDb_DatabaseNotEmptyException(Map<String, String> options) throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(this.path1, this.createTable(options), false);
-        assertThatThrownBy(
-                        () -> {
-                            catalog.dropDatabase("db1", true, false);
-                        })
+        assertThatThrownBy(() -> catalog.dropDatabase("db1", true, false))
                 .isInstanceOf(DatabaseNotEmptyException.class)
                 .hasMessage("Database db1 in catalog test-catalog is not empty.");
     }
@@ -636,6 +634,8 @@ public class FlinkCatalogTest {
                 options.put("scan.snapshot-id", "1");
             } else if (mode == CoreOptions.StartupMode.FROM_TIMESTAMP) {
                 options.put("scan.timestamp-millis", System.currentTimeMillis() + "");
+            } else if (mode == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME) {
+                options.put(SCAN_FILE_CREATION_TIME_MILLIS.key(), System.currentTimeMillis() + "");
             } else if (mode == CoreOptions.StartupMode.INCREMENTAL) {
                 options.put("incremental-between", "2,5");
             }
