@@ -97,6 +97,10 @@ case class WriteIntoPaimonTable(
     val rowType = table.rowType()
     val writeBuilder = table.newBatchWriteBuilder()
 
+    if (overwritePartition != null) {
+      writeBuilder.withOverwrite(overwritePartition.asJava)
+    }
+
     val df =
       bucketMode match {
         case BucketMode.DYNAMIC =>
@@ -157,11 +161,7 @@ case class WriteIntoPaimonTable(
       .collect()
       .map(deserializeCommitMessage(serializer, _))
 
-    val tableCommit = if (overwritePartition == null) {
-      writeBuilder.newCommit()
-    } else {
-      writeBuilder.withOverwrite(overwritePartition.asJava).newCommit()
-    }
+    val tableCommit = writeBuilder.newCommit()
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
