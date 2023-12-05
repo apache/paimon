@@ -17,17 +17,18 @@
  */
 package org.apache.paimon.spark.procedure
 
+import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.table.AbstractFileStoreTable
 
 import org.apache.spark.sql.{Dataset, Row}
-import org.apache.spark.sql.SparkSession.setActiveSession
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
 import org.assertj.core.api.Assertions
 
 import java.util
 
-/** Test sort compact procedure. See {@link CompactProcedure}. */
+/** Test sort compact procedure. See [[CompactProcedure]]. */
 class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
@@ -257,7 +258,76 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
     }
   }
 
-  test("Piamon test: toWhere method in CompactProcedure") {
+  test("Paimon Procedure: compact aware bucket pk table") {
+    Seq(1, -1).foreach(
+      bucket => {
+        withTable("T") {
+          spark.sql(
+            s"""
+               |CREATE TABLE T (id INT, value STRING, pt STRING)
+               |TBLPROPERTIES ('primary-key'='id, pt', 'bucket'='$bucket', 'write-only'='true')
+               |PARTITIONED BY (pt)
+               |""".stripMargin)
+
+          val table = loadTable("T")
+
+          spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+          spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
+
+          spark.sql(s"CALL sys.compact(table => 'T', partitions => 'pt=p1')")
+          Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(3)
+
+          spark.sql(s"CALL sys.compact(table => 'T')")
+          Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+          // compact condition no longer met
+          spark.sql(s"CALL sys.compact(table => 'T')")
+          Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+          checkAnswer(
+            spark.sql(s"SELECT * FROM T ORDER BY id"),
+            Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") :: Nil)
+        }
+      })
+  }
+
+  test("Paimon Procedure: compact unaware bucket append table") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, value STRING, pt STRING)
+         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='3', 'target-file-size'='1kb')
+         |PARTITIONED BY (pt)
+         |""".stripMargin)
+
+    val table = loadTable("T")
+
+    spark.sql(s"INSERT INTO T VALUES (1, 'a', 'p1'), (2, 'b', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (3, 'c', 'p1'), (4, 'd', 'p2')")
+    spark.sql(s"INSERT INTO T VALUES (5, 'e', 'p1'), (6, 'f', 'p2')")
+
+    spark.sql(s"CALL sys.compact(table => 'T', partitions => 'pt=p1')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(4)
+
+    spark.sql(s"CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    // compact condition no longer met
+    spark.sql(s"CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotId(table)).isEqualTo(5)
+
+    checkAnswer(
+      spark.sql(s"SELECT * FROM T ORDER BY id"),
+      Row(1, "a", "p1") :: Row(2, "b", "p2") :: Row(3, "c", "p1") :: Row(4, "d", "p2") :: Row(
+        5,
+        "e",
+        "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
+  test("Paimon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 
     val where = CompactProcedure.toWhere(conditions)
@@ -265,5 +335,13 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
       "(f0=0 AND f1=0 AND f2=0) OR (f0=1 AND f1=1 AND f2=1) OR (f0=1 AND f1=2 AND f2=2) OR (f3=3)"
 
     Assertions.assertThat(where).isEqualTo(whereExpected)
+  }
+
+  def lastSnapshotCommand(table: AbstractFileStoreTable): CommitKind = {
+    table.snapshotManager().latestSnapshot().commitKind()
+  }
+
+  def lastSnapshotId(table: AbstractFileStoreTable): Long = {
+    table.snapshotManager().latestSnapshotId()
   }
 }

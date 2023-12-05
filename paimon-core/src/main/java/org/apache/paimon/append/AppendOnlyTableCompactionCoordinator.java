@@ -212,12 +212,12 @@ public class AppendOnlyTableCompactionCoordinator {
         }
 
         public boolean readyToRemove() {
-            return toCompact.size() == 0 || age > REMOVE_AGE;
+            return toCompact.isEmpty() || age > REMOVE_AGE;
         }
 
         private List<List<DataFileMeta>> agePack() {
             List<List<DataFileMeta>> packed = pack();
-            if (packed.size() == 0) {
+            if (packed.isEmpty()) {
                 // non-packed, we need to grow up age, and check whether to compact once
                 if (++age > COMPACT_AGE && toCompact.size() > 1) {
                     List<DataFileMeta> all = new ArrayList<>(toCompact);

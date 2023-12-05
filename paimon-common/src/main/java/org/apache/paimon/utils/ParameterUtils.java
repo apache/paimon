@@ -18,6 +18,10 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.types.RowType;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +36,14 @@ public class ParameterUtils {
             partitions.add(parseCommaSeparatedKeyValues(partition));
         }
         return partitions;
+    }
+
+    public static Predicate getPartitionFilter(
+            List<Map<String, String>> specifiedPartitions, RowType rowType) {
+        return PredicateBuilder.or(
+                specifiedPartitions.stream()
+                        .map(p -> PredicateBuilder.partition(p, rowType))
+                        .toArray(Predicate[]::new));
     }
 
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {

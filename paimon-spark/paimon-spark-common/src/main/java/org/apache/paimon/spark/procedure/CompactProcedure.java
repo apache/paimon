@@ -20,16 +20,36 @@ package org.apache.paimon.spark.procedure;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.append.AppendOnlyCompactionTask;
+import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.DynamicOverWrite$;
+import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CompactionTaskSerializer;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.spark.api.java.JavaRDD;
+import org.apache.spark.api.java.JavaSparkContext;
+import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -42,11 +62,15 @@ import org.apache.spark.sql.types.StructType;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
@@ -85,7 +109,7 @@ public class CompactProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Preconditions.checkArgument(args.numFields() >= 1);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
-        String partitionFilter = blank(args, 1) ? null : toWhere(args.getString(1));
+        String partitions = blank(args, 1) ? null : args.getString(1);
         String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
         List<String> sortColumns =
                 blank(args, 3)
@@ -106,7 +130,7 @@ public class CompactProcedure extends BaseProcedure {
                                             (FileStoreTable) table,
                                             sortType,
                                             sortColumns,
-                                            partitionFilter));
+                                            partitions));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -124,28 +148,155 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             String sortType,
             List<String> sortColumns,
-            @Nullable String filter) {
-        CoreOptions coreOptions = table.store().options();
+            @Nullable String partitions) {
+        table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
+        BucketMode bucketMode = table.bucketMode();
+        TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
 
-        // sort only works with bucket=-1 yet
-        if (!TableSorter.OrderType.of(sortType).equals(TableSorter.OrderType.NONE)) {
-            if (!(table instanceof AppendOnlyFileStoreTable) || coreOptions.bucket() != -1) {
-                throw new UnsupportedOperationException(
-                        "Spark compact with sort_type "
-                                + sortType
-                                + " only support unaware-bucket append-only table yet.");
+        if (orderType.equals(TableSorter.OrderType.NONE)) {
+            JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
+            Predicate filter =
+                    StringUtils.isBlank(partitions)
+                            ? null
+                            : ParameterUtils.getPartitionFilter(
+                                    ParameterUtils.getPartitions(partitions), table.rowType());
+            switch (bucketMode) {
+                case FIXED:
+                case DYNAMIC:
+                    compactAwareBucketTable(table, filter, javaSparkContext);
+                    break;
+                case UNAWARE:
+                    compactUnAwareBucketTable(table, filter, javaSparkContext);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Spark compact with " + bucketMode + " is not support yet.");
+            }
+        } else {
+            switch (bucketMode) {
+                case UNAWARE:
+                    sortCompactUnAwareTable(table, orderType, sortColumns, partitions);
+                    break;
+                default:
+                    throw new UnsupportedOperationException(
+                            "Spark compact with sort_type "
+                                    + sortType
+                                    + " only support unaware-bucket append-only table yet.");
             }
         }
+        return true;
+    }
 
-        Dataset<Row> row = spark().read().format("paimon").load(coreOptions.path().toString());
-        row = StringUtils.isBlank(filter) ? row : row.where(filter);
+    private void compactAwareBucketTable(
+            FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
+        InnerTableScan scan = table.newScan();
+        if (filter != null) {
+            scan.withFilter(filter);
+        }
+
+        List<Split> splits = scan.plan().splits();
+        if (splits.isEmpty()) {
+            return;
+        }
+
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        JavaRDD<CommitMessage> commitMessageJavaRDD =
+                javaSparkContext
+                        .parallelize(splits)
+                        .mapPartitions(
+                                (FlatMapFunction<Iterator<Split>, CommitMessage>)
+                                        splitIterator -> {
+                                            IOManager ioManager = SparkUtils.createIOManager();
+                                            BatchTableWrite write = writeBuilder.newWrite();
+                                            write.withIOManager(ioManager);
+                                            try {
+                                                while (splitIterator.hasNext()) {
+                                                    DataSplit dataSplit =
+                                                            (DataSplit) splitIterator.next();
+                                                    BinaryRow partition = dataSplit.partition();
+                                                    int bucket = dataSplit.bucket();
+                                                    write.compact(partition, bucket, true);
+                                                }
+                                                return write.prepareCommit().iterator();
+                                            } finally {
+                                                write.close();
+                                                ioManager.close();
+                                            }
+                                        });
+
+        try (BatchTableCommit commit = writeBuilder.newCommit()) {
+            commit.commit(commitMessageJavaRDD.collect());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void compactUnAwareBucketTable(
+            FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
+        AppendOnlyFileStoreTable fileStoreTable = (AppendOnlyFileStoreTable) table;
+        List<AppendOnlyCompactionTask> compactionTasks =
+                new AppendOnlyTableCompactionCoordinator(fileStoreTable, false, filter).run();
+        if (compactionTasks.isEmpty()) {
+            return;
+        }
+
+        CompactionTaskSerializer serializer = new CompactionTaskSerializer();
+        List<byte[]> serializedTasks = new ArrayList<>();
+        try {
+            for (AppendOnlyCompactionTask compactionTask : compactionTasks) {
+                serializedTasks.add(serializer.serialize(compactionTask));
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("serialize compaction task failed");
+        }
+
+        String commitUser = UUID.randomUUID().toString();
+        JavaRDD<CommitMessage> commitMessageJavaRDD =
+                javaSparkContext
+                        .parallelize(serializedTasks)
+                        .mapPartitions(
+                                (FlatMapFunction<Iterator<byte[]>, CommitMessage>)
+                                        taskIterator -> {
+                                            AppendOnlyFileStoreWrite write =
+                                                    fileStoreTable.store().newWrite(commitUser);
+                                            CompactionTaskSerializer ser =
+                                                    new CompactionTaskSerializer();
+                                            ArrayList<CommitMessage> messages = new ArrayList<>();
+                                            try {
+                                                while (taskIterator.hasNext()) {
+                                                    AppendOnlyCompactionTask task =
+                                                            ser.deserialize(
+                                                                    ser.getVersion(),
+                                                                    taskIterator.next());
+                                                    messages.add(task.doCompact(write));
+                                                }
+                                                return messages.iterator();
+                                            } finally {
+                                                write.close();
+                                            }
+                                        });
+
+        try (TableCommitImpl commit = table.newCommit(commitUser)) {
+            commit.commit(commitMessageJavaRDD.collect());
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    private void sortCompactUnAwareTable(
+            FileStoreTable table,
+            TableSorter.OrderType orderType,
+            List<String> sortColumns,
+            @Nullable String partitions) {
+        Dataset<Row> row =
+                spark().read().format("paimon").load(table.coreOptions().path().toString());
+        row = StringUtils.isBlank(partitions) ? row : row.where(toWhere(partitions));
         new WriteIntoPaimonTable(
                         table,
                         DynamicOverWrite$.MODULE$,
-                        TableSorter.getSorter(table, sortType, sortColumns).sort(row),
+                        TableSorter.getSorter(table, orderType, sortColumns).sort(row),
                         new Options())
                 .run(spark());
-        return true;
     }
 
     @VisibleForTesting

@@ -24,9 +24,8 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -95,7 +94,13 @@ public class UnawareBucketCompactionTopoBuilder {
         long scanInterval = table.coreOptions().continuousDiscoveryInterval().toMillis();
         BucketUnawareCompactSource source =
                 new BucketUnawareCompactSource(
-                        table, isContinuous, scanInterval, getPartitionFilter());
+                        table,
+                        isContinuous,
+                        scanInterval,
+                        specifiedPartitions != null
+                                ? ParameterUtils.getPartitionFilter(
+                                        specifiedPartitions, table.rowType())
+                                : null);
 
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }
@@ -122,17 +127,5 @@ public class UnawareBucketCompactionTopoBuilder {
             transformation.setParallelism(env.getParallelism());
         }
         return new DataStream<>(env, transformation);
-    }
-
-    private Predicate getPartitionFilter() {
-        Predicate partitionPredicate = null;
-        if (specifiedPartitions != null) {
-            partitionPredicate =
-                    PredicateBuilder.or(
-                            specifiedPartitions.stream()
-                                    .map(p -> PredicateBuilder.partition(p, table.rowType()))
-                                    .toArray(Predicate[]::new));
-        }
-        return partitionPredicate;
     }
 }
