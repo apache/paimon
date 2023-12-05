@@ -37,7 +37,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <pre><code>
  *  CALL sys.drop_partition('tableId', 'partition1', 'partition2', ...)
  * </code></pre>
+ *
+ * @deprecated use ALTER TABLE DROP PARTITION
  */
+@Deprecated
 public class DropPartitionProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "drop_partition";
