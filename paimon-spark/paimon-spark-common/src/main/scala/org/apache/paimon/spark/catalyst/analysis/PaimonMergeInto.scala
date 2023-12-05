@@ -15,14 +15,14 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.spark.commands.MergeIntoPaimonTable
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.spark.sql.catalyst.expressions.{AttributeReference, AttributeSet, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule

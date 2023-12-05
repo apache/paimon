@@ -17,6 +17,9 @@
  */
 package org.apache.spark.sql.catalyst.parser.extensions
 
+import org.apache.paimon.spark.catalyst.plans.logical
+import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, PaimonCallStatement, PaimonNamedArgument, PaimonPositionalArgument}
+
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
@@ -56,7 +59,7 @@ class PaimonSqlExtensionsAstBuilder(delegate: ParserInterface)
   override def visitCall(ctx: CallContext): PaimonCallStatement = withOrigin(ctx) {
     val name = toSeq(ctx.multipartIdentifier.parts).map(_.getText)
     val args = toSeq(ctx.callArgument).map(typedVisit[PaimonCallArgument])
-    PaimonCallStatement(name, args)
+    logical.PaimonCallStatement(name, args)
   }
 
   /** Creates a positional argument in a stored procedure call. */

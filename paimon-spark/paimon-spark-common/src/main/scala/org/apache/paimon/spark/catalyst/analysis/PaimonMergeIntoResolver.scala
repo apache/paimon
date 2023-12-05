@@ -15,10 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
+
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
 
 /** Resolve all the expressions for MergeInto. */

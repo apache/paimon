@@ -15,11 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.spark.sql.catalyst.analysis
+package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
 
 import org.apache.spark.internal.Logging
+import org.apache.spark.sql.catalyst.analysis.{EliminateSubqueryAliases, ResolvedTable}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
