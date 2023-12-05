@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.BIGINT_UNSIGNED_TO_BIGINT;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.CHAR_TO_STRING;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.LONGTEXT_TO_BYTES;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
@@ -207,7 +208,9 @@ public class MySqlTypeUtils {
             case BIGINT_UNSIGNED:
             case BIGINT_UNSIGNED_ZEROFILL:
             case SERIAL:
-                return DataTypes.DECIMAL(20, 0);
+                return typeMapping.containsMode(BIGINT_UNSIGNED_TO_BIGINT)
+                        ? DataTypes.BIGINT()
+                        : DataTypes.DECIMAL(20, 0);
             case FLOAT:
             case FLOAT_UNSIGNED:
             case FLOAT_UNSIGNED_ZEROFILL:

@@ -90,9 +90,13 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 3. You can use type mapping option `to-string` (Use `--type_mapping`) to map all MySQL data type to STRING.
 4. You can use type mapping option `char-to-string` (Use `--type_mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
 5. You can use type mapping option `longtext-to-bytes` (Use `--type_mapping`) to map MySQL LONGTEXT types to BYTES.
-6. MySQL BIT(1) type will be mapped to Boolean.
-7. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-8. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
+6. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)` by default. You can 
+use type mapping option `bigint-unsigned-to-bigint` (Use `--type_mapping`) to map these types to Paimon `BIGINT`, but there 
+is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon `BIGINT` can only 
+store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
+7. MySQL BIT(1) type will be mapped to Boolean.
+8. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+9. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
    should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
 ## Setting Custom Job Name
