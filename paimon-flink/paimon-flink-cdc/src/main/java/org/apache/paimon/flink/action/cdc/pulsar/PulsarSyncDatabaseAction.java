@@ -18,45 +18,19 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.cdc.MessageQueueSyncDatabaseActionBase;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
 import java.util.Map;
 
 /** Synchronize database from Pulsar. */
-public class PulsarSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
+public class PulsarSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public PulsarSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> pulsarConfig) {
-        super(warehouse, database, catalogConfig, pulsarConfig);
-    }
-
-    @Override
-    protected DataStreamSource<String> buildSource() throws Exception {
-        return env.fromSource(
-                PulsarActionUtils.buildPulsarSource(cdcSourceConfig),
-                WatermarkStrategy.noWatermarks(),
-                sourceName());
-    }
-
-    @Override
-    protected DataFormat getDataFormat() {
-        return PulsarActionUtils.getDataFormat(cdcSourceConfig);
-    }
-
-    @Override
-    protected String sourceName() {
-        return "Pulsar Source";
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("Pulsar-Paimon Database Sync: %s", database);
+        super(warehouse, database, catalogConfig, pulsarConfig, SyncJobHandler.SourceType.PULSAR);
     }
 }

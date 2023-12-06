@@ -18,45 +18,19 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.MessageQueueSyncDatabaseActionBase;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
 import java.util.Map;
 
 /** Synchronize database from Kafka. */
-public class KafkaSyncDatabaseAction extends MessageQueueSyncDatabaseActionBase {
+public class KafkaSyncDatabaseAction extends SyncDatabaseActionBase {
 
     public KafkaSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> kafkaConfig) {
-        super(warehouse, database, catalogConfig, kafkaConfig);
-    }
-
-    @Override
-    protected DataStreamSource<String> buildSource() throws Exception {
-        return env.fromSource(
-                KafkaActionUtils.buildKafkaSource(cdcSourceConfig),
-                WatermarkStrategy.noWatermarks(),
-                sourceName());
-    }
-
-    @Override
-    protected String sourceName() {
-        return "Kafka Source";
-    }
-
-    @Override
-    protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("Kafka-Paimon Database Sync: %s", database);
+        super(warehouse, database, catalogConfig, kafkaConfig, SyncJobHandler.SourceType.KAFKA);
     }
 }

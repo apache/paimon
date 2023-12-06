@@ -25,10 +25,10 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -36,9 +36,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -109,7 +106,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
-        super(warehouse, database, catalogConfig, mySqlConfig);
+        super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
         this.mode = DIVIDED;
         MySqlActionUtils.registerJdbcDriver();
     }
@@ -125,17 +122,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     @Override
-    protected void checkCdcSourceArgument() {
-        checkArgument(
-                !cdcSourceConfig.contains(MySqlSourceOptions.TABLE_NAME),
-                MySqlSourceOptions.TABLE_NAME.key()
-                        + " cannot be set for mysql-sync-database. "
-                        + "If you want to sync several MySQL tables into one Paimon table, "
-                        + "use mysql-sync-table instead.");
-    }
-
-    @Override
-    protected DataStreamSource<String> buildSource() throws Exception {
+    protected void beforeBuildingSourceSink() throws Exception {
         boolean caseSensitive = catalog.caseSensitive();
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
@@ -197,34 +184,18 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 !monitoredTables.isEmpty(),
                 "No tables to be synchronized. Possible cause is the schemas of all tables in specified "
                         + "MySQL database are not compatible with those of existed Paimon tables. Please check the log.");
-
-        MySqlSource<String> source =
-                MySqlActionUtils.buildMySqlSource(
-                        cdcSourceConfig,
-                        tableList(
-                                mode,
-                                cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
-                                includingTables,
-                                monitoredTables,
-                                excludedTables));
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
     }
 
     @Override
-    protected String sourceName() {
-        return "MySQL Source";
-    }
-
-    @Override
-    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
-        boolean caseSensitive = catalog.caseSensitive();
-        return new MySqlRecordParser(
-                cdcSourceConfig, caseSensitive, typeMapping, metadataConverters);
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("MySQL-Paimon Database Sync: %s", database);
+    protected MySqlSource<String> buildSource() {
+        return MySqlActionUtils.buildMySqlSource(
+                cdcSourceConfig,
+                tableList(
+                        mode,
+                        cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                        includingTables,
+                        monitoredTables,
+                        excludedTables));
     }
 
     private void logNonPkTables(List<Identifier> nonPkTables) {

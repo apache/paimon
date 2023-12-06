@@ -18,19 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
-import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
-import java.util.ArrayList;
-import java.util.List;
+import java.util.Collections;
 import java.util.Map;
 
 /**
@@ -59,35 +54,16 @@ public class MongoDBSyncDatabaseAction extends SyncDatabaseActionBase {
             String database,
             Map<String, String> catalogConfig,
             Map<String, String> mongodbConfig) {
-        super(warehouse, database, catalogConfig, mongodbConfig);
+        super(warehouse, database, catalogConfig, mongodbConfig, SyncJobHandler.SourceType.MONGODB);
     }
 
     @Override
-    protected DataStreamSource<String> buildSource() throws Exception {
-        List<Identifier> excludedTables = new ArrayList<>();
-        MongoDBSource<String> source =
-                MongoDBActionUtils.buildMongodbSource(
-                        cdcSourceConfig,
-                        CdcActionCommonUtils.combinedModeTableList(
-                                cdcSourceConfig.get(MongoDBSourceOptions.DATABASE),
-                                includingTables,
-                                excludedTables));
-        return env.fromSource(source, WatermarkStrategy.noWatermarks(), sourceName());
-    }
-
-    @Override
-    protected String sourceName() {
-        return "MongoDB Source";
-    }
-
-    @Override
-    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
-        boolean caseSensitive = catalog.caseSensitive();
-        return new MongoDBRecordParser(caseSensitive, cdcSourceConfig);
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("MongoDB-Paimon Database Sync: %s", database);
+    protected MongoDBSource<String> buildSource() {
+        return MongoDBActionUtils.buildMongodbSource(
+                cdcSourceConfig,
+                CdcActionCommonUtils.combinedModeTableList(
+                        cdcSourceConfig.get(MongoDBSourceOptions.DATABASE),
+                        includingTables,
+                        Collections.emptyList()));
     }
 }

@@ -67,13 +67,13 @@ import static org.apache.pulsar.client.api.KeySharedPolicy.stickyHashRange;
 /** Utils for Pulsar synchronization. */
 public class PulsarActionUtils {
 
-    static final ConfigOption<String> VALUE_FORMAT =
+    public static final ConfigOption<String> VALUE_FORMAT =
             ConfigOptions.key("value.format")
                     .stringType()
                     .noDefaultValue()
                     .withDescription("Defines the format identifier for encoding value data.");
 
-    static final ConfigOption<String> TOPIC =
+    public static final ConfigOption<String> TOPIC =
             ConfigOptions.key("topic")
                     .stringType()
                     .noDefaultValue()
@@ -151,9 +151,8 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
-    static PulsarSource<String> buildPulsarSource(Configuration rawConfig) {
+    public static PulsarSource<String> buildPulsarSource(Configuration rawConfig) {
         Configuration pulsarConfig = preprocessPulsarConfig(rawConfig);
-        validatePulsarConfig(pulsarConfig);
 
         PulsarSourceBuilder<String> pulsarSourceBuilder = PulsarSource.builder();
 
@@ -261,29 +260,6 @@ public class PulsarActionUtils {
         return pulsarSourceBuilder.build();
     }
 
-    private static void validatePulsarConfig(Configuration pulsarConfig) {
-        checkArgument(
-                pulsarConfig.contains(VALUE_FORMAT),
-                String.format("pulsar-conf [%s] must be specified.", VALUE_FORMAT.key()));
-
-        checkArgument(
-                pulsarConfig.contains(PULSAR_SERVICE_URL),
-                String.format("pulsar-conf [%s] must be specified.", PULSAR_SERVICE_URL.key()));
-
-        checkArgument(
-                pulsarConfig.contains(PULSAR_ADMIN_URL),
-                String.format("pulsar-conf [%s] must be specified.", PULSAR_ADMIN_URL.key()));
-
-        checkArgument(
-                pulsarConfig.contains(PULSAR_SUBSCRIPTION_NAME),
-                String.format(
-                        "pulsar-conf [%s] must be specified.", PULSAR_SUBSCRIPTION_NAME.key()));
-
-        checkArgument(
-                pulsarConfig.contains(TOPIC),
-                String.format("pulsar-conf [%s] must be specified.", TOPIC.key()));
-    }
-
     private static MessageId toMessageId(String messageIdString) {
         if (messageIdString.equalsIgnoreCase("EARLIEST")) {
             return MessageId.earliest;
@@ -317,56 +293,63 @@ public class PulsarActionUtils {
         return cloned;
     }
 
-    static DataFormat getDataFormat(Configuration pulsarConfig) {
+    public static DataFormat getDataFormat(Configuration pulsarConfig) {
         return DataFormat.fromConfigString(pulsarConfig.get(VALUE_FORMAT));
     }
 
     /** Referenced to {@link PulsarPartitionSplitReader#createPulsarConsumer}. */
-    static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
-            Configuration pulsarConfig, String topic) throws PulsarClientException {
-        SourceConfiguration pulsarSourceConfiguration = toSourceConfiguration(pulsarConfig);
-        PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
+    public static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
+            Configuration pulsarConfig) {
+        try {
+            SourceConfiguration pulsarSourceConfiguration = toSourceConfiguration(pulsarConfig);
+            PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
 
-        ConsumerBuilder<String> consumerBuilder =
-                createConsumerBuilder(
-                        pulsarClient,
-                        org.apache.pulsar.client.api.Schema.STRING,
-                        pulsarSourceConfiguration);
+            ConsumerBuilder<String> consumerBuilder =
+                    createConsumerBuilder(
+                            pulsarClient,
+                            org.apache.pulsar.client.api.Schema.STRING,
+                            pulsarSourceConfiguration);
 
-        // The default position is Latest
-        consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
+            // The default position is Latest
+            consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
 
-        TopicPartition topicPartition = new TopicPartition(topic);
-        consumerBuilder.topic(topicPartition.getFullTopicName());
+            String topic = pulsarConfig.get(PulsarActionUtils.TOPIC).split(",")[0];
+            TopicPartition topicPartition = new TopicPartition(topic);
+            consumerBuilder.topic(topicPartition.getFullTopicName());
 
-        // TODO currently, PulsarCrypto is not supported
+            // TODO currently, PulsarCrypto is not supported
 
-        // Add KeySharedPolicy for partial keys subscription.
-        if (!isFullTopicRanges(topicPartition.getRanges())) {
-            KeySharedPolicy policy = stickyHashRange().ranges(topicPartition.getPulsarRanges());
-            // We may enable out of order delivery for speeding up. It was turned off by
-            // default.
-            policy.setAllowOutOfOrderDelivery(
-                    pulsarSourceConfiguration.isAllowKeySharedOutOfOrderDelivery());
-            consumerBuilder.keySharedPolicy(policy);
+            // Add KeySharedPolicy for partial keys subscription.
+            if (!isFullTopicRanges(topicPartition.getRanges())) {
+                KeySharedPolicy policy = stickyHashRange().ranges(topicPartition.getPulsarRanges());
+                // We may enable out of order delivery for speeding up. It was turned off by
+                // default.
+                policy.setAllowOutOfOrderDelivery(
+                        pulsarSourceConfiguration.isAllowKeySharedOutOfOrderDelivery());
+                consumerBuilder.keySharedPolicy(policy);
+            }
+
+            // Create the consumer configuration by using common utils.
+            Consumer<String> consumer = consumerBuilder.subscribe();
+
+            return new PulsarConsumerWrapper(consumer, topic);
+        } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
         }
-
-        // Create the consumer configuration by using common utils.
-        Consumer<String> consumer = consumerBuilder.subscribe();
-
-        return new PulsarConsumerWrapper(consumer);
     }
 
     private static class PulsarConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
         private final Consumer<String> consumer;
+        private final String topic;
 
-        PulsarConsumerWrapper(Consumer<String> consumer) {
+        PulsarConsumerWrapper(Consumer<String> consumer, String topic) {
             this.consumer = consumer;
+            this.topic = topic;
         }
 
         @Override
-        public List<String> getRecords(String topic, int pollTimeOutMills) {
+        public List<String> getRecords(int pollTimeOutMills) {
             try {
                 Message<String> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
                 return message == null
@@ -375,6 +358,11 @@ public class PulsarActionUtils {
             } catch (PulsarClientException e) {
                 throw new RuntimeException(e);
             }
+        }
+
+        @Override
+        public String topic() {
+            return topic;
         }
 
         @Override

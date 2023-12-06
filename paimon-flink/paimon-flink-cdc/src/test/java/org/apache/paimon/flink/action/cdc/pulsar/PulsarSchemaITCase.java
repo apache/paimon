@@ -56,8 +56,7 @@ public class PulsarSchemaITCase extends PulsarActionITCaseBase {
 
         Schema pulsarSchema =
                 MessageQueueSchemaUtils.getSchema(
-                        createPulsarConsumer(pulsarConfig, topic),
-                        topic,
+                        createPulsarConsumer(pulsarConfig),
                         getDataFormat(pulsarConfig),
                         TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();
