@@ -293,6 +293,32 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
       })
   }
 
+  test("Paimon Procedure: compact aware bucket pk table with many small files") {
+    Seq(3, -1).foreach(
+      bucket => {
+        withTable("T") {
+          spark.sql(
+            s"""
+               |CREATE TABLE T (id INT, value STRING, pt STRING)
+               |TBLPROPERTIES ('primary-key'='id, pt', 'bucket'='$bucket', 'write-only'='true',
+               |'source.split.target-size'='128m','source.split.open-file-cost'='32m') -- simulate multiple splits in a single bucket
+               |PARTITIONED BY (pt)
+               |""".stripMargin)
+
+          val table = loadTable("T")
+
+          val count = 100
+          for (i <- 0 until count) {
+            spark.sql(s"INSERT INTO T VALUES ($i, 'a', 'p${i % 2}')")
+          }
+
+          spark.sql(s"CALL sys.compact(table => 'T')")
+          Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+          checkAnswer(spark.sql(s"SELECT COUNT(*) FROM T"), Row(count) :: Nil)
+        }
+      })
+  }
+
   test("Paimon Procedure: compact unaware bucket append table") {
     spark.sql(
       s"""
@@ -325,6 +351,26 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
         5,
         "e",
         "p1") :: Row(6, "f", "p2") :: Nil)
+  }
+
+  test("Paimon Procedure: compact unaware bucket append table with many small files") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, value STRING, pt STRING)
+         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.max.file-num' = '10')
+         |PARTITIONED BY (pt)
+         |""".stripMargin)
+
+    val table = loadTable("T")
+
+    val count = 100
+    for (i <- 0 until count) {
+      spark.sql(s"INSERT INTO T VALUES ($i, 'a', 'p${i % 2}')")
+    }
+
+    spark.sql(s"CALL sys.compact(table => 'T')")
+    Assertions.assertThat(lastSnapshotCommand(table).equals(CommitKind.COMPACT)).isTrue
+    checkAnswer(spark.sql(s"SELECT COUNT(*) FROM T"), Row(count) :: Nil)
   }
 
   test("Paimon test: toWhere method in CompactProcedure") {

@@ -24,8 +24,8 @@ import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -98,8 +98,7 @@ public class UnawareBucketCompactionTopoBuilder {
                         isContinuous,
                         scanInterval,
                         specifiedPartitions != null
-                                ? ParameterUtils.getPartitionFilter(
-                                        specifiedPartitions, table.rowType())
+                                ? PredicateBuilder.partitions(specifiedPartitions, table.rowType())
                                 : null);
 
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);

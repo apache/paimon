@@ -27,6 +27,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
@@ -42,7 +43,7 @@ import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
@@ -71,10 +72,17 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
-/** Compact procedure for tables. */
+/**
+ * Compact procedure. Usage:
+ *
+ * <pre><code>
+ *  CALL sys.compact(table => 'tableId', [partitions => 'p1;p2'], [order_strategy => 'xxx'], [order_by => 'xxx'])
+ * </code></pre>
+ */
 public class CompactProcedure extends BaseProcedure {
 
     private static final ProcedureParameter[] PARAMETERS =
@@ -137,7 +145,7 @@ public class CompactProcedure extends BaseProcedure {
 
     @Override
     public String description() {
-        return "This procedure execute sort compact action on unaware-bucket table.";
+        return "This procedure execute compact action on paimon table.";
     }
 
     private boolean blank(InternalRow args, int index) {
@@ -158,7 +166,7 @@ public class CompactProcedure extends BaseProcedure {
             Predicate filter =
                     StringUtils.isBlank(partitions)
                             ? null
-                            : ParameterUtils.getPartitionFilter(
+                            : PredicateBuilder.partitions(
                                     ParameterUtils.getPartitions(partitions), table.rowType());
             switch (bucketMode) {
                 case FIXED:
@@ -194,28 +202,33 @@ public class CompactProcedure extends BaseProcedure {
             scan.withFilter(filter);
         }
 
-        List<Split> splits = scan.plan().splits();
-        if (splits.isEmpty()) {
+        List<Pair<BinaryRow, Integer>> partitionBuckets =
+                scan.plan().splits().stream()
+                        .map(split -> (DataSplit) split)
+                        .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
+                        .distinct()
+                        .collect(Collectors.toList());
+
+        if (partitionBuckets.isEmpty()) {
             return;
         }
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         JavaRDD<CommitMessage> commitMessageJavaRDD =
                 javaSparkContext
-                        .parallelize(splits)
+                        .parallelize(partitionBuckets)
                         .mapPartitions(
-                                (FlatMapFunction<Iterator<Split>, CommitMessage>)
-                                        splitIterator -> {
+                                (FlatMapFunction<Iterator<Pair<BinaryRow, Integer>>, CommitMessage>)
+                                        pairIterator -> {
                                             IOManager ioManager = SparkUtils.createIOManager();
                                             BatchTableWrite write = writeBuilder.newWrite();
                                             write.withIOManager(ioManager);
                                             try {
-                                                while (splitIterator.hasNext()) {
-                                                    DataSplit dataSplit =
-                                                            (DataSplit) splitIterator.next();
-                                                    BinaryRow partition = dataSplit.partition();
-                                                    int bucket = dataSplit.bucket();
-                                                    write.compact(partition, bucket, true);
+                                                while (pairIterator.hasNext()) {
+                                                    Pair<BinaryRow, Integer> pair =
+                                                            pairIterator.next();
+                                                    write.compact(
+                                                            pair.getLeft(), pair.getRight(), true);
                                                 }
                                                 return write.prepareCommit().iterator();
                                             } finally {
