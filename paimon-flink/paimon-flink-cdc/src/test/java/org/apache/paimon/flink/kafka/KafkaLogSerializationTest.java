@@ -63,6 +63,12 @@ public class KafkaLogSerializationTest {
         checkNonKeyed(LogChangelogMode.ALL, 2, 5, 3);
     }
 
+    @Test
+    public void testUnawareBucket() throws Exception {
+        checkNonKeyed(LogChangelogMode.AUTO, -1, 3, 5);
+        checkNonKeyed(LogChangelogMode.ALL, -1, 5, 3);
+    }
+
     private void checkKeyed(LogChangelogMode mode, int bucket, int key, int value)
             throws Exception {
         check(mode, true, bucket, key, value, RowKind.INSERT);
@@ -92,7 +98,11 @@ public class KafkaLogSerializationTest {
         SinkRecord input = testRecord(keyed, bucket, key, value, rowKind);
         ProducerRecord<byte[], byte[]> record = serializer.serialize(input, null);
 
-        assertThat(record.partition().intValue()).isEqualTo(bucket);
+        if (bucket >= 0) {
+            assertThat(record.partition().intValue()).isEqualTo(bucket);
+        } else {
+            assertThat(record.partition()).isNull();
+        }
 
         AtomicReference<RowData> rowReference = new AtomicReference<>();
         deserializer.deserialize(
@@ -129,7 +139,8 @@ public class KafkaLogSerializationTest {
     }
 
     private ConsumerRecord<byte[], byte[]> toConsumerRecord(ProducerRecord<byte[], byte[]> record) {
-        return new ConsumerRecord<>(TOPIC, record.partition(), 0, record.key(), record.value());
+        int partition = record.partition() == null ? -1 : record.partition();
+        return new ConsumerRecord<>(TOPIC, partition, 0, record.key(), record.value());
     }
 
     private static KafkaLogSerializationSchema createTestSerializationSchema(

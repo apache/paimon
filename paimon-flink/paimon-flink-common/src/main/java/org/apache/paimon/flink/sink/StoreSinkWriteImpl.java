@@ -146,7 +146,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                                         state.stateValueFilter().filter(table.name(), part, bucket))
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
-                        .withExecutionMode(isStreamingMode);
+                        .withExecutionMode(isStreamingMode)
+                        .withBucketMode(table.bucketMode());
 
         if (metricGroup != null) {
             tableWrite.withMetricRegistry(new FlinkMetricRegistry(metricGroup));

@@ -29,6 +29,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Restorable;
 
 import java.util.List;
@@ -48,6 +49,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final RecordExtractor<T> recordExtractor;
 
     private boolean batchCommitted = false;
+    private BucketMode bucketMode;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
@@ -89,6 +91,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
         write.withCompactExecutor(compactExecutor);
+        return this;
+    }
+
+    public TableWriteImpl<T> withBucketMode(BucketMode bucketMode) {
+        this.bucketMode = bucketMode;
         return this;
     }
 
@@ -136,7 +143,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         keyAndBucketExtractor.setRecord(record.row());
         return new SinkRecord(
                 record.partition(),
-                record.bucket(),
+                bucketMode == BucketMode.UNAWARE ? -1 : record.bucket(),
                 keyAndBucketExtractor.logPrimaryKey(),
                 record.row());
     }
