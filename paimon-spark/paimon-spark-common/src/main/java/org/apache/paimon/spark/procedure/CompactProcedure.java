@@ -175,7 +175,7 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case UNAWARE:
-                    sortCompactUnAwareTable(table, orderType, sortColumns, partitions);
+                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, partitions);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -283,7 +283,7 @@ public class CompactProcedure extends BaseProcedure {
         }
     }
 
-    private void sortCompactUnAwareTable(
+    private void sortCompactUnAwareBucketTable(
             FileStoreTable table,
             TableSorter.OrderType orderType,
             List<String> sortColumns,
