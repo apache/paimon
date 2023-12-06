@@ -297,7 +297,7 @@ class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
     spark.sql(
       s"""
          |CREATE TABLE T (id INT, value STRING, pt STRING)
-         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='3', 'target-file-size'='1kb')
+         |TBLPROPERTIES ('bucket'='-1', 'write-only'='true', 'compaction.min.file-num'='2', 'compaction.max.file-num' = '3')
          |PARTITIONED BY (pt)
          |""".stripMargin)
 
