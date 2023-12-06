@@ -60,8 +60,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         optionalConfigMap(params, CATALOG_CONF),
                         optionalConfigMap(params, MYSQL_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF))
-                .ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
+        action.ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
                 .mergeShards(
                         !params.has(MERGE_SHARDS) || Boolean.parseBoolean(params.get(MERGE_SHARDS)))
                 .withTablePrefix(params.get(TABLE_PREFIX))
@@ -70,7 +70,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
         if (params.has(METADATA_COLUMN)) {
-            action.withMetadataKeys(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
+            action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
         }
 
         if (params.has(TYPE_MAPPING)) {
