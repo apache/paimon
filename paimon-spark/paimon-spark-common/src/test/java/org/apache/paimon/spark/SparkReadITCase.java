@@ -363,7 +363,6 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isEqualTo(
                         String.format(
                                 "[[%s"
-                                        + "USING paimon\n"
                                         + "PARTITIONED BY (b)\n"
                                         + "COMMENT 'tbl comment'\n"
                                         + "TBLPROPERTIES (\n"
