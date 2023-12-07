@@ -88,7 +88,6 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                 catalogConfig,
                 mySqlConfig,
                 SyncJobHandler.SourceType.MYSQL);
-        MySqlActionUtils.registerJdbcDriver();
     }
 
     @Override

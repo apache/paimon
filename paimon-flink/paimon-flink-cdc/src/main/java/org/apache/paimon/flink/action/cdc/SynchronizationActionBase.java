@@ -62,6 +62,8 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;
         this.caseSensitive = catalog.caseSensitive();
+
+        this.syncJobHandler.registerJdbcDriver();
     }
 
     public SynchronizationActionBase withTableConfig(Map<String, String> tableConfig) {

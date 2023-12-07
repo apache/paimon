@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils;
 import org.apache.paimon.flink.action.cdc.mongodb.MongoDBRecordParser;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlRecordParser;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
@@ -78,6 +79,12 @@ public class SyncJobHandler {
     public String provideDefaultJobName() {
         return String.format(
                 sourceType.defaultJobNameFormat, isTableSync ? "Table" : "Database", sinkLocation);
+    }
+
+    public void registerJdbcDriver() {
+        if (sourceType == SourceType.MYSQL) {
+            MySqlActionUtils.registerJdbcDriver();
+        }
     }
 
     public void checkRequiredOption() {

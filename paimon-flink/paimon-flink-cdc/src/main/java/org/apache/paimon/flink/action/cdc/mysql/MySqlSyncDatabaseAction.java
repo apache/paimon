@@ -108,7 +108,6 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             Map<String, String> mySqlConfig) {
         super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
         this.mode = DIVIDED;
-        MySqlActionUtils.registerJdbcDriver();
     }
 
     public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
