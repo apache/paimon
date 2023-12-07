@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
@@ -202,6 +203,13 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion());
+        }
+        if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
+                && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
+            committerOperator =
+                    new BatchWriteGeneratorTagOperator<>(
+                            (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
+                            table);
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(

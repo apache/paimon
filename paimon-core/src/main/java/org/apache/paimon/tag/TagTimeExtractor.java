@@ -79,6 +79,7 @@ public interface TagTimeExtractor {
     static TagTimeExtractor create(CoreOptions.TagCreationMode mode, CoreOptions options) {
         switch (mode) {
             case NONE:
+            case BATCH:
                 return null;
             case PROCESS_TIME:
                 return new ProcessTimeExtractor();

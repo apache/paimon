@@ -1966,8 +1966,10 @@ public class CoreOptions implements Serializable {
                 "Based on the time of the machine, create TAG once the processing time passes period time plus delay."),
         WATERMARK(
                 "watermark",
-                "Based on the watermark of the input, create TAG once the watermark passes period time plus delay.");
-
+                "Based on the watermark of the input, create TAG once the watermark passes period time plus delay."),
+        BATCH(
+                "batch",
+                "In the batch processing scenario, the tag corresponding to the current snapshot is generated after the task is completed.");
         private final String value;
         private final String description;
 
