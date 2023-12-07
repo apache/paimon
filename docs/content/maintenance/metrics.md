@@ -359,6 +359,10 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
     </tbody>
 </table>
 
+{{< hint info >}}
+Please note that if you specified `consumer-id` in your streaming query, the level of source metrics should turn into the reader operator, which is behind the `Monitor` operator.
+{{< /hint >}}
+
 #### Sink Metrics (Flink)
 
 <table class="table table-bordered">
