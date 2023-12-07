@@ -79,6 +79,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private List<ManifestFileMeta> specifiedManifests = null;
     private ScanMode scanMode = ScanMode.ALL;
     private Filter<Integer> levelFilter = null;
+    private Long dataFileTimeMills = null;
 
     private ManifestCacheFilter manifestCacheFilter = null;
     private final Integer scanManifestParallelism;
@@ -188,6 +189,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withDataFileTimeMills(long dataFileTimeMills) {
+        this.dataFileTimeMills = dataFileTimeMills;
+        return this;
+    }
+
+    @Override
     public FileStoreScan withManifestCacheFilter(ManifestCacheFilter manifestFilter) {
         this.manifestCacheFilter = manifestFilter;
         return this;
@@ -260,7 +267,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                     files.parallelStream()
                                             .filter(this::filterManifestFileMeta)
                                             .flatMap(m -> readManifest.apply(m).stream())
-                                            .filter(this::filterByStats)
+                                            .filter(this::filterUnmergedManifestEntry)
                                             .collect(Collectors.toList());
                             cntEntries.getAndAdd(entryList.size());
                             return entryList;
@@ -295,7 +302,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             // however entry.bucket() was computed against the old numOfBuckets
             // and thus the filtered manifest entries might be empty
             // which renders the bucket check invalid
-            if (filterByBucket(file) && filterByBucketSelector(file) && filterByLevel(file)) {
+            if (filterMergedManifestEntry(file)) {
                 files.add(file);
             }
         }
@@ -381,22 +388,24 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     /** Note: Keep this thread-safe. */
-    private boolean filterByBucket(ManifestEntry entry) {
-        return (bucketFilter == null || bucketFilter.test(entry.bucket()));
-    }
+    private boolean filterUnmergedManifestEntry(ManifestEntry entry) {
+        if (dataFileTimeMills != null
+                && entry.file().creationTimeEpochMillis() < dataFileTimeMills) {
+            return false;
+        }
 
-    /** Note: Keep this thread-safe. */
-    private boolean filterByBucketSelector(ManifestEntry entry) {
-        return bucketKeyFilter.select(entry.bucket(), entry.totalBuckets());
-    }
-
-    /** Note: Keep this thread-safe. */
-    private boolean filterByLevel(ManifestEntry entry) {
-        return (levelFilter == null || levelFilter.test(entry.file().level()));
+        return filterByStats(entry);
     }
 
     /** Note: Keep this thread-safe. */
     protected abstract boolean filterByStats(ManifestEntry entry);
+
+    /** Note: Keep this thread-safe. */
+    private boolean filterMergedManifestEntry(ManifestEntry entry) {
+        return (bucketFilter == null || bucketFilter.test(entry.bucket()))
+                && bucketKeyFilter.select(entry.bucket(), entry.totalBuckets())
+                && (levelFilter == null || levelFilter.test(entry.file().level()));
+    }
 
     /** Note: Keep this thread-safe. */
     protected abstract List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries);

@@ -61,4 +61,18 @@ public class SparkReaderFactory implements PartitionReaderFactory {
         SparkInternalRow row = new SparkInternalRow(readBuilder.readType());
         return new SparkInputPartitionReader(ioManager, iterator, row);
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        SparkReaderFactory that = (SparkReaderFactory) o;
+        return this.readBuilder.equals(that.readBuilder);
+    }
 }

@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -28,9 +29,10 @@ import org.apache.paimon.schema.TableSchema;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+
+import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
@@ -42,7 +44,7 @@ public class FileSystemCatalog extends AbstractCatalog {
         this.warehouse = warehouse;
     }
 
-    public FileSystemCatalog(FileIO fileIO, Path warehouse, Map<String, String> options) {
+    public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, options);
         this.warehouse = warehouse;
     }
@@ -66,23 +68,23 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
-        return uncheck(() -> fileIO.exists(databasePath(databaseName)));
+        return uncheck(() -> fileIO.exists(newDatabasePath(databaseName)));
     }
 
     @Override
     protected void createDatabaseImpl(String name) {
-        uncheck(() -> fileIO.mkdirs(databasePath(name)));
+        uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
     }
 
     @Override
     protected void dropDatabaseImpl(String name) {
-        uncheck(() -> fileIO.delete(databasePath(name), true));
+        uncheck(() -> fileIO.delete(newDatabasePath(name), true));
     }
 
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listStatus(databasePath(databaseName)))) {
+        for (FileStatus status : uncheck(() -> fileIO.listStatus(newDatabasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
@@ -159,5 +161,10 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public String warehouse() {
         return warehouse.toString();
+    }
+
+    @Override
+    public boolean caseSensitive() {
+        return catalogOptions.get(CASE_SENSITIVE);
     }
 }

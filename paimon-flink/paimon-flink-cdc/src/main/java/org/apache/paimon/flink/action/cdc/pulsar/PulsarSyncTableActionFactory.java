@@ -20,18 +20,24 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
+import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.ArrayList;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
+
 /** Factory to create {@link PulsarSyncTableAction}. */
 public class PulsarSyncTableActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "pulsar-sync-table";
+    public static final String IDENTIFIER = "pulsar_sync_table";
 
     @Override
     public String identifier() {
@@ -39,34 +45,34 @@ public class PulsarSyncTableActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        checkRequiredArgument(params, "pulsar-conf");
+        checkRequiredArgument(params, PULSAR_CONF);
 
         PulsarSyncTableAction action =
                 new PulsarSyncTableAction(
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,
-                        optionalConfigMap(params, "catalog-conf"),
-                        optionalConfigMap(params, "pulsar-conf"));
-        action.withTableConfig(optionalConfigMap(params, "table-conf"));
+                        optionalConfigMap(params, CATALOG_CONF),
+                        optionalConfigMap(params, PULSAR_CONF));
+        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
 
-        if (params.has("partition-keys")) {
-            action.withPartitionKeys(params.get("partition-keys").split(","));
+        if (params.has(PARTITION_KEYS)) {
+            action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
         }
 
-        if (params.has("primary-keys")) {
-            action.withPrimaryKeys(params.get("primary-keys").split(","));
+        if (params.has(PRIMARY_KEYS)) {
+            action.withPrimaryKeys(params.get(PRIMARY_KEYS).split(","));
         }
 
-        if (params.has("computed-column")) {
+        if (params.has(COMPUTED_COLUMN)) {
             action.withComputedColumnArgs(
-                    new ArrayList<>(params.getMultiParameter("computed-column")));
+                    new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
 
-        if (params.has("type-mapping")) {
-            String[] options = params.get("type-mapping").split(",");
+        if (params.has(TYPE_MAPPING)) {
+            String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
@@ -76,10 +82,76 @@ public class PulsarSyncTableActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"pulsar-sync-table\" creates a streaming job "
-                        + "with a Flink pulsar CDC source and a Paimon table sink to consume CDC events.");
+                "Action \"pulsar_sync_table\" creates a streaming job "
+                        + "with a Flink Pulsar CDC source and a Paimon table sink to consume CDC events.");
         System.out.println();
 
-        // TODO
+        System.out.println("Syntax:");
+        System.out.println(
+                "  pulsar_sync_table --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> "
+                        + "[--partition_keys <partition_keys>] "
+                        + "[--primary_keys <primary_keys>] "
+                        + "[--type_mapping <option1,option2...>] "
+                        + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
+                        + "[--pulsar_conf <pulsar_source_conf> [--pulsar_conf <pulsar_source_conf> ...]] "
+                        + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
+                        + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
+        System.out.println();
+
+        System.out.println("Partition keys syntax:");
+        System.out.println("  key1,key2,...");
+        System.out.println(
+                "If partition key is not defined and the specified Paimon table does not exist, "
+                        + "this action will automatically create an unpartitioned Paimon table.");
+        System.out.println();
+
+        System.out.println("Primary keys syntax:");
+        System.out.println("  key1,key2,...");
+        System.out.println("Primary keys will be derived from tables if not specified.");
+        System.out.println();
+
+        System.out.println(
+                "--type_mapping is used to specify how to map MySQL type to Paimon type. Please see the doc for usage.");
+        System.out.println();
+
+        System.out.println("Please see doc for usage of --computed_column.");
+        System.out.println();
+
+        System.out.println("pulsar source conf syntax:");
+        System.out.println("  key=value");
+        System.out.println(
+                "'topic', 'value.format', 'pulsar.client.serviceUrl', 'pulsar.admin.adminUrl', 'pulsar.consumer.subscriptionName' "
+                        + "are required configurations, others are optional.");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/datastream/pulsar/#source-configurable-options");
+        System.out.println();
+
+        System.out.println("Paimon catalog and table sink conf syntax:");
+        System.out.println("  key=value");
+        System.out.println(
+                "For a complete list of supported configurations, "
+                        + "see https://paimon.apache.org/docs/master/maintenance/configurations/");
+        System.out.println();
+
+        System.out.println("Examples:");
+        System.out.println(
+                "  pulsar_sync_table \\\n"
+                        + "    --warehouse hdfs:///path/to/warehouse \\\n"
+                        + "    --database test_db \\\n"
+                        + "    --table test_table \\\n"
+                        + "    --partition_keys pt \\\n"
+                        + "    --primary_keys pt,uid \\\n"
+                        + "    --pulsar_conf topic=order \\\n"
+                        + "    --pulsar_conf value.format=canal-json \\\n"
+                        + "    --pulsar_conf pulsar.client.serviceUrl=pulsar://127.0.0.1:6650 \\\n"
+                        + "    --pulsar_conf pulsar.admin.adminUrl=http://127.0.0.1:8080 \\\n"
+                        + "    --pulsar_conf pulsar.consumer.subscriptionName=paimon-tests \\\n"
+                        + "    --catalog_conf metastore=hive \\\n"
+                        + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
+                        + "    --table_conf bucket=4 \\\n"
+                        + "    --table_conf changelog-producer=input \\\n"
+                        + "    --table_conf sink.parallelism=4");
     }
 }

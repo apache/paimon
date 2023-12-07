@@ -134,4 +134,9 @@ public class SystemTableSource extends FlinkTableSource {
                         "Cannot apply dynamic filtering to Paimon system table '%s'.",
                         table.name()));
     }
+
+    @Override
+    public boolean isStreaming() {
+        return isStreamingMode;
+    }
 }

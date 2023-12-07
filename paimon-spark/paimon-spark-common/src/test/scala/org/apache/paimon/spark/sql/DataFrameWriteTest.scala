@@ -20,10 +20,40 @@ package org.apache.paimon.spark.sql
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
+import org.junit.jupiter.api.Assertions
 
 import java.sql.Date
 
 class DataFrameWriteTest extends PaimonSparkTestBase {
+
+  test("Paimon: DataFrameWrite.saveAsTable") {
+
+    import testImplicits._
+
+    Seq((1L, "x1"), (2L, "x2"))
+      .toDF("a", "b")
+      .write
+      .format("paimon")
+      .mode("append")
+      .option("primary-key", "a")
+      .option("bucket", "-1")
+      .option("target-file-size", "256MB")
+      .option("write.merge-schema", "true")
+      .option("write.merge-schema.explicit-cast", "true")
+      .saveAsTable("test_ctas")
+
+    val paimonTable = loadTable("test_ctas")
+    Assertions.assertEquals(1, paimonTable.primaryKeys().size())
+    Assertions.assertEquals("a", paimonTable.primaryKeys().get(0))
+
+    // check all the core options
+    Assertions.assertEquals("-1", paimonTable.options().get("bucket"))
+    Assertions.assertEquals("256MB", paimonTable.options().get("target-file-size"))
+
+    // non-core options should not be here.
+    Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema"))
+    Assertions.assertFalse(paimonTable.options().containsKey("write.merge-schema.explicit-cast"))
+  }
 
   withPk.foreach {
     hasPk =>
@@ -46,7 +76,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "a"), (2, "b")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)
@@ -92,7 +122,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "a"), (2, "b")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)
@@ -181,7 +211,7 @@ class DataFrameWriteTest extends PaimonSparkTestBase {
                          |""".stripMargin)
 
             val paimonTable = loadTable("T")
-            val location = paimonTable.location().getPath
+            val location = paimonTable.location().toString
 
             val df1 = Seq((1, "2023-08-01"), (2, "2023-08-02")).toDF("a", "b")
             df1.write.format("paimon").mode("append").save(location)

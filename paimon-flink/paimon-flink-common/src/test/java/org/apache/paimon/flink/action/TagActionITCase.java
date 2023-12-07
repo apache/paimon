@@ -67,7 +67,19 @@ public class TagActionITCase extends ActionITCaseBase {
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new CreateTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2", 2)
+            createAction(
+                            CreateTagAction.class,
+                            "create_tag",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--tag_name",
+                            "tag2",
+                            "--snapshot",
+                            "2")
                     .run();
         } else {
             callProcedure(
@@ -81,7 +93,17 @@ public class TagActionITCase extends ActionITCaseBase {
                 Arrays.asList(Row.of(1L, "Hi"), Row.of(2L, "Hello")));
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            new DeleteTagAction(warehouse, database, tableName, Collections.emptyMap(), "tag2")
+            createAction(
+                            DeleteTagAction.class,
+                            "delete_tag",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--tag_name",
+                            "tag2")
                     .run();
         } else {
             callProcedure(

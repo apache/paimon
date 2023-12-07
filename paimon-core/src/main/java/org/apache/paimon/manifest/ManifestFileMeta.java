@@ -215,9 +215,7 @@ public class ManifestFileMeta {
         }
 
         Map<Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        for (ManifestFileMeta manifest : candidates) {
-            ManifestEntry.mergeEntries(manifestFile.read(manifest.fileName), map);
-        }
+        ManifestEntry.mergeEntries(manifestFile, candidates, map);
         if (!map.isEmpty()) {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
@@ -272,9 +270,7 @@ public class ManifestFileMeta {
         // 2.1. try to skip base files by partition filter
 
         Map<Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
-        for (ManifestFileMeta manifest : delta) {
-            ManifestEntry.mergeEntries(manifestFile.read(manifest.fileName), deltaMerged);
-        }
+        ManifestEntry.mergeEntries(manifestFile, delta, deltaMerged);
 
         List<ManifestFileMeta> result = new ArrayList<>();
         int j = 0;
@@ -338,10 +334,7 @@ public class ManifestFileMeta {
 
         // 2.3. merge base files
 
-        for (; j < base.size(); j++) {
-            ManifestFileMeta manifestFileMeta = base.get(j);
-            ManifestEntry.mergeEntries(manifestFile.read(manifestFileMeta.fileName), fullMerged);
-        }
+        ManifestEntry.mergeEntries(manifestFile, base.subList(j, base.size()), fullMerged);
         ManifestEntry.mergeEntries(deltaMerged.values(), fullMerged);
 
         // 2.4. write new manifest files

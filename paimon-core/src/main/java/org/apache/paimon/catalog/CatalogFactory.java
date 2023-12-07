@@ -23,6 +23,7 @@ import org.apache.paimon.factories.Factory;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -30,7 +31,6 @@ import java.io.UncheckedIOException;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Factory to create {@link Catalog}. Each factory should have a unique identifier.
@@ -40,7 +40,15 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 @Public
 public interface CatalogFactory extends Factory {
 
-    Catalog create(FileIO fileIO, Path warehouse, CatalogContext context);
+    default Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
+        throw new UnsupportedOperationException(
+                "Use  create(context) for " + this.getClass().getSimpleName());
+    }
+
+    default Catalog create(CatalogContext context) {
+        throw new UnsupportedOperationException(
+                "Use create(fileIO, warehouse, context) for " + this.getClass().getSimpleName());
+    }
 
     static Path warehouse(CatalogContext context) {
         String warehouse =
@@ -59,29 +67,27 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
+        Options options = context.options();
+        String metastore = options.get(METASTORE);
+        CatalogFactory catalogFactory =
+                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
+
+        try {
+            return catalogFactory.create(context);
+        } catch (UnsupportedOperationException ignore) {
+        }
+
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
         String warehouse = warehouse(context).toUri().toString();
-
-        String metastore = context.options().get(METASTORE);
-        CatalogFactory catalogFactory =
-                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
 
         Path warehousePath = new Path(warehouse);
         FileIO fileIO;
 
         try {
             fileIO = FileIO.get(warehousePath, context);
-            if (fileIO.exists(warehousePath)) {
-                checkArgument(
-                        fileIO.isDir(warehousePath),
-                        "The %s path '%s' should be a directory.",
-                        WAREHOUSE.key(),
-                        warehouse);
-            } else {
-                fileIO.mkdirs(warehousePath);
-            }
+            fileIO.checkOrMkdirs(warehousePath);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

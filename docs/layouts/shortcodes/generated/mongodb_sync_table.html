@@ -38,23 +38,23 @@ under the License.
         <td>The Paimon table name.</td>
     </tr>
     <tr>
-        <td><h5>--partition-keys</h5></td>
+        <td><h5>--partition_keys</h5></td>
         <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".</td>
     </tr>
     <tr>
-        <td><h5>--computed-column</h5></td>
+        <td><h5>--computed_column</h5></td>
         <td>The definitions of computed columns. The argument field is from MongoDB collection field name. See <a href="../overview/#computed-functions">here</a> for a complete list of configurations. </td>
     </tr>
     <tr>
-        <td><h5>--mongodb-conf</h5></td>
+        <td><h5>--mongodb_conf</h5></td>
         <td>The configuration for Flink CDC MongoDB sources. Each configuration should be specified in the format "key=value". hosts, username, password, database and collection are required configurations, others are optional. See its <a href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mongodb-cdc.html#connector-options">document</a> for a complete list of configurations.</td>
     </tr>
     <tr>
-        <td><h5>--catalog-conf</h5></td>
+        <td><h5>--catalog_conf</h5></td>
         <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
     </tr>
     <tr>
-        <td><h5>--table-conf</h5></td>
+        <td><h5>--table_conf</h5></td>
         <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
     </tr>
     </tbody>

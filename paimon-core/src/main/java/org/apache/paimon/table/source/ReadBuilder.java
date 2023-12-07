@@ -119,6 +119,9 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withProjection(int[][] projection);
 
+    /** the row number pushed down. */
+    ReadBuilder withLimit(int limit);
+
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();
 

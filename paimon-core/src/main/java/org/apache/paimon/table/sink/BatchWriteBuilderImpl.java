@@ -60,7 +60,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     public BatchTableWrite newWrite() {
         return table.newWrite(commitUser)
                 .withIgnorePreviousFiles(staticPartition != null)
-                .isStreamingMode(false);
+                .withExecutionMode(false);
     }
 
     @Override

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase.SchemaRetrievalException;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.schema.Schema;
@@ -79,13 +80,6 @@ public class MessageQueueSchemaUtils {
             Thread.sleep(duration);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-        }
-    }
-
-    /** Custom exception to indicate issues with schema retrieval. */
-    public static class SchemaRetrievalException extends Exception {
-        public SchemaRetrievalException(String message) {
-            super(message);
         }
     }
 

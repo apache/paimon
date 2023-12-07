@@ -23,8 +23,6 @@ import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
-import org.apache.paimon.operation.metrics.CompactionMetrics;
-import org.apache.paimon.operation.metrics.CompactionStats;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.Preconditions;
@@ -63,27 +61,15 @@ public class AppendOnlyCompactionTask {
     }
 
     public CommitMessage doCompact(AppendOnlyFileStoreWrite write) throws Exception {
-        CompactionMetrics metrics = write.getCompactionMetrics(partition, 0);
-        long startMillis = System.currentTimeMillis();
-        try {
-            compactAfter.addAll(write.compactRewriter(partition, 0).rewrite(compactBefore));
-            CompactIncrement compactIncrement =
-                    new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
-            return new CommitMessageImpl(
-                    partition,
-                    0, // bucket 0 is bucket for unaware-bucket table for compatibility with the old
-                    // design
-                    NewFilesIncrement.emptyIncrement(),
-                    compactIncrement);
-        } finally {
-            if (metrics != null) {
-                long duration = System.currentTimeMillis() - startMillis;
-                CompactionStats compactionStats =
-                        new CompactionStats(
-                                duration, compactBefore, compactAfter, Collections.emptyList());
-                metrics.reportCompaction(compactionStats);
-            }
-        }
+        compactAfter.addAll(write.compactRewriter(partition, 0).rewrite(compactBefore));
+        CompactIncrement compactIncrement =
+                new CompactIncrement(compactBefore, compactAfter, Collections.emptyList());
+        return new CommitMessageImpl(
+                partition,
+                0, // bucket 0 is bucket for unaware-bucket table for compatibility with the old
+                // design
+                NewFilesIncrement.emptyIncrement(),
+                compactIncrement);
     }
 
     public int hashCode() {

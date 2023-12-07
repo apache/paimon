@@ -18,6 +18,8 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.data.Timestamp;
+
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -40,6 +42,20 @@ public class DateTimeUtilsTest {
         for (int precision = 0; precision <= 9; precision++) {
             assertThat(DateTimeUtils.formatLocalDateTime(time, precision))
                     .isEqualTo(expectations[precision]);
+        }
+    }
+
+    @Test
+    public void testTimestamp() {
+        int nanos = 100;
+        java.sql.Timestamp timestamp = new java.sql.Timestamp(System.currentTimeMillis());
+        for (int i = 0; i < 2000; i++) {
+            timestamp = new java.sql.Timestamp(timestamp.getTime() + 60 * 1000);
+            timestamp.setNanos(nanos + timestamp.getNanos());
+
+            Timestamp t1 = Timestamp.fromSQLTimestamp(timestamp);
+            Timestamp t2 = DateTimeUtils.toInternal(timestamp.getTime(), nanos);
+            assertThat(t1).isEqualTo(t2);
         }
     }
 }

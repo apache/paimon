@@ -20,6 +20,8 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.types.DataType;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 
 /** abstract class of aggregating a field of a row. */
@@ -30,8 +32,11 @@ public abstract class FieldAggregator implements Serializable {
         this.fieldType = dataType;
     }
 
-    static FieldAggregator createFieldAggregator(
-            DataType fieldType, String strAgg, boolean ignoreRetract, boolean isPrimaryKey) {
+    public static FieldAggregator createFieldAggregator(
+            DataType fieldType,
+            @Nullable String strAgg,
+            boolean ignoreRetract,
+            boolean isPrimaryKey) {
         FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
@@ -66,9 +71,17 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldBoolAndAgg.NAME:
                         fieldAggregator = new FieldBoolAndAgg(fieldType);
                         break;
+                    case FieldFirstValueAgg.NAME:
+                        fieldAggregator = new FieldFirstValueAgg(fieldType);
+                        break;
+                    case FieldFirstNotNullValueAgg.NAME:
+                        fieldAggregator = new FieldFirstNotNullValueAgg(fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
-                                "Use unsupported aggregation or spell aggregate function incorrectly!");
+                                String.format(
+                                        "Use unsupported aggregation: %s or spell aggregate function incorrectly!",
+                                        strAgg));
                 }
             }
         }
@@ -76,14 +89,18 @@ public abstract class FieldAggregator implements Serializable {
         if (ignoreRetract) {
             fieldAggregator = new FieldIgnoreRetractAgg(fieldAggregator);
         }
+
         return fieldAggregator;
     }
 
     abstract String name();
 
-    abstract Object agg(Object accumulator, Object inputField);
+    public abstract Object agg(Object accumulator, Object inputField);
 
-    Object retract(Object accumulator, Object retractField) {
+    /** reset the aggregator to a clean start state. */
+    public void reset() {}
+
+    public Object retract(Object accumulator, Object retractField) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Aggregate function '%s' does not support retraction,"

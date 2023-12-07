@@ -46,6 +46,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.TreeMap;
 import java.util.concurrent.ArrayBlockingQueue;
 
@@ -92,8 +93,16 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
             long discoveryInterval,
             StreamTableScan scan,
             BucketMode bucketMode,
-            long alignTimeout) {
-        super(context, remainSplits, nextSnapshotId, discoveryInterval, scan, bucketMode);
+            long alignTimeout,
+            int splitPerTaskMax) {
+        super(
+                context,
+                remainSplits,
+                nextSnapshotId,
+                discoveryInterval,
+                scan,
+                bucketMode,
+                splitPerTaskMax);
         this.pendingPlans = new ArrayBlockingQueue<>(MAX_PENDING_PLAN);
         this.alignedAssigner = (AlignedSplitAssigner) super.splitAssigner;
         this.nextSnapshotId = nextSnapshotId;
@@ -193,21 +202,25 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
     // ------------------------------------------------------------------------
 
     @Override
-    protected PlanWithNextSnapshotId scanNextSnapshot() {
+    protected Optional<PlanWithNextSnapshotId> scanNextSnapshot() {
         if (pendingPlans.remainingCapacity() > 0) {
-            PlanWithNextSnapshotId scannedPlan = super.scanNextSnapshot();
-            if (!(scannedPlan.plan() instanceof SnapshotNotExistPlan)) {
-                synchronized (lock) {
-                    pendingPlans.add(scannedPlan);
-                    lock.notifyAll();
+            Optional<PlanWithNextSnapshotId> scannedPlanOptional = super.scanNextSnapshot();
+            if (scannedPlanOptional.isPresent()) {
+                PlanWithNextSnapshotId scannedPlan = scannedPlanOptional.get();
+                if (!(scannedPlan.plan() instanceof SnapshotNotExistPlan)) {
+                    synchronized (lock) {
+                        pendingPlans.add(scannedPlan);
+                        lock.notifyAll();
+                    }
                 }
             }
         }
-        return null;
+        return Optional.empty();
     }
 
     @Override
-    protected void processDiscoveredSplits(PlanWithNextSnapshotId ignore, Throwable error) {
+    protected void processDiscoveredSplits(
+            Optional<PlanWithNextSnapshotId> ignore, Throwable error) {
         if (error != null) {
             if (error instanceof EndOfScanException) {
                 // finished

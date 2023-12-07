@@ -68,7 +68,7 @@ public class CdcMultiplexRecordChannelComputerTest {
         tableWithoutPartition = Identifier.create(databaseName, "test_table2");
 
         Options catalogOptions = new Options();
-        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
+        catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse.toString());
         catalogOptions.set(CatalogOptions.URI, "");
         catalogLoader = () -> CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
         catalog = catalogLoader.load();

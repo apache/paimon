@@ -276,7 +276,7 @@ public class StartupModeTest extends ScannerTestBase {
     private void initializeTable(
             CoreOptions.StartupMode startupMode, Map<String, String> properties) throws Exception {
         Options options = new Options();
-        options.set(PATH, tablePath.getPath());
+        options.set(PATH, tablePath.toString());
         options.set(CoreOptions.SCAN_MODE, startupMode);
         for (Map.Entry<String, String> property : properties.entrySet()) {
             options.set(property.getKey(), property.getValue());

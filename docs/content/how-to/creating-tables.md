@@ -582,7 +582,11 @@ Paimon external tables can be used in any catalog. If you do not want to create 
 
 {{< tabs "external-table-example" >}}
 
-{{< tab "Flink" >}}
+{{< tab "Flink (Deprecated)" >}}
+
+{{< hint info >}}
+Please **DO NOT** use this mode. We recommend using the Paimon Catalog way. The current reservation is only for compatibility.
+{{< /hint >}}
 
 Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs:///path/to/table`.
 
@@ -601,6 +605,8 @@ CREATE TABLE MyTable (
                            -- currently only supported by Flink
 );
 ```
+
+(Flink SQL must declare all fields, which is difficult to use. And if the table already exists, type nullable should be checked.)
 
 {{< /tab >}}
 

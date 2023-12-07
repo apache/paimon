@@ -222,7 +222,7 @@ public class LocalFileIO implements FileIO {
      */
     public File toFile(Path path) {
         // remove scheme
-        String localPath = path.getPath();
+        String localPath = path.toUri().getPath();
         checkState(localPath != null, "Cannot convert a null path to File");
 
         if (localPath.length() == 0) {

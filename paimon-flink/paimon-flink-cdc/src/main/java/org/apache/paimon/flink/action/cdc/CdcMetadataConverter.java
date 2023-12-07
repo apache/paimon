@@ -23,7 +23,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.Serializable;
-import java.util.Map;
 
 /**
  * A functional interface for converting CDC metadata.
@@ -32,11 +31,11 @@ import java.util.Map;
  * {@link JsonNode} source. Implementations of this interface can be used to process and transform
  * metadata entries from CDC sources.
  */
-public interface CdcMetadataConverter extends Serializable {
+public interface CdcMetadataConverter<T> extends Serializable {
 
-    Map<String, String> read(JsonNode payload);
+    String read(T payload);
 
-    DataType getDataType();
+    DataType dataType();
 
-    String getColumnName();
+    String columnName();
 }

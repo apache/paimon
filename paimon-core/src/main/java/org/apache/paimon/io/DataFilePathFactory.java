@@ -34,6 +34,8 @@ public class DataFilePathFactory {
 
     public static final String CHANGELOG_FILE_PREFIX = "changelog-";
 
+    public static final String BUCKET_PATH_PREFIX = "bucket-";
+
     private final Path bucketDir;
     private final String uuid;
 
@@ -71,7 +73,7 @@ public class DataFilePathFactory {
     }
 
     public static Path bucketPath(Path tablePath, String partition, int bucket) {
-        return new Path(tablePath + "/" + partition + "/bucket-" + bucket);
+        return new Path(tablePath + "/" + partition + "/" + BUCKET_PATH_PREFIX + bucket);
     }
 
     public static String formatIdentifier(String fileName) {

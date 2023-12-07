@@ -20,7 +20,7 @@ package org.apache.paimon.spark
 import org.apache.spark.sql.{SaveMode => SparkSaveMode}
 import org.apache.spark.sql.sources.{AlwaysTrue, Filter}
 
-sealed trait SaveMode extends Serializable
+sealed private[spark] trait SaveMode extends Serializable
 
 object InsertInto extends SaveMode
 

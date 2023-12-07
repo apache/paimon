@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-oss-impl</artifactId>
@@ -32,15 +32,8 @@
     <packaging>jar</packaging>
 
     <properties>
-        <jindodata.version>6.1.1</jindodata.version>
+        <fs.oss.sdk.version>3.13.2</fs.oss.sdk.version>
     </properties>
-
-    <repositories>
-        <repository>
-            <id>jindodata</id>
-            <url>https://jindodata-binary.oss-cn-shanghai.aliyuncs.com/mvn-repo/</url>
-        </repository>
-    </repositories>
 
     <dependencies>
         <dependency>
@@ -57,15 +50,40 @@
         </dependency>
 
         <dependency>
-            <groupId>com.aliyun.jindodata</groupId>
-            <artifactId>jindo-core</artifactId>
-            <version>${jindodata.version}</version>
+            <groupId>org.apache.hadoop</groupId>
+            <artifactId>hadoop-aliyun</artifactId>
+            <version>${fs.hadoopshaded.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>com.aliyun.oss</groupId>
+                    <artifactId>aliyun-oss-sdk</artifactId>
+                </exclusion>
+                <exclusion>
+                    <!-- provided by paimon-hadoop-shaded -->
+                    <groupId>org.apache.hadoop</groupId>
+                    <artifactId>hadoop-common</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>ch.qos.reload4j</groupId>
+                    <artifactId>reload4j</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>org.slf4j</groupId>
+                    <artifactId>slf4j-reload4j</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
-            <groupId>com.aliyun.jindodata</groupId>
-            <artifactId>jindo-sdk</artifactId>
-            <version>${jindodata.version}</version>
+            <groupId>com.aliyun.oss</groupId>
+            <artifactId>aliyun-sdk-oss</artifactId>
+            <version>${fs.oss.sdk.version}</version>
+            <exclusions>
+                <exclusion>
+                    <groupId>javax.xml.bind</groupId>
+                    <artifactId>jaxb-api</artifactId>
+                </exclusion>
+            </exclusions>
         </dependency>
 
         <dependency>
@@ -105,8 +123,6 @@
                                         <exclude>.gitkeep</exclude>
                                         <exclude>mime.types</exclude>
                                         <exclude>mozilla/**</exclude>
-                                        <exclude>META-INF/maven/**</exclude>
-                                        <exclude>META-INF/LICENSE.txt</exclude>
                                     </excludes>
                                 </filter>
                             </filters>

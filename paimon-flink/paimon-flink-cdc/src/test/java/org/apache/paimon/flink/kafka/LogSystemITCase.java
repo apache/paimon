@@ -26,12 +26,18 @@ import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.types.Row;
+import org.apache.kafka.clients.admin.AdminClient;
+import org.apache.kafka.clients.admin.ListOffsetsResult;
+import org.apache.kafka.clients.admin.OffsetSpec;
+import org.apache.kafka.common.TopicPartition;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -366,6 +372,52 @@ public class LogSystemITCase extends KafkaTableTestBase {
             List<Row> result = iterator.collectAndClose(2);
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of("1", "2", "3", 4), Row.of("4", "5", "6", 7));
+        } finally {
+            deleteTopicIfExists(topic);
+        }
+    }
+
+    @Test
+    @Timeout(120)
+    public void testAppendOnlyWithUnawareBucket() throws Exception {
+        String topic = UUID.randomUUID().toString();
+        createTopicIfNotExists(topic, 2);
+
+        try {
+            // disable checkpointing to test eventual
+            env.getCheckpointConfig().disableCheckpointing();
+            env.setParallelism(1);
+            tEnv.executeSql(
+                    String.format(
+                            "CREATE TABLE T (i INT, j INT) WITH ("
+                                    + "'log.system'='kafka', "
+                                    + "'log.consistency'='eventual', "
+                                    + "'bucket'='-1', "
+                                    + "'kafka.bootstrap.servers'='%s', "
+                                    + "'kafka.topic'='%s',"
+                                    + "'kafka.batch.size'='20')",
+                            getBootstrapServers(), topic));
+            tEnv.executeSql(
+                    "CREATE TEMPORARY TABLE gen (i INT, j INT) WITH ('connector'='datagen', 'rows-per-second'='2')");
+            TableResult write = tEnv.executeSql("INSERT INTO T SELECT * FROM gen");
+            BlockingIterator<Row, Row> read =
+                    BlockingIterator.of(tEnv.executeSql("SELECT * FROM T").collect());
+            List<Row> collect = read.collect(10);
+            assertThat(collect).hasSize(10);
+            write.getJobClient().get().cancel();
+            read.close();
+
+            // check offsets
+            try (final AdminClient adminClient = AdminClient.create(getStandardProps())) {
+                Map<TopicPartition, OffsetSpec> topicPartitionOffsets = new HashMap<>(4);
+                for (int i = 0; i < 2; i++) {
+                    topicPartitionOffsets.put(new TopicPartition(topic, i), OffsetSpec.latest());
+                }
+                Map<TopicPartition, ListOffsetsResult.ListOffsetsResultInfo> result =
+                        adminClient.listOffsets(topicPartitionOffsets).all().get();
+                assertThat(result.values())
+                        .allMatch(partitionOffsetInfo -> partitionOffsetInfo.offset() > 0);
+            }
         } finally {
             deleteTopicIfExists(topic);
         }

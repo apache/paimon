@@ -19,20 +19,13 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataFilePlan;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 
 import org.junit.jupiter.api.Test;
 
-import javax.annotation.Nullable;
-
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Comparator;
@@ -47,62 +40,20 @@ public class FileStoreSourceSplitGeneratorTest {
 
     @Test
     public void test() {
-        FileStoreScan.Plan plan =
-                new FileStoreScan.Plan() {
-                    @Override
-                    public Long watermark() {
-                        return null;
-                    }
-
-                    @Nullable
-                    @Override
-                    public Long snapshotId() {
-                        return 1L;
-                    }
-
-                    @Override
-                    public ScanMode scanMode() {
-                        return ScanMode.ALL;
-                    }
-
-                    @Override
-                    public List<ManifestEntry> files() {
-                        return Arrays.asList(
-                                makeEntry(1, 0, "f0"),
-                                makeEntry(1, 0, "f1"),
-                                makeEntry(1, 1, "f2"),
-                                makeEntry(2, 0, "f3"),
-                                makeEntry(2, 0, "f4"),
-                                makeEntry(2, 0, "f5"),
-                                makeEntry(2, 1, "f6"),
-                                makeEntry(3, 0, "f7"),
-                                makeEntry(3, 1, "f8"),
-                                makeEntry(4, 0, "f9"),
-                                makeEntry(4, 1, "f10"),
-                                makeEntry(5, 0, "f11"),
-                                makeEntry(5, 1, "f12"),
-                                makeEntry(6, 0, "f13"),
-                                makeEntry(6, 1, "f14"));
-                    }
-                };
         List<DataSplit> scanSplits =
-                SnapshotReaderImpl.generateSplits(
-                        1L,
-                        false,
-                        new SplitGenerator() {
-                            @Override
-                            public List<List<DataFileMeta>> splitForBatch(
-                                    List<DataFileMeta> files) {
-                                return Collections.singletonList(files);
-                            }
-
-                            @Override
-                            public List<List<DataFileMeta>> splitForStreaming(
-                                    List<DataFileMeta> files) {
-                                return null;
-                            }
-                        },
-                        FileStoreScan.Plan.groupByPartFiles(plan.files(FileKind.ADD)));
+                Arrays.asList(
+                        dataSplit(1, 0, "f0", "f1"),
+                        dataSplit(1, 1, "f2"),
+                        dataSplit(2, 0, "f3", "f4", "f5"),
+                        dataSplit(2, 1, "f6"),
+                        dataSplit(3, 0, "f7"),
+                        dataSplit(3, 1, "f8"),
+                        dataSplit(4, 0, "f9"),
+                        dataSplit(4, 1, "f10"),
+                        dataSplit(5, 0, "f11"),
+                        dataSplit(5, 1, "f12"),
+                        dataSplit(6, 0, "f13"),
+                        dataSplit(6, 1, "f14"));
         DataFilePlan tableScanPlan = new DataFilePlan(scanSplits);
 
         List<FileStoreSourceSplit> splits =
@@ -145,24 +96,30 @@ public class FileStoreSourceSplitGeneratorTest {
                 .isEqualTo(files);
     }
 
-    private ManifestEntry makeEntry(int partition, int bucket, String fileName) {
-        return new ManifestEntry(
-                FileKind.ADD,
-                row(partition), // not used
-                bucket, // not used
-                0, // not used
-                new DataFileMeta(
-                        fileName,
-                        0, // not used
-                        0, // not used
-                        null, // not used
-                        null, // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        StatsTestUtils.newEmptyTableStats(), // not used
-                        0, // not used
-                        0, // not used
-                        0, // not used
-                        0 // not used
-                        ));
+    private DataSplit dataSplit(int partition, int bucket, String... fileNames) {
+        List<DataFileMeta> metas = new ArrayList<>();
+        for (String fileName : fileNames) {
+            metas.add(
+                    new DataFileMeta(
+                            fileName,
+                            0, // not used
+                            0, // not used
+                            null, // not used
+                            null, // not used
+                            StatsTestUtils.newEmptyTableStats(), // not used
+                            StatsTestUtils.newEmptyTableStats(), // not used
+                            0, // not used
+                            0, // not used
+                            0, // not used
+                            0 // not used
+                            ));
+        }
+        return DataSplit.builder()
+                .withSnapshot(1)
+                .withPartition(row(partition))
+                .withBucket(bucket)
+                .isStreaming(false)
+                .withDataFiles(metas)
+                .build();
     }
 }

@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Projection;
 
 import org.apache.avro.Schema;
 import org.apache.avro.file.CodecFactory;
@@ -63,8 +62,8 @@ public class AvroFileFormat extends FileFormat {
 
     @Override
     public FormatReaderFactory createReaderFactory(
-            RowType type, int[][] projection, @Nullable List<Predicate> filters) {
-        return new AvroBulkFormat(type, Projection.of(projection).toTopLevelIndexes());
+            RowType projectedRowType, @Nullable List<Predicate> filters) {
+        return new AvroBulkFormat(projectedRowType);
     }
 
     @Override

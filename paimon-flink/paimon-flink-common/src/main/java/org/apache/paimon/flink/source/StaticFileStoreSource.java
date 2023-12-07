@@ -18,10 +18,13 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
+import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
@@ -75,16 +78,22 @@ public class StaticFileStoreSource extends FlinkSource {
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             PendingSplitsCheckpoint checkpoint) {
         Collection<FileStoreSourceSplit> splits =
-                checkpoint == null ? getSplits() : checkpoint.splits();
+                checkpoint == null ? getSplits(context) : checkpoint.splits();
         SplitAssigner splitAssigner =
                 createSplitAssigner(context, splitBatchSize, splitAssignMode, splits);
         return new StaticFileStoreSplitEnumerator(
                 context, null, splitAssigner, dynamicPartitionFilteringInfo);
     }
 
-    private List<FileStoreSourceSplit> getSplits() {
+    private List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-        return splitGenerator.createSplits(readBuilder.newScan().plan());
+        TableScan scan = readBuilder.newScan();
+        // register scan metrics
+        if (context.metricGroup() != null) {
+            ((InnerTableScan) scan)
+                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+        }
+        return splitGenerator.createSplits(scan.plan());
     }
 
     public static SplitAssigner createSplitAssigner(

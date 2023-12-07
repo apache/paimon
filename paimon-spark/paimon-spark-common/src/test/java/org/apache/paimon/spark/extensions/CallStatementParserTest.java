@@ -18,15 +18,16 @@
 
 package org.apache.paimon.spark.extensions;
 
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallArgument;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonCallStatement;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonNamedArgument;
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonPositionalArgument;
+
 import org.apache.spark.sql.SparkSession;
 import org.apache.spark.sql.catalyst.expressions.Literal$;
 import org.apache.spark.sql.catalyst.parser.ParseException;
 import org.apache.spark.sql.catalyst.parser.ParserInterface;
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParseException;
-import org.apache.spark.sql.catalyst.plans.logical.CallArgument;
-import org.apache.spark.sql.catalyst.plans.logical.CallStatement;
-import org.apache.spark.sql.catalyst.plans.logical.NamedArgument;
-import org.apache.spark.sql.catalyst.plans.logical.PositionalArgument;
 import org.apache.spark.sql.types.DataType;
 import org.apache.spark.sql.types.DataTypes;
 import org.junit.jupiter.api.AfterEach;
@@ -44,7 +45,7 @@ import scala.collection.JavaConverters;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
-/** Test for {@link CallStatement} of {@link PaimonSparkSessionExtensions}. */
+/** Test for {@link PaimonCallStatement} of {@link PaimonSparkSessionExtensions}. */
 public class CallStatementParserTest {
 
     private SparkSession spark = null;
@@ -80,8 +81,8 @@ public class CallStatementParserTest {
 
     @Test
     public void testCallWithNamedArguments() throws ParseException {
-        CallStatement callStatement =
-                (CallStatement)
+        PaimonCallStatement callStatement =
+                (PaimonCallStatement)
                         parser.parsePlan(
                                 "CALL catalog.system.named_args_func(arg1 => 1, arg2 => 'test', arg3 => true)");
         assertThat(JavaConverters.seqAsJavaList(callStatement.name()))
@@ -94,8 +95,8 @@ public class CallStatementParserTest {
 
     @Test
     public void testCallWithPositionalArguments() throws ParseException {
-        CallStatement callStatement =
-                (CallStatement)
+        PaimonCallStatement callStatement =
+                (PaimonCallStatement)
                         parser.parsePlan(
                                 "CALL catalog.system.positional_args_func(1, '${spark.sql.extensions}', 2L, true, 3.0D, 4"
                                         + ".0e1,500e-1BD, "
@@ -124,8 +125,8 @@ public class CallStatementParserTest {
 
     @Test
     public void testCallWithMixedArguments() throws ParseException {
-        CallStatement callStatement =
-                (CallStatement)
+        PaimonCallStatement callStatement =
+                (PaimonCallStatement)
                         parser.parsePlan("CALL catalog.system.mixed_function(arg1 => 1, 'test')");
         assertThat(JavaConverters.seqAsJavaList(callStatement.name()))
                 .isEqualTo(Arrays.asList("catalog", "system", "mixed_function"));
@@ -142,22 +143,22 @@ public class CallStatementParserTest {
     }
 
     private void assertArgument(
-            CallStatement call, int index, Object expectedValue, DataType expectedType) {
+            PaimonCallStatement call, int index, Object expectedValue, DataType expectedType) {
         assertArgument(call, index, null, expectedValue, expectedType);
     }
 
     private void assertArgument(
-            CallStatement callStatement,
+            PaimonCallStatement callStatement,
             int index,
             String expectedName,
             Object expectedValue,
             DataType expectedType) {
         if (expectedName == null) {
-            CallArgument callArgument = callStatement.args().apply(index);
-            assertCast(callArgument, PositionalArgument.class);
+            PaimonCallArgument callArgument = callStatement.args().apply(index);
+            assertCast(callArgument, PaimonPositionalArgument.class);
         } else {
-            NamedArgument namedArgument =
-                    assertCast(callStatement.args().apply(index), NamedArgument.class);
+            PaimonNamedArgument namedArgument =
+                    assertCast(callStatement.args().apply(index), PaimonNamedArgument.class);
             assertThat(namedArgument.name()).isEqualTo(expectedName);
         }
         assertThat(callStatement.args().apply(index).expr())

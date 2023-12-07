@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
@@ -27,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataFileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.IndexCastMapping;
@@ -37,6 +39,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Projection;
 
 import org.slf4j.Logger;
@@ -112,18 +115,21 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                             key -> {
                                 TableSchema tableSchema = schemaManager.schema(this.schemaId);
                                 TableSchema dataSchema = schemaManager.schema(key.schemaId);
+
+                                // projection to data schema
                                 int[][] dataProjection =
                                         SchemaEvolutionUtil.createDataProjection(
                                                 tableSchema.fields(),
                                                 dataSchema.fields(),
                                                 projection);
-                                RowType rowType = dataSchema.logicalRowType();
+
                                 IndexCastMapping indexCastMapping =
                                         SchemaEvolutionUtil.createIndexCastMapping(
                                                 Projection.of(projection).toTopLevelIndexes(),
                                                 tableSchema.fields(),
                                                 Projection.of(dataProjection).toTopLevelIndexes(),
                                                 dataSchema.fields());
+
                                 List<Predicate> dataFilters =
                                         this.schemaId == key.schemaId
                                                 ? filters
@@ -131,14 +137,38 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                         tableSchema.fields(),
                                                         dataSchema.fields(),
                                                         filters);
+
+                                Pair<int[], RowType> partitionPair = null;
+                                if (!dataSchema.partitionKeys().isEmpty()) {
+                                    Pair<int[], int[][]> partitionMappping =
+                                            PartitionUtils.constructPartitionMapping(
+                                                    dataSchema, dataProjection);
+                                    // if partition fields are not selected, we just do nothing
+                                    if (partitionMappping != null) {
+                                        dataProjection = partitionMappping.getRight();
+                                        partitionPair =
+                                                Pair.of(
+                                                        partitionMappping.getLeft(),
+                                                        dataSchema.projectedLogicalRowType(
+                                                                dataSchema.partitionKeys()));
+                                    }
+                                }
+
+                                RowType projectedRowType =
+                                        Projection.of(dataProjection)
+                                                .project(dataSchema.logicalRowType());
+
                                 return new BulkFormatMapping(
                                         indexCastMapping.getIndexMapping(),
                                         indexCastMapping.getCastMapping(),
+                                        partitionPair,
                                         formatDiscover
                                                 .discover(formatIdentifier)
                                                 .createReaderFactory(
-                                                        rowType, dataProjection, dataFilters));
+                                                        projectedRowType, dataFilters));
                             });
+
+            final BinaryRow partition = split.partition();
             suppliers.add(
                     () ->
                             new RowDataFileRecordReader(
@@ -146,7 +176,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     dataFilePathFactory.toPath(file.fileName()),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping(),
-                                    bulkFormatMapping.getCastMapping()));
+                                    bulkFormatMapping.getCastMapping(),
+                                    PartitionUtils.create(
+                                            bulkFormatMapping.getPartitionPair(), partition)));
         }
 
         return ConcatRecordReader.create(suppliers);

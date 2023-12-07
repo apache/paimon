@@ -31,7 +31,7 @@ under the License.
     <artifactId>paimon-parent</artifactId>
     <groupId>org.apache.paimon</groupId>
     <name>Paimon : </name>
-    <version>0.6-SNAPSHOT</version>
+    <version>0.7-SNAPSHOT</version>
     <packaging>pom</packaging>
 
     <url>https://paimon.apache.org</url>
@@ -66,11 +66,12 @@ under the License.
         <module>paimon-hive</module>
         <module>paimon-spark</module>
         <module>paimon-test-utils</module>
+        <module>tools/ci/paimon-ci-tools</module>
     </modules>
 
     <properties>
-        <project.build.outputTimestamp>2023-09-06T02:16:30Z</project.build.outputTimestamp>
-        <paimon.shade.version>0.6-SNAPSHOT</paimon.shade.version>
+        <project.build.outputTimestamp>2023-11-23T05:28:56Z</project.build.outputTimestamp>
+        <paimon.shade.version>0.4.0-incubating</paimon.shade.version>
         <paimon.shade.jackson.version>2.14.2</paimon.shade.jackson.version>
         <paimon.shade.guava.version>30.1.1-jre</paimon.shade.guava.version>
         <paimon.shade.caffeine.version>2.9.3</paimon.shade.caffeine.version>
@@ -355,6 +356,7 @@ under the License.
                     <dotGitDirectory>${project.basedir}/.git</dotGitDirectory>
                     <failOnNoGitDirectory>false</failOnNoGitDirectory>
                     <failOnUnableToExtractRepoInfo>false</failOnUnableToExtractRepoInfo>
+                    <useNativeGit>true</useNativeGit>
                 </configuration>
             </plugin>
 
@@ -404,7 +406,6 @@ under the License.
                         <license implementation="org.apache.rat.analysis.license.SimplePatternBasedLicense">
                             <licenseFamilyCategory>AL2</licenseFamilyCategory>
                             <licenseFamilyName>Apache License 2.0</licenseFamilyName>
-                            <notes/>
                             <patterns>
                                 <pattern>Licensed to the Apache Software Foundation (ASF) under one</pattern>
                             </patterns>
@@ -905,7 +906,7 @@ under the License.
                         <dependency>
                             <groupId>org.apache.paimon</groupId>
                             <artifactId>paimon-ci-tools</artifactId>
-                            <version>${paimon.shade.version}</version>
+                            <version>${project.version}</version>
                         </dependency>
                     </dependencies>
                 </plugin>

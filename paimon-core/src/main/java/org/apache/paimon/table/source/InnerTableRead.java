@@ -50,4 +50,9 @@ public interface InnerTableRead extends TableRead {
     default InnerTableRead forceKeepDelete() {
         return this;
     }
+
+    @Override
+    default TableRead executeFilter() {
+        return this;
+    }
 }

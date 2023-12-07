@@ -27,9 +27,6 @@ import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.factories.CatalogFactory;
 import org.apache.flink.table.factories.FactoryUtil;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.Map;
 import java.util.Set;
@@ -67,9 +64,7 @@ public class FlinkGenericCatalogFactory implements CatalogFactory {
     @VisibleForTesting
     public static FlinkGenericCatalog createCatalog(
             ClassLoader cl, Map<String, String> optionMap, String name, Catalog flinkCatalog) {
-        String warehouse = extractWarehouse(flinkCatalog);
         Options options = Options.fromMap(optionMap);
-        options.set(CatalogOptions.WAREHOUSE, warehouse);
         options.set(CatalogOptions.METASTORE, "hive");
         FlinkCatalog paimon =
                 new FlinkCatalog(
@@ -85,21 +80,5 @@ public class FlinkGenericCatalogFactory implements CatalogFactory {
 
     private static CatalogFactory createHiveCatalogFactory(ClassLoader cl) {
         return FactoryUtil.discoverFactory(cl, CatalogFactory.class, "hive");
-    }
-
-    private static String extractWarehouse(Catalog catalog) {
-        try {
-            Field field = catalog.getClass().getDeclaredField("hiveConf");
-            field.setAccessible(true);
-            Object hiveConf = field.get(catalog);
-
-            Method method = hiveConf.getClass().getMethod("get", String.class);
-            return (String) method.invoke(hiveConf, "hive.metastore.warehouse.dir");
-        } catch (NoSuchFieldException
-                | IllegalAccessException
-                | NoSuchMethodException
-                | InvocationTargetException e) {
-            throw new RuntimeException(e);
-        }
     }
 }

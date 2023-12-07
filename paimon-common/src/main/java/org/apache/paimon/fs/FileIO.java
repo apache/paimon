@@ -48,6 +48,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * File IO to read and write file.
@@ -177,6 +178,14 @@ public interface FileIO extends Serializable {
 
     default boolean isDir(Path path) throws IOException {
         return getFileStatus(path).isDir();
+    }
+
+    default void checkOrMkdirs(Path path) throws IOException {
+        if (exists(path)) {
+            checkArgument(isDir(path), "The path '%s' should be a directory.", path);
+        } else {
+            mkdirs(path);
+        }
     }
 
     /** Read file to UTF_8 decoding. */

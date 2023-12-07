@@ -27,6 +27,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
@@ -143,6 +144,10 @@ public class TypeUtils {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return BinaryStringUtils.toTimestamp(str, timestampType.getPrecision());
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
+                return BinaryStringUtils.toTimestamp(
+                        str, localZonedTimestampType.getPrecision(), DateTimeUtils.LOCAL_TZ);
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 DataType elementType = arrayType.getElementType();

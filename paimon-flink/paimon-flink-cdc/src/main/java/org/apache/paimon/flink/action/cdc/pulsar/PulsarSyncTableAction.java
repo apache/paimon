@@ -22,7 +22,7 @@ import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 
-import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.pulsar.client.api.PulsarClientException;
 
 import java.util.Map;
@@ -40,19 +40,19 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
     }
 
     @Override
-    protected Source<String, ?, ?> buildSource() {
-        return PulsarActionUtils.buildPulsarSource(mqConfig);
+    protected DataStreamSource<String> buildSource() {
+        return buildDataStreamSource(PulsarActionUtils.buildPulsarSource(cdcSourceConfig));
     }
 
     @Override
     protected String topic() {
-        return mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
+        return cdcSourceConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
     }
 
     @Override
     protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
         try {
-            return PulsarActionUtils.createPulsarConsumer(mqConfig, topic);
+            return PulsarActionUtils.createPulsarConsumer(cdcSourceConfig, topic);
         } catch (PulsarClientException e) {
             throw new RuntimeException(e);
         }
@@ -60,7 +60,7 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
 
     @Override
     protected DataFormat getDataFormat() {
-        return PulsarActionUtils.getDataFormat(mqConfig);
+        return PulsarActionUtils.getDataFormat(cdcSourceConfig);
     }
 
     @Override

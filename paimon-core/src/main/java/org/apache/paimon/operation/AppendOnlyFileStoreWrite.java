@@ -124,6 +124,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
                                 getCompactionMetrics(partition, bucket));
+
         return new AppendOnlyWriter(
                 fileIO,
                 ioManager,
@@ -139,7 +140,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 useWriteBuffer,
                 spillable,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                getWriterMetrics(partition, bucket));
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(

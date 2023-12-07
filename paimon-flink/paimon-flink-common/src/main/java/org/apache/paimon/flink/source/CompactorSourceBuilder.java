@@ -142,6 +142,7 @@ public class CompactorSourceBuilder {
         return new HashMap<String, String>() {
             {
                 put(CoreOptions.SCAN_TIMESTAMP_MILLIS.key(), null);
+                put(CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS.key(), null);
                 put(CoreOptions.SCAN_SNAPSHOT_ID.key(), null);
                 put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.LATEST_FULL.toString());
             }

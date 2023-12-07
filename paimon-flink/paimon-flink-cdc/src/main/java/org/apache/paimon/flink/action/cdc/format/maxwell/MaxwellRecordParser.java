@@ -29,9 +29,6 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import java.util.ArrayList;
 import java.util.List;
 
-import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * The {@code MaxwellRecordParser} class extends the abstract {@link RecordParser} and is designed
  * to parse records from Maxwell's JSON change data capture (CDC) format. Maxwell is a CDC solution
@@ -60,15 +57,16 @@ public class MaxwellRecordParser extends RecordParser {
 
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
-        String operation = extractStringFromRootJson(FIELD_TYPE);
-        JsonNode data = root.get(dataField());
+        String operation = getAndCheck(FIELD_TYPE).asText();
+        JsonNode data = getAndCheck(dataField());
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
         switch (operation) {
             case OP_INSERT:
                 processRecord(data, RowKind.INSERT, records);
                 break;
             case OP_UPDATE:
-                processRecord(mergeOldRecord(data, root.get(FIELD_OLD)), RowKind.DELETE, records);
+                JsonNode old = getAndCheck(FIELD_OLD, FIELD_TYPE, operation);
+                processRecord(mergeOldRecord(data, old), RowKind.DELETE, records);
                 processRecord(data, RowKind.INSERT, records);
                 break;
             case OP_DELETE:
@@ -81,17 +79,6 @@ public class MaxwellRecordParser extends RecordParser {
     }
 
     @Override
-    protected void validateFormat() {
-        String errorMessageTemplate =
-                "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
-        checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
-        checkArgument(!isNull(root.get(FIELD_DATABASE)), errorMessageTemplate, FIELD_DATABASE);
-        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
-        checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
-        checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
-    }
-
-    @Override
     protected String primaryField() {
         return "primary_key_columns";
     }
@@ -99,5 +86,10 @@ public class MaxwellRecordParser extends RecordParser {
     @Override
     protected String dataField() {
         return "data";
+    }
+
+    @Override
+    protected String format() {
+        return "maxwell-json";
     }
 }

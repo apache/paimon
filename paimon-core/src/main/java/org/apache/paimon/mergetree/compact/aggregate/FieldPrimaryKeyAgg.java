@@ -35,12 +35,12 @@ public class FieldPrimaryKeyAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         return inputField;
     }
 
     @Override
-    Object retract(Object accumulator, Object inputField) {
+    public Object retract(Object accumulator, Object inputField) {
         return inputField;
     }
 }

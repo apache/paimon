@@ -89,4 +89,11 @@ public class FlinkMetricGroup implements MetricGroup {
                 "FlinkMetricGroup does not support fetching all metrics. "
                         + "Please read the metrics through Flink's metric system.");
     }
+
+    @Override
+    public void close() {
+        if (wrapped instanceof org.apache.flink.runtime.metrics.groups.AbstractMetricGroup) {
+            ((org.apache.flink.runtime.metrics.groups.AbstractMetricGroup<?>) wrapped).close();
+        }
+    }
 }

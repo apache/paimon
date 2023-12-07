@@ -237,6 +237,14 @@ public class FlinkConnectorOptions {
                             "Weight of writer buffer in managed memory, Flink will compute the memory size "
                                     + "for writer according to the weight, the actual memory used depends on the running environment.");
 
+    public static final ConfigOption<MemorySize> SINK_CROSS_PARTITION_MANAGED_MEMORY =
+            ConfigOptions.key("sink.cross-partition.managed-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size "
+                                    + "according to the weight, the actual memory used depends on the running environment.");
+
     public static final ConfigOption<Boolean> SCAN_PUSH_DOWN =
             ConfigOptions.key("scan.push-down")
                     .booleanType()

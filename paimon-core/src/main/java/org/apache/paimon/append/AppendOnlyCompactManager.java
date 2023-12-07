@@ -70,7 +70,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             CompactRewriter rewriter,
             @Nullable CompactionMetrics metrics) {
         this.executor = executor;
-        this.toCompact = new TreeSet<>(fileComparator());
+        this.toCompact = new TreeSet<>(fileComparator(false));
         this.toCompact.addAll(restored);
         this.minFileNum = minFileNum;
         this.maxFileNum = maxFileNum;
@@ -195,7 +195,11 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
     }
 
     @Override
-    public void close() throws IOException {}
+    public void close() throws IOException {
+        if (metrics != null) {
+            metrics.close();
+        }
+    }
 
     /** A {@link CompactTask} impl for full compaction of append-only table. */
     public static class FullCompactTask extends CompactTask {
@@ -300,13 +304,13 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
      * may be put after the new files, and this order will be disrupted. We need to ensure this
      * order, so we force the order by sequence.
      */
-    public static Comparator<DataFileMeta> fileComparator() {
+    public static Comparator<DataFileMeta> fileComparator(boolean ignoreOverlap) {
         return (o1, o2) -> {
             if (o1 == o2) {
                 return 0;
             }
 
-            if (isOverlap(o1, o2)) {
+            if (!ignoreOverlap && isOverlap(o1, o2)) {
                 LOG.warn(
                         String.format(
                                 "There should no overlap in append files, but Range1(%s, %s), Range2(%s, %s),"

@@ -20,10 +20,12 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
+import org.apache.paimon.utils.HadoopUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
@@ -83,9 +85,8 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         Identifier.create("TEST_DB", "new_table"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Database name[TEST_DB] cannot contain upper case in hive catalog");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Database name [TEST_DB] cannot contain upper case in the catalog.");
 
         assertThatThrownBy(
                         () ->
@@ -93,9 +94,8 @@ public class HiveCatalogTest extends CatalogTestBase {
                                         Identifier.create("test_db", "NEW_TABLE"),
                                         DEFAULT_TABLE_SCHEMA,
                                         false))
-                .hasRootCauseInstanceOf(IllegalStateException.class)
-                .hasRootCauseMessage(
-                        "Table name[NEW_TABLE] cannot contain upper case in hive catalog");
+                .isInstanceOf(IllegalArgumentException.class)
+                .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
     }
 
     private static final String HADOOP_CONF_DIR =
@@ -106,7 +106,9 @@ public class HiveCatalogTest extends CatalogTestBase {
 
     @Test
     public void testHadoopConfDir() {
-        HiveConf hiveConf = HiveCatalog.createHiveConf(null, HADOOP_CONF_DIR);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(
+                        null, HADOOP_CONF_DIR, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("fs.defaultFS")).isEqualTo("dummy-fs");
     }
 
@@ -120,7 +122,9 @@ public class HiveCatalogTest extends CatalogTestBase {
     }
 
     private void testHiveConfDirImpl() {
-        HiveConf hiveConf = HiveCatalog.createHiveConf(HIVE_CONF_DIR, null);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(
+                        HIVE_CONF_DIR, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
     }
 
@@ -136,7 +140,9 @@ public class HiveCatalogTest extends CatalogTestBase {
         // add HADOOP_CONF_DIR to system environment
         CommonTestUtils.setEnv(newEnv, false);
 
-        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(
+                        null, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("fs.defaultFS")).isEqualTo("dummy-fs");
     }
 
@@ -155,7 +161,9 @@ public class HiveCatalogTest extends CatalogTestBase {
         // add HIVE_CONF_DIR to system environment
         CommonTestUtils.setEnv(newEnv, false);
 
-        HiveConf hiveConf = HiveCatalog.createHiveConf(null, null);
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(
+                        null, null, HadoopUtils.getHadoopConfiguration(new Options()));
         assertThat(hiveConf.get("hive.metastore.uris")).isEqualTo("dummy-hms");
     }
 

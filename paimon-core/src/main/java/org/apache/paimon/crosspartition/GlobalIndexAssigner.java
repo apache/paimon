@@ -19,7 +19,7 @@
 package org.apache.paimon.crosspartition;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.MergeEngine;
+import org.apache.paimon.crosspartition.ExistingProcessor.SortOrder;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -32,6 +32,7 @@ import org.apache.paimon.lookup.RocksDBOptions;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.AbstractFileStoreTable;
@@ -40,10 +41,8 @@ import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.IDMapping;
 import org.apache.paimon.utils.KeyValueIterator;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -51,7 +50,10 @@ import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.PositiveIntInt;
 import org.apache.paimon.utils.PositiveIntIntSerializer;
 import org.apache.paimon.utils.ProjectToRowFunction;
+import org.apache.paimon.utils.RowIterator;
 import org.apache.paimon.utils.TypeUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.File;
@@ -61,12 +63,12 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
 
+import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Assign UPDATE_BEFORE and bucket for the input record, output record with bucket. */
@@ -98,7 +100,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     private transient IDMapping<BinaryRow> partMapping;
     private transient BucketAssigner bucketAssigner;
-    private transient ExistsAction existsAction;
+    private transient ExistingProcessor existingProcessor;
 
     public GlobalIndexAssigner(Table table) {
         this.table = (AbstractFileStoreTable) table;
@@ -107,6 +109,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     // ================== Start Public API ===================
 
     public void open(
+            long offHeapMemory,
             IOManager ioManager,
             int numAssigners,
             int assignId,
@@ -134,9 +137,15 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         ThreadLocalRandom.current().nextInt(ioManager.tempDirs().length)];
         this.path = new File(rocksDBDir, "rocksdb-" + UUID.randomUUID());
 
+        Options rocksdbOptions = Options.fromMap(new HashMap<>(options.toMap()));
+        // we should avoid too small memory
+        long blockCache = Math.max(offHeapMemory, rocksdbOptions.get(BLOCK_CACHE_SIZE).getBytes());
+        rocksdbOptions.set(BLOCK_CACHE_SIZE, new MemorySize(blockCache));
         this.stateFactory =
                 new RocksDBStateFactory(
-                        path.toString(), options, coreOptions.crossPartitionUpsertIndexTtl());
+                        path.toString(),
+                        rocksdbOptions,
+                        coreOptions.crossPartitionUpsertIndexTtl());
         RowType keyType = table.schema().logicalTrimmedPrimaryKeysType();
         this.keyIndex =
                 stateFactory.valueState(
@@ -147,7 +156,9 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
         this.partMapping = new IDMapping<>(BinaryRow::copy);
         this.bucketAssigner = new BucketAssigner();
-        this.existsAction = fromMergeEngine(coreOptions.mergeEngine());
+        this.existingProcessor =
+                ExistingProcessor.create(
+                        coreOptions.mergeEngine(), setPartition, bucketAssigner, this::collect);
 
         // create bootstrap sort buffer
         this.bootstrap = true;
@@ -225,7 +236,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         bootstrapKeys.clear();
         bootstrapKeys = null;
 
-        if (isEmpty && isEndInput && table.coreOptions().mergeEngine() == MergeEngine.DEDUPLICATE) {
+        if (isEmpty && isEndInput) {
             // optimization: bulk load mode
             bulkLoadBootstrapRecords();
         } else {
@@ -251,30 +262,11 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
             if (previousPartId == partId) {
                 collect(value, previousBucket);
             } else {
-                switch (existsAction) {
-                    case DELETE:
-                        {
-                            // retract old record
-                            BinaryRow previousPart = partMapping.get(previousPartId);
-                            InternalRow retract = setPartition.apply(value, previousPart);
-                            retract.setRowKind(RowKind.DELETE);
-                            collect(retract, previousBucket);
-                            bucketAssigner.decrement(previousPart, previousBucket);
-
-                            // new record
-                            processNewRecord(partition, partId, key, value);
-                            break;
-                        }
-                    case USE_OLD:
-                        {
-                            BinaryRow previousPart = partMapping.get(previousPartId);
-                            InternalRow newValue = setPartition.apply(value, previousPart);
-                            collect(newValue, previousBucket);
-                            break;
-                        }
-                    case SKIP_NEW:
-                        // do nothing
-                        break;
+                BinaryRow previousPart = partMapping.get(previousPartId);
+                boolean processNewRecord =
+                        existingProcessor.processExists(value, previousPart, previousBucket);
+                if (processNewRecord) {
+                    processNewRecord(partition, partId, key, value);
                 }
             }
         } else {
@@ -298,7 +290,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     // ================== End Public API ===================
 
     /** Sort bootstrap records and assign bucket without RocksDB. */
-    private void bulkLoadBootstrapRecords() throws Exception {
+    private void bulkLoadBootstrapRecords() {
         RowType rowType = table.rowType();
         List<DataType> fields =
                 new ArrayList<>(TypeUtils.project(rowType, table.primaryKeys()).getFieldTypes());
@@ -318,39 +310,70 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         coreOptions.writeBufferSize() / 2,
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
-        int id = Integer.MAX_VALUE;
-        GenericRow idRow = new GenericRow(1);
-        JoinedRow keyAndId = new JoinedRow();
-        JoinedRow keyAndRow = new JoinedRow();
-        try (RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator()) {
-            while (iterator.advanceNext()) {
-                BinaryRow row = iterator.getRow();
-                BinaryRow key = extractor.trimmedPrimaryKey(row);
-                idRow.setField(0, id);
-                keyAndId.replace(key, idRow);
-                keyAndRow.replace(keyAndId, row);
-                keyIdBuffer.write(keyAndRow);
-                id--;
-            }
-        }
-        bootstrapRecords.reset();
-        bootstrapRecords = null;
 
-        // 2. loop sorted iterator to assign bucket
-        MutableObjectIterator<BinaryRow> iterator = keyIdBuffer.sortedIterator();
-        BinaryRow keyWithRow = new BinaryRow(keyWithRowType.getFieldCount());
-        OffsetRow row = new OffsetRow(rowType.getFieldCount(), keyWithIdType.getFieldCount());
-        BinaryRow currentKey = null;
-        while ((keyWithRow = iterator.next(keyWithRow)) != null) {
-            row.replace(keyWithRow);
-            BinaryRow key = extractor.trimmedPrimaryKey(row);
-            if (currentKey == null || !currentKey.equals(key)) {
-                // output first record
-                BinaryRow partition = extractor.partition(row);
-                collect(row, assignBucket(partition));
-                currentKey = key.copy();
-            }
-        }
+        Function<SortOrder, RowIterator> iteratorFunction =
+                sortOrder -> {
+                    int id = sortOrder == SortOrder.ASCENDING ? 0 : Integer.MAX_VALUE;
+                    GenericRow idRow = new GenericRow(1);
+                    JoinedRow keyAndId = new JoinedRow();
+                    JoinedRow keyAndRow = new JoinedRow();
+                    try (RowBuffer.RowBufferIterator iterator = bootstrapRecords.newIterator()) {
+                        while (iterator.advanceNext()) {
+                            BinaryRow row = iterator.getRow();
+                            BinaryRow key = extractor.trimmedPrimaryKey(row);
+                            idRow.setField(0, id);
+                            keyAndId.replace(key, idRow);
+                            keyAndRow.replace(keyAndId, row);
+                            try {
+                                keyIdBuffer.write(keyAndRow);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            if (sortOrder == SortOrder.ASCENDING) {
+                                id++;
+                            } else {
+                                id--;
+                            }
+                        }
+                    }
+                    bootstrapRecords.reset();
+                    bootstrapRecords = null;
+
+                    // 2. loop sorted iterator to assign bucket
+                    MutableObjectIterator<BinaryRow> iterator;
+                    try {
+                        iterator = keyIdBuffer.sortedIterator();
+                    } catch (IOException e) {
+                        throw new RuntimeException(e);
+                    }
+
+                    BinaryRow reuseBinaryRow = new BinaryRow(keyWithRowType.getFieldCount());
+                    OffsetRow row =
+                            new OffsetRow(rowType.getFieldCount(), keyWithIdType.getFieldCount());
+                    return new RowIterator() {
+                        @Nullable
+                        @Override
+                        public InternalRow next() {
+                            BinaryRow keyWithRow;
+                            try {
+                                keyWithRow = iterator.next(reuseBinaryRow);
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                            if (keyWithRow == null) {
+                                return null;
+                            }
+                            row.replace(keyWithRow);
+                            return row;
+                        }
+                    };
+                };
+
+        existingProcessor.bulkLoadNewRecords(
+                iteratorFunction,
+                extractor::trimmedPrimaryKey,
+                extractor::partition,
+                this::assignBucket);
 
         keyIdBuffer.clear();
     }
@@ -388,71 +411,5 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     private void collect(InternalRow value, int bucket) {
         collector.accept(value, bucket);
-    }
-
-    private static class BucketAssigner {
-
-        private final Map<BinaryRow, TreeMap<Integer, Integer>> stats = new HashMap<>();
-
-        public void bootstrapBucket(BinaryRow part, int bucket) {
-            TreeMap<Integer, Integer> bucketMap = bucketMap(part);
-            Integer count = bucketMap.get(bucket);
-            if (count == null) {
-                count = 0;
-            }
-            bucketMap.put(bucket, count + 1);
-        }
-
-        public int assignBucket(BinaryRow part, Filter<Integer> filter, int maxCount) {
-            TreeMap<Integer, Integer> bucketMap = bucketMap(part);
-            for (Map.Entry<Integer, Integer> entry : bucketMap.entrySet()) {
-                int bucket = entry.getKey();
-                int count = entry.getValue();
-                if (filter.test(bucket) && count < maxCount) {
-                    bucketMap.put(bucket, count + 1);
-                    return bucket;
-                }
-            }
-
-            for (int i = 0; ; i++) {
-                if (filter.test(i) && !bucketMap.containsKey(i)) {
-                    bucketMap.put(i, 1);
-                    return i;
-                }
-            }
-        }
-
-        public void decrement(BinaryRow part, int bucket) {
-            bucketMap(part).compute(bucket, (k, v) -> v == null ? 0 : v - 1);
-        }
-
-        private TreeMap<Integer, Integer> bucketMap(BinaryRow part) {
-            TreeMap<Integer, Integer> map = stats.get(part);
-            if (map == null) {
-                map = new TreeMap<>();
-                stats.put(part.copy(), map);
-            }
-            return map;
-        }
-    }
-
-    private ExistsAction fromMergeEngine(MergeEngine mergeEngine) {
-        switch (mergeEngine) {
-            case DEDUPLICATE:
-                return ExistsAction.DELETE;
-            case PARTIAL_UPDATE:
-            case AGGREGATE:
-                return ExistsAction.USE_OLD;
-            case FIRST_ROW:
-                return ExistsAction.SKIP_NEW;
-            default:
-                throw new UnsupportedOperationException("Unsupported engine: " + mergeEngine);
-        }
-    }
-
-    private enum ExistsAction {
-        DELETE,
-        USE_OLD,
-        SKIP_NEW
     }
 }

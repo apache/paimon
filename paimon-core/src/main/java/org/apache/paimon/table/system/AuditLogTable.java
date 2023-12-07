@@ -233,13 +233,21 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
             return this;
         }
 
+        @Override
         public SnapshotReader withMode(ScanMode scanMode) {
             snapshotReader.withMode(scanMode);
             return this;
         }
 
+        @Override
         public SnapshotReader withLevelFilter(Filter<Integer> levelFilter) {
             snapshotReader.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        @Override
+        public SnapshotReader withDataFileTimeMills(long dataFileTimeMills) {
+            snapshotReader.withDataFileTimeMills(dataFileTimeMills);
             return this;
         }
 
@@ -292,6 +300,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
             convert(predicate).ifPresent(batchScan::withFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+            batchScan.withMetricsRegistry(metricsRegistry);
             return this;
         }
 
@@ -360,6 +374,12 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
             streamScan.notifyCheckpointComplete(nextSnapshot);
+        }
+
+        @Override
+        public InnerStreamTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+            streamScan.withMetricsRegistry(metricsRegistry);
+            return this;
         }
     }
 

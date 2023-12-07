@@ -54,6 +54,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.system.AuditLogTable;
 import org.apache.paimon.table.system.FileMonitorTable;
+import org.apache.paimon.table.system.ReadOptimizedTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -561,7 +562,8 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testStreamingChangelogCompatibility02() throws Exception {
         // already contains 2 commits
-        CompatibilityTestUtils.unzip("compatibility/table-changelog-0.2.zip", tablePath.getPath());
+        CompatibilityTestUtils.unzip(
+                "compatibility/table-changelog-0.2.zip", tablePath.toUri().getPath());
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
@@ -1168,6 +1170,53 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         change = FileMonitorTable.toFileChange(results.get(0));
         assertThat(change.beforeFiles()).hasSize(1);
         assertThat(change.dataFiles()).hasSize(1);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testReadOptimizedTable() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 11, 110L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 201L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        ReadOptimizedTable roTable = new ReadOptimizedTable(table);
+        Function<InternalRow, String> rowDataToString =
+                row ->
+                        internalRowToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+
+        SnapshotReader snapshotReader = roTable.newSnapshotReader();
+        TableRead read = roTable.newRead();
+        List<String> result =
+                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        assertThat(result).isEmpty();
+
+        write.compact(binaryRow(1), 0, true);
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        assertThat(result).containsExactlyInAnyOrder("+I[1, 10, 100]", "+I[1, 11, 110]");
+
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 101L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 21, 210L));
+        write.compact(binaryRow(2), 0, true);
+        commit.commit(3, write.prepareCommit(true, 3));
+
+        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+I[1, 10, 100]", "+I[1, 11, 110]", "+I[2, 20, 201]", "+I[2, 21, 210]");
 
         write.close();
         commit.close();
