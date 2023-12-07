@@ -180,7 +180,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             Transform[] partitions,
             Map<String, String> properties)
             throws TableAlreadyExistsException, NoSuchNamespaceException {
-        String provider = properties.get("provider");
+        String provider = properties.get(TableCatalog.PROP_PROVIDER);
         if (usePaimon(provider)) {
             return sparkCatalog.createTable(ident, schema, partitions, properties);
         } else {
@@ -284,7 +284,7 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
     }
 
     private boolean usePaimon(String provider) {
-        return provider == null || "paimon".equalsIgnoreCase(provider);
+        return provider == null || SparkSource.NAME().equalsIgnoreCase(provider);
     }
 
     private T getSessionCatalog() {

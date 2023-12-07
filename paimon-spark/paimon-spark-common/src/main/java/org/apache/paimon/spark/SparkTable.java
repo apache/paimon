@@ -27,6 +27,7 @@ import org.apache.paimon.table.Table;
 import org.apache.spark.sql.connector.catalog.SupportsRead;
 import org.apache.spark.sql.connector.catalog.SupportsWrite;
 import org.apache.spark.sql.connector.catalog.TableCapability;
+import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.IdentityTransform;
 import org.apache.spark.sql.connector.expressions.Transform;
@@ -108,10 +109,11 @@ public class SparkTable
         if (table instanceof DataTable) {
             Map<String, String> properties =
                     new HashMap<>(((DataTable) table).coreOptions().toMap());
-            if (table.primaryKeys().size() > 0) {
+            if (!table.primaryKeys().isEmpty()) {
                 properties.put(
                         CoreOptions.PRIMARY_KEY.key(), String.join(",", table.primaryKeys()));
             }
+            properties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
             return properties;
         } else {
             return Collections.emptyMap();
