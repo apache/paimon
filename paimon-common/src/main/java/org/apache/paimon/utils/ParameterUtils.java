@@ -38,14 +38,6 @@ public class ParameterUtils {
         return partitions;
     }
 
-    public static Predicate getPartitionFilter(
-            List<Map<String, String>> specifiedPartitions, RowType rowType) {
-        return PredicateBuilder.or(
-                specifiedPartitions.stream()
-                        .map(p -> PredicateBuilder.partition(p, rowType))
-                        .toArray(Predicate[]::new));
-    }
-
     public static Map<String, String> parseCommaSeparatedKeyValues(String keyValues) {
         Map<String, String> kvs = new HashMap<>();
         if (!StringUtils.isBlank(keyValues)) {
