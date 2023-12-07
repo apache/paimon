@@ -53,6 +53,7 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_FINISH_GENERATAR_TAG;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -202,6 +203,12 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion());
+        }
+        if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH && Options.fromMap(table.options()).get(SINK_FINISH_GENERATAR_TAG)) {
+            committerOperator =
+                    new SinkFinishGeneratorTagOperator<>(
+                            (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
+                            table);
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(
