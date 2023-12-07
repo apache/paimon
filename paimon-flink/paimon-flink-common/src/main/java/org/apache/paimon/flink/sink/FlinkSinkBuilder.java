@@ -44,6 +44,7 @@ public class FlinkSinkBuilder {
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
+    private boolean boundedInput = false;
     private boolean compactSink = false;
 
     public FlinkSinkBuilder(FileStoreTable table) {
@@ -76,6 +77,11 @@ public class FlinkSinkBuilder {
 
     public FlinkSinkBuilder withParallelism(@Nullable Integer parallelism) {
         this.parallelism = parallelism;
+        return this;
+    }
+
+    public FlinkSinkBuilder withBoundedInputStream(boolean bounded) {
+        this.boundedInput = bounded;
         return this;
     }
 
@@ -142,7 +148,8 @@ public class FlinkSinkBuilder {
                         (AppendOnlyFileStoreTable) table,
                         overwritePartition,
                         logSinkFunction,
-                        parallelism)
+                        parallelism,
+                        boundedInput)
                 .sinkFrom(input);
     }
 }
