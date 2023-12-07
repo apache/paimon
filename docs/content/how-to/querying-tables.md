@@ -127,6 +127,18 @@ SELECT * FROM t;
 
 {{< /tab >}}
 
+{{< tab "Trino 368+" >}}
+
+```sql
+-- read the snapshot from specified timestamp
+SELECT * FROM t FOR TIMESTAMP AS OF TIMESTAMP '2023-01-01 00:00:00 Asia/Shanghai';
+
+-- read the snapshot with id 1L (use snapshot id as version)
+SELECT * FROM t FOR VERSION AS OF 1;
+```
+
+{{< /tab >}}
+
 {{< tab "Hive" >}}
 
 Hive requires adding the following configuration parameters to the hive-site.xml file:
