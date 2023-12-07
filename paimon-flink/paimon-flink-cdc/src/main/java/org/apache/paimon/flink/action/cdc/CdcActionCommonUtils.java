@@ -290,7 +290,7 @@ public class CdcActionCommonUtils {
             Configuration config, String confName, ConfigOption<?>... configOptions) {
         for (ConfigOption<?> configOption : configOptions) {
             checkArgument(
-                    !config.contains(configOption),
+                    config.contains(configOption),
                     "%s [%s] must be specified.",
                     confName,
                     configOption.key());

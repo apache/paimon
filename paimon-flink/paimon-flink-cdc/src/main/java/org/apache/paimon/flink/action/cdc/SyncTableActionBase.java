@@ -159,6 +159,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
+        boolean caseSensitive = this.caseSensitive;
         return () -> new RichCdcMultiplexRecordEventParser(caseSensitive);
     }
 
