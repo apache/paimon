@@ -21,11 +21,14 @@ package org.apache.paimon.flink.action.cdc.postgresql;
 import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import org.apache.flink.api.java.utils.MultipleParameterTool;
+import org.junit.ClassRule;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.testcontainers.containers.Network;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
+import org.testcontainers.utility.MountableFile;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -42,6 +45,11 @@ import java.util.stream.Stream;
 public class PostgreSqlActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(PostgreSqlActionITCaseBase.class);
+
+    @ClassRule
+    public static final Network NETWORK = Network.newNetwork();
+
+    private static final String INTER_CONTAINER_PG_ALIAS = "postgres";
 
     protected static final PostgreSqlContainer POSTGRE_SQL_CONTAINER =
             createPostgreSqlContainer(PostgreSqlVersion.V_12);
@@ -76,11 +84,21 @@ public class PostgreSqlActionITCaseBase extends CdcActionITCaseBase {
         PostgreSqlContainer postgresContainer =
                 (PostgreSqlContainer)
                         new PostgreSqlContainer(postgreSqlVersion)
-                                .withPostgresConf("postgresql/postgresql.conf")
+                                //.withPostgresConf("postgresql/postgresql.conf")
                                 .withUsername(USER)
                                 .withPassword(PASSWORD)
                                 .withEnv("TZ", "America/Los_Angeles")
-                                .withLogConsumer(new Slf4jLogConsumer(LOG));
+                                .withLogConsumer(new Slf4jLogConsumer(LOG))
+                                .withNetwork(NETWORK)
+                                .withNetworkAliases(INTER_CONTAINER_PG_ALIAS)
+                                .withCommand(
+                                        "postgres",
+                                        "-c",
+                                        "max_wal_senders=20",
+                                        "-c",
+                                        "max_replication_slots=20",
+                                        "-c",
+                                        "wal_level=logical");
 
         return postgresContainer;
     }

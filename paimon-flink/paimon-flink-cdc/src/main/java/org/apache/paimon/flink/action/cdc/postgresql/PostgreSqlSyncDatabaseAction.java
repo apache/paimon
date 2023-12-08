@@ -200,6 +200,10 @@ public class PostgreSqlSyncDatabaseAction extends ActionBase {
                                 excludingPattern,
                                 tableNameConverter);
 
+        env.addSource(source, "PostgreSQL Source")
+                .flatMap(recordParser)
+                .name("Parse").print();
+
         new FlinkCdcSyncDatabaseSinkBuilder<RichCdcMultiplexRecord>()
                 .withInput(
                         env.addSource(source, "PostgreSQL Source")

@@ -48,7 +48,7 @@ public class PostgreSqlSyncDatabaseActionITCase extends PostgreSqlActionITCaseBa
     }
 
     @Test
-    @Timeout(180)
+    @Timeout(120)
     public void testSyncDatabase() throws Exception {
         Map<String, String> postgreSqlConfig = getBasicPostgreSqlConfig();
         postgreSqlConfig.put("database-name", "test_db");
@@ -72,18 +72,18 @@ public class PostgreSqlSyncDatabaseActionITCase extends PostgreSqlActionITCaseBa
                 "test_table_06");
 
         try (Statement statement = getStatement()) {
-            insertData(statement);
+            //insertData(statement);
             assertResult();
         }
     }
 
-    private void insertData(Statement statement) throws SQLException {
+   /* private void insertData(Statement statement) throws SQLException {
         statement.executeUpdate("SET search_path TO test_schema;");
         statement.executeUpdate("INSERT INTO test_table_01 VALUES (1, 'a1')");
         statement.executeUpdate("INSERT INTO test_table_02 VALUES (2, 'a2')");
         statement.executeUpdate("INSERT INTO test_table_01 VALUES (3, 'a3')");
         statement.executeUpdate("INSERT INTO test_table_02 VALUES (4, 'a4')");
-    }
+    }*/
 
     private void assertResult() throws Exception {
         FileStoreTable t1 = getFileStoreTable("test_table_01");

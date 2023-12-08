@@ -92,17 +92,6 @@ public class PostgreSqlContainer extends PostgreSQLContainer {
         return password;
     }
 
-    /* @Override
-    protected String getTestQueryString() {
-        return "SELECT 1";
-    }*/
-
-    @SuppressWarnings("unchecked")
-    public PostgreSqlContainer withSetupSQL(String sqlPath) {
-        parameters.put(SETUP_SQL_PARAM_NAME, sqlPath);
-        return this;
-    }
-
     public PostgreSqlContainer withPostgresConf(String confPath) {
         parameters.put(POSTGRESQL_CONF, confPath);
         return this;

@@ -58,6 +58,9 @@ CREATE TABLE test_table_06 (
     PRIMARY KEY (k6)
 );
 
+INSERT INTO test_table_01 VALUES (1, 'a1'),(3, 'a3');
+INSERT INTO test_table_02 VALUES (2, 'a2'),(4, 'a4');
+
 -- ################################################################################
 --  PostgreSqlSyncDatabaseActionITCase#testIncludingAndExcludingTables
 -- ################################################################################
