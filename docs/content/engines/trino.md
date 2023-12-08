@@ -190,16 +190,6 @@ SELECT * FROM paimon.test_db.orders
 ## Query with Time Traveling
 {{< tabs "time-travel-example" >}}
 
-{{< tab "version < 368" >}}
-
-```sql
--- read the snapshot from specified timestamp with a long value in unix milliseconds
-SET SESSION paimon.scan_timestamp_millis=1679486589444;
-SELECT * FROM t;
-```
-
-{{< /tab >}}
-
 {{< tab "version >=368" >}}
 
 ```sql
@@ -208,6 +198,16 @@ SELECT * FROM t FOR TIMESTAMP AS OF TIMESTAMP '2023-01-01 00:00:00 Asia/Shanghai
 
 -- read the snapshot with id 1L (use snapshot id as version)
 SELECT * FROM t FOR VERSION AS OF 1;
+```
+
+{{< /tab >}}
+
+{{< tab "version < 368" >}}
+
+```sql
+-- read the snapshot from specified timestamp with a long value in unix milliseconds
+SET SESSION paimon.scan_timestamp_millis=1679486589444;
+SELECT * FROM t;
 ```
 
 {{< /tab >}}
