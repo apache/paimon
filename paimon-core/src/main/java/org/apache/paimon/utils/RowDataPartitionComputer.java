@@ -21,7 +21,10 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -52,7 +55,19 @@ public class RowDataPartitionComputer {
 
         for (int i = 0; i < partitionFieldGetters.length; i++) {
             Object field = partitionFieldGetters[i].getFieldOrNull(in);
-            String partitionValue = field != null ? field.toString() : null;
+            String partitionValue = null;
+            if (field != null) {
+                if (field instanceof byte[]) {
+                    partitionValue =
+                            StandardCharsets.ISO_8859_1
+                                    .decode(
+                                            Base64.getEncoder()
+                                                    .encode(ByteBuffer.wrap((byte[]) field)))
+                                    .toString();
+                } else {
+                    partitionValue = field.toString();
+                }
+            }
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }
