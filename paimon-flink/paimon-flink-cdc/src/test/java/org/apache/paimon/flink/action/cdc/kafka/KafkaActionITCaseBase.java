@@ -24,7 +24,6 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -209,6 +208,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         standardProps.put("max.partition.fetch.bytes", 256);
         standardProps.put("zookeeper.session.timeout.ms", zkTimeoutMills);
         standardProps.put("zookeeper.connection.timeout.ms", zkTimeoutMills);
+        standardProps.put("default.api.timeout.ms", "120000");
         return standardProps;
     }
 
@@ -246,6 +246,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             List<String> args =
                     new ArrayList<>(
                             Arrays.asList(
+                                    "kafka_sync_table",
                                     "--warehouse",
                                     warehouse,
                                     "--database",
@@ -263,12 +264,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (KafkaSyncTableAction)
-                    new KafkaSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(KafkaSyncTableAction.class, args);
         }
     }
 
@@ -295,7 +291,12 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         public KafkaSyncDatabaseAction build() {
             List<String> args =
                     new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
+                            Arrays.asList(
+                                    "kafka_sync_database",
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database));
 
             args.addAll(mapToArgs("--kafka-conf", sourceConfig));
             args.addAll(mapToArgs("--catalog-conf", catalogConfig));
@@ -308,12 +309,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (KafkaSyncDatabaseAction)
-                    new KafkaSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            return createAction(KafkaSyncDatabaseAction.class, args);
         }
     }
 

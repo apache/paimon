@@ -18,6 +18,7 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.ListSerializer;
 import org.apache.paimon.data.serializer.NullableSerializer;
@@ -25,6 +26,7 @@ import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -82,9 +84,18 @@ public class LeafPredicate implements Predicate {
         return literals;
     }
 
+    public LeafPredicate copyWithNewIndex(int fieldIndex) {
+        return new LeafPredicate(function, type, fieldIndex, fieldName, literals);
+    }
+
     @Override
     public boolean test(Object[] values) {
         return function.test(type, values[fieldIndex], literals);
+    }
+
+    @Override
+    public boolean test(InternalRow row) {
+        return function.test(type, InternalRowUtils.get(row, fieldIndex, type), literals);
     }
 
     @Override

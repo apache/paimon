@@ -40,6 +40,8 @@ We currently support the following sync ways:
 7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
 8. PostgreSQL Synchronizing Table: synchronize one or multiple tables from PostgreSQL into one Paimon table.
 9. PostgreSQL Synchronizing Database: synchronize the whole PostgreSQL database into one Paimon database.
+8. Pulsar Synchronizing Table: synchronize one Pulsar topic's table into one Paimon table.
+9. Pulsar Synchronizing Database: synchronize one Pulsar topic containing multiple tables or multiple topics containing one table each into one Paimon database.
 
 ## What is Schema Evolution
 
@@ -78,18 +80,27 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 ## Computed Functions
 
-`--computed-column` are the definitions of computed columns. The argument field is from Kafka topic's table field name. Supported expressions are:
+`--computed_column` are the definitions of computed columns. The argument field is from source table field name. Supported expressions are:
 
 {{< generated/compute_column >}}
 
 ## Special Data Type Mapping
 
 1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL,
-   you can specify type mapping option `tinyint1-not-bool` (Use `--type-mapping`), then the column will be mapped to TINYINT in Paimon table.
-2. You can use type mapping option `to-nullable` (Use `--type-mapping`) to ignore all NOT NULL constraints (except primary keys).
-3. You can use type mapping option `to-string` (Use `--type-mapping`) to map all MySQL data type to STRING.
-4. You can use type mapping option `char-to-string` (Use `--type-mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
-5. MySQL BIT(1) type will be mapped to Boolean.
-6. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-7. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
+   you can specify type mapping option `tinyint1-not-bool` (Use `--type_mapping`), then the column will be mapped to TINYINT in Paimon table.
+2. You can use type mapping option `to-nullable` (Use `--type_mapping`) to ignore all NOT NULL constraints (except primary keys).
+3. You can use type mapping option `to-string` (Use `--type_mapping`) to map all MySQL data type to STRING.
+4. You can use type mapping option `char-to-string` (Use `--type_mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
+5. You can use type mapping option `longtext-to-bytes` (Use `--type_mapping`) to map MySQL LONGTEXT types to BYTES.
+6. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)` by default. You can 
+use type mapping option `bigint-unsigned-to-bigint` (Use `--type_mapping`) to map these types to Paimon `BIGINT`, but there 
+is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon `BIGINT` can only 
+store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
+7. MySQL BIT(1) type will be mapped to Boolean.
+8. When using Hive catalog, MySQL TIME type will be mapped to STRING.
+9. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
    should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
+
+## Setting Custom Job Name
+
+Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.

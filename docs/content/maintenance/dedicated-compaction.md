@@ -93,23 +93,25 @@ Run the following command to submit a compaction job for the table.
     --database <database-name> \ 
     --table <table-name> \
     [--partition <partition-name>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
+    [--table_conf <table_conf>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
 ```
 
 Example: compact table
 
 ```bash
 <FLINK_HOME>/bin/flink run \
-    /path/to/paimon-flink-action-0.6-SNAPSHOT.jar \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
     compact \
     --warehouse s3:///path/to/warehouse \
     --database test_db \
     --table test_table \
     --partition dt=20221126,hh=08 \
     --partition dt=20221127,hh=09 \
-    --catalog-conf s3.endpoint=https://****.com \
-    --catalog-conf s3.access-key=***** \
-    --catalog-conf s3.secret-key=*****
+    --table_conf sink.parallelism=10 \
+    --catalog_conf s3.endpoint=https://****.com \
+    --catalog_conf s3.access-key=***** \
+    --catalog_conf s3.secret-key=*****
 ```
 
 You can use `-D execution.runtime-mode=batch` or `-yD execution.runtime-mode=batch` (for the ON-YARN scenario) to control batch or streaming mode. If you submit a batch job, all
@@ -139,24 +141,24 @@ You can run the following command to submit a compaction job for multiple databa
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact-database \
+    compact_database \
     --warehouse <warehouse-path> \
-    --including-databases <database-name|name-regular-expr> \ 
-    [--including-tables <paimon-table-name|name-regular-expr>] \
-    [--excluding-tables <paimon-table-name|name-regular-expr>] \
+    --including_databases <database-name|name-regular-expr> \ 
+    [--including_tables <paimon-table-name|name-regular-expr>] \
+    [--excluding_tables <paimon-table-name|name-regular-expr>] \
     [--mode <compact-mode>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-conf> [--table-conf <paimon-table-conf> ...]]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table_conf> [--table_conf <paimon-table_conf> ...]]
 ```
 
-* `--including-databases` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact-database mode, you could specify multiple database, regular expression is supported.
-* `--including-tables` is used to specify which source tables are to be compacted, you must use '|' to separate multiple tables, the format is `databaseName.tableName`, regular expression is supported. For example, specifying "--including-tables db1.t1|db2.+" means to compact table 'db1.t1' and all tables in the db2 database.
-* `--excluding-tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including-tables". "--excluding-tables" has higher priority than "--including-tables" if you specified both.
+* `--including_databases` is used to specify which database is to be compacted. In compact mode, you need to specify a database name, in compact_database mode, you could specify multiple database, regular expression is supported.
+* `--including_tables` is used to specify which source tables are to be compacted, you must use '|' to separate multiple tables, the format is `databaseName.tableName`, regular expression is supported. For example, specifying "--including_tables db1.t1|db2.+" means to compact table 'db1.t1' and all tables in the db2 database.
+* `--excluding_tables`  is used to specify which source tables are not to be compacted. The usage is same as "--including_tables". "--excluding_tables" has higher priority than "--including_tables" if you specified both.
 * `mode` is used to specify compaction mode. Possible values:
   * "divided" (the default mode if you haven't specified one): start a sink for each table, the compaction of the new table requires restarting the job.
   * "combined": start a single combined sink for all tables, the new table will be automatically compacted.
-* `--catalog-conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
-* `--table-conf` is the configuration for compaction. Each configuration should be specified in the format `key=value`. Pivotal configuration is listed below:
+* `--catalog_conf` is the configuration for Paimon catalog. Each configuration should be specified in the format `key=value`. See [here]({{< ref "maintenance/configurations" >}}) for a complete list of catalog configurations.
+* `--table_conf` is the configuration for compaction. Each configuration should be specified in the format `key=value`. Pivotal configuration is listed below:
 
 | Key                               | Default | Type       | Description                                                                                                                                                                                                 |
 |-----------------------------------|---------|------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -184,12 +186,12 @@ Example1: compact database
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact-database \
+    compact_database \
     --warehouse s3:///path/to/warehouse \
-    --including-databases test_db \
-    --catalog-conf s3.endpoint=https://****.com \
-    --catalog-conf s3.access-key=***** \
-    --catalog-conf s3.secret-key=*****
+    --including_databases test_db \
+    --catalog_conf s3.endpoint=https://****.com \
+    --catalog_conf s3.access-key=***** \
+    --catalog_conf s3.secret-key=*****
 ```
 
 Example2: compact database in combined mode
@@ -197,22 +199,22 @@ Example2: compact database in combined mode
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact-database \
+    compact_database \
     --warehouse s3:///path/to/warehouse \
-    --including-databases test_db \
+    --including_databases test_db \
     --mode combined \
-    --catalog-conf s3.endpoint=https://****.com \
-    --catalog-conf s3.access-key=***** \
-    --catalog-conf s3.secret-key=***** \
-    --table-conf continuous.discovery-interval=*****
+    --catalog_conf s3.endpoint=https://****.com \
+    --catalog_conf s3.access-key=***** \
+    --catalog_conf s3.secret-key=***** \
+    --table_conf continuous.discovery-interval=*****
 ```
 
-For more usage of the compact-database action, see
+For more usage of the compact_database action, see
 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    compact-database --help
+    compact_database --help
 ```
 
 {{< /tab >}}
@@ -233,14 +235,14 @@ you can trigger a compact with specified column sort to speed up queries.
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --order-strategy <orderType> \
-    --order-by <col1,col2,...>
+    --order_strategy <orderType> \
+    --order_by <col1,col2,...>
     [--partition <partition-name>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-dynamic-conf> [--table-conf <paimon-table-dynamic-conf>] ...]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-dynamic-conf> [--table_conf <paimon-table-dynamic-conf>] ...]
 ```
 There are two new configuration in `Sort Compact`
 {{< generated/sort-compact >}}
 
-The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf `--table-conf sink.parallelism=<value>`.
+The sort parallelism is the same as the sink parallelism, you can dynamically specify it by add conf `--table_conf sink.parallelism=<value>`.
 

@@ -25,20 +25,25 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
+import org.apache.avro.AvroRuntimeException;
 import org.apache.avro.Schema;
 import org.apache.avro.io.Decoder;
 import org.apache.avro.util.Utf8;
+import org.jetbrains.annotations.NotNull;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.math.BigDecimal;
 import java.math.BigInteger;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.IntStream;
 
 /** Factory to create {@link FieldReader}. */
 public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
@@ -66,7 +71,7 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     private static final FieldReader TIMESTAMP_MICROS_READER = new TimestampMicrosReader();
 
     @Override
-    public FieldReader visitUnion(Schema schema, DataType type) {
+    public FieldReader visitUnion(Schema schema, @Nullable DataType type) {
         return new NullableReader(visit(schema.getTypes().get(1), type));
     }
 
@@ -116,35 +121,35 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
     }
 
     @Override
-    public FieldReader visitTimestampMillis(int precision) {
+    public FieldReader visitTimestampMillis(@Nullable Integer precision) {
         return TIMESTAMP_MILLS_READER;
     }
 
     @Override
-    public FieldReader visitTimestampMicros(int precision) {
+    public FieldReader visitTimestampMicros(@Nullable Integer precision) {
         return TIMESTAMP_MICROS_READER;
     }
 
     @Override
-    public FieldReader visitDecimal(int precision, int scale) {
+    public FieldReader visitDecimal(@Nullable Integer precision, @Nullable Integer scale) {
         return new DecimalReader(precision, scale);
     }
 
     @Override
-    public FieldReader visitArray(Schema schema, DataType elementType) {
+    public FieldReader visitArray(Schema schema, @Nullable DataType elementType) {
         FieldReader elementReader = visit(schema.getElementType(), elementType);
         return new ArrayReader(elementReader);
     }
 
     @Override
-    public FieldReader visitMap(Schema schema, DataType valueType) {
+    public FieldReader visitMap(Schema schema, @Nullable DataType valueType) {
         FieldReader valueReader = visit(schema.getValueType(), valueType);
         return new MapReader(valueReader);
     }
 
     @Override
-    public FieldReader visitRecord(Schema schema, List<DataType> fieldTypes) {
-        return new RowReader(schema, fieldTypes);
+    public FieldReader visitRecord(Schema schema, @NotNull List<DataField> fields) {
+        return new RowReader(schema, fields);
     }
 
     private static class NullableReader implements FieldReader {
@@ -295,16 +300,20 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
 
     private static class DecimalReader implements FieldReader {
 
-        private final int precision;
-        private final int scale;
+        private final Integer precision;
+        private final Integer scale;
 
-        private DecimalReader(int precision, int scale) {
+        private DecimalReader(Integer precision, Integer scale) {
             this.precision = precision;
             this.scale = scale;
         }
 
         @Override
         public Object read(Decoder decoder, Object reuse) throws IOException {
+            if (precision == null || scale == null) {
+                throw new AvroRuntimeException(
+                        "Can't reader record when precision or scale is null.");
+            }
             byte[] bytes = (byte[]) BYTES_READER.read(decoder, null);
             return Decimal.fromBigDecimal(
                     new BigDecimal(new BigInteger(bytes), scale), precision, scale);
@@ -432,49 +441,42 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         }
     }
 
-    public RowReader createRowReader(Schema schema, List<DataType> fieldTypes, int[] projection) {
-        return new RowReader(schema, fieldTypes, projection);
+    public RowReader createRowReader(Schema schema, List<DataField> fields) {
+        return new RowReader(schema, fields);
     }
 
     /** A {@link FieldReader} to read {@link InternalRow}. */
     public class RowReader implements FieldReader {
 
         private final FieldReader[] fieldReaders;
-        private final int[] projection;
-        private final int[][] mapping;
+        private final int[] mapping;
+        private final int[] mappingBack;
 
-        public RowReader(Schema schema, List<DataType> fieldTypes) {
-            this(schema, fieldTypes, IntStream.range(0, fieldTypes.size()).toArray());
-        }
-
-        public RowReader(Schema schema, List<DataType> fieldTypes, int[] projection) {
+        public RowReader(Schema schema, List<DataField> fields) {
             List<Schema.Field> schemaFields = schema.getFields();
+            this.mapping = new int[fields.size()];
+            this.mappingBack = new int[schemaFields.size()];
+            Arrays.fill(mappingBack, -1);
+            for (int i = 0; i < mapping.length; i++) {
+                DataField field = fields.get(i);
+                Schema.Field schemaField = schema.getField(field.name());
+                if (schemaField != null) {
+                    int index = schemaFields.indexOf(schemaField);
+                    this.mapping[i] = index;
+                    this.mappingBack[index] = i;
+                } else {
+                    this.mapping[i] = -1;
+                }
+            }
+
             this.fieldReaders = new FieldReader[schemaFields.size()];
             for (int i = 0, fieldsSize = schemaFields.size(); i < fieldsSize; i++) {
                 Schema.Field field = schemaFields.get(i);
-                DataType type = fieldTypes.get(i);
-                fieldReaders[i] = visit(field.schema(), type);
-            }
-            this.projection = projection;
-
-            // use fieldTypes to compatible with less fields in avro
-
-            @SuppressWarnings("unchecked")
-            List<Integer>[] mapping = new List[fieldTypes.size()];
-            for (int i = 0; i < projection.length; i++) {
-                List<Integer> columns = mapping[projection[i]];
-                if (columns == null) {
-                    columns = new ArrayList<>();
-                    mapping[projection[i]] = columns;
-                }
-                columns.add(i);
-            }
-
-            this.mapping = new int[fieldTypes.size()][];
-            for (int i = 0; i < mapping.length; i++) {
-                List<Integer> fields = mapping[i];
-                if (fields != null) {
-                    this.mapping[i] = fields.stream().mapToInt(Integer::intValue).toArray();
+                if (mappingBack[i] >= 0) {
+                    DataType type = fields.get(mappingBack[i]).type();
+                    fieldReaders[i] = visit(field.schema(), type);
+                } else {
+                    fieldReaders[i] = visit(field.schema(), null);
                 }
             }
         }
@@ -483,24 +485,25 @@ public class FieldReaderFactory implements AvroSchemaVisitor<FieldReader> {
         public InternalRow read(Decoder decoder, Object reuse) throws IOException {
             GenericRow row;
             if (reuse instanceof GenericRow
-                    && ((GenericRow) reuse).getFieldCount() == projection.length) {
+                    && ((GenericRow) reuse).getFieldCount() == mapping.length) {
                 row = (GenericRow) reuse;
             } else {
-                row = new GenericRow(projection.length);
+                row = new GenericRow(mapping.length);
             }
 
+            Object[] values = new Object[fieldReaders.length];
             for (int i = 0; i < fieldReaders.length; i += 1) {
-                int[] columns = mapping[i];
-                FieldReader reader = fieldReaders[i];
-                if (columns == null) {
-                    reader.skip(decoder);
+                if (mappingBack[i] >= 0) {
+                    values[i] = fieldReaders[i].read(decoder, row.getField(mappingBack[i]));
                 } else {
-                    Object value = reader.read(decoder, row.getField(columns[0]));
-                    for (int column : columns) {
-                        row.setField(column, value);
-                    }
+                    fieldReaders[i].skip(decoder);
                 }
             }
+
+            for (int i = 0; i < mapping.length; i++) {
+                row.setField(i, mapping[i] >= 0 ? values[mapping[i]] : null);
+            }
+
             return row;
         }
 

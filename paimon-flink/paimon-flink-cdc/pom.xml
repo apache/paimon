@@ -25,7 +25,7 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-flink</artifactId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -34,7 +34,7 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.17.1</flink.version>
+        <flink.version>1.17.2</flink.version>
         <flink.mysql.cdc.version>2.3.0</flink.mysql.cdc.version>
         <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
         <flink.postgresql.cdc.version>2.4.1</flink.postgresql.cdc.version>

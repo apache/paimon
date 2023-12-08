@@ -62,27 +62,27 @@ public class PartitionPredicateTest {
                 PartitionPredicate.fromMultiple(
                         type, Arrays.asList(createPart(3, 5), createPart(4, 6)));
 
-        assertThat(vailidate(p1, p2, createPart(3, 4))).isFalse();
-        assertThat(vailidate(p1, p2, createPart(3, 5))).isTrue();
-        assertThat(vailidate(p1, p2, createPart(4, 6))).isTrue();
-        assertThat(vailidate(p1, p2, createPart(4, 5))).isFalse();
+        assertThat(validate(p1, p2, createPart(3, 4))).isFalse();
+        assertThat(validate(p1, p2, createPart(3, 5))).isTrue();
+        assertThat(validate(p1, p2, createPart(4, 6))).isTrue();
+        assertThat(validate(p1, p2, createPart(4, 5))).isFalse();
 
         assertThat(
-                        vailidate(
+                        validate(
                                 p1,
                                 new FieldStats[] {
                                     new FieldStats(4, 8, 0L), new FieldStats(10, 12, 0L)
                                 }))
                 .isFalse();
         assertThat(
-                        vailidate(
+                        validate(
                                 p2,
                                 new FieldStats[] {
                                     new FieldStats(4, 8, 0L), new FieldStats(10, 12, 0L)
                                 }))
-                .isTrue();
+                .isFalse();
         assertThat(
-                        vailidate(
+                        validate(
                                 p2,
                                 new FieldStats[] {
                                     new FieldStats(6, 8, 0L), new FieldStats(10, 12, 0L)
@@ -90,14 +90,14 @@ public class PartitionPredicateTest {
                 .isFalse();
 
         assertThat(
-                        vailidate(
+                        validate(
                                 p1,
                                 new FieldStats[] {
                                     new FieldStats(4, 8, 0L), new FieldStats(5, 12, 0L)
                                 }))
                 .isTrue();
         assertThat(
-                        vailidate(
+                        validate(
                                 p2,
                                 new FieldStats[] {
                                     new FieldStats(4, 8, 0L), new FieldStats(5, 12, 0L)
@@ -105,14 +105,14 @@ public class PartitionPredicateTest {
                 .isTrue();
 
         assertThat(
-                        vailidate(
+                        validate(
                                 p1,
                                 new FieldStats[] {
                                     new FieldStats(1, 2, 0L), new FieldStats(2, 3, 0L)
                                 }))
                 .isFalse();
         assertThat(
-                        vailidate(
+                        validate(
                                 p2,
                                 new FieldStats[] {
                                     new FieldStats(1, 2, 0L), new FieldStats(2, 3, 0L)
@@ -120,14 +120,36 @@ public class PartitionPredicateTest {
                 .isFalse();
     }
 
-    private boolean vailidate(
+    @Test
+    public void testPartitionWithMultiFields() {
+        RowType type = DataTypes.ROW(DataTypes.INT(), DataTypes.INT());
+        PartitionPredicate predicate =
+                PartitionPredicate.fromMultiple(type, Collections.singletonList(createPart(3, 4)));
+
+        assertThat(
+                        validate(
+                                predicate,
+                                new FieldStats[] {
+                                    new FieldStats(2, 2, 0L), new FieldStats(4, 4, 0L)
+                                }))
+                .isFalse();
+        assertThat(
+                        validate(
+                                predicate,
+                                new FieldStats[] {
+                                    new FieldStats(2, 4, 0L), new FieldStats(4, 4, 0L)
+                                }))
+                .isTrue();
+    }
+
+    private boolean validate(
             PartitionPredicate predicate1, PartitionPredicate predicate2, BinaryRow part) {
         boolean ret = predicate1.test(part);
         assertThat(predicate2.test(part)).isEqualTo(ret);
         return ret;
     }
 
-    private boolean vailidate(PartitionPredicate predicate, FieldStats[] fieldStats) {
+    private boolean validate(PartitionPredicate predicate, FieldStats[] fieldStats) {
         return predicate.test(3, fieldStats);
     }
 

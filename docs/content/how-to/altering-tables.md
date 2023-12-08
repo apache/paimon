@@ -268,6 +268,40 @@ ALTER TABLE my_table DROP COLUMN c1;
 
 {{< /tabs >}}
 
+
+## Dropping Partitions
+
+The following SQL drops the partitions of the paimon table.
+
+{{< tabs "drop_partitions" >}}
+
+{{< tab "Flink" >}}
+
+For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time.
+
+```sql
+ALTER TABLE MyTable DROP PARTITION (`id` = 1);
+
+ALTER TABLE MyTable DROP PARTITION (`id` = 1, `name` = 'paimon');
+
+ALTER TABLE MyTable DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
+
+```
+
+{{< /tab >}}
+
+{{< tab "Spark3" >}}
+
+For spark sql, you need to specify all the partition columns.
+
+```sql
+ALTER TABLE MyTable DROP PARTITION (`id` = 1, `name` = 'paimon');
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ## Changing Column Nullability
 
 The following SQL changes nullability of column `coupon_info`.

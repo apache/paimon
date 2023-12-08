@@ -198,7 +198,7 @@ public abstract class SparkReadTestBase {
     // return of 'SHOW CREATE TABLE' excluding TBLPROPERTIES
     protected String showCreateString(String table, String... fieldSpec) {
         return String.format(
-                "CREATE TABLE paimon.default.%s (%s)\n",
+                "CREATE TABLE paimon.default.%s (%s)\nUSING paimon\n",
                 table,
                 Arrays.stream(fieldSpec).map(s -> "\n  " + s).collect(Collectors.joining(",")));
     }

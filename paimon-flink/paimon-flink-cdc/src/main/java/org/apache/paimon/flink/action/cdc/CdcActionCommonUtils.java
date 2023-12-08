@@ -47,6 +47,20 @@ public class CdcActionCommonUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(CdcActionCommonUtils.class);
 
+    public static final String KAFKA_CONF = "kafka_conf";
+    public static final String MONGODB_CONF = "mongodb_conf";
+    public static final String MYSQL_CONF = "mysql_conf";
+    public static final String PULSAR_CONF = "pulsar_conf";
+    public static final String TABLE_PREFIX = "table_prefix";
+    public static final String TABLE_SUFFIX = "table_suffix";
+    public static final String INCLUDING_TABLES = "including_tables";
+    public static final String EXCLUDING_TABLES = "excluding_tables";
+    public static final String TYPE_MAPPING = "type_mapping";
+    public static final String PARTITION_KEYS = "partition_keys";
+    public static final String PRIMARY_KEYS = "primary_keys";
+    public static final String COMPUTED_COLUMN = "computed_column";
+    public static final String METADATA_COLUMN = "metadata_column";
+
     public static void assertSchemaCompatible(
             TableSchema paimonSchema, List<DataField> sourceTableFields) {
         if (!schemaCompatible(paimonSchema, sourceTableFields)) {
@@ -150,23 +164,9 @@ public class CdcActionCommonUtils {
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
-            Schema sourceSchema) {
-        return buildPaimonSchema(
-                specifiedPartitionKeys,
-                specifiedPrimaryKeys,
-                computedColumns,
-                tableConfig,
-                sourceSchema,
-                new CdcMetadataConverter[] {});
-    }
-
-    public static Schema buildPaimonSchema(
-            List<String> specifiedPartitionKeys,
-            List<String> specifiedPrimaryKeys,
-            List<ComputedColumn> computedColumns,
-            Map<String, String> tableConfig,
             Schema sourceSchema,
-            CdcMetadataConverter[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters,
+            boolean requirePrimaryKeys) {
         Schema.Builder builder = Schema.newBuilder();
 
         // options
@@ -188,7 +188,7 @@ public class CdcActionCommonUtils {
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            builder.column(metadataConverter.getColumnName(), metadataConverter.getDataType());
+            builder.column(metadataConverter.columnName(), metadataConverter.dataType());
         }
 
         // primary keys
@@ -208,7 +208,7 @@ public class CdcActionCommonUtils {
             builder.primaryKey(specifiedPrimaryKeys);
         } else if (!sourceSchema.primaryKeys().isEmpty()) {
             builder.primaryKey(sourceSchema.primaryKeys());
-        } else {
+        } else if (requirePrimaryKeys) {
             throw new IllegalArgumentException(
                     "Primary keys are not specified. "
                             + "Also, can't infer primary keys from source table schemas because "

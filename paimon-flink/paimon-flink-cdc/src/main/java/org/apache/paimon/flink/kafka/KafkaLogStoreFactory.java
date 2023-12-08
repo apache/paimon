@@ -40,7 +40,6 @@ import org.apache.flink.table.types.utils.DataTypeUtils;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Properties;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
@@ -50,6 +49,7 @@ import static org.apache.paimon.CoreOptions.LogConsistency;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.flink.factories.FlinkFactoryUtil.createFlinkTableFactoryHelper;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** The Kafka {@link LogStoreTableFactory} implementation. */
 public class KafkaLogStoreFactory implements LogStoreTableFactory {
@@ -143,14 +143,7 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
 
     public static Properties toKafkaProperties(Options options) {
         Properties properties = new Properties();
-        Map<String, String> optionMap = options.toMap();
-        optionMap.keySet().stream()
-                .filter(key -> key.startsWith(KAFKA_PREFIX))
-                .forEach(
-                        key ->
-                                properties.put(
-                                        key.substring((KAFKA_PREFIX).length()),
-                                        optionMap.get(key)));
+        properties.putAll(convertToPropertiesPrefixKey(options.toMap(), KAFKA_PREFIX));
 
         // Add read committed for transactional consistency mode.
         if (options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL) {

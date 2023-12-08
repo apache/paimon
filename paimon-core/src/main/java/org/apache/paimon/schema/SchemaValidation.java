@@ -35,6 +35,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -50,6 +51,7 @@ import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
+import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -168,6 +170,12 @@ public class SchemaValidation {
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
                                 field));
+        sequenceField.ifPresent(
+                field ->
+                        checkArgument(
+                                options.fieldAggFunc(field) == null,
+                                "Should not define aggregation on sequence field: '%s'",
+                                field));
 
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
         if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
@@ -182,12 +190,22 @@ public class SchemaValidation {
             }
         }
 
-        if (schema.crossPartitionUpdate() && options.bucket() != -1) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                    + "(Primary key constraint %s not include all partition fields %s).",
-                            schema.primaryKeys(), schema.partitionKeys()));
+        if (schema.crossPartitionUpdate()) {
+            if (options.bucket() != -1) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+
+            if (sequenceField.isPresent()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You can not use sequence.field in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
         }
     }
 
@@ -219,6 +237,7 @@ public class SchemaValidation {
                     options,
                     Arrays.asList(
                             SCAN_SNAPSHOT_ID,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
                             INCREMENTAL_BETWEEN),
@@ -230,6 +249,7 @@ public class SchemaValidation {
                     options,
                     Arrays.asList(
                             SCAN_TIMESTAMP_MILLIS,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
                             INCREMENTAL_BETWEEN),
                     Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TAG_NAME));
@@ -241,7 +261,11 @@ public class SchemaValidation {
                     INCREMENTAL_BETWEEN_TIMESTAMP);
             checkOptionsConflict(
                     options,
-                    Arrays.asList(SCAN_SNAPSHOT_ID, SCAN_TIMESTAMP_MILLIS, SCAN_TAG_NAME),
+                    Arrays.asList(
+                            SCAN_SNAPSHOT_ID,
+                            SCAN_TIMESTAMP_MILLIS,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
+                            SCAN_TAG_NAME),
                     Arrays.asList(INCREMENTAL_BETWEEN, INCREMENTAL_BETWEEN_TIMESTAMP));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT_FULL) {
             checkOptionExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
@@ -249,12 +273,29 @@ public class SchemaValidation {
                     options,
                     Arrays.asList(
                             SCAN_TIMESTAMP_MILLIS,
+                            SCAN_FILE_CREATION_TIME_MILLIS,
                             SCAN_TAG_NAME,
                             INCREMENTAL_BETWEEN_TIMESTAMP,
                             INCREMENTAL_BETWEEN),
                     Collections.singletonList(SCAN_SNAPSHOT_ID));
+        } else if (options.startupMode() == CoreOptions.StartupMode.FROM_FILE_CREATION_TIME) {
+            checkOptionExistInMode(
+                    options,
+                    SCAN_FILE_CREATION_TIME_MILLIS,
+                    CoreOptions.StartupMode.FROM_FILE_CREATION_TIME);
+            checkOptionsConflict(
+                    options,
+                    Arrays.asList(
+                            SCAN_SNAPSHOT_ID,
+                            SCAN_TIMESTAMP_MILLIS,
+                            SCAN_TAG_NAME,
+                            INCREMENTAL_BETWEEN_TIMESTAMP,
+                            INCREMENTAL_BETWEEN),
+                    Collections.singletonList(SCAN_FILE_CREATION_TIME_MILLIS));
         } else {
             checkOptionNotExistInMode(options, SCAN_TIMESTAMP_MILLIS, options.startupMode());
+            checkOptionNotExistInMode(
+                    options, SCAN_FILE_CREATION_TIME_MILLIS, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_SNAPSHOT_ID, options.startupMode());
             checkOptionNotExistInMode(options, SCAN_TAG_NAME, options.startupMode());
             checkOptionNotExistInMode(
@@ -338,7 +379,7 @@ public class SchemaValidation {
                                 String.format("Field %s can not be found in table schema.", field));
                     }
                     Set<String> group = fields2Group.computeIfAbsent(field, p -> new HashSet<>());
-                    if (group.add(k) && group.size() > 1) {
+                    if (group.add(sequenceFieldName) && group.size() > 1) {
                         throw new IllegalArgumentException(
                                 String.format(
                                         "Field %s is defined repeatedly by multiple groups: %s.",
@@ -346,6 +387,15 @@ public class SchemaValidation {
                     }
                 }
             }
+        }
+        Set<String> illegalGroup =
+                fields2Group.values().stream()
+                        .flatMap(Collection::stream)
+                        .filter(g -> options.fieldAggFunc(g) != null)
+                        .collect(Collectors.toSet());
+        if (!illegalGroup.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Should not defined aggregation function on sequence group: " + illegalGroup);
         }
     }
 

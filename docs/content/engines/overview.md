@@ -40,10 +40,11 @@ Apache Spark and Apache Hive.
 | Spark  |      2.4      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
 | Trino  |   358 - 422   |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
 | Presto | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
+| [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) | 3.1+       |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
+| [Doris](https://doris.apache.org/docs/lakehouse/multi-catalog/paimon/) | 2.0+       |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
 
-Ongoing engines:
-- Doris: Experimental feature. See: [Paimon Catalog](https://doris.apache.org/docs/dev/lakehouse/multi-catalog/paimon).
-- Seatunnel: Under development, [Introduce paimon connector](https://github.com/apache/incubator-seatunnel/pull/4178).
-- Starrocks: Under discussion
+Recommended versions are Flink 1.17.2, Spark 3.5.0, Hive 2.3.9
+
+## Download
 
 [Download Link]({{< ref "project/download#engine-jars" >}})

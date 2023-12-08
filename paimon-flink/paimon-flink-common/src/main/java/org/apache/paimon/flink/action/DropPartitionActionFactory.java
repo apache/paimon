@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.List;
 import java.util.Map;
@@ -28,7 +27,7 @@ import java.util.Optional;
 /** Factory to create {@link DropPartitionAction}. */
 public class DropPartitionActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "drop-partition";
+    public static final String IDENTIFIER = "drop_partition";
 
     @Override
     public String identifier() {
@@ -36,13 +35,13 @@ public class DropPartitionActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        checkRequiredArgument(params, "partition");
+        checkRequiredArgument(params, PARTITION);
         List<Map<String, String>> partitions = getPartitions(params);
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         return Optional.of(
                 new DropPartitionAction(
@@ -52,15 +51,15 @@ public class DropPartitionActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"drop-partition\" drops data of specified partitions for a table.");
+                "Action \"drop_partition\" drops data of specified partitions for a table.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  drop-partition --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --partition <partition-name> [--partition <partition-name> ...]");
+                "  drop_partition --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --partition <partition_name> [--partition <partition_name> ...]");
         System.out.println(
-                "  drop-partition --path <table-path> --partition <partition-name> [--partition <partition-name> ...]");
+                "  drop_partition --path <table_path> --partition <partition_name> [--partition <partition_name> ...]");
         System.out.println();
 
         System.out.println("Partition name syntax:");
@@ -69,8 +68,8 @@ public class DropPartitionActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  drop-partition --warehouse hdfs:///path/to/warehouse --database test_db --table test_table --partition dt=20221126,hh=08");
+                "  drop_partition --warehouse hdfs:///path/to/warehouse --database test_db --table test_table --partition dt=20221126,hh=08");
         System.out.println(
-                "  drop-partition --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
+                "  drop_partition --path hdfs:///path/to/warehouse/test_db.db/test_table --partition dt=20221126,hh=08 --partition dt=20221127,hh=09");
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
@@ -28,6 +29,9 @@ import org.apache.avro.LogicalType;
 import org.apache.avro.LogicalTypes;
 import org.apache.avro.Schema;
 
+import javax.annotation.Nonnull;
+
+import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
@@ -38,19 +42,24 @@ public interface AvroSchemaVisitor<T> {
     default T visit(Schema schema, DataType type) {
         switch (schema.getType()) {
             case RECORD:
-                return visitRecord(schema, ((RowType) type).getFieldTypes());
+                return visitRecord(
+                        schema,
+                        type == null ? Collections.emptyList() : ((RowType) type).getFields());
 
             case UNION:
                 return visitUnion(schema, type);
 
             case ARRAY:
-                return visitArray(schema, ((ArrayType) type).getElementType());
+                return visitArray(
+                        schema, type == null ? null : ((ArrayType) type).getElementType());
 
             case MAP:
-                DataType valueType = DataTypes.INT();
-                if (type instanceof MapType) {
-                    valueType = ((MapType) type).getValueType();
-                }
+                DataType valueType =
+                        type == null
+                                ? null
+                                : type instanceof MapType
+                                        ? ((MapType) type).getValueType()
+                                        : DataTypes.INT();
                 return visitMap(schema, valueType);
 
             default:
@@ -85,6 +94,9 @@ public interface AvroSchemaVisitor<T> {
             case BOOLEAN:
                 return visitBoolean();
             case INT:
+                if (type == null) {
+                    return visitInt();
+                }
                 switch (type.getTypeRoot()) {
                     case TINYINT:
                         return visitTinyInt();
@@ -128,15 +140,15 @@ public interface AvroSchemaVisitor<T> {
 
     T visitDouble();
 
-    T visitTimestampMillis(int precision);
+    T visitTimestampMillis(Integer precision);
 
-    T visitTimestampMicros(int precision);
+    T visitTimestampMicros(Integer precision);
 
-    T visitDecimal(int precision, int scale);
+    T visitDecimal(Integer precision, Integer scale);
 
     T visitArray(Schema schema, DataType elementType);
 
     T visitMap(Schema schema, DataType valueType);
 
-    T visitRecord(Schema schema, List<DataType> fieldTypes);
+    T visitRecord(Schema schema, @Nonnull List<DataField> fields);
 }

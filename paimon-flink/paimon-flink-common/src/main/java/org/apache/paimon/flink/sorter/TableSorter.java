@@ -102,11 +102,11 @@ public abstract class TableSorter {
         }
 
         public static OrderType of(String orderType) {
-            if (ORDER.orderType.equals(orderType)) {
+            if (ORDER.orderType.equalsIgnoreCase(orderType)) {
                 return ORDER;
-            } else if (ZORDER.orderType.equals(orderType)) {
+            } else if (ZORDER.orderType.equalsIgnoreCase(orderType)) {
                 return ZORDER;
-            } else if (HILBERT.orderType.equals(orderType)) {
+            } else if (HILBERT.orderType.equalsIgnoreCase(orderType)) {
                 return HILBERT;
             }
 

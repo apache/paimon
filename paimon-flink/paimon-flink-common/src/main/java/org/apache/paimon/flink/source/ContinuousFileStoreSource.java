@@ -19,7 +19,9 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 
@@ -73,6 +75,10 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         StreamTableScan scan = readBuilder.newStreamScan();
+        if (context.metricGroup() != null) {
+            ((InnerStreamTableScan) scan)
+                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+        }
         scan.restore(nextSnapshotId);
         return buildEnumerator(context, splits, nextSnapshotId, scan);
     }
@@ -82,12 +88,14 @@ public class ContinuousFileStoreSource extends FlinkSource {
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
+        CoreOptions coreOptions = CoreOptions.fromMap(options);
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
                 nextSnapshotId,
-                CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
+                coreOptions.continuousDiscoveryInterval().toMillis(),
                 scan,
-                bucketMode);
+                bucketMode,
+                coreOptions.scanSplitMaxPerTask());
     }
 }

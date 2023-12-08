@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.format.ogg;
 
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
@@ -26,11 +27,12 @@ import org.apache.paimon.types.RowKind;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.List;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * The {@code OggRecordParser} class extends the abstract {@link RecordParser} and is responsible
@@ -64,17 +66,17 @@ public class OggRecordParser extends RecordParser {
     @Override
     public List<RichCdcMultiplexRecord> extractRecords() {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
-        String operation = extractStringFromRootJson(FIELD_TYPE);
+        String operation = getAndCheck(FIELD_TYPE).asText();
         switch (operation) {
             case OP_UPDATE:
-                processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
-                processRecord(root.get(dataField()), RowKind.INSERT, records);
+                processRecord(getBefore(operation), RowKind.DELETE, records);
+                processRecord(getData(), RowKind.INSERT, records);
                 break;
             case OP_INSERT:
-                processRecord(root.get(dataField()), RowKind.INSERT, records);
+                processRecord(getData(), RowKind.INSERT, records);
                 break;
             case OP_DELETE:
-                processRecord(root.get(FIELD_BEFORE), RowKind.DELETE, records);
+                processRecord(getBefore(operation), RowKind.DELETE, records);
                 break;
             default:
                 throw new UnsupportedOperationException("Unknown record operation: " + operation);
@@ -82,41 +84,12 @@ public class OggRecordParser extends RecordParser {
         return records;
     }
 
-    @Override
-    protected void validateFormat() {
-        String errorMessageTemplate =
-                "Didn't find '%s' node in json. Please make sure your topic's format is correct.";
-
-        checkArgument(!isNull(root.get(FIELD_TABLE)), errorMessageTemplate, FIELD_TABLE);
-        checkArgument(!isNull(root.get(FIELD_TYPE)), errorMessageTemplate, FIELD_TYPE);
-        checkArgument(!isNull(root.get(primaryField())), errorMessageTemplate, primaryField());
-
-        String fieldType = root.get(FIELD_TYPE).asText();
-
-        switch (fieldType) {
-            case OP_UPDATE:
-                checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
-                checkArgument(!isNull(root.get(FIELD_BEFORE)), errorMessageTemplate, FIELD_BEFORE);
-                break;
-            case OP_INSERT:
-                checkArgument(!isNull(root.get(dataField())), errorMessageTemplate, dataField());
-                break;
-            case OP_DELETE:
-                checkArgument(!isNull(root.get(FIELD_BEFORE)), errorMessageTemplate, FIELD_BEFORE);
-                break;
-        }
+    private JsonNode getData() {
+        return getAndCheck(dataField());
     }
 
-    @Override
-    protected String extractStringFromRootJson(String key) {
-        if (key.equals(FIELD_TABLE)) {
-            extractDatabaseAndTableNames();
-            return tableName;
-        } else if (key.equals(FIELD_DATABASE)) {
-            extractDatabaseAndTableNames();
-            return databaseName;
-        }
-        return root.get(key) != null ? root.get(key).asText() : null;
+    private JsonNode getBefore(String op) {
+        return getAndCheck(FIELD_BEFORE, FIELD_TYPE, op);
     }
 
     @Override
@@ -129,14 +102,32 @@ public class OggRecordParser extends RecordParser {
         return "after";
     }
 
-    private void extractDatabaseAndTableNames() {
-        JsonNode tableNode = root.get(FIELD_TABLE);
-        if (tableNode != null) {
-            String[] dbt = tableNode.asText().split("\\.", 2);
-            if (dbt.length == 2) {
-                databaseName = dbt[0];
-                tableName = dbt[1];
-            }
+    @Nullable
+    @Override
+    protected String getTableName() {
+        Identifier id = getTableId();
+        return id == null ? null : id.getObjectName();
+    }
+
+    @Nullable
+    @Override
+    protected String getDatabaseName() {
+        Identifier id = getTableId();
+        return id == null ? null : id.getDatabaseName();
+    }
+
+    @Nullable
+    private Identifier getTableId() {
+        JsonNode node = root.get(FIELD_TABLE);
+        if (isNull(node)) {
+            return null;
         }
+
+        return Identifier.fromString(node.asText());
+    }
+
+    @Override
+    protected String format() {
+        return "ogg-json";
     }
 }

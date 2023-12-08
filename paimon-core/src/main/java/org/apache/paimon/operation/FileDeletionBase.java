@@ -229,28 +229,28 @@ public abstract class FileDeletionBase {
      */
     protected void addMergedDataFiles(
             Map<BinaryRow, Map<Integer, Set<String>>> dataFiles, Snapshot snapshot)
-            throws Exception {
-        // read data manifests
-        List<String> files = tryReadDataManifests(snapshot);
-
-        // try merging
-        Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
-        for (String file : files) {
-            List<ManifestEntry> entries;
-            try {
-                entries = manifestFile.read(file);
-            } catch (Exception e) {
-                throw new Exception("Failed to read manifest file " + file, e);
-            }
-            ManifestEntry.mergeEntries(entries, map);
-        }
-
-        for (ManifestEntry entry : map.values()) {
+            throws IOException {
+        for (ManifestEntry entry : readMergedDataFiles(snapshot)) {
             dataFiles
                     .computeIfAbsent(entry.partition(), p -> new HashMap<>())
                     .computeIfAbsent(entry.bucket(), b -> new HashSet<>())
                     .add(entry.file().fileName());
         }
+    }
+
+    protected Collection<ManifestEntry> readMergedDataFiles(Snapshot snapshot) throws IOException {
+        // read data manifests
+        List<String> files = tryReadDataManifests(snapshot);
+
+        // read and merge manifest entries
+        Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
+        for (String manifest : files) {
+            List<ManifestEntry> entries;
+            entries = manifestFile.readWithIOException(manifest);
+            ManifestEntry.mergeEntries(entries, map);
+        }
+
+        return map.values();
     }
 
     protected boolean containsDataFile(

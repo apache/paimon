@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.utils.ParameterUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -36,7 +37,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * <pre><code>
  *  CALL sys.drop_partition('tableId', 'partition1', 'partition2', ...)
  * </code></pre>
+ *
+ * @deprecated use ALTER TABLE DROP PARTITION
  */
+@Deprecated
 public class DropPartitionProcedure extends ProcedureBase {
 
     public static final String IDENTIFIER = "drop_partition";
@@ -50,7 +54,9 @@ public class DropPartitionProcedure extends ProcedureBase {
         FileStoreTable fileStoreTable =
                 (FileStoreTable) catalog.getTable(Identifier.fromString(tableId));
         FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
-        commit.dropPartitions(getPartitions(partitionStrings), BatchWriteBuilder.COMMIT_IDENTIFIER);
+        commit.dropPartitions(
+                ParameterUtils.getPartitions(partitionStrings),
+                BatchWriteBuilder.COMMIT_IDENTIFIER);
 
         return new String[] {"Success"};
     }

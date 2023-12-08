@@ -19,7 +19,9 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
 
@@ -27,6 +29,7 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
@@ -79,5 +82,43 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         }
         assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
         assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    @Test
+    public void testMixedSnapshotAndTagDeletion() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        commit(random.nextInt(10) + 30, allData, snapshotPositions);
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        TagManager tagManager = store.newTagManager();
+
+        // create tags for each snapshot
+        for (int id = 1; id <= latestSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            tagManager.createTag(snapshot, "tag" + id);
+        }
+
+        // randomly expire snapshots
+        int expired = random.nextInt(latestSnapshotId / 2) + 1;
+        int retained = latestSnapshotId - expired;
+        store.newExpire(retained, retained, Long.MAX_VALUE).expire();
+
+        // randomly delete tags
+        for (int id = 1; id <= latestSnapshotId; id++) {
+            if (random.nextBoolean()) {
+                tagManager.deleteTag("tag" + id, store.newTagDeletion(), snapshotManager);
+            }
+        }
+
+        // check snapshots and tags
+        Set<Snapshot> allSnapshots = new HashSet<>();
+        snapshotManager.snapshots().forEachRemaining(allSnapshots::add);
+        allSnapshots.addAll(tagManager.taggedSnapshots());
+
+        for (Snapshot snapshot : allSnapshots) {
+            assertSnapshot(snapshot, allData, snapshotPositions);
+        }
     }
 }

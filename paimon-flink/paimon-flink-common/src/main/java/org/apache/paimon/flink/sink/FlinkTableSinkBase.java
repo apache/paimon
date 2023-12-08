@@ -133,6 +133,7 @@ public abstract class FlinkTableSinkBase
                                 .withLogSinkFunction(logSinkFunction)
                                 .withOverwritePartition(overwrite ? staticPartitions : null)
                                 .withParallelism(conf.get(FlinkConnectorOptions.SINK_PARALLELISM))
+                                .withBoundedInputStream(context.isBounded())
                                 .build());
     }
 

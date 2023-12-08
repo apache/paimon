@@ -37,7 +37,7 @@ public class FieldMaxAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         Object max;
 
         if (accumulator == null || inputField == null) {

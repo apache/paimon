@@ -66,4 +66,36 @@ public class TableScanTest extends ScannerTestBase {
         write.close();
         commit.close();
     }
+
+    @Test
+    public void testPushDownLimit() throws Exception {
+        createAppenOnlyTable();
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(3, 30, 300L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(4, 40, 400L));
+        write.write(rowData(5, 50, 500L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // no limit pushed down
+        TableScan.Plan plan1 = table.newScan().plan();
+        assertThat(plan1.splits().size()).isEqualTo(5);
+
+        // with limit 1
+        TableScan.Plan plan2 = table.newScan().withLimit(1).plan();
+        assertThat(plan2.splits().size()).isEqualTo(1);
+
+        // with limit4
+        TableScan.Plan plan3 = table.newScan().withLimit(4).plan();
+        assertThat(plan3.splits().size()).isEqualTo(4);
+
+        write.close();
+        commit.close();
+    }
 }

@@ -45,8 +45,7 @@ public class PushedRichTableSource extends RichTableSource
 
     @Override
     public Result applyFilters(List<ResolvedExpression> filters) {
-        source.pushFilters(filters);
-        return Result.of(filters, filters);
+        return Result.of(filters, source.pushFilters(filters));
     }
 
     @Override

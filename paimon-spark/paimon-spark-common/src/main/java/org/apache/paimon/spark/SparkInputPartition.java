@@ -36,4 +36,18 @@ public class SparkInputPartition implements InputPartition {
     public Split split() {
         return split;
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        SparkInputPartition that = (SparkInputPartition) o;
+        return this.split.equals(that.split);
+    }
 }

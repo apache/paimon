@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -29,22 +28,24 @@ public class DeleteActionFactory implements ActionFactory {
 
     public static final String IDENTIFIER = "delete";
 
+    private static final String WHERE = "where";
+
     @Override
     public String identifier() {
         return IDENTIFIER;
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
         Tuple3<String, String, String> tablePath = getTablePath(params);
 
-        String filter = params.get("where");
+        String filter = params.get(WHERE);
         if (filter == null) {
             throw new IllegalArgumentException(
                     "Please specify deletion filter. If you want to delete all records, please use overwrite (see doc).");
         }
 
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
 
         DeleteAction action =
                 new DeleteAction(tablePath.f0, tablePath.f1, tablePath.f2, filter, catalogConfig);
@@ -58,9 +59,9 @@ public class DeleteActionFactory implements ActionFactory {
 
         System.out.println("Syntax:");
         System.out.println(
-                "  delete --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --where <filter_spec>");
-        System.out.println("  delete --path <table-path> --where <filter_spec>");
+                "  delete --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --where <filter_spec>");
+        System.out.println("  delete --path <table_path> --where <filter_spec>");
         System.out.println();
 
         System.out.println(
@@ -69,7 +70,7 @@ public class DeleteActionFactory implements ActionFactory {
 
         System.out.println("Examples:");
         System.out.println(
-                "  delete --path hdfs:///path/to/warehouse/test_db.db/test_table --where id > (SELECT count(*) FROM employee)");
+                "  delete --path hdfs:///path/to/warehouse/test_db.db/test_table --where 'id > (SELECT count(*) FROM employee)'");
         System.out.println(
                 "  It's equal to 'DELETE FROM test_table WHERE id > (SELECT count(*) FROM employee)");
     }

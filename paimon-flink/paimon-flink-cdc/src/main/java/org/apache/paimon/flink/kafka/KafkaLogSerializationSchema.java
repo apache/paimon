@@ -81,6 +81,7 @@ public class KafkaLogSerializationSchema implements KafkaSerializationSchema<Sin
         } else {
             valueBytes = valueSerializer.serialize(new FlinkRowData(element.row()));
         }
-        return new ProducerRecord<>(topic, element.bucket(), primaryKeyBytes, valueBytes);
+        Integer partition = element.bucket() < 0 ? null : element.bucket();
+        return new ProducerRecord<>(topic, partition, primaryKeyBytes, valueBytes);
     }
 }

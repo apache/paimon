@@ -50,7 +50,6 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
-import org.apache.paimon.operation.metrics.CompactionMetrics;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -163,13 +162,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         ? new LookupCompaction(universalCompaction)
                         : universalCompaction;
         CompactManager compactManager =
-                createCompactManager(
-                        partition,
-                        bucket,
-                        compactStrategy,
-                        compactExecutor,
-                        levels,
-                        getCompactionMetrics(partition, bucket));
+                createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
+
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -181,7 +175,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer(),
-                restoreIncrement);
+                restoreIncrement,
+                getWriterMetrics(partition, bucket));
     }
 
     @VisibleForTesting
@@ -194,8 +189,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             int bucket,
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
-            Levels levels,
-            @Nullable CompactionMetrics metrics) {
+            Levels levels) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
@@ -209,7 +203,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
                     rewriter,
-                    metrics);
+                    getCompactionMetrics(partition, bucket));
         }
     }
 

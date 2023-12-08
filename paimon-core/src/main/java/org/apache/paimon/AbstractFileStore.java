@@ -18,7 +18,6 @@
 
 package org.apache.paimon;
 
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexFile;
@@ -78,6 +77,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                         : new SegmentsCache<>(options.pageSize(), writeManifestCache);
     }
 
+    @Override
     public FileStorePathFactory pathFactory() {
         return new FileStorePathFactory(
                 options.path(),
@@ -91,7 +91,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return new SnapshotManager(fileIO, options.path());
     }
 
-    @VisibleForTesting
+    @Override
     public ManifestFile.Factory manifestFileFactory() {
         return manifestFileFactory(false);
     }
@@ -107,7 +107,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 forWrite ? writeManifestCache : null);
     }
 
-    @VisibleForTesting
+    @Override
     public ManifestList.Factory manifestListFactory() {
         return manifestListFactory(false);
     }

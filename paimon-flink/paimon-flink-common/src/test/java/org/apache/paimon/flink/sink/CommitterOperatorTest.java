@@ -352,10 +352,14 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     public void testEmptyCommitWithProcessTimeTag() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
-                        options ->
-                                options.set(
-                                        CoreOptions.TAG_AUTOMATIC_CREATION,
-                                        CoreOptions.TagCreationMode.PROCESS_TIME));
+                        options -> {
+                            options.set(
+                                    CoreOptions.TAG_AUTOMATIC_CREATION,
+                                    CoreOptions.TagCreationMode.PROCESS_TIME);
+                            options.set(
+                                    CoreOptions.TAG_CREATION_PERIOD,
+                                    CoreOptions.TagCreationPeriod.DAILY);
+                        });
 
         OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
                 createRecoverableTestHarness(table);
@@ -366,12 +370,14 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(1);
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
 
         testHarness.snapshot(2, 2);
         testHarness.notifyOfCompletedCheckpoint(2);
         snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot).isNotNull();
-        assertThat(snapshot.id()).isEqualTo(2);
+        assertThat(snapshot.id()).isEqualTo(1);
+        assertThat(table.tagManager().tagCount()).isEqualTo(1);
     }
 
     // ------------------------------------------------------------------------

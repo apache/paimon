@@ -38,6 +38,12 @@ Options for paimon catalog.
 
 {{< generated/catalog_configuration >}}
 
+### FilesystemCatalogOptions
+
+Options for Filesystem catalog.
+
+{{< generated/file_system_catalog_configuration >}}
+
 ### HiveCatalogOptions
 
 Options for Hive catalog.

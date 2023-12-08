@@ -31,6 +31,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -55,8 +57,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -152,8 +154,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "togg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "togg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -180,8 +182,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
 
         // create an incompatible table
         createFileStoreTable(
@@ -220,8 +222,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put("scan.startup.mode", "specific-offsets");
         kafkaConfig.put("scan.startup.specific-offsets", "partition:0,offset:1");
         KafkaSyncTableAction action =
@@ -263,8 +265,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put("scan.startup.mode", "latest-offset");
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -312,8 +314,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put("scan.startup.mode", "timestamp");
         kafkaConfig.put(
                 "scan.startup.timestamp-millis", String.valueOf(System.currentTimeMillis()));
@@ -362,8 +364,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put("scan.startup.mode", "earliest-offset");
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -412,8 +414,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write ogg data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         kafkaConfig.put("scan.startup.mode", "group-offsets");
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
@@ -462,8 +464,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPartitionKeys("_year")
@@ -501,8 +503,8 @@ public class KafkaOggSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "ogg-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "ogg-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")

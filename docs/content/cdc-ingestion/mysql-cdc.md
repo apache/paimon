@@ -43,18 +43,18 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-table
+    mysql_sync_table
     --warehouse <warehouse-path> \
     --database <database-name> \
     --table <table-name> \
-    [--partition-keys <partition-keys>] \
-    [--primary-keys <primary-keys>] \
-    [--type-mapping <option1,option2...>] \
-    [--computed-column <'column-name=expr-name(args[, ...])'> [--computed-column ...]] \
-    [--metadata-column <metadata-column>] \
-    [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--partition_keys <partition_keys>] \
+    [--primary_keys <primary-keys>] \
+    [--type_mapping <option1,option2...>] \
+    [--computed_column <'column-name=expr-name(args[, ...])'> [--computed_column ...]] \
+    [--metadata_column <metadata-column>] \
+    [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mysql_sync_table >}}
@@ -66,26 +66,26 @@ Example 1: synchronize tables into one Paimon table
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-table \
+    mysql_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --primary-keys pt,uid \
-    --computed-column '_year=year(age)' \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name='source_db' \
-    --mysql-conf table-name='source_table1|source_table2' \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --primary_keys pt,uid \
+    --computed_column '_year=year(age)' \
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name='source_db' \
+    --mysql_conf table-name='source_table1|source_table2' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
-As example shows, the mysql-conf's table-name supports regular expressions to monitor multiple tables that satisfy
+As example shows, the mysql_conf's table-name supports regular expressions to monitor multiple tables that satisfy
 the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
 
 Example 2: synchronize shards into one Paimon table
@@ -97,23 +97,23 @@ table 'source_table' is split into database 'source_db1', 'source_db2' ..., then
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-table \
+    mysql_sync_table \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
     --table test_table \
-    --partition-keys pt \
-    --primary-keys pt,uid \
-    --computed-column '_year=year(age)' \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name='source_db.+' \
-    --mysql-conf table-name='source_table' \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --partition_keys pt \
+    --primary_keys pt,uid \
+    --computed_column '_year=year(age)' \
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name='source_db.+' \
+    --mysql_conf table-name='source_table' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 ## Synchronizing Databases
@@ -125,21 +125,21 @@ To use this feature through `flink run`, run the following shell command.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-database
+    mysql_sync_database
     --warehouse <warehouse-path> \
     --database <database-name> \
-    [--ignore-incompatible <true/false>] \
-    [--merge-shards <true/false>] \
-    [--table-prefix <paimon-table-prefix>] \
-    [--table-suffix <paimon-table-suffix>] \
-    [--including-tables <mysql-table-name|name-regular-expr>] \
-    [--excluding-tables <mysql-table-name|name-regular-expr>] \
+    [--ignore_incompatible <true/false>] \
+    [--merge_shards <true/false>] \
+    [--table_prefix <paimon-table-prefix>] \
+    [--table_suffix <paimon-table-suffix>] \
+    [--including_tables <mysql-table-name|name-regular-expr>] \
+    [--excluding_tables <mysql-table-name|name-regular-expr>] \
     [--mode <sync-mode>] \
-    [--metadata-column <metadata-column>] \
-    [--type-mapping <option1,option2...>] \
-    [--mysql-conf <mysql-cdc-source-conf> [--mysql-conf <mysql-cdc-source-conf> ...]] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]] \
-    [--table-conf <paimon-table-sink-conf> [--table-conf <paimon-table-sink-conf> ...]]
+    [--metadata_column <metadata-column>] \
+    [--type_mapping <option1,option2...>] \
+    [--mysql_conf <mysql-cdc-source-conf> [--mysql_conf <mysql-cdc-source-conf> ...]] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]] \
+    [--table_conf <paimon-table-sink-conf> [--table_conf <paimon-table-sink-conf> ...]]
 ```
 
 {{< generated/mysql_sync_database >}}
@@ -153,18 +153,18 @@ Example 1: synchronize entire database
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-database \
+    mysql_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name=source_db \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4
 ```
 
 Example 2: synchronize newly added tables under database
@@ -175,19 +175,19 @@ under database `source_db`. The command to submit the job looks like:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-database \
+    mysql_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name=source_db \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4 \
-    --including-tables 'product|user|address'
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4 \
+    --including_tables 'product|user|address'
 ```
 
 At a later point we would like the job to also synchronize tables [order, custom], 
@@ -203,17 +203,17 @@ The command to recover from previous snapshot and add new tables to synchronize 
 <FLINK_HOME>/bin/flink run \
     --fromSavepoint savepointPath \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-database \
+    mysql_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name=source_db \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --including-tables 'product|user|address|order|custom'
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name=source_db \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --including_tables 'product|user|address|order|custom'
 ```
 
 {{< hint info >}}
@@ -228,26 +228,26 @@ synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... 
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    mysql-sync-database \
+    mysql_sync_database \
     --warehouse hdfs:///path/to/warehouse \
     --database test_db \
-    --mysql-conf hostname=127.0.0.1 \
-    --mysql-conf username=root \
-    --mysql-conf password=123456 \
-    --mysql-conf database-name='db.+' \
-    --catalog-conf metastore=hive \
-    --catalog-conf uri=thrift://hive-metastore:9083 \
-    --table-conf bucket=4 \
-    --table-conf changelog-producer=input \
-    --table-conf sink.parallelism=4 \
-    --including-tables 'tbl.+'
+    --mysql_conf hostname=127.0.0.1 \
+    --mysql_conf username=root \
+    --mysql_conf password=123456 \
+    --mysql_conf database-name='db.+' \
+    --catalog_conf metastore=hive \
+    --catalog_conf uri=thrift://hive-metastore:9083 \
+    --table_conf bucket=4 \
+    --table_conf changelog-producer=input \
+    --table_conf sink.parallelism=4 \
+    --including_tables 'tbl.+'
 ```
 
 By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 
 and merge tables of the same name into one table.
 
 {{< hint info >}}
-You can set `--merge-shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName' 
+You can set `--merge_shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName' 
 to avoid potential name conflict.
 {{< /hint >}}
 

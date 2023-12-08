@@ -126,7 +126,10 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
         public ChangelogResult getResult() {
             reusedResult.reset();
             KeyValue result = mergeFunction.getResult();
-            checkArgument(result != null);
+            if (result == null) {
+                return reusedResult;
+            }
+
             if (contains.test(result.key())) {
                 // empty
                 return reusedResult;

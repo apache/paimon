@@ -18,7 +18,9 @@
 
 package org.apache.paimon.data.columnar;
 
+import org.apache.paimon.data.InternalRow;
+
 /** Row column vector. */
 public interface RowColumnVector extends ColumnVector {
-    ColumnarRow getRow(int i);
+    InternalRow getRow(int i);
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.ReadonlyTable;
@@ -52,7 +53,7 @@ public class CatalogOptionsTable implements ReadonlyTable {
 
     public static final String CATALOG_OPTIONS = "catalog_options";
 
-    private final Map<String, String> catalogOptions;
+    private final Options catalogOptions;
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -60,7 +61,7 @@ public class CatalogOptionsTable implements ReadonlyTable {
                             new DataField(0, "key", newStringType(false)),
                             new DataField(1, "value", newStringType(false))));
 
-    public CatalogOptionsTable(Map<String, String> catalogOptions) {
+    public CatalogOptionsTable(Options catalogOptions) {
         this.catalogOptions = catalogOptions;
     }
 
@@ -118,8 +119,8 @@ public class CatalogOptionsTable implements ReadonlyTable {
 
         private final Map<String, String> catalogOptions;
 
-        private CatalogOptionsSplit(Map<String, String> catalogOptions) {
-            this.catalogOptions = catalogOptions;
+        private CatalogOptionsSplit(Options catalogOptions) {
+            this.catalogOptions = catalogOptions.toMap();
         }
 
         @Override

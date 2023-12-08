@@ -86,6 +86,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         builder.equal(0, 1),
                         null,
                         null,
+                        null,
                         null);
         Assertions.assertThat(partitionFilterSource.reportStatistics().getRowCount()).isEqualTo(5L);
         // TODO validate column statistics
@@ -105,6 +106,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         builder.equal(1, 50),
                         null,
                         null,
+                        null,
                         null);
         Assertions.assertThat(keyFilterSource.reportStatistics().getRowCount()).isEqualTo(2L);
         // TODO validate column statistics
@@ -122,6 +124,7 @@ public abstract class FileStoreTableStatisticsTestBase {
                         null,
                         null,
                         builder.greaterThan(2, 500L),
+                        null,
                         null,
                         null,
                         null);

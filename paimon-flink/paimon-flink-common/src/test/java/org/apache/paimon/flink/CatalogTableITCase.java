@@ -32,6 +32,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.table.catalog.exceptions.PartitionNotExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotPartitionedException;
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
@@ -455,6 +456,50 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testDropPartition() {
+        sql(
+                "CREATE TABLE PartitionTable (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO PartitionTable select 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO PartitionTable select 2,2,'b','2020-01-02','11'");
+        sql("INSERT INTO PartitionTable select 3,3,'c','2020-01-03','11'");
+        sql("INSERT INTO PartitionTable select 4,4,'d','2020-01-04','14'");
+        sql("INSERT INTO PartitionTable select 5,5,'e','2020-01-05','15'");
+
+        assertThatThrownBy(
+                        () ->
+                                sql(
+                                        "ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-10-10')"))
+                .getRootCause()
+                .isInstanceOf(PartitionNotExistException.class)
+                .hasMessage(
+                        "Partition CatalogPartitionSpec{{dt=2020-10-10}} of table default.PartitionTable in catalog PAIMON does not exist.");
+
+        List<Row> result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[dt=2020-01-01/hh=10], +I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+
+        // drop a partition
+        sql("ALTER TABLE PartitionTable DROP PARTITION (`dt` = '2020-01-01', `hh` = '10')");
+        result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString())
+                .isEqualTo(
+                        "[+I[dt=2020-01-02/hh=11], +I[dt=2020-01-03/hh=11], +I[dt=2020-01-04/hh=14], +I[dt=2020-01-05/hh=15]]");
+
+        // drop two partitions
+        sql("ALTER TABLE PartitionTable DROP PARTITION (dt ='2020-01-04'), PARTITION (hh='11')");
+        result = sql("SHOW PARTITIONS PartitionTable");
+        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-05/hh=15]]");
+    }
+
+    @Test
     public void testFileFormatPerLevel() {
         sql(
                 "CREATE TABLE T1 (a INT PRIMARY KEY NOT ENFORCED, b STRING) "
@@ -707,5 +752,47 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 UnsupportedOperationException.class,
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));
+    }
+
+    @Test
+    public void testAlterTableNonPhysicalColumn() {
+        sql(
+                "CREATE TABLE T (a INT,  c ROW < a INT, d INT> METADATA, b INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts)");
+        sql("ALTER TABLE T ADD e VARCHAR METADATA");
+        sql("ALTER TABLE T DROP c ");
+        sql("ALTER TABLE T RENAME e TO ee");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `b` INT,\n"
+                                + "  `ts` TIMESTAMP(3),\n"
+                                + "  `ee` VARCHAR(2147483647) METADATA,\n"
+                                + "  WATERMARK FOR `ts` AS `ts`\n"
+                                + ") ")
+                .doesNotContain("schema");
+    }
+
+    @Test
+    public void testReadOptimizedTable() {
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
+
+        // full compaction will always be performed at the end of batch jobs, as long as
+        // full-compaction.delta-commits is set, regardless of its value
+        sql(
+                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (1, 10), (2, 20)");
+        List<Row> result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
+
+        // no compaction, so result of ro table does not change
+        sql("INSERT INTO T VALUES (1, 11), (3, 30)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 10), Row.of(2, 20));
+
+        sql(
+                "INSERT INTO T /*+ OPTIONS('full-compaction.delta-commits' = '100') */ VALUES (2, 21), (3, 31)");
+        result = sql("SELECT k, v FROM T$ro ORDER BY k");
+        assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
     }
 }

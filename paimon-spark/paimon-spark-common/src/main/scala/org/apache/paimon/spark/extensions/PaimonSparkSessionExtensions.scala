@@ -17,12 +17,12 @@
  */
 package org.apache.paimon.spark.extensions
 
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
+import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
+import org.apache.paimon.spark.execution.PaimonStrategy
+
 import org.apache.spark.sql.SparkSessionExtensions
-import org.apache.spark.sql.catalyst.analysis.{CoerceArguments, PaimonAnalysis, ResolveProcedures}
-import org.apache.spark.sql.catalyst.optimizer.RewriteRowLeverCommands
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSparkSqlExtensionsParser
-import org.apache.spark.sql.catalyst.plans.logical.PaimonTableValuedFunctions
-import org.apache.spark.sql.execution.datasources.v2.ExtendedDataSourceV2Strategy
 
 /** Spark session extension to extends the syntax and adds the rules. */
 class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
@@ -33,11 +33,13 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
 
     // analyzer extensions
     extensions.injectResolutionRule(sparkSession => new PaimonAnalysis(sparkSession))
-    extensions.injectResolutionRule(spark => ResolveProcedures(spark))
-    extensions.injectResolutionRule(_ => CoerceArguments)
+    extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
 
-    // optimizer extensions
-    extensions.injectOptimizerRule(_ => RewriteRowLeverCommands)
+    extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
+
+    extensions.injectPostHocResolutionRule(_ => PaimonUpdateTable)
+    extensions.injectPostHocResolutionRule(_ => PaimonDeleteTable)
+    extensions.injectPostHocResolutionRule(spark => PaimonMergeInto(spark))
 
     // table function extensions
     PaimonTableValuedFunctions.supportedFnNames.foreach {
@@ -47,6 +49,6 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     }
 
     // planner extensions
-    extensions.injectPlannerStrategy(spark => ExtendedDataSourceV2Strategy(spark))
+    extensions.injectPlannerStrategy(spark => PaimonStrategy(spark))
   }
 }

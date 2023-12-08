@@ -30,6 +30,9 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.SEQUENCE_FIELD;
+import static org.apache.paimon.schema.SchemaValidation.validateTableSchema;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -37,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class TableSchemaTest {
 
     @Test
-    public void testInvalidPrimaryKeys() {
+    public void testCrossPartition() {
         List<DataField> fields =
                 Arrays.asList(
                         new DataField(0, "f0", DataTypes.INT()),
@@ -50,6 +53,16 @@ public class TableSchemaTest {
         TableSchema schema =
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
         assertThat(schema.crossPartitionUpdate()).isTrue();
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("You should use dynamic bucket");
+
+        options.put(BUCKET.key(), "-1");
+        validateTableSchema(schema);
+
+        options.put(SEQUENCE_FIELD.key(), "f2");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("You can not use sequence.field");
     }
 
     @Test

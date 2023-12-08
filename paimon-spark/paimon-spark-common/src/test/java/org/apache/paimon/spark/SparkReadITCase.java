@@ -312,6 +312,16 @@ public class SparkReadITCase extends SparkReadTestBase {
     }
 
     @Test
+    public void testShowTablesSorted() {
+        spark.sql("create table t3(id int, name string)");
+        spark.sql("create table t4(id int, name string)");
+        List<Row> tables = spark.sql("SHOW TABLES").collectAsList();
+        assertThat(tables.toString())
+                .isEqualTo(
+                        "[[default,t1,false], [default,t2,false], [default,t3,false], [default,t4,false]]");
+    }
+
+    @Test
     public void testCreateTableWithNullablePk() {
         spark.sql(
                 "CREATE TABLE PkTable (\n"
@@ -353,7 +363,6 @@ public class SparkReadITCase extends SparkReadTestBase {
                 .isEqualTo(
                         String.format(
                                 "[[%s"
-                                        + "USING paimon\n"
                                         + "PARTITIONED BY (b)\n"
                                         + "COMMENT 'tbl comment'\n"
                                         + "TBLPROPERTIES (\n"

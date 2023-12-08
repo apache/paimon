@@ -39,6 +39,10 @@ Option `'changelog-producer' = 'lookup' or 'full-compaction'`, and option `'full
 large impact on write performance, if it is a snapshot / full synchronization phase you can unset these options and
 then enable them again in the incremental phase.
 
+If you find that the input of the job shows a jagged pattern in the case of backpressure, it may be imbalanced work
+nodes. You can consider turning on [Asynchronous Compaction]({{< ref "#asynchronous-compaction" >}}) to observe if the
+throughput is increased.
+
 ## Parallelism
 
 It is recommended that the parallelism of sink should be less than or equal to the number of buckets, preferably equal. You can control the parallelism of the sink with the `sink.parallelism` table property.
@@ -79,6 +83,9 @@ sort-spill-threshold = 10
 
 This configuration will generate more files during peak write periods and gradually merge into optimal read
 performance during low write periods.
+
+In the case of `'changelog-producer' = 'lookup'`, by default, the lookup will be completed at checkpointing, which
+will block the checkpoint. If you want an asynchronous lookup, you can use `'changelog-producer.lookup-wait' = 'false'`.
 
 ### Number of Sorted Runs to Pause Writing
 

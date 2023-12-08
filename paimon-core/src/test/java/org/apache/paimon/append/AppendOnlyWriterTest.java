@@ -547,7 +547,8 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

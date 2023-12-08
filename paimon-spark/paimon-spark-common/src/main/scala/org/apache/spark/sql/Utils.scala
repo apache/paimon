@@ -17,6 +17,12 @@
  */
 package org.apache.spark.sql
 
+import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
+import org.apache.spark.sql.execution.datasources.DataSourceStrategy
+import org.apache.spark.sql.sources.Filter
+
 /**
  * Some classes or methods defined in the spark project are marked as private under
  * [[org.apache.spark.sql]] package, Hence, use this class to adapt then so that we can use them
@@ -40,4 +46,21 @@ object Utils {
     data.sqlContext.internalCreateDataFrame(data.queryExecution.toRdd, data.schema)
   }
 
+  def createDataset(sparkSession: SparkSession, logicalPlan: LogicalPlan): Dataset[Row] = {
+    Dataset.ofRows(sparkSession, logicalPlan)
+  }
+
+  def normalizeExprs(exprs: Seq[Expression], attributes: Seq[Attribute]): Seq[Expression] = {
+    DataSourceStrategy.normalizeExprs(exprs, attributes)
+  }
+
+  def translateFilter(
+      predicate: Expression,
+      supportNestedPredicatePushdown: Boolean): Option[Filter] = {
+    DataSourceStrategy.translateFilter(predicate, supportNestedPredicatePushdown)
+  }
+
+  def fieldReference(name: String): NamedReference = {
+    FieldReference.column(name)
+  }
 }

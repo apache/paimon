@@ -75,6 +75,7 @@ public class ConfigOptionsDocGenerator {
                 new OptionsClassLocation("paimon-common", "org.apache.paimon.options"),
                 new OptionsClassLocation("paimon-common", "org.apache.paimon"),
                 new OptionsClassLocation("paimon-core", "org.apache.paimon.lookup"),
+                new OptionsClassLocation("paimon-core", "org.apache.paimon.catalog"),
                 new OptionsClassLocation(
                         "paimon-flink/paimon-flink-common", "org.apache.paimon.flink"),
                 new OptionsClassLocation(

@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.ArrayType;
@@ -36,6 +37,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -222,6 +224,16 @@ public class DataFileMeta {
                 .toEpochMilli();
     }
 
+    public Optional<CoreOptions.FileFormatType> fileFormat() {
+        String[] split = fileName.split("\\.");
+        try {
+            return Optional.of(
+                    CoreOptions.FileFormatType.valueOf(split[split.length - 1].toUpperCase()));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+
     public DataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
         return new DataFileMeta(
@@ -238,6 +250,13 @@ public class DataFileMeta {
                 newLevel,
                 extraFiles,
                 creationTime);
+    }
+
+    public List<Path> collectFiles(DataFilePathFactory pathFactory) {
+        List<Path> paths = new ArrayList<>();
+        paths.add(pathFactory.toPath(fileName));
+        extraFiles.forEach(f -> paths.add(pathFactory.toPath(f)));
+        return paths;
     }
 
     public DataFileMeta copy(List<String> newExtraFiles) {

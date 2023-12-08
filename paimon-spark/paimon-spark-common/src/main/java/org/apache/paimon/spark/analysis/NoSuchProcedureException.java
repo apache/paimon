@@ -18,17 +18,12 @@
 
 package org.apache.paimon.spark.analysis;
 
-import org.apache.spark.SparkThrowableHelper;
 import org.apache.spark.sql.connector.catalog.Identifier;
-
-import java.util.Collections;
 
 /** Thrown by a catalog when a stored procedure cannot be found. */
 public class NoSuchProcedureException extends RuntimeException {
 
     public NoSuchProcedureException(Identifier identifier) {
-        super(
-                SparkThrowableHelper.getMessage(
-                        "Procedure " + identifier + " is not found", Collections.emptyMap()));
+        super("Procedure " + identifier + " is not found");
     }
 }

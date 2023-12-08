@@ -19,6 +19,7 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
@@ -39,6 +40,13 @@ public interface Predicate extends Serializable {
      * @return return true when hit, false when not hit.
      */
     boolean test(Object[] values);
+
+    /**
+     * Test based on the specific input row.
+     *
+     * @return return true when hit, false when not hit.
+     */
+    boolean test(InternalRow row);
 
     /**
      * Test based on the statistical information to determine whether a hit is possible.

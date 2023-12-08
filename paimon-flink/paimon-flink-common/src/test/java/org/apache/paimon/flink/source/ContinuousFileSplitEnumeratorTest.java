@@ -33,35 +33,35 @@ import org.apache.flink.api.connector.source.SplitEnumeratorContext;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
 import org.apache.flink.runtime.source.coordinator.ExecutorNotifier;
+import org.assertj.core.api.Assertions;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.TreeMap;
-import java.util.UUID;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext.SplitAssignmentState;
-import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Unit tests for the {@link ContinuousFileSplitEnumerator}. */
-public class ContinuousFileSplitEnumeratorTest {
+public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBase {
 
     @Test
     public void testSplitAllocationIsOrdered() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 4; i++) {
@@ -113,8 +113,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSplitWithBatch() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 18; i++) {
@@ -151,8 +150,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSplitAllocationIsFair() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(1);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(1);
 
         List<FileStoreSourceSplit> initialSplits = new ArrayList<>();
         for (int i = 1; i <= 2; i++) {
@@ -196,9 +194,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testSnapshotEnumerator() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -266,8 +262,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorWithBucket() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(3);
-        context.registerReader(0, "test-host");
+                getSplitEnumeratorContext(3, 1);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -309,11 +304,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorLot() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -372,11 +363,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testUnawareBucketEnumeratorAssignLater() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -432,9 +419,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testEnumeratorDeregisteredByContext() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -473,9 +458,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testRemoveReadersAwaitSuccessful() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         StreamTableScan scan = new MockScan(results);
@@ -506,9 +489,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testTriggerScanByTaskRequest() throws Exception {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(2);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
+                getSplitEnumeratorContext(2);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -549,11 +530,7 @@ public class ContinuousFileSplitEnumeratorTest {
     @Test
     public void testNoTriggerWhenReadLatest() {
         final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
-                new TestingSplitEnumeratorContext<>(4);
-        context.registerReader(0, "test-host");
-        context.registerReader(1, "test-host");
-        context.registerReader(2, "test-host");
-        context.registerReader(3, "test-host");
+                getSplitEnumeratorContext(4);
 
         TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
         MockScan scan = new MockScan(results);
@@ -706,6 +683,128 @@ public class ContinuousFileSplitEnumeratorTest {
         assertThat(toDataSplits(state.splits())).containsExactlyElementsOf(expectedResults.get(2L));
     }
 
+    @Test
+    public void testEnumeratorWithConsumer() throws Exception {
+        final TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context =
+                new TestingAsyncSplitEnumeratorContext<>(3);
+        for (int i = 0; i < 3; i++) {
+            context.registerReader(i, "test-host");
+        }
+
+        // prepare test data
+        TreeMap<Long, TableScan.Plan> dataSplits = new TreeMap<>();
+        for (int i = 1; i <= 2; i++) {
+            dataSplits.put(
+                    (long) i,
+                    new DataFilePlan(
+                            Arrays.asList(
+                                    createDataSplit(i, 0, Collections.emptyList()),
+                                    createDataSplit(i, 2, Collections.emptyList()))));
+        }
+        MockScan scan = new MockScan(dataSplits);
+
+        final ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .build();
+        enumerator.start();
+
+        long checkpointId = 1L;
+
+        // request for splits
+        for (int i = 0; i < 3; i++) {
+            enumerator.handleSplitRequest(i, "test-host");
+        }
+
+        // checkpoint is triggered for the first time and no snapshot is found
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isNull();
+
+        // find a new snapshot and trigger for the second checkpoint, but no snapshot is consumed
+        scanNextSnapshot(context);
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-0 has consumed the snapshot-1 and trigger for the next checkpoint
+        enumerator.handleSourceEvent(0, new ReaderConsumeProgressEvent(1L));
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-2 has consumed the snapshot-1 and trigger for the next checkpoint
+        enumerator.handleSourceEvent(2, new ReaderConsumeProgressEvent(1L));
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(1L);
+
+        // subtask-0 and subtask-2 request for the next splits but there are no new snapshot
+        enumerator.handleSplitRequest(0, "test-host");
+        enumerator.handleSplitRequest(2, "test-host");
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(2L);
+
+        // find next snapshot and trigger for the next checkpoint, subtask-0 and subtask-2 has been
+        // assigned new snapshot
+        scanNextSnapshot(context);
+        triggerCheckpointAndComplete(enumerator, checkpointId++);
+        assertThat(scan.getNextSnapshotIdForConsumer()).isEqualTo(2L);
+    }
+
+    @Test
+    public void testEnumeratorSplitMax() throws Exception {
+        final TestingSplitEnumeratorContext<FileStoreSourceSplit> context =
+                getSplitEnumeratorContext(2);
+
+        TreeMap<Long, TableScan.Plan> results = new TreeMap<>();
+        StreamTableScan scan = new MockScan(results);
+        ContinuousFileSplitEnumerator enumerator =
+                new Builder()
+                        .setSplitEnumeratorContext(context)
+                        .setInitialSplits(Collections.emptyList())
+                        .setDiscoveryInterval(1)
+                        .setScan(scan)
+                        .withBucketMode(BucketMode.UNAWARE)
+                        .build();
+        enumerator.start();
+
+        long snapshot = 0;
+        List<DataSplit> splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(1L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(2L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        splits = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            splits.add(createDataSplit(snapshot++, i, Collections.emptyList()));
+        }
+        results.put(3L, new DataFilePlan(splits));
+        context.triggerAllActions();
+
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
+    }
+
+    private void triggerCheckpointAndComplete(
+            ContinuousFileSplitEnumerator enumerator, long checkpointId) throws Exception {
+        enumerator.snapshotState(checkpointId);
+        enumerator.notifyCheckpointComplete(checkpointId);
+    }
+
+    private void scanNextSnapshot(
+            TestingAsyncSplitEnumeratorContext<FileStoreSourceSplit> context) {
+        context.workerExecutor.triggerPeriodicScheduledTasks();
+        context.triggerAlCoordinatorAction();
+    }
+
     private static PendingSplitsCheckpoint checkpointWithoutException(
             ContinuousFileSplitEnumerator enumerator, long checkpointId) {
         try {
@@ -720,20 +819,6 @@ public class ContinuousFileSplitEnumeratorTest {
                 .map(FileStoreSourceSplit::split)
                 .map(split -> (DataSplit) split)
                 .collect(Collectors.toList());
-    }
-
-    public static FileStoreSourceSplit createSnapshotSplit(
-            int snapshotId, int bucket, List<DataFileMeta> files) {
-        return new FileStoreSourceSplit(
-                UUID.randomUUID().toString(),
-                DataSplit.builder()
-                        .withSnapshot(snapshotId)
-                        .withPartition(row(1))
-                        .withBucket(bucket)
-                        .withDataFiles(files)
-                        .isStreaming(true)
-                        .build(),
-                0);
     }
 
     private static DataSplit createDataSplit(
@@ -783,7 +868,7 @@ public class ContinuousFileSplitEnumeratorTest {
 
         public ContinuousFileSplitEnumerator build() {
             return new ContinuousFileSplitEnumerator(
-                    context, initialSplits, null, discoveryInterval, scan, bucketMode);
+                    context, initialSplits, null, discoveryInterval, scan, bucketMode, 10);
         }
     }
 
@@ -792,10 +877,12 @@ public class ContinuousFileSplitEnumeratorTest {
         private final TreeMap<Long, Plan> results;
         private @Nullable Long nextSnapshotId;
         private boolean allowEnd = true;
+        private Long nextSnapshotIdForConsumer;
 
         public MockScan(TreeMap<Long, Plan> results) {
             this.results = results;
             this.nextSnapshotId = null;
+            this.nextSnapshotIdForConsumer = null;
         }
 
         @Override
@@ -823,7 +910,9 @@ public class ContinuousFileSplitEnumeratorTest {
         }
 
         @Override
-        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {}
+        public void notifyCheckpointComplete(@Nullable Long nextSnapshot) {
+            nextSnapshotIdForConsumer = nextSnapshot;
+        }
 
         @Nullable
         @Override
@@ -836,6 +925,10 @@ public class ContinuousFileSplitEnumeratorTest {
 
         public void allowEnd(boolean allowEnd) {
             this.allowEnd = allowEnd;
+        }
+
+        public Long getNextSnapshotIdForConsumer() {
+            return nextSnapshotIdForConsumer;
         }
     }
 

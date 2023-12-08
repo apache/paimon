@@ -192,7 +192,6 @@ Paimon supports that use Spark SQL to do the incremental query that implemented 
 To enable this needs these configs below:
 
 ```text
---conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
 --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
@@ -311,6 +310,20 @@ SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL
 
 {{< /tabs >}}
 
+Time travel's stream read rely on snapshots, but by default, snapshot only retains data within 1 hour, which can 
+prevent you from reading older incremental data. So, Paimon also provides another mode for streaming reads, 
+`scan.file-creation-time-millis`, which provides a rough filtering to retain files generated after `timeMillis`.
+
+{{< tabs "file-creation-time-millis" >}}
+
+{{< tab "Flink (dynamic option)" >}}
+```sql
+SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') */;
+```
+{{< /tab >}}
+
+{{< /tabs >}}
+
 ### Consumer ID
 
 You can specify the `consumer-id` when streaming read table:
@@ -332,6 +345,18 @@ NOTE: The consumer will prevent expiration of the snapshot. You can specify 'con
 lifetime of consumers.
 {{< /hint >}}
 
+By default, the consumer uses `exactly-once` mode to record consumption progress, which strictly ensures that what is 
+recorded in the consumer is the snapshot-id + 1 that all readers have exactly consumed. You can set `consumer.mode` to 
+`at-least-once` to allow readers consume snapshots at different rates and record the slowest snapshot-id among all 
+readers into the consumer. This mode can provide more capabilities, such as watermark alignment.
+
+{{< hint warning >}}
+1. When there is no watermark definition, the consumer in `at-least-once` mode cannot provide the ability to pass the 
+watermark in the snapshot to the downstream. 
+2. Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
+flink is incompatible and cannot be restored from the state when switching modes.
+{{< /hint >}}
+
 You can reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.
 
 {{< hint info >}}
@@ -351,12 +376,12 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --consumer-id <consumer-id> \
-    [--next-snapshot <next-snapshot-id>] \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    --consumer_id <consumer-id> \
+    [--next_snapshot <next-snapshot-id>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
-please don't specify --next-snapshot parameter if you want to delete the consumer.
+please don't specify --next_snapshot parameter if you want to delete the consumer.
 
 {{< /tab >}}
 

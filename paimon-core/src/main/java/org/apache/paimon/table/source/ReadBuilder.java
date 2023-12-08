@@ -27,6 +27,7 @@ import org.apache.paimon.types.RowType;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 
 /**
  * An interface for building the {@link TableScan} and {@link TableRead}.
@@ -95,6 +96,9 @@ public interface ReadBuilder extends Serializable {
      */
     ReadBuilder withFilter(Predicate predicate);
 
+    /** Push partition filter. */
+    ReadBuilder withPartitionFilter(Map<String, String> partitionSpec);
+
     /**
      * Apply projection to the reader.
      *
@@ -114,6 +118,9 @@ public interface ReadBuilder extends Serializable {
      * field of the 3rd field of the 1st field in the top-level row.
      */
     ReadBuilder withProjection(int[][] projection);
+
+    /** the row number pushed down. */
+    ReadBuilder withLimit(int limit);
 
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();

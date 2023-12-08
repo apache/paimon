@@ -18,12 +18,15 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.data.RowData;
+
+import java.util.Optional;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
@@ -56,7 +59,13 @@ public class CompactorSinkBuilder {
     }
 
     private DataStreamSink<?> buildForBucketAware() {
-        DataStream<RowData> partitioned = partition(input, new BucketsRowChannelComputer(), null);
+        Integer parallelism =
+                Optional.ofNullable(
+                                table.options().get(FlinkConnectorOptions.SINK_PARALLELISM.key()))
+                        .map(Integer::valueOf)
+                        .orElse(null);
+        DataStream<RowData> partitioned =
+                partition(input, new BucketsRowChannelComputer(), parallelism);
         return new CompactorSink(table).sinkFrom(partitioned);
     }
 }

@@ -22,9 +22,11 @@ import org.apache.paimon.utils.TimeUtils;
 
 import java.time.Duration;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.StructuredOptionsSplitter.escapeWithSingleQuote;
@@ -282,13 +284,34 @@ public class OptionsUtils {
 
     static Map<String, String> convertToPropertiesPrefixed(
             Map<String, String> confData, String key) {
-        final String prefixKey = key + ".";
+        return convertToPropertiesPrefixKey(confData, key + ".");
+    }
+
+    public static Map<String, String> convertToPropertiesPrefixKey(
+            Map<String, String> confData, final String prefixKey) {
         return confData.keySet().stream()
                 .filter(k -> k.startsWith(prefixKey))
                 .collect(
                         Collectors.toMap(
                                 k -> k.substring(prefixKey.length()),
                                 k -> convertToString(confData.get(k))));
+    }
+
+    public static Map<String, String> convertToPropertiesPrefixKey(
+            Iterable<Map.Entry<String, String>> confData,
+            final String prefixKey,
+            Predicate<String> valuePredicate) {
+        Map<String, String> properties = new HashMap<>();
+        confData.forEach(
+                entry -> {
+                    if (entry.getKey().startsWith(prefixKey)
+                            && valuePredicate.test(entry.getValue())) {
+                        properties.put(
+                                entry.getKey().substring(prefixKey.length()), entry.getValue());
+                    }
+                });
+
+        return properties;
     }
 
     static boolean containsPrefixMap(Map<String, String> confData, String key) {

@@ -300,15 +300,6 @@ public class Path implements Comparable<Path>, Serializable {
     }
 
     /**
-     * Return full path.
-     *
-     * @return full path
-     */
-    public String getPath() {
-        return uri.getPath();
-    }
-
-    /**
      * Returns the final component of this path, i.e., everything that follows the last separator.
      *
      * @return the final component of the path
