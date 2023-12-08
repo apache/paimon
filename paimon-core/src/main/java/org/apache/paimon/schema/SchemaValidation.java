@@ -79,8 +79,8 @@ public class SchemaValidation {
      * @param schema the schema to be validated
      */
     public static void validateTableSchema(TableSchema schema) {
-        validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys());
-        validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys());
+        validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
+        validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
 
         CoreOptions options = new CoreOptions(schema.options());
 
@@ -211,7 +211,7 @@ public class SchemaValidation {
     }
 
     private static void validateOnlyContainPrimitiveType(
-            List<DataField> fields, List<String> fieldNames) {
+            List<DataField> fields, List<String> fieldNames, String errorMessageIntro) {
         if (!fieldNames.isEmpty()) {
             Map<String, DataField> rowFields = new HashMap<>();
             for (DataField rowField : fields) {
@@ -224,8 +224,10 @@ public class SchemaValidation {
                         .anyMatch(c -> c.isInstance(dataType))) {
                     throw new UnsupportedOperationException(
                             String.format(
-                                    "The type %s in primary key or partition field %s is unsupported",
-                                    dataType.getClass().getSimpleName(), fieldName));
+                                    "The type %s in %s field %s is unsupported",
+                                    dataType.getClass().getSimpleName(),
+                                    errorMessageIntro,
+                                    fieldName));
                 }
             }
         }
