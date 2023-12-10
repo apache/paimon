@@ -170,6 +170,15 @@ public class SchemaValidation {
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
                                 field));
+
+        Optional<String> rowkindField = options.rowkindField();
+        rowkindField.ifPresent(
+                field ->
+                        checkArgument(
+                                schema.fieldNames().contains(field),
+                                "Nonexistent rowkind field: '%s'",
+                                field));
+
         sequenceField.ifPresent(
                 field ->
                         checkArgument(

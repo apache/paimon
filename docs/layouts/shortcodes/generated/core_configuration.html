@@ -420,6 +420,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Read batch size for orc and parquet.</td>
         </tr>
         <tr>
+            <td><h5>rowkind.field</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>The field that generates the row kind for primary key table, the row kind determines which data is '+I', '-U', '+U' or '-D'.</td>
+        </tr>
+        <tr>
             <td><h5>scan.bounded.watermark</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Long</td>

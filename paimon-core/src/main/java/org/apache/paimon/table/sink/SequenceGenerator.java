@@ -85,6 +85,7 @@ public class SequenceGenerator {
         generator = fieldType.accept(new SequenceGeneratorVisitor());
     }
 
+    @Nullable
     public static SequenceGenerator create(TableSchema schema, CoreOptions options) {
         List<SequenceAutoPadding> sequenceAutoPadding =
                 options.sequenceAutoPadding().stream()
