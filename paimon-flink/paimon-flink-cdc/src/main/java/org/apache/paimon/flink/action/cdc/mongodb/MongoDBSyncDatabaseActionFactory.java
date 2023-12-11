@@ -50,11 +50,11 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
                         optionalConfigMap(params, CATALOG_CONF),
                         optionalConfigMap(params, MONGODB_CONF));
 
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF))
-                .withTablePrefix(params.get(TABLE_PREFIX))
+        action.withTablePrefix(params.get(TABLE_PREFIX))
                 .withTableSuffix(params.get(TABLE_SUFFIX))
                 .includingTables(params.get(INCLUDING_TABLES))
-                .excludingTables(params.get(EXCLUDING_TABLES));
+                .excludingTables(params.get(EXCLUDING_TABLES))
+                .withTableConfig(optionalConfigMap(params, TABLE_CONF));
 
         return Optional.of(action);
     }

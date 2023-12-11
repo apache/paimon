@@ -33,8 +33,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /**
  * Utility class for MongoDB-related actions.
  *
@@ -87,7 +85,6 @@ public class MongoDBActionUtils {
 
     public static MongoDBSource<String> buildMongodbSource(
             Configuration mongodbConfig, String tableList) {
-        validateMongodbConfig(mongodbConfig);
         MongoDBSourceBuilder<String> sourceBuilder = MongoDBSource.builder();
 
         if (mongodbConfig.contains(MongoDBSourceOptions.USERNAME)
@@ -139,18 +136,5 @@ public class MongoDBActionUtils {
                 new JsonDebeziumDeserializationSchema(false, customConverterConfigs);
 
         return sourceBuilder.deserializer(schema).build();
-    }
-
-    private static void validateMongodbConfig(Configuration mongodbConfig) {
-        checkArgument(
-                mongodbConfig.get(MongoDBSourceOptions.HOSTS) != null,
-                String.format(
-                        "mongodb-conf [%s] must be specified.", MongoDBSourceOptions.HOSTS.key()));
-
-        checkArgument(
-                mongodbConfig.get(MongoDBSourceOptions.DATABASE) != null,
-                String.format(
-                        "mongodb-conf [%s] must be specified.",
-                        MongoDBSourceOptions.DATABASE.key()));
     }
 }

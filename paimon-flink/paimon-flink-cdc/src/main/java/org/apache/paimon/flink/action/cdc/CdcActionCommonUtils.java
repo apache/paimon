@@ -26,6 +26,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 
+import org.apache.flink.configuration.ConfigOption;
+import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -282,5 +284,16 @@ public class CdcActionCommonUtils {
                         .collect(Collectors.joining("|"));
         excludingPattern = "?!" + excludingPattern;
         return String.format("(%s)(%s)", excludingPattern, includingPattern);
+    }
+
+    public static void checkRequiredOptions(
+            Configuration config, String confName, ConfigOption<?>... configOptions) {
+        for (ConfigOption<?> configOption : configOptions) {
+            checkArgument(
+                    config.contains(configOption),
+                    "%s [%s] must be specified.",
+                    confName,
+                    configOption.key());
+        }
     }
 }

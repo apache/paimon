@@ -252,7 +252,7 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "kafka-conf [topic] must be specified."));
+                                "kafka_conf [topic] must be specified."));
     }
 
     @Test

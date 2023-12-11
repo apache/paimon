@@ -106,14 +106,6 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     public MySqlRecordParser(
             Configuration mySqlConfig,
             boolean caseSensitive,
-            TypeMapping typeMapping,
-            CdcMetadataConverter[] metadataConverters) {
-        this(mySqlConfig, caseSensitive, Collections.emptyList(), typeMapping, metadataConverters);
-    }
-
-    public MySqlRecordParser(
-            Configuration mySqlConfig,
-            boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
             CdcMetadataConverter[] metadataConverters) {

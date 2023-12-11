@@ -21,15 +21,14 @@ package org.apache.paimon.flink.action.cdc.mysql;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
 import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
 
+import com.ververica.cdc.connectors.mysql.source.MySqlSource;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
-import org.apache.flink.api.common.functions.FlatMapFunction;
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -82,21 +81,18 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> mySqlConfig) {
-        super(warehouse, database, table, catalogConfig, mySqlConfig);
-        MySqlActionUtils.registerJdbcDriver();
+        super(
+                warehouse,
+                database,
+                table,
+                catalogConfig,
+                mySqlConfig,
+                SyncJobHandler.SourceType.MYSQL);
     }
 
     @Override
     protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
         return Optional.of(MySqlMetadataProcessor.converter(column));
-    }
-
-    @Override
-    protected void checkCdcSourceArgument() {
-        checkArgument(
-                cdcSourceConfig.contains(MySqlSourceOptions.TABLE_NAME),
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.TABLE_NAME.key()));
     }
 
     @Override
@@ -107,36 +103,19 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                         monitorTablePredication(),
                         new ArrayList<>(),
                         typeMapping,
-                        catalog.caseSensitive());
+                        caseSensitive);
         validateMySqlTableInfos(mySqlSchemasInfo);
         MySqlTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
         return tableInfo.schema();
     }
 
     @Override
-    protected DataStreamSource<String> buildSource() throws Exception {
+    protected MySqlSource<String> buildSource() {
         String tableList =
                 mySqlSchemasInfo.pkTables().stream()
                         .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
                         .collect(Collectors.joining("|"));
-        return buildDataStreamSource(MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList));
-    }
-
-    @Override
-    protected String sourceName() {
-        return "MySQL Source";
-    }
-
-    @Override
-    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
-        boolean caseSensitive = catalog.caseSensitive();
-        return new MySqlRecordParser(
-                cdcSourceConfig, caseSensitive, computedColumns, typeMapping, metadataConverters);
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("MySQL-Paimon Table Sync: %s.%s", database, table);
+        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList);
     }
 
     private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {

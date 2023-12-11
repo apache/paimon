@@ -19,11 +19,7 @@
 package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.schema.Schema;
-
-import org.apache.flink.api.common.functions.FlatMapFunction;
 
 import java.util.Map;
 
@@ -60,15 +56,16 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
             String database,
             String table,
             Map<String, String> catalogConfig,
-            Map<String, String> mqConfig) {
-        super(warehouse, database, table, catalogConfig, mqConfig);
+            Map<String, String> mqConfig,
+            SyncJobHandler.SourceType sourceType) {
+        super(warehouse, database, table, catalogConfig, mqConfig, sourceType);
     }
 
     @Override
     protected Schema retrieveSchema() throws Exception {
-        String topic = topic();
-        try (MessageQueueSchemaUtils.ConsumerWrapper consumer = consumer(topic)) {
-            return MessageQueueSchemaUtils.getSchema(consumer, topic, getDataFormat(), typeMapping);
+        try (MessageQueueSchemaUtils.ConsumerWrapper consumer = syncJobHandler.provideConsumer()) {
+            return MessageQueueSchemaUtils.getSchema(
+                    consumer, syncJobHandler.provideDataFormat(), typeMapping);
         }
     }
 
@@ -83,17 +80,4 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
                 metadataConverters,
                 false);
     }
-
-    @Override
-    protected FlatMapFunction<String, RichCdcMultiplexRecord> recordParse() {
-        boolean caseSensitive = catalog.caseSensitive();
-        DataFormat format = getDataFormat();
-        return format.createParser(caseSensitive, typeMapping, computedColumns);
-    }
-
-    protected abstract String topic();
-
-    protected abstract MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic);
-
-    protected abstract DataFormat getDataFormat();
 }

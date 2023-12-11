@@ -18,12 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
-import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
 import java.util.Map;
 
@@ -36,36 +32,12 @@ public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> kafkaConfig) {
-        super(warehouse, database, table, catalogConfig, kafkaConfig);
-    }
-
-    @Override
-    protected DataStreamSource<String> buildSource() {
-        return buildDataStreamSource(KafkaActionUtils.buildKafkaSource(cdcSourceConfig));
-    }
-
-    @Override
-    protected String topic() {
-        return cdcSourceConfig.get(KafkaConnectorOptions.TOPIC).get(0);
-    }
-
-    @Override
-    protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
-        return KafkaActionUtils.getKafkaEarliestConsumer(cdcSourceConfig, topic);
-    }
-
-    @Override
-    protected DataFormat getDataFormat() {
-        return KafkaActionUtils.getDataFormat(cdcSourceConfig);
-    }
-
-    @Override
-    protected String sourceName() {
-        return "Kafka Source";
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("Kafka-Paimon Table Sync: %s.%s", database, table);
+        super(
+                warehouse,
+                database,
+                table,
+                catalogConfig,
+                kafkaConfig,
+                SyncJobHandler.SourceType.KAFKA);
     }
 }
