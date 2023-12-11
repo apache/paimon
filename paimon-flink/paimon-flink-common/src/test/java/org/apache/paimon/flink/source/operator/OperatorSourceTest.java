@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -32,6 +33,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import org.apache.flink.streaming.api.operators.StreamSource;
@@ -175,6 +177,34 @@ public class OperatorSourceTest {
                 .containsExactlyInAnyOrder(
                         new StreamRecord<>(GenericRowData.of(1, 1, 1)),
                         new StreamRecord<>(GenericRowData.of(2, 2, 2)));
+    }
+
+    @Test
+    public void testReadOperatorMetricsRegisterAndUpdate() throws Exception {
+        ReadOperator readOperator = new ReadOperator(table.newReadBuilder());
+        OneInputStreamOperatorTestHarness<Split, RowData> harness =
+                new OneInputStreamOperatorTestHarness<>(readOperator);
+        harness.setup(
+                InternalSerializers.create(
+                        RowType.of(new IntType(), new IntType(), new IntType())));
+        writeToTable(1, 1, 1);
+        writeToTable(2, 2, 2);
+        List<Split> splits = table.newReadBuilder().newScan().plan().splits();
+        assertThat(splits.size()).isGreaterThan(0);
+        MetricGroup readerOperatorMetricGroup = readOperator.getMetricGroup();
+        harness.open();
+        assertThat(
+                        MetricUtils.getGauge(readerOperatorMetricGroup, "currentFetchEventTimeLag")
+                                .getValue())
+                .isEqualTo(-1L);
+        harness.processElement(new StreamRecord<>(splits.get(0)));
+        assertThat(
+                        (Long)
+                                MetricUtils.getGauge(
+                                                readerOperatorMetricGroup,
+                                                "currentFetchEventTimeLag")
+                                        .getValue())
+                .isGreaterThan(0);
     }
 
     private <T> T testReadSplit(
