@@ -36,13 +36,8 @@ Paimon currently supports Presto 0.236 and above.
 
 {{< stable >}}
 
-Download the jar file with corresponding version.
-
-| Version         | Jar                                                                                                                                                                                               |
-|-----------------|---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| [0.236, 0.268)  | [paimon-presto-0.236-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.236/{{< version >}}/paimon-presto-0.236-{{< version >}}-plugin.tar.gz) |
-| [0.268, 0.273)  | [paimon-presto-0.268-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.268/{{< version >}}/paimon-presto-0.268-{{< version >}}-plugin.tar.gz) |
-| [0.273, latest] | [paimon-presto-0.273-{{< version >}}-plugin.tar.gz](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-presto-0.273/{{< version >}}/paimon-presto-0.273-{{< version >}}-plugin.tar.gz) |
+Download from master:
+https://paimon.apache.org/docs/master/project/download/
 
 {{< /stable >}}
 
