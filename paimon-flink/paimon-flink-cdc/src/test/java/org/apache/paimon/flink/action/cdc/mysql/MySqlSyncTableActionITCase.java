@@ -26,14 +26,18 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -959,5 +963,39 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     private FileStoreTable getFileStoreTable() throws Exception {
         return getFileStoreTable(tableName);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDefaultCheckpointInterval() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "default_checkpoint");
+        mySqlConfig.put("table-name", "t");
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.setRestartStrategy(RestartStrategies.noRestart());
+
+        MySqlSyncTableAction action = syncTableActionBuilder(mySqlConfig).build();
+        action.withStreamExecutionEnvironment(env);
+
+        Thread thread =
+                new Thread(
+                        () -> {
+                            try {
+                                action.run();
+                            } catch (Exception ignore) {
+                            }
+                        });
+        thread.start();
+
+        CommonTestUtils.waitUtil(
+                () -> env.getCheckpointConfig().isCheckpointingEnabled(),
+                Duration.ofSeconds(5),
+                Duration.ofMillis(100));
+
+        assertThat(env.getCheckpointInterval()).isEqualTo(3 * 60 * 1000);
+
+        thread.interrupt();
+        env.close();
     }
 }
