@@ -53,7 +53,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for MySQL Action. */
 public class MySqlActionUtils {
@@ -133,7 +132,6 @@ public class MySqlActionUtils {
 
     public static MySqlSource<String> buildMySqlSource(
             Configuration mySqlConfig, String tableList) {
-        validateMySqlConfig(mySqlConfig);
         MySqlSourceBuilder<String> sourceBuilder = MySqlSource.builder();
 
         sourceBuilder
@@ -240,28 +238,5 @@ public class MySqlActionUtils {
                         "No suitable driver found. Cannot find class com.mysql.cj.jdbc.Driver and com.mysql.jdbc.Driver.");
             }
         }
-    }
-
-    private static void validateMySqlConfig(Configuration mySqlConfig) {
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.HOSTNAME) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.HOSTNAME.key()));
-
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.USERNAME) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.USERNAME.key()));
-
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.PASSWORD) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.", MySqlSourceOptions.PASSWORD.key()));
-
-        checkArgument(
-                mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME) != null,
-                String.format(
-                        "mysql-conf [%s] must be specified.",
-                        MySqlSourceOptions.DATABASE_NAME.key()));
     }
 }
