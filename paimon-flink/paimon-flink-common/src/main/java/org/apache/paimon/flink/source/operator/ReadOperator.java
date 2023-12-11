@@ -21,6 +21,8 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
@@ -48,6 +50,8 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     private transient FlinkRowData reuseRow;
     private transient IOManager ioManager;
 
+    private transient FileStoreSourceReaderMetrics sourceReaderMetrics;
+
     public ReadOperator(ReadBuilder readBuilder) {
         this.readBuilder = readBuilder;
     }
@@ -55,6 +59,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     @Override
     public void open() throws Exception {
         super.open();
+        this.sourceReaderMetrics = new FileStoreSourceReaderMetrics(getMetricGroup());
         this.ioManager =
                 IOManager.create(
                         getContainingTask()
@@ -68,8 +73,15 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
 
     @Override
     public void processElement(StreamRecord<Split> record) throws Exception {
+        Split split = record.getValue();
+        // update metric when reading a new split
+        long eventTime =
+                ((DataSplit) split)
+                        .getLatestFileCreationEpochMillis()
+                        .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
+        sourceReaderMetrics.recordSnapshotUpdate(eventTime);
         try (CloseableIterator<InternalRow> iterator =
-                read.createReader(record.getValue()).toCloseableIterator()) {
+                read.createReader(split).toCloseableIterator()) {
             while (iterator.hasNext()) {
                 reuseRow.replace(iterator.next());
                 output.collect(reuseRecord);
