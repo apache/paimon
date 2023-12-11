@@ -357,4 +357,15 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(tEnv.explainSql(joinSql)).contains("DynamicFilteringDataCollector");
         assertThat(sql(joinSql).toString()).isEqualTo(expected2);
     }
+
+    @Test
+    public void testRowKindField() {
+        sql(
+                "CREATE TABLE R_T (pk INT PRIMARY KEY NOT ENFORCED, v INT, rf STRING) "
+                        + "WITH ('rowkind.field'='rf')");
+        sql("INSERT INTO R_T VALUES (1, 1, '+I')");
+        assertThat(sql("SELECT * FROM R_T")).containsExactly(Row.of(1, 1, "+I"));
+        sql("INSERT INTO R_T VALUES (1, 2, '-D')");
+        assertThat(sql("SELECT * FROM R_T")).isEmpty();
+    }
 }
