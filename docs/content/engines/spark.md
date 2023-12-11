@@ -235,6 +235,58 @@ Warning: we do not support updating primary keys.
 UPDATE my_table SET v = 'new_value' WHERE id = 1;
 ```
 
+## Merge Into Table
+
+Paimon currently supports Merge Into syntax in Spark 3+, which allow a set of updates, insertions and deletions based on a source table in a single commit.
+
+{{< hint into >}}
+1. This only work with primary-key table.
+2. In update clause, to update primary key columns is not supported.
+3. `WHEN NOT MATCHED BY SOURCE` syntax is not supported.
+{{< /hint >}}
+
+**Example: One**
+
+This is a simple demo that, if a row exists in the target table update it, else insert it.
+
+```sql
+
+-- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
+
+MERGE INTO target
+USING source
+ON target.a = source.a
+WHEN MATCHED THEN
+UPDATE SET *
+WHEN NOT MATCHED
+THEN INSERT *
+
+```
+
+**Example: Two**
+
+This is a demo with multiple, conditional clauses.
+
+```sql
+
+-- Here both source and target tables have the same schema: (a INT, b INT, c STRING), and a is a primary key.
+
+MERGE INTO target
+USING source
+ON target.a = source.a
+WHEN MATCHED AND target.a = 5 THEN
+   UPDATE SET b = source.b + target.b      -- when matched and meet the condition 1, then update b;
+WHEN MATCHED AND source.c > 'c2' THEN
+   UPDATE SET *    -- when matched and meet the condition 2, then update all the columns;
+WHEN MATCHED THEN
+   DELETE      -- when matched, delete this row in target table;
+WHEN NOT MATCHED AND c > 'c9' THEN
+   INSERT (a, b, c) VALUES (a, b * 1.1, c)      -- when not matched but meet the condition 3, then transform and insert this row;
+WHEN NOT MATCHED THEN
+INSERT *      -- when not matched, insert this row without any transformation;
+
+```
+
 ## Streaming Write
 
 {{< hint info >}}
