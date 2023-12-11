@@ -15,8 +15,9 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.paimon.spark.sql
 
+import org.apache.paimon.spark.{PaimonSparkTestBase, SparkInputPartition, SparkTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
