@@ -504,6 +504,10 @@ This section introduce all available spark procedures about paimon.
     </tbody>
 </table>
 
+{{< hint info >}}
+`CALL sys.compact` without sort is not recommended, it will cause the entire table to be rewritten in 0.6.
+{{< /hint >}}
+
 ## Spark Type Conversion
 
 This section lists all supported type conversion between Spark and Paimon.
