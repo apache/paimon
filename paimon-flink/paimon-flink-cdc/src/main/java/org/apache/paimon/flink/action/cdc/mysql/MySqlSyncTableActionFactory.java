@@ -29,7 +29,7 @@ import java.util.ArrayList;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMNS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
@@ -73,8 +73,8 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                     new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
 
-        if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(new ArrayList<>(params.getMultiParameter(METADATA_COLUMN)));
+        if (params.has(METADATA_COLUMNS)) {
+            action.withMetadataColumns(params.get(METADATA_COLUMNS).split(","));
         }
 
         if (params.has(TYPE_MAPPING)) {
@@ -100,7 +100,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
                         + "[--primary_keys <primary_keys>] "
                         + "[--type_mapping <option1,option2...>] "
                         + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
-                        + "[--metadata_column <metadata_column>] "
+                        + "[--metadata_columns <metadata_columns>] "
                         + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] "
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
@@ -126,7 +126,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--metadata_column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
+                "--metadata_columns is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("MySQL CDC source conf syntax:");

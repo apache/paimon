@@ -120,6 +120,10 @@ public abstract class SyncTableActionBase extends ActionBase {
         return this;
     }
 
+    public SyncTableActionBase withMetadataColumns(String... metadataColumns) {
+        return withMetadataColumns(Arrays.asList(metadataColumns));
+    }
+
     public SyncTableActionBase withMetadataColumns(List<String> metadataColumns) {
         this.metadataConverters =
                 metadataColumns.stream()

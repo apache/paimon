@@ -29,7 +29,7 @@ import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMNS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
@@ -69,8 +69,9 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
-        if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
+
+        if (params.has(METADATA_COLUMNS)) {
+            action.withMetadataColumns(params.get(METADATA_COLUMNS).split(","));
         }
 
         if (params.has(TYPE_MAPPING)) {
@@ -101,7 +102,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                         + "[--including_tables <mysql_table_name|name_regular_expr>] "
                         + "[--excluding_tables <mysql_table_name|name_regular_expr>] "
                         + "[--mode <sync_mode>] "
-                        + "[--metadata_column <metadata_column>] "
+                        + "[--metadata_columns <metadata_columns>] "
                         + "[--type_mapping <option1,option2...>] "
                         + "[--mysql_conf <mysql_cdc_source_conf> [--mysql_conf <mysql_cdc_source_conf> ...]] "
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
@@ -147,7 +148,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println();
 
         System.out.println(
-                "--metadata_column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
+                "--metadata_columns is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
         System.out.println(
