@@ -241,6 +241,15 @@ public class KafkaActionUtils {
     public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
             Configuration kafkaConfig) {
         Properties props = new Properties();
+
+        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key.startsWith(PROPERTIES_PREFIX)) {
+                props.put(key.substring(PROPERTIES_PREFIX.length()), value);
+            }
+        }
+
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS));
