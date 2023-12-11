@@ -212,9 +212,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertThatThrownBy(action::run)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "table-name cannot be set for mysql-sync-database. "
+                        "table-name cannot be set for mysql_sync_database. "
                                 + "If you want to sync several MySQL tables into one Paimon table, "
-                                + "use mysql-sync-table instead.");
+                                + "use mysql_sync_table instead.");
     }
 
     @Test

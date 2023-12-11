@@ -215,7 +215,7 @@ public class KafkaOggSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "kafka-conf [topic] must be specified."));
+                                "kafka_conf [topic] must be specified."));
     }
 
     @Test
