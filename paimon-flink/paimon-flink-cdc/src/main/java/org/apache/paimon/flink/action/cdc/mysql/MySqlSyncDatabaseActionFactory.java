@@ -24,7 +24,6 @@ import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
-import java.util.Arrays;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
