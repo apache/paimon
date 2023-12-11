@@ -128,7 +128,7 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
             args.addAll(listToArgs("--type-mapping", typeMappingModes));
 
             args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
-            args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
+            args.addAll(listToArgs("--metadata-column", metadataColumns));
 
             return createAction(MySqlSyncTableAction.class, args);
         }
