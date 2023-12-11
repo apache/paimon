@@ -458,3 +458,10 @@ of sequence number will be made up to microsecond by system.
 
 3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
 pad the row kind flag.
+
+## Row Kind Field
+
+By default, the primary key table determines the row kind according to the input row. You can also define the 
+`'rowkind.field'` to use a field to extract row kind.
+
+The valid row kind string should be `'+I'`, `'-U'`, `'+U'` or `'-D'`.

@@ -427,6 +427,15 @@ public class CoreOptions implements Serializable {
                             "The field that generates the sequence number for primary key table,"
                                     + " the sequence number determines which data is the most recent.");
 
+    @Immutable
+    public static final ConfigOption<String> ROWKIND_FIELD =
+            key("rowkind.field")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The field that generates the row kind for primary key table,"
+                                    + " the row kind determines which data is '+I', '-U', '+U' or '-D'.");
+
     public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
             key("sequence.auto-padding")
                     .stringType()
@@ -1309,6 +1318,10 @@ public class CoreOptions implements Serializable {
 
     public Optional<String> sequenceField() {
         return options.getOptional(SEQUENCE_FIELD);
+    }
+
+    public Optional<String> rowkindField() {
+        return options.getOptional(ROWKIND_FIELD);
     }
 
     public List<String> sequenceAutoPadding() {

@@ -128,4 +128,25 @@ public enum RowKind {
                         "Unsupported byte value '" + value + "' for row kind.");
         }
     }
+
+    /**
+     * Creates a {@link RowKind} from the given short string.
+     *
+     * @see #shortString() for mapping of string and {@link RowKind}.
+     */
+    public static RowKind fromShortString(String value) {
+        switch (value.toUpperCase()) {
+            case "+I":
+                return INSERT;
+            case "-U":
+                return UPDATE_BEFORE;
+            case "+U":
+                return UPDATE_AFTER;
+            case "-D":
+                return DELETE;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unsupported short string '" + value + "' for row kind.");
+        }
+    }
 }
