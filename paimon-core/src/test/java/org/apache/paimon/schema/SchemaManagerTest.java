@@ -244,6 +244,27 @@ public class SchemaManagerTest {
     }
 
     @Test
+    public void testPartitionType() {
+        final RowType mapPrimaryKeyType =
+                RowType.of(
+                        new MapType(new IntType(), new BigIntType()),
+                        new BigIntType(),
+                        new VarCharType());
+        final Schema mapPartitionSchema =
+                new Schema(
+                        mapPrimaryKeyType.getFields(),
+                        partitionKeys,
+                        Collections.emptyList(),
+                        options,
+                        "");
+        assertThatThrownBy(() -> manager.createTable(mapPartitionSchema))
+                .isInstanceOf(UnsupportedOperationException.class)
+                .hasMessage(
+                        "The type %s in partition field %s is unsupported",
+                        MapType.class.getSimpleName(), "f0");
+    }
+
+    @Test
     public void testChangelogTableWithFullCompaction() throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put("key", "value");
