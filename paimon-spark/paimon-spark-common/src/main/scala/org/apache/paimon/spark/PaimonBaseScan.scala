@@ -50,17 +50,10 @@ abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: Stri
   }
 
   override def estimateStatistics(): Statistics = {
-    val rowCount = getSplits.map(_.rowCount).sum
-    val scannedTotalSize = rowCount * readSchema().defaultSize
-
-    new Statistics {
-      override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
-
-      override def numRows(): OptionalLong = OptionalLong.of(rowCount)
-    }
+    PaimonStatistics(this)
   }
 
-  private def getSplits: Array[Split] = {
+  def getSplits: Array[Split] = {
     if (splits == null) {
       splits = readBuilder.newScan().plan().splits().asScala.toArray
     }
