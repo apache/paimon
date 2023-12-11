@@ -148,9 +148,11 @@ public class FlinkCatalog extends AbstractCatalog {
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);
         this.logStoreAutoRegisterTimeout = options.get(REGISTER_TIMEOUT);
         this.disableCreateTableInDefaultDatabase = options.get(DISABLE_CREATE_TABLE_IN_DEFAULT_DB);
-        try {
-            this.catalog.createDatabase(defaultDatabase, true);
-        } catch (Catalog.DatabaseAlreadyExistException ignore) {
+        if (!catalog.databaseExists(defaultDatabase)) {
+            try {
+                catalog.createDatabase(defaultDatabase, true);
+            } catch (Catalog.DatabaseAlreadyExistException ignore) {
+            }
         }
     }
 
