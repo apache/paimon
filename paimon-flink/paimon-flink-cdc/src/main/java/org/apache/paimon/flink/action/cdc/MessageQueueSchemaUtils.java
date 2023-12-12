@@ -66,7 +66,10 @@ public class MessageQueueSchemaUtils {
             if (retry >= MAX_RETRY) {
                 throw new SchemaRetrievalException(
                         String.format(
-                                "Could not get metadata from server, topic: %s", consumer.topic()));
+                                "Could not get metadata from server, topic: %s. If this topic is not empty, "
+                                        + "please check the configuration of synchronization job. "
+                                        + "Otherwise, you should create the Paimon table first.",
+                                consumer.topic()));
             }
 
             sleepSafely(retryInterval);
