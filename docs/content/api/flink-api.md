@@ -73,6 +73,8 @@ public class WriteToTable {
     public static void writeTo() {
         // create environments of both APIs
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
+        // env.enableCheckpointing(60_000);
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 
         // create a changelog DataStream
@@ -173,6 +175,8 @@ public class WriteCdcToTable {
 
     public static void writeTo() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
+        // env.enableCheckpointing(60_000);
 
         DataStream<RichCdcRecord> dataStream =
                 env.fromElements(
