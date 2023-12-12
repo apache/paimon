@@ -19,20 +19,25 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFileMetaSerializer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.runtime.state.StateSnapshotContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.data.RowData;
 
 import java.io.IOException;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 
@@ -52,6 +57,7 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
     private transient StoreSinkWriteState state;
     private transient StoreSinkWrite write;
     private transient DataFileMetaSerializer dataFileMetaSerializer;
+    private transient Set<Pair<BinaryRow, Integer>> waitToCompact;
 
     public StoreCompactOperator(
             FileStoreTable table,
@@ -77,30 +83,39 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
-        state =
-                new StoreSinkWriteState(
-                        context,
-                        (tableName, partition, bucket) ->
-                                ChannelComputer.select(
-                                                partition,
-                                                bucket,
-                                                getRuntimeContext().getNumberOfParallelSubtasks())
-                                        == getRuntimeContext().getIndexOfThisSubtask());
+        initStateAndWriter(
+                context,
+                (tableName, partition, bucket) ->
+                        ChannelComputer.select(
+                                        partition,
+                                        bucket,
+                                        getRuntimeContext().getNumberOfParallelSubtasks())
+                                == getRuntimeContext().getIndexOfThisSubtask(),
+                getContainingTask().getEnvironment().getIOManager(),
+                commitUser);
+    }
+
+    @VisibleForTesting
+    void initStateAndWriter(
+            StateInitializationContext context,
+            StoreSinkWriteState.StateValueFilter stateFilter,
+            IOManager ioManager,
+            String commitUser)
+            throws Exception {
+        // We put state and write init in this method for convenient testing. Without construct a
+        // runtime context, we can test to construct a writer here
+        state = new StoreSinkWriteState(context, stateFilter);
 
         write =
                 storeSinkWriteProvider.provide(
-                        table,
-                        commitUser,
-                        state,
-                        getContainingTask().getEnvironment().getIOManager(),
-                        memoryPool,
-                        getMetricGroup());
+                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
     }
 
     @Override
     public void open() throws Exception {
         super.open();
         dataFileMetaSerializer = new DataFileMetaSerializer();
+        waitToCompact = new LinkedHashSet<>();
     }
 
     @Override
@@ -115,19 +130,31 @@ public class StoreCompactOperator extends PrepareCommitOperator<RowData, Committ
 
         if (write.streamingMode()) {
             write.notifyNewFiles(snapshotId, partition, bucket, files);
-            write.compact(partition, bucket, false);
         } else {
             Preconditions.checkArgument(
                     files.isEmpty(),
                     "Batch compact job does not concern what files are compacted. "
                             + "They only need to know what buckets are compacted.");
-            write.compact(partition, bucket, true);
         }
+
+        waitToCompact.add(Pair.of(partition, bucket));
     }
 
     @Override
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
+
+        try {
+            for (Pair<BinaryRow, Integer> partitionBucket : waitToCompact) {
+                write.compact(
+                        partitionBucket.getKey(),
+                        partitionBucket.getRight(),
+                        !write.streamingMode());
+            }
+        } catch (Exception e) {
+            throw new RuntimeException("Exception happens while executing compaction.", e);
+        }
+        waitToCompact.clear();
         return write.prepareCommit(waitCompaction, checkpointId);
     }
 
