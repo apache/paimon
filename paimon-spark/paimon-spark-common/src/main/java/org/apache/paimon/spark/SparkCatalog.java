@@ -74,9 +74,11 @@ public class SparkCatalog extends SparkBaseCatalog {
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
-        try {
-            createNamespace(defaultNamespace(), new HashMap<>());
-        } catch (NamespaceAlreadyExistsException ignored) {
+        if (!catalog.databaseExists(defaultNamespace()[0])) {
+            try {
+                createNamespace(defaultNamespace(), new HashMap<>());
+            } catch (NamespaceAlreadyExistsException ignored) {
+            }
         }
     }
 

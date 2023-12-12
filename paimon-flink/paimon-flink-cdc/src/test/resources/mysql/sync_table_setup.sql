@@ -335,3 +335,16 @@ CREATE TABLE test_metadata_columns (
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+-- ################################################################################
+--  testDefaultCheckpointInterval
+-- ################################################################################
+
+CREATE DATABASE default_checkpoint;
+USE default_checkpoint;
+
+CREATE TABLE t (
+    pk INT,
+    v VARCHAR(10),
+    PRIMARY KEY (pk)
+);

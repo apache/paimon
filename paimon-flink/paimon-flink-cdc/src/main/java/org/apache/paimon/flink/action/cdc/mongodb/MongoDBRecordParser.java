@@ -30,7 +30,6 @@ import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
 
-import java.util.Collections;
 import java.util.List;
 
 /**
@@ -62,10 +61,6 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
     private final boolean caseSensitive;
     private final Configuration mongodbConfig;
     private JsonNode root;
-
-    public MongoDBRecordParser(boolean caseSensitive, Configuration mongodbConfig) {
-        this(caseSensitive, Collections.emptyList(), mongodbConfig);
-    }
 
     public MongoDBRecordParser(
             boolean caseSensitive,

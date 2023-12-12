@@ -99,6 +99,13 @@ store up to 19 digits integer value. So you should ensure the overflow won't occ
 9. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
    should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
 
-## Setting Custom Job Name
+## Custom Job Settings
+
+### Checkpointing
+
+Use `-Dexecution.checkpointing.interval=<interval>` to enable checkpointing and set interval. For 0.7 and later versions,
+if you haven't enabled checkpointing, Paimon will enable checkpointing by default and set checkpoint interval to 180 seconds.
+
+### Job Name
 
 Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.

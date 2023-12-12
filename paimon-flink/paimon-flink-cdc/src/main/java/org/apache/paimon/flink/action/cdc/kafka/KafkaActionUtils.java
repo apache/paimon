@@ -32,7 +32,6 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
-import org.apache.flink.util.CollectionUtil;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
@@ -56,7 +55,6 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for Kafka Action. */
 public class KafkaActionUtils {
@@ -67,7 +65,6 @@ public class KafkaActionUtils {
     private static final String OFFSET = "offset";
 
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
-        validateKafkaConfig(kafkaConfig);
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
 
         List<String> topics =
@@ -79,14 +76,7 @@ public class KafkaActionUtils {
                 .setTopics(topics)
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
-        Properties properties = new Properties();
-        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                properties.put(key.substring(PROPERTIES_PREFIX.length()), value);
-            }
-        }
+        Properties properties = createKafkaProperties(kafkaConfig);
 
         StartupMode startupMode =
                 fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
@@ -228,25 +218,6 @@ public class KafkaActionUtils {
         return offsetMap;
     }
 
-    private static void validateKafkaConfig(Configuration kafkaConfig) {
-        checkArgument(
-                kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT) != null,
-                String.format(
-                        "kafka-conf [%s] must be specified.",
-                        KafkaConnectorOptions.VALUE_FORMAT.key()));
-
-        checkArgument(
-                !CollectionUtil.isNullOrEmpty(kafkaConfig.get(KafkaConnectorOptions.TOPIC)),
-                String.format(
-                        "kafka-conf [%s] must be specified.", KafkaConnectorOptions.TOPIC.key()));
-
-        checkArgument(
-                kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS) != null,
-                String.format(
-                        "kafka-conf [%s] must be specified.",
-                        KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS.key()));
-    }
-
     private static String kafkaPropertiesGroupId(Configuration kafkaConfig) {
         String groupId = kafkaConfig.get(KafkaConnectorOptions.PROPS_GROUP_ID);
         if (StringUtils.isEmpty(groupId)) {
@@ -256,13 +227,14 @@ public class KafkaActionUtils {
         return groupId;
     }
 
-    static DataFormat getDataFormat(Configuration kafkaConfig) {
+    public static DataFormat getDataFormat(Configuration kafkaConfig) {
         return DataFormat.fromConfigString(kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT));
     }
 
-    static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
-            Configuration kafkaConfig, String topic) {
-        Properties props = new Properties();
+    public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
+            Configuration kafkaConfig) {
+        Properties props = createKafkaProperties(kafkaConfig);
+
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS));
@@ -275,6 +247,7 @@ public class KafkaActionUtils {
 
         KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
 
+        String topic = kafkaConfig.get(KafkaConnectorOptions.TOPIC).get(0);
         // the return may be null in older versions of the Kafka client
         List<PartitionInfo> partitionInfos = consumer.partitionsFor(topic);
         if (partitionInfos == null || partitionInfos.isEmpty()) {
@@ -291,24 +264,43 @@ public class KafkaActionUtils {
         consumer.assign(topicPartitions);
         consumer.seekToBeginning(topicPartitions);
 
-        return new KafkaConsumerWrapper(consumer);
+        return new KafkaConsumerWrapper(consumer, topic);
+    }
+
+    private static Properties createKafkaProperties(Configuration kafkaConfig) {
+        Properties props = new Properties();
+        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key.startsWith(PROPERTIES_PREFIX)) {
+                props.put(key.substring(PROPERTIES_PREFIX.length()), value);
+            }
+        }
+        return props;
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
         private final KafkaConsumer<String, String> consumer;
+        private final String topic;
 
-        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer) {
+        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer, String topic) {
             this.consumer = kafkaConsumer;
+            this.topic = topic;
         }
 
         @Override
-        public List<String> getRecords(String topic, int pollTimeOutMills) {
+        public List<String> getRecords(int pollTimeOutMills) {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
                     .map(ConsumerRecord::value)
                     .collect(Collectors.toList());
+        }
+
+        @Override
+        public String topic() {
+            return topic;
         }
 
         @Override

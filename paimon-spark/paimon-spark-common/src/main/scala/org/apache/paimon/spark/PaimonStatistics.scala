@@ -15,29 +15,21 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+package org.apache.paimon.spark
 
-package org.apache.paimon.flink.action.cdc.kafka;
+import org.apache.spark.sql.connector.read.Statistics
 
-import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
-import org.apache.paimon.flink.action.cdc.SyncJobHandler;
+import java.util.OptionalLong
 
-import java.util.Map;
+case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
-/** Synchronize table from Kafka. */
-public class KafkaSyncTableAction extends MessageQueueSyncTableActionBase {
+  private lazy val rowCount: Long = scan.getSplits.map(_.rowCount).sum
 
-    public KafkaSyncTableAction(
-            String warehouse,
-            String database,
-            String table,
-            Map<String, String> catalogConfig,
-            Map<String, String> kafkaConfig) {
-        super(
-                warehouse,
-                database,
-                table,
-                catalogConfig,
-                kafkaConfig,
-                SyncJobHandler.SourceType.KAFKA);
-    }
+  private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
+
+  override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
+
+  override def numRows(): OptionalLong = OptionalLong.of(rowCount)
+
+  // TODO: extend columnStats for CBO
 }

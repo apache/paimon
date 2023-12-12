@@ -360,6 +360,13 @@ public class PredicateBuilder {
         return predicate;
     }
 
+    public static Predicate partitions(List<Map<String, String>> partitions, RowType rowType) {
+        return PredicateBuilder.or(
+                partitions.stream()
+                        .map(p -> PredicateBuilder.partition(p, rowType))
+                        .toArray(Predicate[]::new));
+    }
+
     public static Predicate equalPartition(BinaryRow partition, RowType partitionType) {
         Preconditions.checkArgument(
                 partition.getFieldCount() == partitionType.getFieldCount(),

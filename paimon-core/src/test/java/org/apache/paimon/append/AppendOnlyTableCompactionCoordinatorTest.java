@@ -105,7 +105,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
             assertThat(compactionCoordinator.partitionCompactCoordinators.size()).isEqualTo(1);
         }
 
-        // age enough, generate less file comaction
+        // age enough, generate less file compaction
         List<AppendOnlyCompactionTask> tasks = compactionCoordinator.compactPlan();
         assertThat(tasks.size()).isEqualTo(1);
         assertThat(new HashSet<>(files))

@@ -79,7 +79,8 @@ public class SchemaValidation {
      * @param schema the schema to be validated
      */
     public static void validateTableSchema(TableSchema schema) {
-        validatePrimaryKeysType(schema.fields(), schema.primaryKeys());
+        validateOnlyContainPrimitiveType(schema.fields(), schema.primaryKeys(), "primary key");
+        validateOnlyContainPrimitiveType(schema.fields(), schema.partitionKeys(), "partition");
 
         CoreOptions options = new CoreOptions(schema.options());
 
@@ -170,6 +171,15 @@ public class SchemaValidation {
                                 schema.fieldNames().contains(field),
                                 "Nonexistent sequence field: '%s'",
                                 field));
+
+        Optional<String> rowkindField = options.rowkindField();
+        rowkindField.ifPresent(
+                field ->
+                        checkArgument(
+                                schema.fieldNames().contains(field),
+                                "Nonexistent rowkind field: '%s'",
+                                field));
+
         sequenceField.ifPresent(
                 field ->
                         checkArgument(
@@ -209,21 +219,24 @@ public class SchemaValidation {
         }
     }
 
-    private static void validatePrimaryKeysType(List<DataField> fields, List<String> primaryKeys) {
-        if (!primaryKeys.isEmpty()) {
+    private static void validateOnlyContainPrimitiveType(
+            List<DataField> fields, List<String> fieldNames, String errorMessageIntro) {
+        if (!fieldNames.isEmpty()) {
             Map<String, DataField> rowFields = new HashMap<>();
             for (DataField rowField : fields) {
                 rowFields.put(rowField.name(), rowField);
             }
-            for (String primaryKeyName : primaryKeys) {
-                DataField rowField = rowFields.get(primaryKeyName);
+            for (String fieldName : fieldNames) {
+                DataField rowField = rowFields.get(fieldName);
                 DataType dataType = rowField.type();
                 if (PRIMARY_KEY_UNSUPPORTED_LOGICAL_TYPES.stream()
                         .anyMatch(c -> c.isInstance(dataType))) {
                     throw new UnsupportedOperationException(
                             String.format(
-                                    "The type %s in primary key field %s is unsupported",
-                                    dataType.getClass().getSimpleName(), primaryKeyName));
+                                    "The type %s in %s field %s is unsupported",
+                                    dataType.getClass().getSimpleName(),
+                                    errorMessageIntro,
+                                    fieldName));
                 }
             }
         }
