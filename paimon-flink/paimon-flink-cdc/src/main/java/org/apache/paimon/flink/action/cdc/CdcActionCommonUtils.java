@@ -220,7 +220,7 @@ public class CdcActionCommonUtils {
             for (String key : specifiedPrimaryKeys) {
                 checkArgument(
                         sourceColumns.contains(key),
-                        "Specified primary '%s' does not exist in source tables or computed columns.",
+                        "Specified primary key '%s' does not exist in source tables or computed columns.",
                         key);
             }
             builder.primaryKey(listCaseConvert(specifiedPrimaryKeys, caseSensitive));
