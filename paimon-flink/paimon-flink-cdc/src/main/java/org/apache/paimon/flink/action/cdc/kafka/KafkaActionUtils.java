@@ -76,14 +76,7 @@ public class KafkaActionUtils {
                 .setTopics(topics)
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
-        Properties properties = new Properties();
-        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                properties.put(key.substring(PROPERTIES_PREFIX.length()), value);
-            }
-        }
+        Properties properties = createKafkaProperties(kafkaConfig);
 
         StartupMode startupMode =
                 fromOption(kafkaConfig.get(KafkaConnectorOptions.SCAN_STARTUP_MODE));
@@ -240,15 +233,7 @@ public class KafkaActionUtils {
 
     public static MessageQueueSchemaUtils.ConsumerWrapper getKafkaEarliestConsumer(
             Configuration kafkaConfig) {
-        Properties props = new Properties();
-
-        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                props.put(key.substring(PROPERTIES_PREFIX.length()), value);
-            }
-        }
+        Properties props = createKafkaProperties(kafkaConfig);
 
         props.put(
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
@@ -280,6 +265,18 @@ public class KafkaActionUtils {
         consumer.seekToBeginning(topicPartitions);
 
         return new KafkaConsumerWrapper(consumer, topic);
+    }
+
+    private static Properties createKafkaProperties(Configuration kafkaConfig) {
+        Properties props = new Properties();
+        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
+            String key = entry.getKey();
+            String value = entry.getValue();
+            if (key.startsWith(PROPERTIES_PREFIX)) {
+                props.put(key.substring(PROPERTIES_PREFIX.length()), value);
+            }
+        }
+        return props;
     }
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
