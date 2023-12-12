@@ -29,6 +29,7 @@ import org.apache.spark.sql.connector.read.PartitionReaderFactory;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.util.Objects;
 
 import static org.apache.paimon.spark.SparkUtils.createIOManager;
 
@@ -74,5 +75,10 @@ public class SparkReaderFactory implements PartitionReaderFactory {
 
         SparkReaderFactory that = (SparkReaderFactory) o;
         return this.readBuilder.equals(that.readBuilder);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(readBuilder);
     }
 }
