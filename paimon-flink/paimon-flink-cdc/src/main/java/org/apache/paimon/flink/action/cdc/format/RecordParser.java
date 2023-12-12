@@ -43,16 +43,12 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
@@ -97,22 +93,9 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 return null;
             }
 
-            LinkedHashMap<String, DataType> paimonFieldTypes = extractPaimonFieldTypes();
             Schema.Builder builder = Schema.newBuilder();
-            Set<String> existedFields = new HashSet<>();
-            Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(getTableName());
-            for (Map.Entry<String, DataType> entry : paimonFieldTypes.entrySet()) {
-                builder.column(
-                        columnCaseConvertAndDuplicateCheck(
-                                entry.getKey(),
-                                existedFields,
-                                caseSensitive,
-                                columnDuplicateErrMsg),
-                        entry.getValue());
-            }
-
-            builder.primaryKey(listCaseConvert(extractPrimaryKeys(), caseSensitive));
-
+            extractPaimonFieldTypes().forEach(builder::column);
+            builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
             logInvalidJsonString(record);
@@ -145,7 +128,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     @Override
-    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
+    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) {
         try {
             setRoot(value);
             extractRecords().forEach(out::collect);

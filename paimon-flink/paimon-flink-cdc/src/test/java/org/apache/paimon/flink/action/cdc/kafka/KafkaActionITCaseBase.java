@@ -55,7 +55,6 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -239,32 +238,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             extends SyncTableActionBuilder<KafkaSyncTableAction> {
 
         public KafkaSyncTableActionBuilder(Map<String, String> kafkaConfig) {
-            super(kafkaConfig);
-        }
-
-        public KafkaSyncTableAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "kafka_sync_table",
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName));
-
-            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(listToArgs("--partition-keys", partitionKeys));
-            args.addAll(listToArgs("--primary-keys", primaryKeys));
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
-
-            return createAction(KafkaSyncTableAction.class, args);
+            super(KafkaSyncTableAction.class, kafkaConfig);
         }
     }
 
@@ -273,43 +247,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             extends SyncDatabaseActionBuilder<KafkaSyncDatabaseAction> {
 
         public KafkaSyncDatabaseActionBuilder(Map<String, String> kafkaConfig) {
-            super(kafkaConfig);
-        }
-
-        public KafkaSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseActionBuilder withMode(String mode) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "kafka_sync_database",
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database));
-
-            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
-            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
-            args.addAll(nullableToArgs("--including-tables", includingTables));
-            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
-
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            return createAction(KafkaSyncDatabaseAction.class, args);
+            super(KafkaSyncDatabaseAction.class, kafkaConfig);
         }
     }
 

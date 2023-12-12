@@ -34,6 +34,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
+
 /**
  * Implementation class for extracting records from MongoDB versions greater than 4.x and less than
  * 6.x.
@@ -93,22 +97,21 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
     private List<RichCdcMultiplexRecord> handleOperation(
             String op, JsonNode fullDocument, JsonNode documentKey) throws JsonProcessingException {
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
-        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
 
         switch (op) {
             case OP_INSERT:
-                records.add(processRecord(fullDocument, paimonFieldTypes, RowKind.INSERT));
+                records.add(processRecord(fullDocument, RowKind.INSERT));
                 break;
             case OP_REPLACE:
             case OP_UPDATE:
                 // Before version 6.0 of MongoDB, it was not possible to obtain 'Update Before'
                 // information. Therefore, data is first deleted using the primary key '_id', and
                 // then inserted.
-                records.add(processRecord(documentKey, paimonFieldTypes, RowKind.DELETE));
-                records.add(processRecord(fullDocument, paimonFieldTypes, RowKind.INSERT));
+                records.add(processRecord(documentKey, RowKind.DELETE));
+                records.add(processRecord(fullDocument, RowKind.INSERT));
                 break;
             case OP_DELETE:
-                records.add(processRecord(documentKey, paimonFieldTypes, RowKind.DELETE));
+                records.add(processRecord(documentKey, RowKind.DELETE));
                 break;
             default:
                 throw new UnsupportedOperationException("Unknown record type: " + op);
@@ -121,24 +124,21 @@ public class Mongo4VersionStrategy implements MongoVersionStrategy {
      * RichCdcMultiplexRecord object.
      *
      * @param fullDocument the JSON node containing the full document to be processed.
-     * @param paimonFieldTypes a LinkedHashMap containing the field types to be used in the
-     *     processing.
      * @param rowKind the kind of row to be processed (e.g., insert, update, delete).
      * @throws JsonProcessingException if there is an error in processing the JSON document.
      * @return a RichCdcMultiplexRecord object that contains the processed record information.
      */
-    private RichCdcMultiplexRecord processRecord(
-            JsonNode fullDocument,
-            LinkedHashMap<String, DataType> paimonFieldTypes,
-            RowKind rowKind)
+    private RichCdcMultiplexRecord processRecord(JsonNode fullDocument, RowKind rowKind)
             throws JsonProcessingException {
+        LinkedHashMap<String, DataType> paimonFieldTypes = new LinkedHashMap<>();
         Map<String, String> record =
-                getExtractRow(
-                        fullDocument,
-                        paimonFieldTypes,
-                        caseSensitive,
-                        computedColumns,
-                        mongodbConfig);
+                getExtractRow(fullDocument, paimonFieldTypes, computedColumns, mongodbConfig);
+
+        record = mapKeyCaseConvert(record, caseSensitive, recordKeyDuplicateErrMsg(record));
+        paimonFieldTypes =
+                mapKeyCaseConvert(
+                        paimonFieldTypes, caseSensitive, columnDuplicateErrMsg(collection));
+
         return new RichCdcMultiplexRecord(
                 databaseName,
                 collection,

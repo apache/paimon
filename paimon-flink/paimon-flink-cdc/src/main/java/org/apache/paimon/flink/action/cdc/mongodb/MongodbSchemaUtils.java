@@ -37,16 +37,11 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
-import java.util.function.Function;
 
 import static com.ververica.cdc.connectors.mongodb.internal.MongoDBEnvelope.encodeValue;
 import static org.apache.flink.util.Preconditions.checkNotNull;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.FIELD_NAME;
 import static org.apache.paimon.flink.action.cdc.mongodb.MongoDBActionUtils.START_MODE;
 
@@ -77,7 +72,7 @@ public class MongodbSchemaUtils {
      * name, and optionally, the username and password for authentication. For the SPECIFIED mode,
      * the field names should also be specified in the configuration.
      */
-    public static Schema getMongodbSchema(Configuration mongodbConfig, boolean caseSensitive) {
+    public static Schema getMongodbSchema(Configuration mongodbConfig) {
         SchemaAcquisitionMode mode = getModeFromConfig(mongodbConfig);
         String databaseName =
                 Objects.requireNonNull(
@@ -95,7 +90,7 @@ public class MongodbSchemaUtils {
                                         mongodbConfig.get(FIELD_NAME), "Field names cannot be null")
                                 .split(",");
 
-                return createMongodbSchema(collectionName, columnNames, caseSensitive);
+                return createMongodbSchema(columnNames);
             case DYNAMIC:
                 String hosts =
                         Objects.requireNonNull(
@@ -126,8 +121,7 @@ public class MongodbSchemaUtils {
                                 "No documents in collection to infer schema");
                     }
 
-                    return createMongodbSchema(
-                            collectionName, getColumnNames(firstDocument), caseSensitive);
+                    return createMongodbSchema(getColumnNames(firstDocument));
                 } catch (Exception e) {
                     throw new RuntimeException(
                             "Failed to create schema from MongoDB collection", e);
@@ -166,21 +160,14 @@ public class MongodbSchemaUtils {
         return document != null ? new ArrayList<>(document.keySet()) : Collections.emptyList();
     }
 
-    private static Schema createMongodbSchema(
-            String collectionName, String[] columnNames, boolean caseSensitive) {
-        return createMongodbSchema(collectionName, Arrays.asList(columnNames), caseSensitive);
+    private static Schema createMongodbSchema(String[] columnNames) {
+        return createMongodbSchema(Arrays.asList(columnNames));
     }
 
-    private static Schema createMongodbSchema(
-            String collectionName, List<String> columnNames, boolean caseSensitive) {
+    private static Schema createMongodbSchema(List<String> columnNames) {
         Schema.Builder builder = Schema.newBuilder();
-        Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(collectionName);
         for (String column : columnNames) {
-            builder.column(
-                    columnCaseConvertAndDuplicateCheck(
-                            column, existedFields, caseSensitive, columnDuplicateErrMsg),
-                    DataTypes.STRING());
+            builder.column(column, DataTypes.STRING());
         }
 
         builder.primaryKey(ID_FIELD);

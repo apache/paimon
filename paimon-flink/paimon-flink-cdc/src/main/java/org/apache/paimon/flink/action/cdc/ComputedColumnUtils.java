@@ -21,6 +21,7 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -35,6 +36,12 @@ public class ComputedColumnUtils {
 
     public static List<ComputedColumn> buildComputedColumns(
             List<String> computedColumnArgs, List<DataField> physicFields) {
+        return buildComputedColumns(computedColumnArgs, physicFields, true);
+    }
+
+    /** The caseSensitive only affects check. We don't change field names at building phase. */
+    public static List<ComputedColumn> buildComputedColumns(
+            List<String> computedColumnArgs, List<DataField> physicFields, boolean caseSensitive) {
         Map<String, DataType> typeMapping =
                 physicFields.stream()
                         .collect(
@@ -67,11 +74,13 @@ public class ComputedColumnUtils {
             String fieldReference = args[0].trim();
             String[] literals =
                     Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
+            String fieldReferenceCheckForm =
+                    StringUtils.caseSensitiveConversion(fieldReference, caseSensitive);
             checkArgument(
-                    typeMapping.containsKey(fieldReference),
+                    typeMapping.containsKey(fieldReferenceCheckForm),
                     String.format(
                             "Referenced field '%s' is not in given fields: %s.",
-                            fieldReference, typeMapping.keySet()));
+                            fieldReferenceCheckForm, typeMapping.keySet()));
 
             computedColumns.add(
                     new ComputedColumn(

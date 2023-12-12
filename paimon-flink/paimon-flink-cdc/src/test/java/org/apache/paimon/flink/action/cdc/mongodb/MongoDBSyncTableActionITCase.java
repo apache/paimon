@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -35,7 +36,7 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT cases for {@link MongoDBSyncTableActionITCase}. */
+/** IT cases for {@link MongoDBSyncTableAction}. */
 public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
     @Test
@@ -328,5 +329,37 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                         "+I[100000000000000000000102, car battery, 12V car battery, 8.1]",
                         "+I[100000000000000000000103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]");
         waitForResult(expectedInsert, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumnWithCaseInsensitive() throws Exception {
+        writeRecordsToMongoDB("test-table-2", database, "table/computedcolumn");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "computed_column_with_case_insensitive");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withComputedColumnArgs("_YEAR=year(_DATE)")
+                        .build();
+        runActionWithDefaultEnv(action);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.INT()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Arrays.asList(
+                        "+I[100000000000000000000101, 2023-12-11, 2023]",
+                        "+I[100000000000000000000102, NULL, NULL]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("_id"));
     }
 }

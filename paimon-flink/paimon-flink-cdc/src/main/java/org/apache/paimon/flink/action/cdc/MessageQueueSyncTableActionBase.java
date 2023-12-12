@@ -72,12 +72,14 @@ public abstract class MessageQueueSyncTableActionBase extends SyncTableActionBas
     @Override
     protected Schema buildPaimonSchema(Schema retrievedSchema) {
         return CdcActionCommonUtils.buildPaimonSchema(
+                table,
                 partitionKeys,
                 primaryKeys,
                 computedColumns,
                 tableConfig,
                 retrievedSchema,
                 metadataConverters,
+                caseSensitive,
                 false);
     }
 }

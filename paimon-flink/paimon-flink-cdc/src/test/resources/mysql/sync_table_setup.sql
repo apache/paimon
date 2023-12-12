@@ -348,3 +348,30 @@ CREATE TABLE t (
     v VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+-- ################################################################################
+--  testComputedColumnWithCaseInsensitive
+-- ################################################################################
+
+CREATE DATABASE computed_column_with_case_insensitive;
+USE computed_column_with_case_insensitive;
+
+CREATE TABLE t (
+    PK INT,
+    UPPERCASE_STRING VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
+-- ################################################################################
+--  testSpecifyKeysWithCaseInsensitive
+-- ################################################################################
+
+CREATE DATABASE specify_key_with_case_insensitive;
+USE specify_key_with_case_insensitive;
+
+CREATE TABLE t (
+    ID0 INT,
+    ID1 INT,
+    PART INT,
+    PRIMARY KEY (ID0)
+);
