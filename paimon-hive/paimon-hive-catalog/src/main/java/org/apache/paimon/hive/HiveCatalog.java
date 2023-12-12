@@ -95,6 +95,9 @@ public class HiveCatalog extends AbstractCatalog {
 
     // we don't include paimon-hive-connector as dependencies because it depends on
     // hive-exec
+    public static final String TABLE_TYPE_PROP = "table_type";
+    public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
+
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
@@ -459,6 +462,7 @@ public class HiveCatalog extends AbstractCatalog {
                         null,
                         null,
                         tableType.toString().toUpperCase(Locale.ROOT) + "_TABLE");
+        table.getParameters().put(TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase());
         table.getParameters()
                 .put(hive_metastoreConstants.META_TABLE_STORAGE, STORAGE_HANDLER_CLASS_NAME);
         if (TableType.EXTERNAL.equals(tableType)) {
