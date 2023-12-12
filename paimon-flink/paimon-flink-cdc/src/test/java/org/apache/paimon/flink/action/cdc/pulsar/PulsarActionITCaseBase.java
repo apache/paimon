@@ -48,7 +48,6 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -269,32 +268,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
             extends SyncTableActionBuilder<PulsarSyncTableAction> {
 
         public PulsarSyncTableActionBuilder(Map<String, String> pulsarConfig) {
-            super(pulsarConfig);
-        }
-
-        public PulsarSyncTableAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "pulsar_sync_table",
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName));
-
-            args.addAll(mapToArgs("--pulsar-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(listToArgs("--partition-keys", partitionKeys));
-            args.addAll(listToArgs("--primary-keys", primaryKeys));
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
-
-            return createAction(PulsarSyncTableAction.class, args);
+            super(PulsarSyncTableAction.class, pulsarConfig);
         }
     }
 
@@ -303,43 +277,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
             extends SyncDatabaseActionBuilder<PulsarSyncDatabaseAction> {
 
         public PulsarSyncDatabaseActionBuilder(Map<String, String> pulsarConfig) {
-            super(pulsarConfig);
-        }
-
-        public PulsarSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
-            throw new UnsupportedOperationException();
-        }
-
-        public PulsarSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
-            throw new UnsupportedOperationException();
-        }
-
-        public PulsarSyncDatabaseActionBuilder withMode(String mode) {
-            throw new UnsupportedOperationException();
-        }
-
-        public PulsarSyncDatabaseAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "pulsar_sync_database",
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database));
-
-            args.addAll(mapToArgs("--pulsar-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
-            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
-            args.addAll(nullableToArgs("--including-tables", includingTables));
-            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
-
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            return createAction(PulsarSyncDatabaseAction.class, args);
+            super(PulsarSyncDatabaseAction.class, pulsarConfig);
         }
     }
 

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -654,7 +655,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
     }
 
     @Test
-    public void testInvalidPrimaryKey() throws Exception {
+    public void testInvalidPrimaryKey() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "schema_evolution_\\d+");
@@ -997,5 +998,63 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         thread.interrupt();
         env.close();
+    }
+
+    @Test
+    @Timeout(60)
+    public void testComputedColumnWithCaseInsensitive() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "computed_column_with_case_insensitive");
+        mySqlConfig.put("table-name", "t");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withComputedColumnArgs("SUBSTRING=substring(UPPERCASE_STRING,2)")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE computed_column_with_case_insensitive");
+            statement.executeUpdate("INSERT INTO t VALUES (1, 'apache')");
+            statement.executeUpdate("INSERT INTO t VALUES (2, null)");
+        }
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.VARCHAR(10), DataTypes.STRING(),
+                        },
+                        new String[] {"pk", "uppercase_string", "substring"});
+        waitForResult(
+                Arrays.asList("+I[1, apache, ache]", "+I[2, NULL, NULL]"),
+                table,
+                rowType,
+                Collections.singletonList("pk"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSpecifyKeysWithCaseInsensitive() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "specify_key_with_case_insensitive");
+        mySqlConfig.put("table-name", "t");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withPrimaryKeys("ID1", "PART")
+                        .withPartitionKeys("PART")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        assertThat(table.primaryKeys()).containsExactly("id1", "part");
+        assertThat(table.partitionKeys()).containsExactly("part");
     }
 }

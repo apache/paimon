@@ -122,7 +122,6 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
 
     @Override
     protected void beforeBuildingSourceSink() throws Exception {
-        boolean caseSensitive = catalog.caseSensitive();
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
@@ -132,8 +131,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         tableName ->
                                 shouldMonitorTable(tableName, includingPattern, excludingPattern),
                         excludedTables,
-                        typeMapping,
-                        caseSensitive);
+                        typeMapping);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
         List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
@@ -153,12 +151,14 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
             FileStoreTable table;
             Schema fromMySql =
                     CdcActionCommonUtils.buildPaimonSchema(
+                            identifier.getFullName(),
                             Collections.emptyList(),
                             Collections.emptyList(),
                             Collections.emptyList(),
                             tableConfig,
                             tableInfo.schema(),
                             metadataConverters,
+                            caseSensitive,
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);

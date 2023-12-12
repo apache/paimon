@@ -100,12 +100,14 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
 
     protected Schema buildPaimonSchema(Schema retrievedSchema) {
         return CdcActionCommonUtils.buildPaimonSchema(
+                table,
                 partitionKeys,
                 primaryKeys,
                 computedColumns,
                 tableConfig,
                 retrievedSchema,
                 metadataConverters,
+                caseSensitive,
                 true);
     }
 
@@ -113,8 +115,6 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
     protected void validateCaseSensitivity() {
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Database", database);
         AbstractCatalog.validateCaseInsensitive(caseSensitive, "Table", table);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Partition keys", partitionKeys);
-        AbstractCatalog.validateCaseInsensitive(caseSensitive, "Primary keys", primaryKeys);
     }
 
     @Override
@@ -124,7 +124,6 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         if (catalog.tableExists(identifier)) {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier).copy(tableConfig);
             try {
-                // TODO: test case insensitive with computed columns
                 Schema retrievedSchema = retrieveSchema();
                 computedColumns =
                         buildComputedColumns(computedColumnArgs, retrievedSchema.fields());
@@ -138,7 +137,10 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                                 + "the Paimon table has defined all the argument columns used for computed columns.");
                 // schema evolution will add the computed columns
                 computedColumns =
-                        buildComputedColumns(computedColumnArgs, fileStoreTable.schema().fields());
+                        buildComputedColumns(
+                                computedColumnArgs,
+                                fileStoreTable.schema().fields(),
+                                caseSensitive);
                 // check partition keys and primary keys in case that user specified them
                 checkConstraints();
             }

@@ -32,6 +32,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -162,12 +163,14 @@ public class CdcActionCommonUtils {
     }
 
     public static Schema buildPaimonSchema(
+            String tableName,
             List<String> specifiedPartitionKeys,
             List<String> specifiedPrimaryKeys,
             List<ComputedColumn> computedColumns,
             Map<String, String> tableConfig,
             Schema sourceSchema,
             CdcMetadataConverter[] metadataConverters,
+            boolean caseSensitive,
             boolean requirePrimaryKeys) {
         Schema.Builder builder = Schema.newBuilder();
 
@@ -176,40 +179,53 @@ public class CdcActionCommonUtils {
         builder.options(sourceSchema.options());
 
         // fields
-        sourceSchema
-                .fields()
-                .forEach(
-                        dataField ->
-                                builder.column(
-                                        dataField.name(),
-                                        dataField.type(),
-                                        dataField.description()));
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+
+        for (DataField field : sourceSchema.fields()) {
+            String fieldName =
+                    columnCaseConvertAndDuplicateCheck(
+                            field.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+            builder.column(fieldName, field.type(), field.description());
+        }
 
         for (ComputedColumn computedColumn : computedColumns) {
-            builder.column(computedColumn.columnName(), computedColumn.columnType());
+            String computedColumnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            computedColumn.columnName(),
+                            existedFields,
+                            caseSensitive,
+                            columnDuplicateErrMsg);
+            builder.column(computedColumnName, computedColumn.columnType());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {
-            builder.column(metadataConverter.columnName(), metadataConverter.dataType());
+            String metadataColumnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            metadataConverter.columnName(),
+                            existedFields,
+                            caseSensitive,
+                            columnDuplicateErrMsg);
+            builder.column(metadataColumnName, metadataConverter.dataType());
         }
 
         // primary keys
         if (!specifiedPrimaryKeys.isEmpty()) {
-            Map<String, Integer> sourceColumns =
-                    sourceSchema.fields().stream()
-                            .collect(Collectors.toMap(DataField::name, entity -> 1));
+            Set<String> sourceColumns =
+                    sourceSchema.fields().stream().map(DataField::name).collect(Collectors.toSet());
+            sourceColumns.addAll(
+                    computedColumns.stream()
+                            .map(ComputedColumn::columnName)
+                            .collect(Collectors.toSet()));
             for (String key : specifiedPrimaryKeys) {
-                if (!sourceColumns.containsKey(key)
-                        && computedColumns.stream().noneMatch(c -> c.columnName().equals(key))) {
-                    throw new IllegalArgumentException(
-                            "Specified primary key '"
-                                    + key
-                                    + "' does not exist in source tables or computed columns.");
-                }
+                checkArgument(
+                        sourceColumns.contains(key),
+                        "Specified primary '%s' does not exist in source tables or computed columns.",
+                        key);
             }
-            builder.primaryKey(specifiedPrimaryKeys);
+            builder.primaryKey(listCaseConvert(specifiedPrimaryKeys, caseSensitive));
         } else if (!sourceSchema.primaryKeys().isEmpty()) {
-            builder.primaryKey(sourceSchema.primaryKeys());
+            builder.primaryKey(listCaseConvert(sourceSchema.primaryKeys(), caseSensitive));
         } else if (requirePrimaryKeys) {
             throw new IllegalArgumentException(
                     "Primary keys are not specified. "
@@ -219,7 +235,7 @@ public class CdcActionCommonUtils {
 
         // partition keys
         if (!specifiedPartitionKeys.isEmpty()) {
-            builder.partitionKeys(specifiedPartitionKeys);
+            builder.partitionKeys(listCaseConvert(specifiedPartitionKeys, caseSensitive));
         }
 
         // comment

@@ -20,6 +20,14 @@ package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.ActionITCaseBase;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseActionFactory;
+import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncTableActionFactory;
+import org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncDatabaseActionFactory;
+import org.apache.paimon.flink.action.cdc.mongodb.MongoDBSyncTableActionFactory;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncDatabaseActionFactory;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableActionFactory;
+import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncDatabaseActionFactory;
+import org.apache.paimon.flink.action.cdc.pulsar.PulsarSyncTableActionFactory;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.TableScan;
@@ -202,20 +210,66 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         }
     }
 
+    private <T> String getActionName(Class<T> clazz) {
+        switch (clazz.getSimpleName()) {
+            case "MySqlSyncTableAction":
+                return MySqlSyncTableActionFactory.IDENTIFIER;
+            case "MySqlSyncDatabaseAction":
+                return MySqlSyncDatabaseActionFactory.IDENTIFIER;
+            case "KafkaSyncTableAction":
+                return KafkaSyncTableActionFactory.IDENTIFIER;
+            case "KafkaSyncDatabaseAction":
+                return KafkaSyncDatabaseActionFactory.IDENTIFIER;
+            case "MongoDBSyncTableAction":
+                return MongoDBSyncTableActionFactory.IDENTIFIER;
+            case "MongoDBSyncDatabaseAction":
+                return MongoDBSyncDatabaseActionFactory.IDENTIFIER;
+            case "PulsarSyncTableAction":
+                return PulsarSyncTableActionFactory.IDENTIFIER;
+            case "PulsarSyncDatabaseAction":
+                return PulsarSyncDatabaseActionFactory.IDENTIFIER;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown sync action: " + clazz.getSimpleName());
+        }
+    }
+
+    private <T> String getConfKey(Class<T> clazz) {
+        switch (clazz.getSimpleName()) {
+            case "MySqlSyncTableAction":
+            case "MySqlSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.MYSQL_CONF;
+            case "KafkaSyncTableAction":
+            case "KafkaSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.KAFKA_CONF;
+            case "MongoDBSyncTableAction":
+            case "MongoDBSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.MONGODB_CONF;
+            case "PulsarSyncTableAction":
+            case "PulsarSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.PULSAR_CONF;
+            default:
+                throw new UnsupportedOperationException(
+                        "Unknown sync action: " + clazz.getSimpleName());
+        }
+    }
+
     /** Base builder to build table synchronization action from action arguments. */
-    protected abstract static class SyncTableActionBuilder<T> {
+    protected abstract class SyncTableActionBuilder<T extends SynchronizationActionBase> {
 
-        protected final Map<String, String> sourceConfig;
-        protected Map<String, String> catalogConfig = Collections.emptyMap();
-        protected Map<String, String> tableConfig = Collections.emptyMap();
+        private final Class<T> clazz;
+        private final Map<String, String> sourceConfig;
 
-        protected final List<String> partitionKeys = new ArrayList<>();
-        protected final List<String> primaryKeys = new ArrayList<>();
-        protected final List<String> computedColumnArgs = new ArrayList<>();
-        protected final List<String> typeMappingModes = new ArrayList<>();
-        protected final List<String> metadataColumns = new ArrayList<>();
+        private Map<String, String> catalogConfig = Collections.emptyMap();
+        private Map<String, String> tableConfig = Collections.emptyMap();
+        private final List<String> partitionKeys = new ArrayList<>();
+        private final List<String> primaryKeys = new ArrayList<>();
+        private final List<String> computedColumnArgs = new ArrayList<>();
+        private final List<String> typeMappingModes = new ArrayList<>();
+        private final List<String> metadataColumns = new ArrayList<>();
 
-        public SyncTableActionBuilder(Map<String, String> sourceConfig) {
+        public SyncTableActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
+            this.clazz = clazz;
             this.sourceConfig = sourceConfig;
         }
 
@@ -258,27 +312,53 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
-        public abstract T build();
+        public T build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    getActionName(clazz),
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database,
+                                    "--table",
+                                    tableName));
+
+            args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(listToArgs("--partition-keys", partitionKeys));
+            args.addAll(listToArgs("--primary-keys", primaryKeys));
+            args.addAll(listToArgs("--type-mapping", typeMappingModes));
+
+            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
+            args.addAll(listToMultiArgs("--metadata-column", metadataColumns));
+
+            return createAction(clazz, args);
+        }
     }
 
     /** Base Builder to build database synchronization from action arguments. */
-    protected abstract static class SyncDatabaseActionBuilder<T> {
+    protected abstract class SyncDatabaseActionBuilder<T extends SynchronizationActionBase> {
 
-        protected final Map<String, String> sourceConfig;
-        protected Map<String, String> catalogConfig = Collections.emptyMap();
-        protected Map<String, String> tableConfig = Collections.emptyMap();
+        private final Class<T> clazz;
+        private final Map<String, String> sourceConfig;
 
-        @Nullable protected Boolean ignoreIncompatible;
-        @Nullable protected Boolean mergeShards;
-        @Nullable protected String tablePrefix;
-        @Nullable protected String tableSuffix;
-        @Nullable protected String includingTables;
-        @Nullable protected String excludingTables;
-        @Nullable protected String mode;
-        protected final List<String> typeMappingModes = new ArrayList<>();
-        protected final List<String> metadataColumn = new ArrayList<>();
+        private Map<String, String> catalogConfig = Collections.emptyMap();
+        private Map<String, String> tableConfig = Collections.emptyMap();
+        @Nullable private Boolean ignoreIncompatible;
+        @Nullable private Boolean mergeShards;
+        @Nullable private String tablePrefix;
+        @Nullable private String tableSuffix;
+        @Nullable private String includingTables;
+        @Nullable private String excludingTables;
+        @Nullable private String mode;
+        private final List<String> typeMappingModes = new ArrayList<>();
+        private final List<String> metadataColumn = new ArrayList<>();
 
-        public SyncDatabaseActionBuilder(Map<String, String> sourceConfig) {
+        public SyncDatabaseActionBuilder(Class<T> clazz, Map<String, String> sourceConfig) {
+            this.clazz = clazz;
             this.sourceConfig = sourceConfig;
         }
 
@@ -337,6 +417,32 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             return this;
         }
 
-        public abstract T build();
+        public T build() {
+            List<String> args =
+                    new ArrayList<>(
+                            Arrays.asList(
+                                    getActionName(clazz),
+                                    "--warehouse",
+                                    warehouse,
+                                    "--database",
+                                    database));
+
+            args.addAll(mapToArgs(getConfKey(clazz), sourceConfig));
+            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
+            args.addAll(mapToArgs("--table-conf", tableConfig));
+
+            args.addAll(nullableToArgs("--ignore-incompatible", ignoreIncompatible));
+            args.addAll(nullableToArgs("--merge-shards", mergeShards));
+            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
+            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
+            args.addAll(nullableToArgs("--including-tables", includingTables));
+            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
+            args.addAll(nullableToArgs("--mode", mode));
+
+            args.addAll(listToArgs("--type-mapping", typeMappingModes));
+            args.addAll(listToArgs("--metadata-column", metadataColumn));
+
+            return createAction(clazz, args);
+        }
     }
 }

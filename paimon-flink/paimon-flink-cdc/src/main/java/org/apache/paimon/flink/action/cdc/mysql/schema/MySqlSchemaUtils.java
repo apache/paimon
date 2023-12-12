@@ -32,17 +32,11 @@ import java.sql.DatabaseMetaData;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Objects;
-import java.util.Set;
-import java.util.function.Function;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
-import static org.apache.paimon.utils.StringUtils.caseSensitiveConversion;
 
 /** Utility class to load MySQL table schema with JDBC. */
 public class MySqlSchemaUtils {
@@ -54,13 +48,10 @@ public class MySqlSchemaUtils {
             String databaseName,
             String tableName,
             String tableComment,
-            TypeMapping typeMapping,
-            boolean caseSensitive)
+            TypeMapping typeMapping)
             throws SQLException {
         Schema.Builder builder = Schema.newBuilder();
         try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
-            Set<String> existedFields = new HashSet<>();
-            Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
@@ -82,10 +73,6 @@ public class MySqlSchemaUtils {
                         MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping)
                                 .copy(isNullable);
 
-                fieldName =
-                        columnCaseConvertAndDuplicateCheck(
-                                fieldName, existedFields, caseSensitive, columnDuplicateErrMsg);
-
                 builder.column(fieldName, paimonType, fieldComment);
             }
         }
@@ -95,7 +82,7 @@ public class MySqlSchemaUtils {
         try (ResultSet rs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
-                primaryKeys.add(caseSensitiveConversion(fieldName, caseSensitive));
+                primaryKeys.add(fieldName);
             }
         }
         builder.primaryKey(primaryKeys);

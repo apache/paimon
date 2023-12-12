@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -26,6 +27,8 @@ import org.apache.paimon.types.RowType;
 import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.Arrays;
 import java.util.Collections;
@@ -1170,5 +1173,59 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("k"));
+    }
+
+    @ParameterizedTest(name = "triggerSchemaRetrievalException = {0}")
+    @ValueSource(booleans = {true, false})
+    @Timeout(60)
+    public void testComputedColumnWithCaseInsensitive(boolean triggerSchemaRetrievalException)
+            throws Exception {
+        String topic = "computed_column_with_case_insensitive" + UUID.randomUUID();
+        createTestTopic(topic, 1, 1);
+
+        if (triggerSchemaRetrievalException) {
+            createFileStoreTable(
+                    RowType.of(
+                            new DataType[] {
+                                DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.INT(),
+                            },
+                            new String[] {"_id", "_date", "_year"}),
+                    Collections.emptyList(),
+                    Collections.singletonList("_id"),
+                    Collections.emptyMap());
+        } else {
+            List<String> lines = readLines("kafka/canal/table/computedcolumn/canal-data-2.txt");
+            writeRecordsToKafka(topic, lines);
+        }
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withCatalogConfig(
+                                Collections.singletonMap(
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withComputedColumnArgs("_YEAR=year(_DATE)")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        if (triggerSchemaRetrievalException) {
+            List<String> lines = readLines("kafka/canal/table/computedcolumn/canal-data-2.txt");
+            writeRecordsToKafka(topic, lines);
+        }
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.INT()
+                        },
+                        new String[] {"_id", "_date", "_year"});
+        waitForResult(
+                Arrays.asList("+I[1, 19439, 2023]", "+I[2, NULL, NULL]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("_id"));
     }
 }
