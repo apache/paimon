@@ -51,6 +51,11 @@ SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 -- read the snapshot from specified timestamp in unix milliseconds
 SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
+-- read the snapshot from specified datetime
+-- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
+-- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
+SELECT * FROM t /*+ OPTIONS('scan.datetime' = '2023-12-09 23:09') */;
+
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 ```
@@ -123,6 +128,12 @@ spark.read
 -- read the snapshot from specified timestamp with a long value in unix milliseconds
 SET SESSION paimon.scan_timestamp_millis=1679486589444;
 SELECT * FROM t;
+
+-- read the snapshot from specified datetime
+-- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
+-- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
+SET paimon.scan_datetime='2023-11-29 14:55';
+SELECT * FROM t;
 ```
 
 {{< /tab >}}
@@ -166,11 +177,38 @@ SET paimon.scan.snapshot-id=null;
 SET paimon.scan.timestamp-millis=1679486589444;
 SELECT * FROM t;
 SET paimon.scan.timestamp-millis=null;
+
+-- read the snapshot from specified datetime
+-- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
+-- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
+SET paimon.scan.datetime='2023-12-09 23:09';
+SELECT * FROM t;
+SET paimon.scan.datetime=null;
     
 -- read tag 'my-tag'
 set paimon.scan.tag-name=my-tag;
 SELECT * FROM t;
 set paimon.scan.tag-name=null;
+```
+{{< /tab >}}
+
+{{< tab "Presto" >}}
+```sql
+-- read the snapshot with id 1L (use snapshot id as version)
+set session paimon.scan_snapshot_id=1;
+SELECT * FROM t;
+
+-- Re enter the client
+-- read the snapshot from specified timestamp in unix seconds
+SET paimon.scan_timestamp_millis=1679486589444;
+SELECT * FROM t;
+
+-- Re enter the client
+-- read the snapshot from specified datetime
+-- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
+-- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
+SET paimon.scan_datetime='2023-11-29 14:55';
+SELECT * FROM t;
 ```
 {{< /tab >}}
 

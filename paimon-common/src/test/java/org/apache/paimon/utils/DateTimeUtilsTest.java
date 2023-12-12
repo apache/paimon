@@ -46,6 +46,25 @@ public class DateTimeUtilsTest {
     }
 
     @Test
+    public void testAutoFormatDatetimeTz() {
+        long millisPerHour = 3600000L;
+        String testDatetime = "2023-12-12 10:12:12";
+        long testTimestamp = 1702375932000L;
+
+        Timestamp utc = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC");
+        Timestamp utc1 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC+1");
+        Timestamp utcMinus1 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC-1");
+        Timestamp utc8 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC+8");
+        Timestamp utcMinus8 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC-8");
+
+        assertThat(utc.getMillisecond()).isEqualTo(testTimestamp);
+        assertThat(utc1.getMillisecond()).isEqualTo(testTimestamp - millisPerHour);
+        assertThat(utcMinus1.getMillisecond()).isEqualTo(testTimestamp + millisPerHour);
+        assertThat(utc8.getMillisecond()).isEqualTo(testTimestamp - millisPerHour * 8);
+        assertThat(utcMinus8.getMillisecond()).isEqualTo(testTimestamp + millisPerHour * 8);
+    }
+
+    @Test
     public void testTimestamp() {
         int nanos = 100;
         java.sql.Timestamp timestamp = new java.sql.Timestamp(System.currentTimeMillis());

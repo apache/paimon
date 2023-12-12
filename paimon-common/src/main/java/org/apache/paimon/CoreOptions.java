@@ -30,6 +30,7 @@ import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
@@ -51,6 +52,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
+import static org.apache.paimon.utils.DateTimeUtils.AUTO_PARSE_PATTERNS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Core options for paimon. */
@@ -462,6 +464,16 @@ public class CoreOptions implements Serializable {
                     .defaultValue(StartupMode.DEFAULT)
                     .withDeprecatedKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
+
+    public static final ConfigOption<String> SCAN_DATETIME =
+            key("scan.datetime")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional datetime used in case of \"from-timestamp\" scan mode,Supported datetime formats include："
+                                    + Arrays.stream(AUTO_PARSE_PATTERNS)
+                                            .collect(Collectors.joining(","))
+                                    + " default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
             key("scan.timestamp-millis")
@@ -1245,7 +1257,8 @@ public class CoreOptions implements Serializable {
     public static StartupMode startupMode(Options options) {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
-            if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
+            if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()
+                    || options.getOptional(SCAN_DATETIME).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()) {
@@ -1266,7 +1279,16 @@ public class CoreOptions implements Serializable {
     }
 
     public Long scanTimestampMills() {
-        return options.get(SCAN_TIMESTAMP_MILLIS);
+        String datetime = scanDatetime();
+        Long timestamp = options.get(SCAN_TIMESTAMP_MILLIS);
+        if (timestamp == null && datetime != null) {
+            return DateTimeUtils.autoFormatToTimestamp(datetime).getMillisecond();
+        }
+        return timestamp;
+    }
+
+    public String scanDatetime() {
+        return options.get(SCAN_DATETIME);
     }
 
     public Long scanFileCreationTimeMills() {
@@ -1842,6 +1864,10 @@ public class CoreOptions implements Serializable {
      */
     public static void setDefaultValues(Options options) {
         if (options.contains(SCAN_TIMESTAMP_MILLIS) && !options.contains(SCAN_MODE)) {
+            options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
+        }
+
+        if (options.contains(SCAN_DATETIME) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
 

@@ -20,6 +20,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.data.Timestamp;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.DateTimeException;
 import java.time.Instant;
 import java.time.LocalDate;
@@ -28,8 +31,12 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.time.format.DateTimeFormatterBuilder;
+import java.time.format.DateTimeParseException;
 import java.time.temporal.TemporalAccessor;
+import java.util.Arrays;
+import java.util.Optional;
 import java.util.TimeZone;
+import java.util.stream.Collectors;
 
 import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
@@ -41,6 +48,7 @@ import static java.time.temporal.ChronoField.YEAR;
 
 /** Utils for date time. */
 public class DateTimeUtils {
+    private static final Logger LOG = LoggerFactory.getLogger(DateTimeUtils.class);
 
     /** The julian date of the epoch, 1970-01-01. */
     public static final int EPOCH_JULIAN = 2440588;
@@ -67,6 +75,8 @@ public class DateTimeUtils {
     /** The local time zone. */
     public static final TimeZone LOCAL_TZ = TimeZone.getDefault();
 
+    public static final String DATETIME_UTC_FLAG = "/UTC";
+
     private static final DateTimeFormatter DEFAULT_TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendPattern("yyyy-[MM][M]-[dd][d]")
@@ -75,6 +85,92 @@ public class DateTimeUtils {
                     .appendFraction(NANO_OF_SECOND, 0, 9, true)
                     .optionalEnd()
                     .toFormatter();
+
+    public static final String[] AUTO_PARSE_PATTERNS = {
+        "yyyy",
+        "yyyy-MM",
+        "yyyy-MM-dd",
+        "yyyy-MM-dd HH",
+        "yyyy-MM-dd HH:mm",
+        "yyyy-MM-dd HH:mm:ss",
+        "yyyy-MM-dd HH:mm:ss.SSS"
+    };
+    private static final String FULL_DATE_DEF = "0000-01-01 00:00:00.000";
+
+    /**
+     * auto format date.
+     *
+     * @param dateStr
+     * @return
+     */
+    public static Timestamp autoFormatToTimestamp(String dateStr) {
+        if (dateStr == null) {
+            return Timestamp.now();
+        }
+        TimeZone timezone = LOCAL_TZ;
+
+        // When using hivesql, there will be an additional quotation mark ,
+        dateStr = dateStr.replace("'", "");
+
+        // use UTC offset format ， example： 2023-12-11 11:00/UTC+8, 2023-12-11 11:00/UTC-5
+        if (dateStr.contains(DATETIME_UTC_FLAG)) {
+            String[] split = dateStr.split(DATETIME_UTC_FLAG);
+            dateStr = split[0];
+            try {
+                // example format： 2023-12-11 11:00/UTC
+                if (split.length == 1) {
+                    timezone = UTC_ZONE;
+                } else {
+                    // example format： 2023-12-11 11:00/UTC+8, 2023-12-11 11:00/UTC-3
+                    timezone = getDefTimeZoneByOffset(Integer.parseInt(split[1]));
+                }
+            } catch (Exception e) {
+                throw new UnsupportedOperationException(
+                        "auto format date:"
+                                + dateStr
+                                + " error, correct example：2023-12-11 12:12/UTC+8");
+            }
+        }
+
+        String errorMsg =
+                String.format(
+                        "auto format not supported format： %s,Supported formats include：%s",
+                        dateStr,
+                        Arrays.stream(AUTO_PARSE_PATTERNS).collect(Collectors.joining(",")));
+
+        if (dateStr.length() < "yyyy".length() || dateStr.length() > FULL_DATE_DEF.length()) {
+            throw new UnsupportedOperationException(errorMsg);
+        }
+        // format to full
+        dateStr += FULL_DATE_DEF.substring(dateStr.length());
+
+        try {
+            Timestamp timestamp = DateTimeUtils.parseTimestampData(dateStr, 3, timezone);
+            LOG.debug(
+                    "auto format date:{},timezone:{},timestamp:{}" + dateStr,
+                    timezone.getID(),
+                    timestamp.getMillisecond());
+            return timestamp;
+        } catch (DateTimeParseException exception) {
+            throw new UnsupportedOperationException(errorMsg);
+        }
+    }
+
+    /**
+     * Obtain one of the default time zones through time zone offset.
+     *
+     * @param offsetHour
+     * @return TimeZone
+     */
+    private static TimeZone getDefTimeZoneByOffset(int offsetHour) {
+        Optional<TimeZone> timezone =
+                Arrays.stream(TimeZone.getAvailableIDs())
+                        .map(id -> TimeZone.getTimeZone(id))
+                        .filter(tz -> (tz.getRawOffset() / MILLIS_PER_HOUR) == offsetHour)
+                        .findFirst();
+
+        return timezone.isPresent() ? timezone.get() : LOCAL_TZ;
+    }
 
     /**
      * Converts the internal representation of a SQL DATE (int) to the Java type used for UDF
