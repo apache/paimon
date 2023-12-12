@@ -62,6 +62,7 @@ public class SparkCatalog extends SparkBaseCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(SparkCatalog.class);
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
+    public static final String TABLE_COMMENT_IDENTIFIER = "comment";
 
     private String name = null;
     protected Catalog catalog = null;
@@ -317,8 +318,13 @@ public class SparkCatalog extends SparkBaseCatalog {
     private SchemaChange toSchemaChange(TableChange change) {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
-            validateAlterProperty(set.property());
-            return SchemaChange.setOption(set.property(), set.value());
+            String key = set.property();
+            validateAlterProperty(key);
+            if (TABLE_COMMENT_IDENTIFIER.equals(key)) {
+                return SchemaChange.updateTableComment(set.value());
+            } else {
+                return SchemaChange.setOption(set.property(), set.value());
+            }
         } else if (change instanceof TableChange.RemoveProperty) {
             TableChange.RemoveProperty remove = (TableChange.RemoveProperty) change;
             validateAlterProperty(remove.property());

@@ -35,6 +35,7 @@ import org.apache.paimon.schema.SchemaChange.UpdateColumnComment;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
+import org.apache.paimon.schema.SchemaChange.UpdateTableComment;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
@@ -165,8 +166,12 @@ public class SchemaManager implements Serializable {
             Map<String, String> newOptions = new HashMap<>(schema.options());
             List<DataField> newFields = new ArrayList<>(schema.fields());
             AtomicInteger highestFieldId = new AtomicInteger(schema.highestFieldId());
+            String tableComment = schema.comment();
             for (SchemaChange change : changes) {
-                if (change instanceof SetOption) {
+                if (change instanceof UpdateTableComment) {
+                    UpdateTableComment updateTableComment = (UpdateTableComment) change;
+                    tableComment = updateTableComment.tableComment();
+                } else if (change instanceof SetOption) {
                     SetOption setOption = (SetOption) change;
                     checkAlterTableOption(setOption.key());
                     newOptions.put(setOption.key(), setOption.value());
@@ -341,7 +346,7 @@ public class SchemaManager implements Serializable {
                             schema.partitionKeys(),
                             schema.primaryKeys(),
                             newOptions,
-                            schema.comment());
+                            tableComment);
 
             try {
                 boolean success = commit(newSchema);

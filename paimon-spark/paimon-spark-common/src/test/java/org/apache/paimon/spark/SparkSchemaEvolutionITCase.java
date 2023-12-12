@@ -43,6 +43,18 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
 
     @Test
+    public void testUpdateTableComment() {
+        spark.sql("CREATE TABLE testUpdateTableComment (id INT) COMMENT 'table comment' ");
+        List<Row> createTable =
+                spark.sql("SHOW CREATE TABLE testUpdateTableComment").collectAsList();
+        assertThat(createTable.toString()).contains("table comment");
+        spark.sql(
+                "ALTER TABLE testUpdateTableComment SET TBLPROPERTIES ('comment' = 'This is a new comment')");
+        createTable = spark.sql("SHOW CREATE TABLE testUpdateTableComment").collectAsList();
+        assertThat(createTable.toString()).contains("This is a new comment");
+    }
+
+    @Test
     public void testSetAndRemoveOption() {
         spark.sql("ALTER TABLE t1 SET TBLPROPERTIES('xyc' 'unknown1')");
 

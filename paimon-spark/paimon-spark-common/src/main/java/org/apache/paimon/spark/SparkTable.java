@@ -43,6 +43,8 @@ import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
 
+import static org.apache.paimon.spark.SparkCatalog.TABLE_COMMENT_IDENTIFIER;
+
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for paimon. */
 public class SparkTable
         implements org.apache.spark.sql.connector.catalog.Table,
@@ -113,6 +115,12 @@ public class SparkTable
                 properties.put(
                         CoreOptions.PRIMARY_KEY.key(), String.join(",", table.primaryKeys()));
             }
+
+            FileStoreTable fileStoreTable = (FileStoreTable) table;
+            if (fileStoreTable.comment().isPresent()) {
+                properties.put(TABLE_COMMENT_IDENTIFIER, fileStoreTable.comment().get());
+            }
+
             properties.put(TableCatalog.PROP_PROVIDER, SparkSource.NAME());
             return properties;
         } else {

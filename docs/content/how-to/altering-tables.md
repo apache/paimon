@@ -64,6 +64,25 @@ ALTER TABLE my_table SET PROPERTIES write_buffer_size = '256 MB';
 
 {{< /tabs >}}
 
+
+## Changing Table Comment
+
+The following SQL change table comment to `table new comment`.
+
+{{< tabs "change-table-comment-example" >}}
+
+{{< tab "Spark3" >}}
+
+```sql
+ALTER TABLE my_table SET TBLPROPERTIES (
+    'comment' = 'table new comment'
+);
+```
+
+{{< /tab >}}
+{{< /tabs >}}
+
+
 ## Rename Table Name
 
 The following SQL rename the table name to new name.

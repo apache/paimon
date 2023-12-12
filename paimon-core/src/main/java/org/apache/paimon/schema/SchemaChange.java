@@ -35,6 +35,10 @@ import java.util.Objects;
 @Public
 public interface SchemaChange extends Serializable {
 
+    static SchemaChange updateTableComment(String tableComment) {
+        return new UpdateTableComment(tableComment);
+    }
+
     static SchemaChange setOption(String key, String value) {
         return new SetOption(key, value);
     }
@@ -85,6 +89,39 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange updateColumnPosition(Move move) {
         return new UpdateColumnPosition(move);
+    }
+
+    /** A SchemaChange to update table comment. */
+    final class UpdateTableComment implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String tableComment;
+
+        private UpdateTableComment(String tableComment) {
+            this.tableComment = tableComment;
+        }
+
+        public String tableComment() {
+            return tableComment;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            UpdateTableComment that = (UpdateTableComment) o;
+            return tableComment.equals(that.tableComment);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(tableComment);
+        }
     }
 
     /** A SchemaChange to set a table option. */
