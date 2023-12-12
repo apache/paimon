@@ -32,7 +32,6 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -75,10 +74,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
     public SynchronizationActionBase withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
         return this;
-    }
-
-    public SynchronizationActionBase withMetadataColumns(String... metadataColumns) {
-        return withMetadataColumns(Arrays.asList(metadataColumns));
     }
 
     public SynchronizationActionBase withMetadataColumns(List<String> metadataColumns) {

@@ -24,6 +24,7 @@ import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 
+import java.util.Arrays;
 import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
@@ -68,9 +69,8 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 .includingTables(params.get(INCLUDING_TABLES))
                 .excludingTables(params.get(EXCLUDING_TABLES))
                 .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
-
         if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(params.get(METADATA_COLUMN).split(","));
+            action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
         }
 
         if (params.has(TYPE_MAPPING)) {

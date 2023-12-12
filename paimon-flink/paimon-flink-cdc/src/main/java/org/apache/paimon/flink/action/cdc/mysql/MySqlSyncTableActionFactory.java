@@ -74,7 +74,7 @@ public class MySqlSyncTableActionFactory implements ActionFactory {
         }
 
         if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(params.get(METADATA_COLUMN).split(","));
+            action.withMetadataColumns(new ArrayList<>(params.getMultiParameter(METADATA_COLUMN)));
         }
 
         if (params.has(TYPE_MAPPING)) {
