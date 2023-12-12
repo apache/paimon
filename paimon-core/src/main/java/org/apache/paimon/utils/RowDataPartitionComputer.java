@@ -21,53 +21,42 @@ package org.apache.paimon.utils;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
 
-import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.stream.Collectors;
 
 /** PartitionComputer for {@link InternalRow}. */
 public class RowDataPartitionComputer {
 
     protected final String defaultPartValue;
     protected final String[] partitionColumns;
-    protected final InternalRow.FieldGetter[] partitionFieldGetters;
+    protected final List<StringFormatter<InternalRow>> stringFormatters;
 
     public RowDataPartitionComputer(
             String defaultPartValue, RowType rowType, String[] partitionColumns) {
         this.defaultPartValue = defaultPartValue;
         this.partitionColumns = partitionColumns;
         List<String> columnList = rowType.getFieldNames();
-        this.partitionFieldGetters =
+
+        this.stringFormatters =
                 Arrays.stream(partitionColumns)
                         .mapToInt(columnList::indexOf)
                         .mapToObj(
                                 i ->
-                                        InternalRowUtils.createNullCheckingFieldGetter(
-                                                rowType.getTypeAt(i), i))
-                        .toArray(InternalRow.FieldGetter[]::new);
+                                        StringFormatter.createStringFormat(
+                                                rowType.getTypeAt(i),
+                                                InternalRowUtils.createNullCheckingFieldGetter(
+                                                                rowType.getTypeAt(i), i)
+                                                        ::getFieldOrNull))
+                        .collect(Collectors.toList());
     }
 
     public LinkedHashMap<String, String> generatePartValues(InternalRow in) {
         LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
 
-        for (int i = 0; i < partitionFieldGetters.length; i++) {
-            Object field = partitionFieldGetters[i].getFieldOrNull(in);
-            String partitionValue = null;
-            if (field != null) {
-                if (field instanceof byte[]) {
-                    partitionValue =
-                            StandardCharsets.ISO_8859_1
-                                    .decode(
-                                            Base64.getEncoder()
-                                                    .encode(ByteBuffer.wrap((byte[]) field)))
-                                    .toString();
-                } else {
-                    partitionValue = field.toString();
-                }
-            }
+        for (int i = 0; i < stringFormatters.size(); i++) {
+            String partitionValue = stringFormatters.get(i).format(in);
             if (StringUtils.isNullOrWhitespaceOnly(partitionValue)) {
                 partitionValue = defaultPartValue;
             }

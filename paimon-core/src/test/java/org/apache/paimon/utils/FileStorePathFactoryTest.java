@@ -27,6 +27,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
@@ -81,20 +82,28 @@ public class FileStorePathFactoryTest {
                 new FileStorePathFactory(
                         new Path(tempDir.toString()),
                         RowType.of(
-                                new DataType[] {new VarCharType(10), new IntType()},
-                                new String[] {"dt", "hr"}),
+                                new DataType[] {
+                                    new VarCharType(10), new IntType(), new VarBinaryType()
+                                },
+                                new String[] {"dt", "hr", "bin"}),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
 
-        assertPartition("20211224", 16, pathFactory, "/dt=20211224/hr=16");
-        assertPartition("20211224", null, pathFactory, "/dt=20211224/hr=default");
-        assertPartition(null, 16, pathFactory, "/dt=default/hr=16");
-        assertPartition(null, null, pathFactory, "/dt=default/hr=default");
+        assertPartition(
+                "20211224", 16, new byte[] {1, 2, 3}, pathFactory, "/dt=20211224/hr=16/bin=AQID");
+        assertPartition(
+                "20211224",
+                null,
+                new byte[] {1, 2, 3},
+                pathFactory,
+                "/dt=20211224/hr=default/bin=AQID");
+        assertPartition(null, 16, new byte[] {1, 2, 3}, pathFactory, "/dt=default/hr=16/bin=AQID");
+        assertPartition(null, null, null, pathFactory, "/dt=default/hr=default/bin=default");
     }
 
     private void assertPartition(
-            String dt, Integer hr, FileStorePathFactory pathFactory, String expected) {
-        BinaryRow partition = new BinaryRow(2);
+            String dt, Integer hr, byte[] bin, FileStorePathFactory pathFactory, String expected) {
+        BinaryRow partition = new BinaryRow(3);
         BinaryRowWriter writer = new BinaryRowWriter(partition);
         if (dt != null) {
             writer.writeString(0, BinaryString.fromString(dt));
@@ -105,6 +114,11 @@ public class FileStorePathFactoryTest {
             writer.writeInt(1, 16);
         } else {
             writer.setNullAt(1);
+        }
+        if (bin != null) {
+            writer.writeBinary(2, bin);
+        } else {
+            writer.setNullAt(2);
         }
         writer.complete();
         DataFilePathFactory dataFilePathFactory =
