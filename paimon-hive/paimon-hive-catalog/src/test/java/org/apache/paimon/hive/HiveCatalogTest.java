@@ -42,10 +42,13 @@ import java.lang.reflect.Field;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTORECONNECTURLKEY;
+import static org.apache.paimon.hive.HiveCatalog.PAIMON_TABLE_TYPE_VALUE;
+import static org.apache.paimon.hive.HiveCatalog.TABLE_TYPE_PROP;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.api.Assertions.fail;
@@ -207,6 +210,9 @@ public class HiveCatalogTest extends CatalogTestBase {
             // Verify the transformed parameters
             assertThat(tableProperties).containsEntry("table.owner", "Jon");
             assertThat(tableProperties).containsEntry("storage.format", "ORC");
+            assertThat(tableProperties)
+                    .containsEntry(
+                            TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase(Locale.ROOT));
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
