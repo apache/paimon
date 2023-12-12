@@ -35,7 +35,7 @@ case class PaimonPartitionReader(
     row: SparkInternalRow
 ) extends PartitionReader[InternalRow] {
 
-  private lazy val split: DataSplit = partition.split.asInstanceOf[DataSplit]
+  private lazy val split: Split = partition.split
 
   private lazy val iterator = {
     val reader = readFunc(split)
@@ -56,13 +56,19 @@ case class PaimonPartitionReader(
   }
 
   override def currentMetricsValues(): Array[CustomTaskMetric] = {
-    val splitSize = split.dataFiles().asScala.map(_.fileSize).sum
+    val paimonMetricsValues: Array[CustomTaskMetric] = split match {
+      case dataSplit: DataSplit =>
+        val splitSize = dataSplit.dataFiles().asScala.map(_.fileSize).sum
+        Array(
+          PaimonNumSplitsTaskMetric(1L),
+          PaimonSplitSizeTaskMetric(splitSize),
+          PaimonAvgSplitSizeTaskMetric(splitSize)
+        )
 
-    Array(
-      PaimonNumSplitsTaskMetric(1L),
-      PaimonSplitSizeTaskMetric(splitSize),
-      PaimonAvgSplitSizeTaskMetric(splitSize)
-    )
+      case _ =>
+        Array.empty[CustomTaskMetric]
+    }
+    super.currentMetricsValues() ++ paimonMetricsValues
   }
 
   override def close(): Unit = {
