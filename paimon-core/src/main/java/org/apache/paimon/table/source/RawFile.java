@@ -120,6 +120,11 @@ public class RawFile {
     }
 
     @Override
+    public int hashCode() {
+        return Objects.hash(path, offset, length, format, schemaId);
+    }
+
+    @Override
     public String toString() {
         return String.format(
                 "{path = %s, offset = %d, length = %d, format = %s, schemaId = %d}",

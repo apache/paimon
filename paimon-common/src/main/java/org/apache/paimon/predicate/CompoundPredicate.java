@@ -82,6 +82,11 @@ public class CompoundPredicate implements Predicate {
         return Objects.equals(function, that.function) && Objects.equals(children, that.children);
     }
 
+    @Override
+    public int hashCode() {
+        return Objects.hash(function, children);
+    }
+
     /** Evaluate the predicate result based on multiple {@link Predicate}s. */
     public abstract static class Function implements Serializable {
 
