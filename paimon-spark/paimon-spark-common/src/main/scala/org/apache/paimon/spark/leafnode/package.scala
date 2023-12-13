@@ -15,24 +15,20 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.catalyst.plans.logical
+package org.apache.paimon.spark
 
-import org.apache.paimon.spark.leafnode.PaimonLeafParsedStatement
+import org.apache.spark.sql.catalyst.plans.logical.{LeafCommand, LeafParsedStatement}
+import org.apache.spark.sql.execution.command.LeafRunnableCommand
+import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
 
-import org.apache.spark.sql.catalyst.expressions.Expression
+package object leafnode {
 
-/** A CALL statement parsed from SQL. */
-case class PaimonCallStatement(name: Seq[String], args: Seq[PaimonCallArgument])
-  extends PaimonLeafParsedStatement
+  trait PaimonLeafParsedStatement extends LeafParsedStatement
 
-/** An argument of a CALL statement. */
-sealed trait PaimonCallArgument {
+  trait PaimonLeafRunnableCommand extends LeafRunnableCommand
 
-  def expr: Expression
+  trait PaimonLeafCommand extends LeafCommand
+
+  trait PaimonLeafV2CommandExec extends LeafV2CommandExec
+
 }
-
-/** An argument identified by name. */
-case class PaimonNamedArgument(name: String, expr: Expression) extends PaimonCallArgument
-
-/** An argument identified by position. */
-case class PaimonPositionalArgument(expr: Expression) extends PaimonCallArgument

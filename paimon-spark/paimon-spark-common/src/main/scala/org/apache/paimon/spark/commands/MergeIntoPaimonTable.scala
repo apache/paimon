@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.{InsertInto, SparkTable}
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
+import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.util.EncoderUtils
 import org.apache.paimon.table.FileStoreTable
@@ -33,7 +34,6 @@ import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, BasePredicat
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.expressions.codegen.GeneratePredicate
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteAction, Filter, InsertAction, LogicalPlan, MergeAction, UpdateAction}
-import org.apache.spark.sql.execution.command.LeafRunnableCommand
 import org.apache.spark.sql.functions.{col, lit, monotonically_increasing_id, sum}
 import org.apache.spark.sql.types.{ByteType, StructField, StructType}
 
@@ -45,7 +45,7 @@ case class MergeIntoPaimonTable(
     mergeCondition: Expression,
     matchedActions: Seq[MergeAction],
     notMatchedActions: Seq[MergeAction])
-  extends LeafRunnableCommand
+  extends PaimonLeafRunnableCommand
   with WithFileStoreTable
   with ExpressionHelper
   with PredicateHelper {
