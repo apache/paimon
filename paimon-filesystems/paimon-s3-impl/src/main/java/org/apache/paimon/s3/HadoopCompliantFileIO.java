@@ -29,6 +29,8 @@ import org.apache.hadoop.fs.FSDataOutputStream;
 import org.apache.hadoop.fs.FileSystem;
 
 import java.io.IOException;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Hadoop {@link FileIO}.
@@ -39,7 +41,7 @@ public abstract class HadoopCompliantFileIO implements FileIO {
 
     private static final long serialVersionUID = 1L;
 
-    protected transient volatile FileSystem fs;
+    protected transient volatile Map<String, FileSystem> fsMap;
 
     @Override
     public SeekableInputStream newInputStream(Path path) throws IOException {
@@ -105,12 +107,24 @@ public abstract class HadoopCompliantFileIO implements FileIO {
     }
 
     private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        if (fs == null) {
+        if (fsMap == null) {
             synchronized (this) {
-                if (fs == null) {
-                    fs = createFileSystem(path);
+                if (fsMap == null) {
+                    fsMap = new ConcurrentHashMap<>();
                 }
             }
+        }
+
+        Map<String, FileSystem> map = fsMap;
+
+        String authority = path.toUri().getAuthority();
+        if (authority == null) {
+            authority = "DEFAULT";
+        }
+        FileSystem fs = map.get(authority);
+        if (fs == null) {
+            fs = createFileSystem(path);
+            map.put(authority, fs);
         }
         return fs;
     }
