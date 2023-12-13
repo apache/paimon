@@ -22,6 +22,7 @@ import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
 import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.sources.Filter
+import org.apache.spark.util.{Utils => SparkUtils}
 
 /**
  * Some classes or methods defined in the spark project are marked as private under
@@ -62,5 +63,9 @@ object Utils {
 
   def fieldReference(name: String): NamedReference = {
     FieldReference.column(name)
+  }
+
+  def bytesToString(size: Long): String = {
+    SparkUtils.bytesToString(size)
   }
 }
