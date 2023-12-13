@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -52,6 +53,9 @@ public class SparkGenericCatalogTest {
         spark =
                 SparkSession.builder()
                         .config("spark.sql.warehouse.dir", warehousePath.toString())
+                        .config(
+                                "spark.sql.extensions",
+                                PaimonSparkSessionExtensions.class.getName())
                         .master("local[2]")
                         .getOrCreate();
         spark.conf().set("spark.sql.catalog.spark_catalog", SparkGenericCatalog.class.getName());

@@ -18,19 +18,19 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkTable
+import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.catalyst.catalog.CatalogTypes.TablePartitionSpec
-import org.apache.spark.sql.execution.command.LeafRunnableCommand
 
 import java.util.{Collections, UUID}
 
 import scala.collection.JavaConverters._
 
 case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TablePartitionSpec)
-  extends LeafRunnableCommand
+  extends PaimonLeafRunnableCommand
   with PaimonCommand {
 
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]

@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.extensions
 
-import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
+import org.apache.paimon.spark.catalyst.analysis.{PaimonAnalysis, PaimonDeleteTable, PaimonIncompatiblePHRRules, PaimonIncompatibleResolutionRules, PaimonMergeInto, PaimonPostHocResolutionRules, PaimonProcedureResolver, PaimonUpdateTable}
 import org.apache.paimon.spark.catalyst.plans.logical.PaimonTableValuedFunctions
 import org.apache.paimon.spark.execution.PaimonStrategy
 
@@ -32,10 +32,12 @@ class PaimonSparkSessionExtensions extends (SparkSessionExtensions => Unit) {
     extensions.injectParser { case (_, parser) => new PaimonSparkSqlExtensionsParser(parser) }
 
     // analyzer extensions
-    extensions.injectResolutionRule(sparkSession => new PaimonAnalysis(sparkSession))
+    extensions.injectResolutionRule(spark => new PaimonAnalysis(spark))
     extensions.injectResolutionRule(spark => PaimonProcedureResolver(spark))
+    extensions.injectResolutionRule(spark => PaimonIncompatibleResolutionRules(spark))
 
     extensions.injectPostHocResolutionRule(spark => PaimonPostHocResolutionRules(spark))
+    extensions.injectPostHocResolutionRule(spark => PaimonIncompatiblePHRRules(spark))
 
     extensions.injectPostHocResolutionRule(_ => PaimonUpdateTable)
     extensions.injectPostHocResolutionRule(_ => PaimonDeleteTable)

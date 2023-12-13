@@ -20,6 +20,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor
 import org.apache.paimon.spark.{InsertInto, SparkTable}
+import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
@@ -28,8 +29,7 @@ import org.apache.paimon.types.RowKind
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.Utils.createDataset
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
-import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, Filter, LogicalPlan, SupportsSubquery}
-import org.apache.spark.sql.execution.command.LeafRunnableCommand
+import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, Filter}
 import org.apache.spark.sql.functions.lit
 
 import java.util.{Collections, UUID}
@@ -37,7 +37,7 @@ import java.util.{Collections, UUID}
 import scala.util.control.NonFatal
 
 case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromTable)
-  extends LeafRunnableCommand
+  extends PaimonLeafRunnableCommand
   with PaimonCommand {
 
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
