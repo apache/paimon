@@ -79,6 +79,7 @@ import static org.apache.paimon.flink.FlinkCatalogOptions.LOG_SYSTEM_AUTO_REGIST
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOG_SYSTEM;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.assertj.core.api.Assertions.assertThatCollection;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link FlinkCatalog}. */
@@ -536,10 +537,12 @@ public class FlinkCatalogTest {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage(
                         "Creating table in default database is disabled, please specify a database name.");
+        assertThatCollection(catalog.listDatabases()).isEmpty();
 
         catalog.createDatabase("db1", null, false);
         assertThatCode(() -> catalog.createTable(path1, this.createTable(new HashMap<>(0)), false))
                 .doesNotThrowAnyException();
+        assertThat(catalog.listDatabases()).containsExactlyInAnyOrder("db1");
 
         conf.set(FlinkCatalogOptions.DEFAULT_DATABASE, "default-db");
         Catalog catalog1 =
