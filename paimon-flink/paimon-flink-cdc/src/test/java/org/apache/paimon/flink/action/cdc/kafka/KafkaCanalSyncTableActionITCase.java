@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
@@ -971,10 +972,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
     }
 
-    @Test
+    @ParameterizedTest(name = "ignore-delete = {0}")
+    @ValueSource(booleans = {true, false})
     @Timeout(60)
-    public void testCDCOperations() throws Exception {
-        final String topic = "event-insert";
+    public void testCDCOperations(boolean ignoreDelete) throws Exception {
+        final String topic = "event-insert" + UUID.randomUUID();
         createTestTopic(topic, 1, 1);
 
         // ---------- Write the Canal json into Kafka -------------------
@@ -984,8 +986,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
         kafkaConfig.put(TOPIC.key(), topic);
 
+        Map<String, String> tableConfig = getBasicTableConfig();
+        tableConfig.put(CoreOptions.DEDUPLICATE_IGNORE_DELETE.key(), String.valueOf(ignoreDelete));
+
         KafkaSyncTableAction action =
-                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+                syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable(tableName);
@@ -1035,10 +1040,12 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
         // For the DELETE operation
         List<String> expectedDelete =
-                Arrays.asList(
-                        "+I[1, 2, second, NULL, NULL, NULL, NULL]",
-                        "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110], 9.9]",
-                        "+I[2, 4, four, NULL, NULL, NULL, NULL]");
+                ignoreDelete
+                        ? expectedUpdate
+                        : Arrays.asList(
+                                "+I[1, 2, second, NULL, NULL, NULL, NULL]",
+                                "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110], 9.9]",
+                                "+I[2, 4, four, NULL, NULL, NULL, NULL]");
         waitForResult(expectedDelete, table, rowType, primaryKeys);
     }
 

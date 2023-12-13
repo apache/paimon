@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
@@ -367,5 +368,22 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM R_T")).containsExactly(Row.of(1, 1, "+I"));
         sql("INSERT INTO R_T VALUES (1, 2, '-D')");
         assertThat(sql("SELECT * FROM R_T")).isEmpty();
+    }
+
+    @Test
+    public void testIgnoreDelete() throws Exception {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('deduplicate.ignore-delete' = 'true')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
+        iterator.close();
     }
 }
