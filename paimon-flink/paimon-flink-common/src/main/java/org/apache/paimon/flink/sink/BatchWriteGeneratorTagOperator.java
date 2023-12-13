@@ -40,17 +40,18 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.SortedMap;
 
 /**
  * Commit {@link Committable} for snapshot using the {@link CommitterOperator}. When the task is
  * completed, the corresponding tag is generated.
  */
-public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT>
+public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
         implements OneInputStreamOperator<CommitT, CommitT>,
                 SetupableStreamOperator,
                 BoundedOneInput {
 
-    private static final String SINK_FINISH_TAG_PREFIX = "sinkFinish-";
+    private static final String BATCH_WRITE_TAG_PREFIX = "batch-write-";
 
     private static final long serialVersionUID = 1L;
 
@@ -58,7 +59,7 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT>
 
     protected final FileStoreTable table;
 
-    public SinkFinishGeneratorTagOperator(
+    public BatchWriteGeneratorTagOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator, FileStoreTable table) {
         this.table = table;
         this.commitOperator = commitOperator;
@@ -102,7 +103,7 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT>
         Instant instant = Instant.ofEpochMilli(snapshot.timeMillis());
         LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
         String tagName =
-                SINK_FINISH_TAG_PREFIX
+                BATCH_WRITE_TAG_PREFIX
                         + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             // If the tag already exists, delete the tag
@@ -111,9 +112,35 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT>
             }
             // Create a new tag
             tagManager.createTag(snapshot, tagName);
+            // Expire the tag
+            expireTag();
         } catch (Exception e) {
             if (tagManager.tagExists(tagName)) {
                 tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+            }
+        }
+    }
+
+    private void expireTag() {
+        Integer tagNumRetainedMax = table.coreOptions().tagNumRetainedMax();
+        if (tagNumRetainedMax != null) {
+            SnapshotManager snapshotManager = table.snapshotManager();
+            if (snapshotManager.latestSnapshot() == null) {
+                return;
+            }
+            TagManager tagManager = table.tagManager();
+            TagDeletion tagDeletion = table.store().newTagDeletion();
+            SortedMap<Snapshot, String> tags = tagManager.tags();
+            if (tags.size() > tagNumRetainedMax) {
+                int toDelete = tags.size() - tagNumRetainedMax;
+                int i = 0;
+                for (String tag : tags.values()) {
+                    tagManager.deleteTag(tag, tagDeletion, snapshotManager);
+                    i++;
+                    if (i == toDelete) {
+                        break;
+                    }
+                }
             }
         }
     }

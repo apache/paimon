@@ -42,6 +42,7 @@ Paimon supports automatic creation of tags in writing job.
 You can set `'tag.automatic-creation'` to `process-time` or `watermark`:
 - `process-time`: Create TAG based on the time of the machine.
 - `watermark`: Create TAG based on the watermark of the Sink input.
+- `batch`: In a batch processing scenario, a tag is generated after the current task is completed.
 
 {{< hint info >}}
 If you choose Watermark, you may need to specify the time zone of watermark, if watermark is not in the

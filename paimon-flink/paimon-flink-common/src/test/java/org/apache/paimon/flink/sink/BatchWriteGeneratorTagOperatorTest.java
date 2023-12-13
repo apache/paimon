@@ -40,14 +40,15 @@ import java.util.Objects;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link SinkFinishGeneratorTagOperator}. */
-public class SinkFinishGeneratorTagOperatorTest extends CommitterOperatorTest {
+/** Tests for {@link BatchWriteGeneratorTagOperator}. */
+public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
     @Test
-    public void testSinkFinishGeneratorTag() throws Exception {
+    public void testBatchWriteGeneratorTag() throws Exception {
         FileStoreTable table = createFileStoreTable();
         // set tag.automatic-creation = batch
         HashMap<String, String> dynamicOptions = new HashMap<>();
         dynamicOptions.put("tag.automatic-creation", "batch");
+        dynamicOptions.put("tag.num-retained-max", "2");
         table = table.copy(dynamicOptions);
 
         StreamTableWrite write =
@@ -71,13 +72,13 @@ public class SinkFinishGeneratorTagOperatorTest extends CommitterOperatorTest {
         TagManager tagManager = table.tagManager();
 
         //  Generate tag name
-        String SINK_FINISH_TAG_PREFIX = "sinkFinish-";
+        String BATCH_WRITE_TAG_PREFIX = "batch-write-";
         Instant instant =
                 Instant.ofEpochMilli(
                         Objects.requireNonNull(snapshotManager.latestSnapshot()).timeMillis());
         LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
         String tagName =
-                SINK_FINISH_TAG_PREFIX
+                BATCH_WRITE_TAG_PREFIX
                         + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
 
         // No tag is generated before the finish method
@@ -94,7 +95,7 @@ public class SinkFinishGeneratorTagOperatorTest extends CommitterOperatorTest {
             FileStoreTable table,
             String commitUser,
             CommittableStateManager<ManifestCommittable> committableStateManager) {
-        return new SinkFinishGeneratorTagOperator<>(
+        return new BatchWriteGeneratorTagOperator<>(
                 (CommitterOperator<Committable, ManifestCommittable>)
                         super.createCommitterOperator(table, commitUser, committableStateManager),
                 table);

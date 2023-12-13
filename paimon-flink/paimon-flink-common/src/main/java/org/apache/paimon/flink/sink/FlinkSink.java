@@ -207,7 +207,7 @@ public abstract class FlinkSink<T> implements Serializable {
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
                 && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
             committerOperator =
-                    new SinkFinishGeneratorTagOperator<>(
+                    new BatchWriteGeneratorTagOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
                             table);
         }
