@@ -118,6 +118,9 @@ public abstract class HadoopCompliantFileIO implements FileIO {
         Map<String, FileSystem> map = fsMap;
 
         String authority = path.toUri().getAuthority();
+        if (authority == null) {
+            authority = "DEFAULT";
+        }
         FileSystem fs = map.get(authority);
         if (fs == null) {
             fs = createFileSystem(path);

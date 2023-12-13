@@ -15,24 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.catalyst.plans.logical
+package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.leafnode.PaimonLeafParsedStatement
+import org.apache.spark.sql.SparkSession
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.catalyst.rules.Rule
 
-import org.apache.spark.sql.catalyst.expressions.Expression
+/** These resolution rules are incompatible between different versions of spark. */
+case class PaimonIncompatibleResolutionRules(session: SparkSession) extends Rule[LogicalPlan] {
 
-/** A CALL statement parsed from SQL. */
-case class PaimonCallStatement(name: Seq[String], args: Seq[PaimonCallArgument])
-  extends PaimonLeafParsedStatement
+  override def apply(plan: LogicalPlan): LogicalPlan = plan
 
-/** An argument of a CALL statement. */
-sealed trait PaimonCallArgument {
-
-  def expr: Expression
 }
-
-/** An argument identified by name. */
-case class PaimonNamedArgument(name: String, expr: Expression) extends PaimonCallArgument
-
-/** An argument identified by position. */
-case class PaimonPositionalArgument(expr: Expression) extends PaimonCallArgument

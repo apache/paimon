@@ -39,7 +39,7 @@ class HadoopLocalFileIOBehaviorTest extends FileIOBehaviorTestBase {
         org.apache.hadoop.fs.FileSystem fs = new RawLocalFileSystem();
         fs.initialize(URI.create("file:///"), new Configuration());
         HadoopFileIO fileIO = new HadoopFileIO();
-        fileIO.setFileSystem(fs);
+        fileIO.setFileSystem(getBasePath(), fs);
         return fileIO;
     }
 

@@ -18,7 +18,9 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.options.Options;
 
 import javax.annotation.Nullable;
 
@@ -28,9 +30,13 @@ import javax.annotation.Nullable;
  */
 public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
+    private final boolean ignoreDelete;
+
     private KeyValue latestKv;
 
-    protected DeduplicateMergeFunction() {}
+    protected DeduplicateMergeFunction(boolean ignoreDelete) {
+        this.ignoreDelete = ignoreDelete;
+    }
 
     @Override
     public void reset() {
@@ -39,6 +45,9 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public void add(KeyValue kv) {
+        if (ignoreDelete && kv.valueKind().isRetract()) {
+            return;
+        }
         latestKv = kv;
     }
 
@@ -49,16 +58,26 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     public static MergeFunctionFactory<KeyValue> factory() {
-        return new Factory();
+        return new Factory(new Options());
+    }
+
+    public static MergeFunctionFactory<KeyValue> factory(Options options) {
+        return new Factory(options);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
+        private final Options options;
+
+        private Factory(Options options) {
+            this.options = options;
+        }
+
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
-            return new DeduplicateMergeFunction();
+            return new DeduplicateMergeFunction(options.get(CoreOptions.DEDUPLICATE_IGNORE_DELETE));
         }
     }
 }

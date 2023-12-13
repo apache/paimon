@@ -33,9 +33,6 @@ class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
 
   override def apply(plan: LogicalPlan): LogicalPlan = plan.resolveOperatorsDown {
 
-    case func: PaimonTableValueFunction if func.args.forall(_.resolved) =>
-      PaimonTableValuedFunctions.resolvePaimonTableValuedFunction(session, func)
-
     case o @ PaimonDynamicPartitionOverwrite(r, d) if o.resolved =>
       PaimonDynamicPartitionOverwriteCommand(r, d, o.query, o.writeOptions, o.isByName)
 
@@ -51,20 +48,6 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
     plan match {
       case t @ TruncateTable(PaimonRelation(table)) if t.resolved =>
         PaimonTruncateTableCommand(table, Map.empty)
-
-      case t @ TruncatePartition(PaimonRelation(table), ResolvedPartitionSpec(names, ident, _))
-          if t.resolved =>
-        assert(names.length == ident.numFields, "Names and values of partition don't match")
-        val resolver = session.sessionState.conf.resolver
-        val schema = table.schema()
-        val partitionSpec = names.zipWithIndex.map {
-          case (name, index) =>
-            val field = schema.find(f => resolver(f.name, name)).getOrElse {
-              throw new RuntimeException(s"$name is not a valid partition column in $schema.")
-            }
-            (name -> ident.get(index, field.dataType).toString)
-        }.toMap
-        PaimonTruncateTableCommand(table, partitionSpec)
 
       case _ => plan
     }

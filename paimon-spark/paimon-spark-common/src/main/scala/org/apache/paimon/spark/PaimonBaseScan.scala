@@ -18,14 +18,13 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
-import org.apache.paimon.table.{DataTable, Table}
+import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 
+import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.types.StructType
-
-import java.util.OptionalLong
 
 import scala.collection.JavaConverters._
 
@@ -60,4 +59,17 @@ abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: Stri
     splits
   }
 
+  override def supportedCustomMetrics: Array[CustomMetric] = {
+    val paimonMetrics: Array[CustomMetric] = table match {
+      case _: FileStoreTable =>
+        Array(
+          PaimonNumSplitMetric(),
+          PaimonSplitSizeMetric(),
+          PaimonAvgSplitSizeMetric()
+        )
+      case _ =>
+        Array.empty[CustomMetric]
+    }
+    super.supportedCustomMetrics() ++ paimonMetrics
+  }
 }

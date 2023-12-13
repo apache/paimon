@@ -505,4 +505,20 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         Row.of(22, 202L, "ccc", 2, 2, "b"));
         iterator.close();
     }
+
+    @Test
+    public void testIgnoreDelete() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('deduplicate.ignore-delete' = 'true')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+    }
 }
