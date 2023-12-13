@@ -25,12 +25,23 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PluginFileIO;
 import org.apache.paimon.plugin.PluginLoader;
 
+import com.amazonaws.auth.AWSCredentials;
+import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
+
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Optional;
+
 /** A {@link PluginLoader} to load oss. */
 public class S3Loader implements FileIOLoader {
 
     private static final String S3_CLASSES_DIR = "paimon-plugin-s3";
 
     private static final String S3_CLASS = "org.apache.paimon.s3.S3FileIO";
+
+    private static final String S3_ACCESS_KEY = "s3.access-key";
+
+    private static final String S3_SECRET_KEY = "s3.secret-key";
 
     // Singleton lazy initialization
 
@@ -47,6 +58,26 @@ public class S3Loader implements FileIOLoader {
     @Override
     public String getScheme() {
         return "s3";
+    }
+
+    @Override
+    public List<String[]> requiredOptions() {
+        List<String[]> options = new ArrayList<>();
+        Optional<AWSCredentials> awsCredentials = getAWSCredentials();
+        if (!awsCredentials.isPresent()) {
+            options.add(new String[] {S3_ACCESS_KEY, S3_ACCESS_KEY});
+            options.add(new String[] {S3_SECRET_KEY, S3_SECRET_KEY});
+        }
+        return options;
+    }
+
+    // try to load AWS credentials via default providers
+    private Optional<AWSCredentials> getAWSCredentials() {
+        try {
+            return Optional.of(DefaultAWSCredentialsProviderChain.getInstance().getCredentials());
+        } catch (Exception e) {
+            return Optional.empty();
+        }
     }
 
     @Override

@@ -22,8 +22,6 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.options.Options;
 
-import com.amazonaws.auth.AWSCredentials;
-import com.amazonaws.auth.DefaultAWSCredentialsProviderChain;
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.fs.FileSystem;
 import org.apache.hadoop.fs.s3a.S3AFileSystem;
@@ -55,10 +53,6 @@ public class S3FileIO extends HadoopCompliantFileIO {
         {"fs.s3a.signer-type", "fs.s3a.signing-algorithm"}
     };
 
-    private static final String S3_ACCESS_KEY = "s3.access-key";
-
-    private static final String S3_SECRET_KEY = "s3.secret-key";
-
     /**
      * Cache S3AFileSystem, at present, there is no good mechanism to ensure that the file system
      * will be shut down, so here the fs cache is used to avoid resource leakage.
@@ -74,22 +68,7 @@ public class S3FileIO extends HadoopCompliantFileIO {
 
     @Override
     public void configure(CatalogContext context) {
-        this.hadoopOptions =
-                mirrorCertainHadoopConfig(
-                        loadHadoopConfigFromContext(configureAwsCredentials(context)));
-    }
-
-    // try to load AWS credentials via default providers if S3_ACCESS_KEY or S3_SECRET_KEY is not
-    // assigned
-    private CatalogContext configureAwsCredentials(CatalogContext context) {
-        if (!context.options().containsKey(S3_ACCESS_KEY)
-                || !context.options().containsKey(S3_SECRET_KEY)) {
-            AWSCredentials awsCredentials =
-                    DefaultAWSCredentialsProviderChain.getInstance().getCredentials();
-            context.options().set(S3_ACCESS_KEY, awsCredentials.getAWSAccessKeyId());
-            context.options().set(S3_SECRET_KEY, awsCredentials.getAWSSecretKey());
-        }
-        return context;
+        this.hadoopOptions = mirrorCertainHadoopConfig(loadHadoopConfigFromContext(context));
     }
 
     // add additional config entries from the IO config to the Hadoop config

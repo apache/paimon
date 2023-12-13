@@ -40,6 +40,12 @@
         </dependency>
 
         <dependency>
+            <groupId>com.amazonaws</groupId>
+            <artifactId>aws-java-sdk-core</artifactId>
+            <version>${fs.s3.aws.version}</version>
+        </dependency>
+
+        <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-s3-impl</artifactId>
             <version>${project.version}</version>
@@ -56,12 +62,6 @@
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-test-utils</artifactId>
             <version>${project.version}</version>
-            <scope>test</scope>
-        </dependency>
-        <dependency>
-            <groupId>com.amazonaws</groupId>
-            <artifactId>aws-java-sdk-core</artifactId>
-            <version>${fs.s3.aws.version}</version>
             <scope>test</scope>
         </dependency>
         <dependency>
