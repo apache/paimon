@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
@@ -53,7 +54,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_CPU;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_COMMITTER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_USE_MANAGED_MEMORY;
-import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_FINISH_GENERATAR_TAG;
 import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -204,7 +204,8 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::tagManager,
                             () -> table.store().newTagDeletion());
         }
-        if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH && Options.fromMap(table.options()).get(SINK_FINISH_GENERATAR_TAG)) {
+        if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
+                && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
             committerOperator =
                     new SinkFinishGeneratorTagOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,

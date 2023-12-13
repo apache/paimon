@@ -301,13 +301,6 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Sink committer memory to control heap memory of global committer.");
 
-    public static final ConfigOption<Boolean> SINK_FINISH_GENERATAR_TAG =
-            ConfigOptions.key("sink.finish.generatar-tag")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription(
-                            "In batch processing scenario, if true, tags will be generated after flink sink is completed, generally used in flink batch scenarios.");
-
     public static List<ConfigOption<?>> getOptions() {
         final Field[] fields = FlinkConnectorOptions.class.getFields();
         final List<ConfigOption<?>> list = new ArrayList<>(fields.length);

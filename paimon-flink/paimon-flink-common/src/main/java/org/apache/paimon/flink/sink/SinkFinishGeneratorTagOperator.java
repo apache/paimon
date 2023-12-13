@@ -18,6 +18,12 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
+
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.runtime.checkpoint.CheckpointOptions;
 import org.apache.flink.runtime.jobgraph.OperatorID;
@@ -29,11 +35,6 @@ import org.apache.flink.streaming.runtime.streamrecord.LatencyMarker;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.runtime.tasks.StreamTask;
 import org.apache.flink.streaming.runtime.watermarkstatus.WatermarkStatus;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.operation.TagDeletion;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
 
 import java.time.Instant;
 import java.time.LocalDateTime;
@@ -41,13 +42,13 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 
 /**
- * Commit {@link Committable} for snapshot using the {@link CommitterOperator}.
- * When the task is completed, the corresponding tag is generated.
+ * Commit {@link Committable} for snapshot using the {@link CommitterOperator}. When the task is
+ * completed, the corresponding tag is generated.
  */
-public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT> implements
-        OneInputStreamOperator<CommitT, CommitT>,
-        SetupableStreamOperator,
-        BoundedOneInput {
+public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT>
+        implements OneInputStreamOperator<CommitT, CommitT>,
+                SetupableStreamOperator,
+                BoundedOneInput {
 
     private static final String SINK_FINISH_TAG_PREFIX = "sinkFinish-";
 
@@ -58,15 +59,14 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT> implements
     protected final FileStoreTable table;
 
     public SinkFinishGeneratorTagOperator(
-            CommitterOperator<CommitT, GlobalCommitT> commitOperator,
-            FileStoreTable table
-    ) {
+            CommitterOperator<CommitT, GlobalCommitT> commitOperator, FileStoreTable table) {
         this.table = table;
         this.commitOperator = commitOperator;
     }
 
     @Override
-    public void initializeState(StreamTaskStateInitializer streamTaskStateManager) throws Exception {
+    public void initializeState(StreamTaskStateInitializer streamTaskStateManager)
+            throws Exception {
         commitOperator.initializeState(streamTaskStateManager);
     }
 
@@ -77,7 +77,8 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT> implements
             CheckpointOptions checkpointOptions,
             CheckpointStreamFactory storageLocation)
             throws Exception {
-        return commitOperator.snapshotState(checkpointId, timestamp, checkpointOptions, storageLocation);
+        return commitOperator.snapshotState(
+                checkpointId, timestamp, checkpointOptions, storageLocation);
     }
 
     @Override
@@ -100,7 +101,9 @@ public class SinkFinishGeneratorTagOperator<CommitT, GlobalCommitT> implements
         TagDeletion tagDeletion = table.store().newTagDeletion();
         Instant instant = Instant.ofEpochMilli(snapshot.timeMillis());
         LocalDateTime localDateTime = LocalDateTime.ofInstant(instant, ZoneId.systemDefault());
-        String tagName = SINK_FINISH_TAG_PREFIX + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
+        String tagName =
+                SINK_FINISH_TAG_PREFIX
+                        + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             // If the tag already exists, delete the tag
             if (tagManager.tagExists(tagName)) {
