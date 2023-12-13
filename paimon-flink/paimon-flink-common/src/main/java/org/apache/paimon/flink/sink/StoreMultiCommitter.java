@@ -89,26 +89,17 @@ public class StoreMultiCommitter
             long checkpointId, long watermark, List<MultiTableCommittable> committables) {
         WrappedManifestCommittable wrappedManifestCommittable =
                 new WrappedManifestCommittable(checkpointId, watermark);
-        for (MultiTableCommittable committable : committables) {
+        combineFile(checkpointId, watermark, wrappedManifestCommittable, committables);
+        return wrappedManifestCommittable;
+    }
 
-            ManifestCommittable manifestCommittable =
-                    wrappedManifestCommittable.computeCommittableIfAbsent(
-                            Identifier.create(committable.getDatabase(), committable.getTable()),
-                            checkpointId,
-                            watermark);
-
-            switch (committable.kind()) {
-                case FILE:
-                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
-                    manifestCommittable.addFileCommittable(file);
-                    break;
-                case LOG_OFFSET:
-                    LogOffsetCommittable offset =
-                            (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
-                    break;
-            }
-        }
+    @Override
+    public WrappedManifestCommittable combine(
+            long checkpointId,
+            long watermark,
+            WrappedManifestCommittable wrappedManifestCommittable,
+            List<MultiTableCommittable> committables) {
+        combineFile(checkpointId, watermark, wrappedManifestCommittable, committables);
         return wrappedManifestCommittable;
     }
 
@@ -175,6 +166,32 @@ public class StoreMultiCommitter
             grouped.computeIfAbsent(c.checkpointId(), k -> new ArrayList<>()).add(c);
         }
         return grouped;
+    }
+
+    private void combineFile(
+            long checkpointId,
+            long watermark,
+            WrappedManifestCommittable wrappedManifestCommittable,
+            List<MultiTableCommittable> committables) {
+        for (MultiTableCommittable committable : committables) {
+            ManifestCommittable manifestCommittable =
+                    wrappedManifestCommittable.computeCommittableIfAbsent(
+                            Identifier.create(committable.getDatabase(), committable.getTable()),
+                            checkpointId,
+                            watermark);
+
+            switch (committable.kind()) {
+                case FILE:
+                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
+                    manifestCommittable.addFileCommittable(file);
+                    break;
+                case LOG_OFFSET:
+                    LogOffsetCommittable offset =
+                            (LogOffsetCommittable) committable.wrappedCommittable();
+                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    break;
+            }
+        }
     }
 
     private StoreCommitter getStoreCommitter(Identifier tableId) {

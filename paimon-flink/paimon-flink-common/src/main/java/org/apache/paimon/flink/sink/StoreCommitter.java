@@ -69,20 +69,18 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     public ManifestCommittable combine(
             long checkpointId, long watermark, List<Committable> committables) {
         ManifestCommittable manifestCommittable = new ManifestCommittable(checkpointId, watermark);
-        for (Committable committable : committables) {
-            switch (committable.kind()) {
-                case FILE:
-                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
-                    manifestCommittable.addFileCommittable(file);
-                    break;
-                case LOG_OFFSET:
-                    LogOffsetCommittable offset =
-                            (LogOffsetCommittable) committable.wrappedCommittable();
-                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
-                    break;
-            }
-        }
+        addFile(manifestCommittable, committables);
         return manifestCommittable;
+    }
+
+    @Override
+    public ManifestCommittable combine(
+            long checkpointId,
+            long watermark,
+            ManifestCommittable oldCommitable,
+            List<Committable> committables) {
+        addFile(oldCommitable, committables);
+        return oldCommitable;
     }
 
     @Override
@@ -109,6 +107,22 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     @Override
     public void close() throws Exception {
         commit.close();
+    }
+
+    private void addFile(ManifestCommittable manifestCommittable, List<Committable> committables) {
+        for (Committable committable : committables) {
+            switch (committable.kind()) {
+                case FILE:
+                    CommitMessage file = (CommitMessage) committable.wrappedCommittable();
+                    manifestCommittable.addFileCommittable(file);
+                    break;
+                case LOG_OFFSET:
+                    LogOffsetCommittable offset =
+                            (LogOffsetCommittable) committable.wrappedCommittable();
+                    manifestCommittable.addLogOffset(offset.bucket(), offset.offset());
+                    break;
+            }
+        }
     }
 
     private void calcNumBytesAndRecordsOut(List<ManifestCommittable> committables) {
