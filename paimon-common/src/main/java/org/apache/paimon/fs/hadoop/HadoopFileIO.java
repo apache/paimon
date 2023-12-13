@@ -26,6 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.hadoop.SerializableConfiguration;
+import org.apache.paimon.utils.FunctionWithException;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ReflectionUtils;
 
 import org.apache.hadoop.fs.FSDataInputStream;
@@ -37,7 +39,10 @@ import java.io.IOException;
 import java.io.OutputStreamWriter;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URI;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** Hadoop {@link FileIO}. */
@@ -47,11 +52,12 @@ public class HadoopFileIO implements FileIO {
 
     protected SerializableConfiguration hadoopConf;
 
-    protected transient volatile FileSystem fs;
+    protected transient volatile Map<Pair<String, String>, FileSystem> fsMap;
 
     @VisibleForTesting
-    public void setFileSystem(FileSystem fs) {
-        this.fs = fs;
+    public void setFileSystem(Path path, FileSystem fs) throws IOException {
+        org.apache.hadoop.fs.Path hadoopPath = path(path);
+        getFileSystem(hadoopPath, p -> fs);
     }
 
     @Override
@@ -136,12 +142,31 @@ public class HadoopFileIO implements FileIO {
     }
 
     private FileSystem getFileSystem(org.apache.hadoop.fs.Path path) throws IOException {
-        if (fs == null) {
+        return getFileSystem(path, this::createFileSystem);
+    }
+
+    private FileSystem getFileSystem(
+            org.apache.hadoop.fs.Path path,
+            FunctionWithException<org.apache.hadoop.fs.Path, FileSystem, IOException> creator)
+            throws IOException {
+        if (fsMap == null) {
             synchronized (this) {
-                if (fs == null) {
-                    fs = createFileSystem(path);
+                if (fsMap == null) {
+                    fsMap = new ConcurrentHashMap<>();
                 }
             }
+        }
+
+        Map<Pair<String, String>, FileSystem> map = fsMap;
+
+        URI uri = path.toUri();
+        String scheme = uri.getScheme();
+        String authority = uri.getAuthority();
+        Pair<String, String> key = Pair.of(scheme, authority);
+        FileSystem fs = map.get(key);
+        if (fs == null) {
+            fs = creator.apply(path);
+            map.put(key, fs);
         }
         return fs;
     }
@@ -373,6 +398,7 @@ public class HadoopFileIO implements FileIO {
                     new org.apache.hadoop.fs.Path(
                             path.getParent(), String.format(".%s.crc", path.getName()));
 
+            FileSystem fs = getFileSystem(checksumFile);
             if (fs.exists(checksumFile)) {
                 // checksum file exists, deleting it
                 fs.delete(checksumFile, true); // recursive=true
