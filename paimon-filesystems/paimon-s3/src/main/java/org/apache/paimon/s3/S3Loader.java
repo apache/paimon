@@ -72,7 +72,7 @@ public class S3Loader implements FileIOLoader {
     }
 
     // try to load AWS credentials via default providers
-    private Optional<AWSCredentials> getAWSCredentials() {
+    private static Optional<AWSCredentials> getAWSCredentials() {
         try {
             return Optional.of(DefaultAWSCredentialsProviderChain.getInstance().getCredentials());
         } catch (Exception e) {
@@ -97,6 +97,12 @@ public class S3Loader implements FileIOLoader {
         @Override
         protected FileIO createFileIO(Path path) {
             FileIO fileIO = getLoader().newInstance(S3_CLASS);
+            // inject aws credentials into options for s3a
+            getAWSCredentials()
+                .ifPresent(credentials -> {
+                options.set(S3_ACCESS_KEY, credentials.getAWSAccessKeyId());
+                options.set(S3_SECRET_KEY, credentials.getAWSSecretKey());
+            });
             fileIO.configure(CatalogContext.create(options));
             return fileIO;
         }
