@@ -173,7 +173,7 @@ public abstract class FullChangelogMergeFunctionWrapperTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new DeduplicateMergeFunction();
+            return DeduplicateMergeFunction.factory().create();
         }
 
         @Override

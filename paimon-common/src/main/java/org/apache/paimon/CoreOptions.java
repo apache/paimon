@@ -232,6 +232,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    public static final ConfigOption<Boolean> DEDUPLICATE_IGNORE_DELETE =
+            key("deduplicate.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore delete records in deduplicate mode.");
+
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
             key("partial-update.ignore-delete")
                     .booleanType()
