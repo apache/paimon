@@ -17,6 +17,7 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
@@ -24,20 +25,51 @@ import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
 import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
+import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: String)
+abstract class PaimonBaseScan(
+    table: Table,
+    requiredSchema: StructType,
+    filters: Array[(Filter, Predicate)],
+    pushDownLimit: Option[Int])
   extends Scan
   with SupportsReportStatistics {
 
+  private val tableRowType = table.rowType
+
+  private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
+
+  protected var runtimeFilters: Array[Filter] = Array.empty
+
   protected var splits: Array[Split] = _
 
-  override def description(): String = desc
+  protected lazy val readBuilder: ReadBuilder = {
+    val _readBuilder = table.newReadBuilder()
+
+    val projection = readSchema().fieldNames.map(field => tableRowType.getFieldNames.indexOf(field))
+    _readBuilder.withProjection(projection)
+    if (filters.nonEmpty) {
+      val pushedPredicate = PredicateBuilder.and(filters.map(_._2): _*)
+      _readBuilder.withFilter(pushedPredicate)
+    }
+    pushDownLimit.foreach(_readBuilder.withLimit)
+
+    _readBuilder
+  }
+
+  def getSplits: Array[Split] = {
+    if (splits == null) {
+      splits = readBuilder.newScan().plan().splits().asScala.toArray
+    }
+    splits
+  }
 
   override def readSchema(): StructType = {
-    SparkTypeUtils.fromPaimonRowType(readBuilder.readType())
+    val requiredFieldNames = requiredSchema.fieldNames
+    StructType(tableSchema.filter(field => requiredFieldNames.contains(field.name)))
   }
 
   override def toBatch: Batch = {
@@ -52,13 +84,6 @@ abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: Stri
     PaimonStatistics(this)
   }
 
-  def getSplits: Array[Split] = {
-    if (splits == null) {
-      splits = readBuilder.newScan().plan().splits().asScala.toArray
-    }
-    splits
-  }
-
   override def supportedCustomMetrics: Array[CustomMetric] = {
     val paimonMetrics: Array[CustomMetric] = table match {
       case _: FileStoreTable =>
@@ -71,5 +96,15 @@ abstract class PaimonBaseScan(table: Table, readBuilder: ReadBuilder, desc: Stri
         Array.empty[CustomMetric]
     }
     super.supportedCustomMetrics() ++ paimonMetrics
+  }
+
+  override def description(): String = {
+    val pushedFiltersStr = if (filters.nonEmpty) {
+      ", PushedFilters: [" + filters.map(_._1).mkString(",") + "]"
+    } else {
+      ""
+    }
+    s"PaimonScan: [${table.name}]" + pushedFiltersStr +
+      pushDownLimit.map(limit => s", Limit: [$limit]").getOrElse("")
   }
 }

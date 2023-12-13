@@ -19,7 +19,6 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
 import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.connector.read.{Scan, ScanBuilder, SupportsPushDownFilters, SupportsPushDownRequiredColumns}
@@ -34,29 +33,14 @@ abstract class PaimonBaseScanBuilder(table: Table)
   with SupportsPushDownRequiredColumns
   with Logging {
 
-  protected var predicates: Option[Predicate] = None
+  protected var requiredSchema: StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
-  protected var pushed: Option[Array[Filter]] = None
+  protected var pushed: Array[(Filter, Predicate)] = Array.empty
 
-  protected var projectedIndexes: Option[Array[Int]] = None
-
-  protected def getReadBuilder: ReadBuilder = {
-    val readBuilder = table.newReadBuilder()
-    projectedIndexes.foreach(readBuilder.withProjection)
-    predicates.foreach(readBuilder.withFilter)
-
-    readBuilder
-  }
-
-  protected def getDescription: String = {
-    val description = s"PaimonTable: [${table.name()}]"
-    description + pushed
-      .map(filters => s" PushedFilters: [${filters.mkString(", ")}]")
-      .getOrElse("")
-  }
+  protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, getReadBuilder, getDescription)
+    PaimonScan(table, requiredSchema, pushed, pushDownLimit)
   }
 
   /**
@@ -65,9 +49,8 @@ abstract class PaimonBaseScanBuilder(table: Table)
    * filters must be interpreted as ANDed together.
    */
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
-    val pushable = mutable.ArrayBuffer.empty[Filter]
+    val pushable = mutable.ArrayBuffer.empty[(Filter, Predicate)]
     val postScan = mutable.ArrayBuffer.empty[Filter]
-    val predicates = mutable.ArrayBuffer.empty[Predicate]
 
     val converter = new SparkFilterConverter(table.rowType)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
@@ -75,8 +58,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
       filter =>
         try {
           val predicate = converter.convert(filter)
-          pushable.append(filter)
-          predicates.append(predicate)
+          pushable.append((filter, predicate))
           if (!predicate.visit(visitor)) postScan.append(filter)
         } catch {
           case e: UnsupportedOperationException =>
@@ -85,21 +67,17 @@ abstract class PaimonBaseScanBuilder(table: Table)
         }
     }
 
-    if (predicates.nonEmpty) {
-      this.predicates = Some(PredicateBuilder.and(predicates: _*))
+    if (pushable.nonEmpty) {
+      this.pushed = pushable.toArray
     }
-    this.pushed = Some(pushable.toArray)
     postScan.toArray
   }
 
   override def pushedFilters(): Array[Filter] = {
-    pushed.getOrElse(Array.empty)
+    pushed.map(_._1)
   }
 
   override def pruneColumns(requiredSchema: StructType): Unit = {
-    val pruneFields = requiredSchema.fieldNames
-    val fieldNames = table.rowType.getFieldNames
-    val projected = pruneFields.map(field => fieldNames.indexOf(field))
-    this.projectedIndexes = Some(projected)
+    this.requiredSchema = requiredSchema
   }
 }
