@@ -345,13 +345,15 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         })
                 .doesNotThrowAnyException();
 
-        Assertions.assertThat(
-                        ((ManifestCommittable)
-                                        ((CommitterOperator) operator)
-                                                .committablesPerCheckpoint.get(Long.MAX_VALUE))
-                                .fileCommittables()
-                                .size())
-                .isEqualTo(3);
+        if (operator instanceof CommitterOperator) {
+            Assertions.assertThat(
+                            ((ManifestCommittable)
+                                            ((CommitterOperator) operator)
+                                                    .committablesPerCheckpoint.get(Long.MAX_VALUE))
+                                    .fileCommittables()
+                                    .size())
+                    .isEqualTo(3);
+        }
 
         Assertions.assertThatCode(
                         () -> {
