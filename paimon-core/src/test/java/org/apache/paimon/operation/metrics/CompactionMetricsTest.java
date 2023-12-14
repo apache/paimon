@@ -79,6 +79,8 @@ public class CompactionMetricsTest {
                 (Gauge<Long>)
                         registeredGenericMetrics.get(
                                 CompactionMetrics.LAST_REWRITE_CHANGELOG_FILE_SIZE);
+        Gauge<Integer> runningCompaction = (Gauge<Integer>) registeredGenericMetrics.get(
+                CompactionMetrics.RUNNING_COMPACTION);
 
         assertThat(lastCompactionDuration.getValue()).isEqualTo(0);
         assertThat(compactionDuration.getCount()).isEqualTo(0);
@@ -91,6 +93,9 @@ public class CompactionMetricsTest {
         assertThat(lastRewriteChangelogFileSize.getValue()).isEqualTo(0);
 
         // report once
+        reportRunning(compactionMetrics);
+        assertThat(runningCompaction.getValue()).isEqualTo(1);
+
         reportOnce(compactionMetrics);
 
         // generic metrics value updated
@@ -110,8 +115,12 @@ public class CompactionMetricsTest {
         assertThat(lastRewriteInputFileSize.getValue()).isEqualTo(2001);
         assertThat(lastRewriteOutputFileSize.getValue()).isEqualTo(1101);
         assertThat(lastRewriteChangelogFileSize.getValue()).isEqualTo(3001);
+        assertThat(runningCompaction.getValue()).isEqualTo(0);
 
         // report again
+        reportRunning(compactionMetrics);
+        assertThat(runningCompaction.getValue()).isEqualTo(1);
+
         reportAgain(compactionMetrics);
 
         // generic metrics value updated
@@ -132,6 +141,11 @@ public class CompactionMetricsTest {
         assertThat(lastRewriteInputFileSize.getValue()).isEqualTo(2001);
         assertThat(lastRewriteOutputFileSize.getValue()).isEqualTo(1201);
         assertThat(lastRewriteChangelogFileSize.getValue()).isEqualTo(2501);
+        assertThat(runningCompaction.getValue()).isEqualTo(0);
+    }
+
+    private void reportRunning(CompactionMetrics compactionMetrics) {
+        compactionMetrics.reportRunningCompaction();
     }
 
     private void reportOnce(CompactionMetrics compactionMetrics) {
@@ -148,7 +162,7 @@ public class CompactionMetricsTest {
         CompactionStats compactionStats =
                 new CompactionStats(3000, compactBefore, compactAfter, compactChangelog);
 
-        compactionMetrics.reportCompaction(compactionStats);
+        compactionMetrics.reportCompleteCompaction(compactionStats);
     }
 
     private void reportAgain(CompactionMetrics compactionMetrics) {
@@ -165,7 +179,7 @@ public class CompactionMetricsTest {
         CompactionStats compactionStats =
                 new CompactionStats(6000, compactBefore, compactAfter, compactChangelog);
 
-        compactionMetrics.reportCompaction(compactionStats);
+        compactionMetrics.reportCompleteCompaction(compactionStats);
     }
 
     private CompactionMetrics getCompactionMetrics() {

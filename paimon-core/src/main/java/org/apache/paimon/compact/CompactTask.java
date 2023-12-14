@@ -45,6 +45,9 @@ public abstract class CompactTask implements Callable<CompactResult> {
     public CompactResult call() throws Exception {
         long startMillis = System.currentTimeMillis();
         CompactResult result = null;
+        if (metrics != null) {
+            metrics.reportRunningCompaction();
+        }
         try {
             result = doCompact();
 
@@ -67,7 +70,7 @@ public abstract class CompactTask implements Callable<CompactResult> {
                                         result.before(),
                                         result.after(),
                                         result.changelog());
-                metrics.reportCompaction(compactionStats);
+                metrics.reportCompleteCompaction(compactionStats);
             }
         }
     }
