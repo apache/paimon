@@ -39,6 +39,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import static org.apache.paimon.CoreOptions.SequenceAutoPadding.INC_SEQ;
 import static org.apache.paimon.CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO;
 import static org.apache.paimon.CoreOptions.SequenceAutoPadding.ROW_KIND_FLAG;
 import static org.apache.paimon.CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO;
@@ -236,6 +237,23 @@ public class SequenceGeneratorTest {
                 .isBetween(2001L, 3999L);
         assertThat(generateWithPaddingOnMicrosAndRowKind(1L, RowKind.UPDATE_BEFORE))
                 .isBetween(2000L, 3998L);
+    }
+
+    @Test
+    public void testGenerateWithIncSeq() {
+        GenericRow genericRow =
+                GenericRow.of(
+                        1,
+                        Timestamp.fromEpochMillis(4294967295000L) /* max ts 2106-02-07T06:28:15 */);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.TIMESTAMP(0)},
+                        new String[] {"id", "ts"});
+
+        assertThat(
+                        new SequenceGenerator("ts", rowType, Collections.singletonList(INC_SEQ))
+                                .generate(genericRow))
+                .isEqualTo(4294967295L);
     }
 
     private SequenceGenerator getGenerator(String field) {

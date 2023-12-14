@@ -51,6 +51,10 @@ import java.util.stream.Collectors;
 /** Generate sequence number. */
 public class SequenceGenerator {
 
+    public static final long INC_SEQ_MASK = 0xFFFFFFFF00000000L;
+    public static final long USER_SEQ_MASK = 0xFFFFFFFFL;
+    public static final long INC = 1L << 32;
+
     private final int index;
     private final List<SequenceAutoPadding> paddings;
 
@@ -125,6 +129,9 @@ public class SequenceGenerator {
                 case MILLIS_TO_MICRO:
                     sequence = millisToMicro(sequence);
                     break;
+                case INC_SEQ:
+                    sequence = truncateUserSeq(sequence);
+                    break;
                 default:
                     throw new UnsupportedOperationException(
                             "Unknown sequence padding mode " + padding);
@@ -158,6 +165,12 @@ public class SequenceGenerator {
         long currentNanoTime = System.nanoTime();
         long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
         return (currentNanoTime - seconds * 1_000_000_000) / 1000;
+    }
+
+    private long truncateUserSeq(long sequence) {
+        // For timestamp, only support to second accuracy.
+        return (fieldType.is(DataTypeFamily.TIMESTAMP) ? sequence / 1000 : sequence)
+                & USER_SEQ_MASK;
     }
 
     private interface Generator {

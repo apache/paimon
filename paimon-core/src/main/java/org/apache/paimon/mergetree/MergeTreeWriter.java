@@ -50,6 +50,9 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.table.sink.SequenceGenerator.INC;
+import static org.apache.paimon.table.sink.SequenceGenerator.INC_SEQ_MASK;
+
 /** A {@link RecordWriter} to write records and generate {@link CompactIncrement}. */
 public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
@@ -72,10 +75,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final LinkedHashSet<DataFileMeta> compactAfter;
     private final LinkedHashSet<DataFileMeta> compactChangelog;
 
-    private long newSequenceNumber;
+    private long nextIncSequenceNumber;
     private WriteBuffer writeBuffer;
 
-    private WriterMetrics writerMetrics;
+    private final WriterMetrics writerMetrics;
+    private final boolean incSeqPadding;
 
     public MergeTreeWriter(
             boolean writeBufferSpillable,
@@ -89,14 +93,22 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
-            WriterMetrics writerMetrics) {
+            WriterMetrics writerMetrics,
+            boolean incSeqPadding) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.ioManager = ioManager;
         this.keyType = writerFactory.keyType();
         this.valueType = writerFactory.valueType();
         this.compactManager = compactManager;
-        this.newSequenceNumber = maxSequenceNumber + 1;
+        this.incSeqPadding = incSeqPadding;
+        if (maxSequenceNumber == -1) {
+            this.nextIncSequenceNumber = 0;
+        } else if (incSeqPadding) {
+            this.nextIncSequenceNumber = (maxSequenceNumber & INC_SEQ_MASK) + INC;
+        } else {
+            this.nextIncSequenceNumber = maxSequenceNumber + 1;
+        }
         this.keyComparator = keyComparator;
         this.mergeFunction = mergeFunction;
         this.writerFactory = writerFactory;
@@ -121,10 +133,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.writerMetrics = writerMetrics;
     }
 
-    private long newSequenceNumber() {
-        return newSequenceNumber++;
-    }
-
     @VisibleForTesting
     CompactManager compactManager() {
         return compactManager;
@@ -144,10 +152,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long sequenceNumber =
-                kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
-                        ? newSequenceNumber()
-                        : kv.sequenceNumber();
+        long sequenceNumber = generateSequenceNumber(kv.sequenceNumber());
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushWriteBuffer(false, false);
@@ -160,6 +165,22 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         if (writerMetrics != null) {
             writerMetrics.incWriteRecordNum();
         }
+    }
+
+    private long generateSequenceNumber(long userSeq) {
+        long res;
+        if (userSeq == KeyValue.UNKNOWN_SEQUENCE) {
+            res = nextIncSequenceNumber;
+            nextIncSequenceNumber += 1;
+        } else {
+            if (incSeqPadding) {
+                res = nextIncSequenceNumber | userSeq;
+                nextIncSequenceNumber += INC;
+            } else {
+                res = userSeq;
+            }
+        }
+        return res;
     }
 
     @Override

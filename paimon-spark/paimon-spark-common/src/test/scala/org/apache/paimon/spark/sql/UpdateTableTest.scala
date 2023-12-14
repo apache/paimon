@@ -227,4 +227,24 @@ class UpdateTableTest extends PaimonSparkTestBase {
       () => spark.sql("UPDATE T SET s.c2 = 'a_new', s = struct(11, 'a_new') WHERE s.c1 = 1"))
       .hasMessageContaining("Conflicting update/insert on attrs: s.c2, s")
   }
+
+  test(s"test update with sequence field") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, name STRING, ts TIMESTAMP)
+         |TBLPROPERTIES ('primary-key' = 'id', 'sequence.field' = 'ts', 'sequence.auto-padding' = 'inc-seq')
+         |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a', CAST('2023-12-15 10:00:00' AS TIMESTAMP))")
+
+    spark.sql("INSERT INTO T VALUES (2, 'b', CAST('2023-12-15 10:00:01' AS TIMESTAMP))")
+
+    spark.sql("INSERT INTO T VALUES (3, 'c', CAST('2023-12-15 10:00:02' AS TIMESTAMP))")
+
+    spark.sql("UPDATE T SET name = 'a_new' WHERE id = 1")
+
+    val rows1 = spark.sql("SELECT * FROM T ORDER BY id").collectAsList()
+    assertThat(rows1.toString).isEqualTo(
+      "[[1,a_new,2023-12-15 10:00:00.0], [2,b,2023-12-15 10:00:01.0], [3,c,2023-12-15 10:00:02.0]]")
+  }
 }

@@ -180,4 +180,24 @@ class DeleteFromTableTest extends PaimonSparkTestBase {
     val rows4 = spark.sql("SELECT * FROM T ORDER BY id").collectAsList()
     assertThat(rows4.toString).isEqualTo("[]")
   }
+
+  test(s"test delete with sequence field") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, name STRING, ts TIMESTAMP)
+         |TBLPROPERTIES ('primary-key' = 'id', 'sequence.field' = 'ts', 'sequence.auto-padding' = 'inc-seq')
+         |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a', CAST('2023-12-15 10:00:00' AS TIMESTAMP))")
+
+    spark.sql("INSERT INTO T VALUES (2, 'b', CAST('2023-12-15 10:00:01' AS TIMESTAMP))")
+
+    spark.sql("INSERT INTO T VALUES (3, 'c', CAST('2023-12-15 10:00:02' AS TIMESTAMP))")
+
+    spark.sql("DELETE FROM T WHERE id = 1")
+
+    val rows1 = spark.sql("SELECT * FROM T").collectAsList()
+    assertThat(rows1.toString).isEqualTo(
+      "[[2,b,2023-12-15 10:00:01.0], [3,c,2023-12-15 10:00:02.0]]")
+  }
 }

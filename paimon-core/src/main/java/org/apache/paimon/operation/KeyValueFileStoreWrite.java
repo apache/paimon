@@ -176,7 +176,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                getWriterMetrics(partition, bucket));
+                getWriterMetrics(partition, bucket),
+                options.incSeqPadding());
     }
 
     @VisibleForTesting

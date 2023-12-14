@@ -459,7 +459,9 @@ public class CoreOptions implements Serializable {
                                             text(
                                                     "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
                                             text(
-                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
+                                                    "4. \"inc-seq\": Pads the sequence field with auto increase sequence."),
+                                            text(
+                                                    "5. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
                                     .build());
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
@@ -1338,6 +1340,10 @@ public class CoreOptions implements Serializable {
         return Arrays.asList(padding.split(","));
     }
 
+    public boolean incSeqPadding() {
+        return SequenceAutoPadding.INC_SEQ.value.equals(options.get(SEQUENCE_AUTO_PADDING));
+    }
+
     public boolean writeOnly() {
         return options.get(WRITE_ONLY);
     }
@@ -1933,7 +1939,8 @@ public class CoreOptions implements Serializable {
                 "Pads the sequence field that indicates time with precision of seconds to micro-second."),
         MILLIS_TO_MICRO(
                 "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
+                "Pads the sequence field that indicates time with precision of milli-second to micro-second."),
+        INC_SEQ("inc-seq", "Pads the sequence field with auto increase sequence.");
 
         private final String value;
         private final String description;
