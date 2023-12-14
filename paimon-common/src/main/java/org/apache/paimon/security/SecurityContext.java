@@ -19,6 +19,7 @@
 package org.apache.paimon.security;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.HadoopUtils;
 
@@ -27,6 +28,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.Callable;
+import java.util.function.Supplier;
 
 /**
  * Security context that provides security module install and holds the security context.
@@ -40,11 +42,22 @@ public class SecurityContext {
 
     private static HadoopSecurityContext installedContext;
 
-    /** Installs security configuration. */
+    /** Installs security configuration by {@link Options}. */
+    @Deprecated
     public static void install(Options options) throws Exception {
+        install(options, () -> HadoopUtils.getHadoopConfiguration(options));
+    }
+
+    /** Installs security configuration by {@link CatalogContext}. */
+    public static void install(CatalogContext catalogContext) throws Exception {
+        install(catalogContext.options(), catalogContext::hadoopConf);
+    }
+
+    private static void install(Options options, Supplier<Configuration> configurationSupplier)
+            throws Exception {
         SecurityConfiguration config = new SecurityConfiguration(options);
         if (config.isLegal()) {
-            HadoopModule module = createModule(config);
+            HadoopModule module = createModule(config, configurationSupplier);
             if (module != null) {
                 module.install();
                 installedContext = new HadoopSecurityContext();
@@ -59,7 +72,8 @@ public class SecurityContext {
                 : securedCallable.call();
     }
 
-    private static HadoopModule createModule(SecurityConfiguration securityConfig) {
+    private static HadoopModule createModule(
+            SecurityConfiguration securityConfig, Supplier<Configuration> configurationSupplier) {
         // First check if we have Hadoop in the ClassPath. If not, we simply don't do anything.
         if (!isHadoopCommonOnClasspath(HadoopModule.class.getClassLoader())) {
             LOG.info(
@@ -68,9 +82,7 @@ public class SecurityContext {
         }
 
         try {
-            Configuration hadoopConfiguration =
-                    HadoopUtils.getHadoopConfiguration(securityConfig.getOptions());
-            return new HadoopModule(securityConfig, hadoopConfiguration);
+            return new HadoopModule(securityConfig, configurationSupplier.get());
         } catch (LinkageError e) {
             LOG.warn(
                     "Cannot create Hadoop Security Module due to an error that happened while instantiating the module. No security module will be loaded.",
