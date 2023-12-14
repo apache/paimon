@@ -194,7 +194,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
                         includingTables,
                         monitoredTables,
-                        excludedTables));
+                        excludedTables),
+                typeMapping);
     }
 
     private void logNonPkTables(List<Identifier> nonPkTables) {

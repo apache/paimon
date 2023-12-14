@@ -111,7 +111,7 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                 mySqlSchemasInfo.pkTables().stream()
                         .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
                         .collect(Collectors.joining("|"));
-        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList);
+        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
     }
 
     private void validateMySqlTableInfos(MySqlSchemasInfo mySqlSchemasInfo) {
