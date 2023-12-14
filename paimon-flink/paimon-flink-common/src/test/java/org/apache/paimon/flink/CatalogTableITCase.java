@@ -453,6 +453,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         result = sql("SHOW PARTITIONS PartitionTable partition (dt='2020-01-02', hh='11')");
         assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-02/hh=11]]");
+
+        // with date and time type
+        sql(
+                "CREATE TABLE PartitionTableDate (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt DATE,\n"
+                        + "    hh TIME,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+        sql("INSERT INTO PartitionTableDate select 1,1,'a',DATE '2020-01-01',TIME '10:11:12'");
+        result = sql("SHOW PARTITIONS PartitionTableDate");
+        assertThat(result.toString()).isEqualTo("[+I[dt=2020-01-01/hh=10:11:12]]");
     }
 
     @Test

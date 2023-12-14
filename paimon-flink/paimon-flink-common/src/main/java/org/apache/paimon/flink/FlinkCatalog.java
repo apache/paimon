@@ -33,6 +33,10 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.TimeType;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataPartitionComputer;
@@ -864,6 +868,26 @@ public class FlinkCatalog extends AbstractCatalog {
                                                 Preconditions.checkNotNull(
                                                         m,
                                                         "Partition row data is null. This is unexpected."));
+
+                                partValues.forEach(
+                                        (k, v) -> {
+                                            DataType dataType =
+                                                    partitionRowType.getTypeAt(
+                                                            partitionRowType.getFieldIndex(k));
+                                            if (dataType instanceof DateType) {
+                                                partValues.put(
+                                                        k,
+                                                        DateTimeUtils.toLocalDate(
+                                                                        Integer.parseInt(v))
+                                                                .toString());
+                                            } else if (dataType instanceof TimeType) {
+                                                partValues.put(
+                                                        k,
+                                                        DateTimeUtils.toLocalTime(
+                                                                        Integer.parseInt(v))
+                                                                .toString());
+                                            }
+                                        });
                                 return new CatalogPartitionSpec(partValues);
                             })
                     .collect(Collectors.toList());
