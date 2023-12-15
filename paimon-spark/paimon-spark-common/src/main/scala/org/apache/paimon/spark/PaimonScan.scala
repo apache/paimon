@@ -17,18 +17,23 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.Table
-import org.apache.paimon.table.source.ReadBuilder
 
 import org.apache.spark.sql.Utils.fieldReference
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
 import org.apache.spark.sql.sources.{Filter, In}
+import org.apache.spark.sql.types.StructType
 
 import scala.collection.JavaConverters._
 
-case class PaimonScan(table: Table, readBuilder: ReadBuilder, desc: String)
-  extends PaimonBaseScan(table, readBuilder, desc)
+case class PaimonScan(
+    table: Table,
+    requiredSchema: StructType,
+    filters: Array[(Filter, Predicate)],
+    pushDownLimit: Option[Int])
+  extends PaimonBaseScan(table, requiredSchema, filters, pushDownLimit)
   with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {
@@ -49,6 +54,7 @@ case class PaimonScan(table: Table, readBuilder: ReadBuilder, desc: String)
       case _ => None
     }
     if (partitionFilter.nonEmpty) {
+      this.runtimeFilters = filters
       readBuilder.withFilter(partitionFilter.head)
       splits = readBuilder.newScan().plan().splits().asScala.toArray
     }
