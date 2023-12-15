@@ -107,7 +107,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new DeduplicateMergeFunction();
+            return DeduplicateMergeFunction.factory().create();
         }
     }
 

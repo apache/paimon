@@ -199,7 +199,7 @@ public class WriteCdcToTable {
         
         new RichCdcSinkBuilder()
                 .withInput(dataStream)
-                .withTable(createTableIfNotExists(identifier))
+                .withTable(createTableIfNotExists(catalogLoader.load(), identifier))
                 .withIdentifier(identifier)
                 .withCatalogLoader(catalogLoader)
                 .build();
@@ -207,10 +207,7 @@ public class WriteCdcToTable {
         env.execute();
     }
 
-    private static Table createTableIfNotExists(Identifier identifier) throws Exception {
-        CatalogContext context = CatalogContext.create(new Path("..."));
-        Catalog catalog = CatalogFactory.createCatalog(context);
-
+    private static Table createTableIfNotExists(Catalog catalog, Identifier identifier) throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.primaryKey("order_id");
         schemaBuilder.column("order_id", DataTypes.BIGINT());

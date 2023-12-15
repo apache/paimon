@@ -17,14 +17,15 @@
  */
 package org.apache.paimon.spark.catalyst.plans.logical
 
+import org.apache.paimon.spark.leafnode.PaimonLeafCommand
 import org.apache.paimon.spark.procedure.Procedure
 
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, Expression}
-import org.apache.spark.sql.catalyst.plans.logical.LeafCommand
 import org.apache.spark.sql.catalyst.util.truncatedString
 
 /** A CALL command that resolves stored procedure from SQL. */
-case class PaimonCallCommand(procedure: Procedure, args: Seq[Expression]) extends LeafCommand {
+case class PaimonCallCommand(procedure: Procedure, args: Seq[Expression])
+  extends PaimonLeafCommand {
 
   override lazy val output: Seq[Attribute] =
     procedure.outputType.map(

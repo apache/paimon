@@ -193,16 +193,31 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         for (Map.Entry<Long, List<CommitT>> entry : grouped.entrySet()) {
             Long cp = entry.getKey();
             List<CommitT> committables = entry.getValue();
-            if (committablesPerCheckpoint.containsKey(cp)) {
+            // To prevent the asynchronous completion of tasks with multiple concurrent bounded
+            // stream inputs, which leads to some tasks passing a Committable with cp =
+            // Long.MAX_VALUE during the endInput method call of the current checkpoint, while other
+            // tasks pass a Committable with Long.MAX_VALUE during other checkpoints hence causing
+            // an error here, we have a special handling for Committables with Long.MAX_VALUE:
+            // instead of throwing an error, we merge them.
+            if (cp != null && cp == Long.MAX_VALUE && committablesPerCheckpoint.containsKey(cp)) {
+                // Merge the Long.MAX_VALUE committables here.
+                GlobalCommitT commitT =
+                        committer.combine(
+                                cp,
+                                currentWatermark,
+                                committablesPerCheckpoint.get(cp),
+                                committables);
+                committablesPerCheckpoint.put(cp, commitT);
+            } else if (committablesPerCheckpoint.containsKey(cp)) {
                 throw new RuntimeException(
                         String.format(
                                 "Repeatedly commit the same checkpoint files. \n"
                                         + "The previous files is %s, \n"
                                         + "and the subsequent files is %s",
                                 committablesPerCheckpoint.get(cp), committables));
+            } else {
+                committablesPerCheckpoint.put(cp, toCommittables(cp, committables));
             }
-
-            committablesPerCheckpoint.put(cp, toCommittables(cp, committables));
         }
 
         this.inputs.clear();

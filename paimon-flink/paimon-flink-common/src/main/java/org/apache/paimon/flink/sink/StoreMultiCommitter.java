@@ -89,8 +89,16 @@ public class StoreMultiCommitter
             long checkpointId, long watermark, List<MultiTableCommittable> committables) {
         WrappedManifestCommittable wrappedManifestCommittable =
                 new WrappedManifestCommittable(checkpointId, watermark);
-        for (MultiTableCommittable committable : committables) {
+        return combine(checkpointId, watermark, wrappedManifestCommittable, committables);
+    }
 
+    @Override
+    public WrappedManifestCommittable combine(
+            long checkpointId,
+            long watermark,
+            WrappedManifestCommittable wrappedManifestCommittable,
+            List<MultiTableCommittable> committables) {
+        for (MultiTableCommittable committable : committables) {
             ManifestCommittable manifestCommittable =
                     wrappedManifestCommittable.computeCommittableIfAbsent(
                             Identifier.create(committable.getDatabase(), committable.getTable()),

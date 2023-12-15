@@ -234,6 +234,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
+    public static final ConfigOption<Boolean> DEDUPLICATE_IGNORE_DELETE =
+            key("deduplicate.ignore-delete")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore delete records in deduplicate mode.");
+
     public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
             key("partial-update.ignore-delete")
                     .booleanType()
@@ -1986,8 +1992,10 @@ public class CoreOptions implements Serializable {
                 "Based on the time of the machine, create TAG once the processing time passes period time plus delay."),
         WATERMARK(
                 "watermark",
-                "Based on the watermark of the input, create TAG once the watermark passes period time plus delay.");
-
+                "Based on the watermark of the input, create TAG once the watermark passes period time plus delay."),
+        BATCH(
+                "batch",
+                "In the batch processing scenario, the tag corresponding to the current snapshot is generated after the task is completed.");
         private final String value;
         private final String description;
 

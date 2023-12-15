@@ -81,8 +81,6 @@ public class MySqlSyncDatabaseTableListITCase extends MySqlActionITCaseBase {
         if (mode == COMBINED) {
             try (Statement statement = getStatement()) {
                 // ensure the job steps into incremental phase
-                statement.executeUpdate("USE shard_1");
-                statement.executeUpdate("INSERT INTO t2 VALUES (1, 'A')");
                 waitForResult(
                         Collections.singletonList("+I[1, A]"),
                         getFileStoreTable("shard_1_t2"),

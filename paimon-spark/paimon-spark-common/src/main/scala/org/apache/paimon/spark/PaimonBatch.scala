@@ -29,7 +29,8 @@ case class PaimonBatch(splits: Array[Split], readBuilder: ReadBuilder) extends B
   override def planInputPartitions(): Array[InputPartition] =
     splits.map(new SparkInputPartition(_).asInstanceOf[InputPartition])
 
-  override def createReaderFactory(): PartitionReaderFactory = new SparkReaderFactory(readBuilder)
+  override def createReaderFactory(): PartitionReaderFactory = new PaimonPartitionReaderFactory(
+    readBuilder)
 
   override def equals(obj: Any): Boolean = {
     obj match {

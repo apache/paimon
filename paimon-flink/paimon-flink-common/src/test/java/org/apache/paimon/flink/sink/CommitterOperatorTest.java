@@ -25,10 +25,13 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
@@ -276,6 +279,138 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         Assertions.assertThat(actual.size()).isEqualTo(1);
 
         Assertions.assertThat(actual).hasSameElementsAs(Lists.newArrayList(commitUser));
+    }
+
+    @Test
+    public void testCommitInputEnd() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        String commitUser = UUID.randomUUID().toString();
+        OneInputStreamOperator<Committable, Committable> operator =
+                createCommitterOperator(table, commitUser, new NoopCommittableStateManager());
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createTestHarness(operator);
+        testHarness.open();
+        Assertions.assertThatCode(
+                        () -> {
+                            long time = System.currentTimeMillis();
+                            long cp = 0L;
+                            testHarness.processElement(
+                                    new Committable(
+                                            Long.MAX_VALUE,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.snapshot(cp++, time++);
+                            testHarness.processElement(
+                                    new Committable(
+                                            Long.MAX_VALUE,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.processElement(
+                                    new Committable(
+                                            Long.MAX_VALUE,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.snapshot(cp++, time++);
+                            testHarness.snapshot(cp, time);
+                        })
+                .doesNotThrowAnyException();
+
+        if (operator instanceof CommitterOperator) {
+            Assertions.assertThat(
+                            ((ManifestCommittable)
+                                            ((CommitterOperator) operator)
+                                                    .committablesPerCheckpoint.get(Long.MAX_VALUE))
+                                    .fileCommittables()
+                                    .size())
+                    .isEqualTo(3);
+        }
+
+        Assertions.assertThatCode(
+                        () -> {
+                            long time = System.currentTimeMillis();
+                            long cp = 0L;
+                            testHarness.processElement(
+                                    new Committable(
+                                            0L,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.snapshot(cp++, time++);
+                            testHarness.processElement(
+                                    new Committable(
+                                            0L,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.processElement(
+                                    new Committable(
+                                            Long.MAX_VALUE,
+                                            Committable.Kind.FILE,
+                                            new CommitMessageImpl(
+                                                    BinaryRow.EMPTY_ROW,
+                                                    0,
+                                                    new NewFilesIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()),
+                                                    new CompactIncrement(
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList(),
+                                                            Collections.emptyList()))),
+                                    cp);
+                            testHarness.snapshot(cp++, time++);
+                            testHarness.snapshot(cp, time);
+                        })
+                .hasRootCauseInstanceOf(RuntimeException.class)
+                .cause()
+                .hasMessageContaining("Repeatedly commit the same checkpoint files.");
     }
 
     private static OperatorSubtaskState writeAndSnapshot(

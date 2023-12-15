@@ -47,6 +47,8 @@ CREATE TABLE s2 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured
 CREATE TABLE sa (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
 CREATE TABLE m (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- ignored
 
+INSERT INTO t2 VALUES (1, 'A');
+
 USE shard_2;
 
 CREATE TABLE t1 (k INT, name VARCHAR(100), PRIMARY KEY (k)); -- captured

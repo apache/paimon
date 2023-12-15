@@ -20,10 +20,12 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -43,6 +45,7 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TIN
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT test for {@link TypeMapping} in MySQL CDC. */
 public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
@@ -60,6 +63,10 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     public void testTinyInt1NotBool() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
+
+        // test tinyInt1isBit compatibility and url building
+        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "tinyInt1isBit", "false");
+        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "useSSL", "false");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
@@ -111,6 +118,28 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                     rowType1,
                     Collections.singletonList("pk"));
         }
+    }
+
+    @Test
+    public void testConflictTinyInt1NotBool() {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "tinyint1_not_bool_test");
+        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "tinyInt1isBit", "true");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .withMode(COMBINED.configString())
+                        .withTypeMappingModes(TINYINT1_NOT_BOOL.configString())
+                        .build();
+
+        assertThatThrownBy(action::run)
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Type mapping option 'tinyint1-not-bool' conflicts with "
+                                        + "jdbc properties 'jdbc.properties.tinyInt1isBit=true'. "
+                                        + "Option 'tinyint1-not-bool' is equal to 'jdbc.properties.tinyInt1isBit=false'."));
     }
 
     // --------------------------------------- all-to-string ---------------------------------------

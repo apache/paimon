@@ -17,15 +17,15 @@
  */
 package org.apache.paimon.spark.execution
 
+import org.apache.paimon.spark.leafnode.PaimonLeafV2CommandExec
 import org.apache.paimon.spark.procedure.Procedure
 
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.util.truncatedString
-import org.apache.spark.sql.execution.datasources.v2.LeafV2CommandExec
 
 case class PaimonCallExec(output: Seq[Attribute], procedure: Procedure, input: InternalRow)
-  extends LeafV2CommandExec {
+  extends PaimonLeafV2CommandExec {
 
   override protected def run(): Seq[InternalRow] = {
     procedure.call(input)
