@@ -44,7 +44,8 @@ case class MergeIntoPaimonTable(
     sourceTable: LogicalPlan,
     mergeCondition: Expression,
     matchedActions: Seq[MergeAction],
-    notMatchedActions: Seq[MergeAction])
+    notMatchedActions: Seq[MergeAction],
+    notMatchedBySourceActions: Seq[MergeAction])
   extends PaimonLeafRunnableCommand
   with WithFileStoreTable
   with ExpressionHelper
@@ -100,7 +101,16 @@ case class MergeIntoPaimonTable(
     val sourceRowNotMatched = resolveOnJoinedPlan(Seq(col(TARGET_ROW_COL).isNull.expr)).head
     val matchedExprs = matchedActions.map(_.condition.getOrElse(TrueLiteral))
     val notMatchedExprs = notMatchedActions.map(_.condition.getOrElse(TrueLiteral))
+    val notMatchedBySourceExprs = notMatchedBySourceActions.map(_.condition.getOrElse(TrueLiteral))
     val matchedOutputs = matchedActions.map {
+      case UpdateAction(_, assignments) =>
+        assignments.map(_.value) :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
+      case DeleteAction(_) =>
+        targetOutput :+ Literal(RowKind.DELETE.toByteValue)
+      case _ =>
+        throw new RuntimeException("should not be here.")
+    }
+    val notMatchedBySourceOutputs = notMatchedBySourceActions.map {
       case UpdateAction(_, assignments) =>
         assignments.map(_.value) :+ Literal(RowKind.UPDATE_AFTER.toByteValue)
       case DeleteAction(_) =>
@@ -126,6 +136,8 @@ case class MergeIntoPaimonTable(
       sourceRowNotMatched,
       matchedExprs,
       matchedOutputs,
+      notMatchedBySourceExprs,
+      notMatchedBySourceOutputs,
       notMatchedExprs,
       notMatchedOutputs,
       noopOutput,
@@ -169,6 +181,8 @@ object MergeIntoPaimonTable {
       sourceRowHasNoMatch: Expression,
       matchedConditions: Seq[Expression],
       matchedOutputs: Seq[Seq[Expression]],
+      notMatchedBySourceConditions: Seq[Expression],
+      notMatchedBySourceOutputs: Seq[Seq[Expression]],
       notMatchedConditions: Seq[Expression],
       notMatchedOutputs: Seq[Seq[Expression]],
       noopCopyOutput: Seq[Expression],
@@ -193,6 +207,8 @@ object MergeIntoPaimonTable {
       val sourceRowHasNoMatchPred = generatePredicate(sourceRowHasNoMatch)
       val matchedPreds = matchedConditions.map(generatePredicate)
       val matchedProjs = matchedOutputs.map(generateProjection)
+      val notMatchedBySourcePreds = notMatchedBySourceConditions.map(generatePredicate)
+      val notMatchedBySourceProjs = notMatchedBySourceOutputs.map(generateProjection)
       val notMatchedPreds = notMatchedConditions.map(generatePredicate)
       val notMatchedProjs = notMatchedOutputs.map(generateProjection)
       val noopCopyProj = generateProjection(noopCopyOutput)
@@ -200,7 +216,15 @@ object MergeIntoPaimonTable {
 
       def processRow(inputRow: InternalRow): InternalRow = {
         if (targetRowHasNoMatchPred.eval(inputRow)) {
-          noopCopyProj.apply(inputRow)
+          val pair = notMatchedBySourcePreds.zip(notMatchedBySourceProjs).find {
+            case (predicate, _) => predicate.eval(inputRow)
+          }
+
+          pair match {
+            case Some((_, projections)) =>
+              projections.apply(inputRow)
+            case None => noopCopyProj.apply(inputRow)
+          }
         } else if (sourceRowHasNoMatchPred.eval(inputRow)) {
           val pair = notMatchedPreds.zip(notMatchedProjs).find {
             case (predicate, _) => predicate.eval(inputRow)

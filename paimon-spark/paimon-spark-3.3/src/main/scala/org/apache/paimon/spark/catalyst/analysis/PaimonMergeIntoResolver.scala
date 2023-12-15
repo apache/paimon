@@ -17,11 +17,9 @@
  */
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
 import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeAction, MergeIntoTable}
 
-/** Resolve all the expressions for MergeInto. */
 object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
 
   def resolveNotMatchedBySourceActions(
@@ -29,30 +27,7 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
       target: LogicalPlan,
       source: LogicalPlan,
       resolve: (Expression, LogicalPlan) => Expression): Seq[MergeAction] = {
-    def resolveMergeAction(action: MergeAction): MergeAction = {
-      action match {
-        case DeleteAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          DeleteAction(resolvedCond)
-        case UpdateAction(condition, assignments) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          val resolvedAssignments = assignments.map {
-            assignment =>
-              assignment.copy(
-                key = resolve(assignment.key, target),
-                value = resolve(assignment.value, target))
-          }
-          UpdateAction(resolvedCond, resolvedAssignments)
-        case UpdateStarAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, target))
-          val resolvedAssignments = target.output.map {
-            attr => Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), source))
-          }
-          UpdateAction(resolvedCond, resolvedAssignments)
-      }
-    }
-
-    merge.notMatchedBySourceActions.map(resolveMergeAction)
+    Seq.empty
   }
 
   def build(
@@ -61,11 +36,14 @@ object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
       resolvedMatched: Seq[MergeAction],
       resolvedNotMatched: Seq[MergeAction],
       resolvedNotMatchedBySource: Seq[MergeAction]): MergeIntoTable = {
+    if (resolvedNotMatchedBySource.nonEmpty) {
+      throw new RuntimeException("WHEN NOT MATCHED BY SOURCE is not supported here.")
+    }
+
     merge.copy(
       mergeCondition = resolvedCond,
       matchedActions = resolvedMatched,
-      notMatchedActions = resolvedNotMatched,
-      notMatchedBySourceActions = resolvedNotMatchedBySource)
+      notMatchedActions = resolvedNotMatched)
   }
 
 }
