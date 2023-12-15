@@ -68,6 +68,7 @@ public class TagAutoCreation {
         this.periodHandler.validateDelay(delay);
 
         SortedMap<Snapshot, String> tags = tagManager.tags();
+        tags.entrySet().removeIf(entry -> entry.getValue().startsWith("savepoint"));
 
         if (tags.isEmpty()) {
             this.nextSnapshot =
