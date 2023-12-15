@@ -26,18 +26,6 @@ class PaimonScanBuilder(table: Table)
   extends PaimonBaseScanBuilder(table)
   with SupportsPushDownLimit {
 
-  private var pushDownLimit: Option[Int] = None
-
-  override protected def getReadBuilder: ReadBuilder = {
-    val readBuilder = super.getReadBuilder
-    pushDownLimit.foreach(readBuilder.withLimit)
-    readBuilder
-  }
-
-  override protected def getDescription: String = {
-    super.getDescription + pushDownLimit.map(limit => s" Limit: [$limit]").getOrElse("")
-  }
-
   override def pushLimit(limit: Int): Boolean = {
     if (table.isInstanceOf[AppendOnlyFileStoreTable]) {
       pushDownLimit = Some(limit)

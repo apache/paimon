@@ -136,4 +136,30 @@ under the License.
             </exclusions>
         </dependency>
     </dependencies>
+
+    <profiles>
+        <profile>
+            <id>skip-paimon-flink-tests</id>
+            <modules>
+                <module>paimon-flink-common</module>
+                <module>paimon-flink-1.14</module>
+                <module>paimon-flink-1.15</module>
+                <module>paimon-flink-1.16</module>
+                <module>paimon-flink-1.17</module>
+                <module>paimon-flink-1.18</module>
+                <module>paimon-flink-cdc</module>
+            </modules>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-surefire-plugin</artifactId>
+                        <configuration>
+                            <skipTests>true</skipTests>
+                        </configuration>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>
