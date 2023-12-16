@@ -59,7 +59,6 @@ import java.util.Map;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.METASTORE;
-import static org.apache.paimon.options.CatalogOptions.URI;
 import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -254,13 +253,10 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
             String warehouse = conf.warehousePath();
             newOptions.put(WAREHOUSE.key(), warehouse);
         }
-        String metastore = conf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
-        if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
-            newOptions.put(METASTORE.key(), metastore);
-            String uri;
-            if ((uri = conf.getConfString("spark.sql.catalog.spark_catalog.uri", null)) != null
-                    && !options.containsKey(URI.key())) {
-                newOptions.put(URI.key(), uri);
+        if (!options.containsKey(METASTORE.key())) {
+            String metastore = conf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
+            if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
+                newOptions.put(METASTORE.key(), metastore);
             }
         }
 
