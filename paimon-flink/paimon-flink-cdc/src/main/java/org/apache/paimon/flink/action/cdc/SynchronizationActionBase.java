@@ -106,7 +106,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
         beforeBuildingSourceSink();
 
         DataStream<RichCdcMultiplexRecord> input =
-                buildDataStreamSource(buildSource()).flatMap(recordParse()).name("Parse");
+                buildDataStreamSource(buildSource()).flatMap(recordParser()).name("Parse");
 
         EventParser.Factory<RichCdcMultiplexRecord> parserFactory = buildEventParserFactory();
 
@@ -135,7 +135,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
         throw new UnsupportedOperationException("Unrecognized source type");
     }
 
-    protected abstract FlatMapFunction<String, RichCdcMultiplexRecord> recordParse();
+    protected abstract FlatMapFunction<String, RichCdcMultiplexRecord> recordParser();
 
     protected abstract EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory();
 
