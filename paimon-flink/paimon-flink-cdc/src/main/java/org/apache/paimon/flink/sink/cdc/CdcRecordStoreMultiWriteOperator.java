@@ -181,7 +181,7 @@ public class CdcRecordStoreMultiWriteOperator
             while (true) {
                 try {
                     table = (FileStoreTable) catalog.getTable(tableId);
-                    table.copy(dynamicOptions);
+                    table = table.copy(dynamicOptions);
                     tables.put(tableId, table);
                     break;
                 } catch (Catalog.TableNotExistException e) {
