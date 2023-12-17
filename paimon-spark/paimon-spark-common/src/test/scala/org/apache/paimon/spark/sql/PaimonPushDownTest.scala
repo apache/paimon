@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.{PaimonSparkTestBase, SparkInputPartition, SparkTable}
+import org.apache.paimon.spark.{PaimonBatch, PaimonScan, PaimonSparkTestBase, SparkInputPartition, SparkTable}
 import org.apache.paimon.table.source.DataSplit
 
 import org.apache.spark.sql.Row
@@ -111,7 +111,9 @@ class PaimonPushDownTest extends PaimonSparkTestBase {
 
     // It still return false even it can push down limit.
     Assertions.assertFalse(scanBuilder.asInstanceOf[SupportsPushDownLimit].pushLimit(1))
-    val partitions = scanBuilder.build().toBatch.planInputPartitions()
+    val paimonScan = scanBuilder.build().asInstanceOf[PaimonScan]
+    val partitions =
+      PaimonBatch(paimonScan.getOriginSplits, paimonScan.readBuilder).planInputPartitions()
     Assertions.assertEquals(1, partitions.length)
 
     Assertions.assertEquals(1, spark.sql("SELECT * FROM T LIMIT 1").count())
