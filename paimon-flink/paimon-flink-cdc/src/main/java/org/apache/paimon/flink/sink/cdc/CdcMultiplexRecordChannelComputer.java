@@ -76,7 +76,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                     FileStoreTable table;
                     try {
                         table = (FileStoreTable) catalog.getTable(id);
-                        table.copy(dynamicOptions);
+                        table = table.copy(dynamicOptions);
                     } catch (Catalog.TableNotExistException e) {
                         LOG.error("Failed to get table " + id.getFullName());
                         return null;
