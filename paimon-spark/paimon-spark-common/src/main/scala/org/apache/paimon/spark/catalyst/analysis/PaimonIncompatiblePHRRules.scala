@@ -17,11 +17,11 @@
  */
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.commands.{PaimonShowTablePartitionsCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.commands.PaimonTruncateTableCommand
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ShowPartitions, TruncatePartition}
+import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, TruncatePartition}
 import org.apache.spark.sql.catalyst.rules.Rule
 
 /** These post-hoc resolution rules are incompatible between different versions of spark. */
@@ -42,11 +42,6 @@ case class PaimonIncompatiblePHRRules(session: SparkSession) extends Rule[Logica
             (name -> ident.get(index, field.dataType).toString)
         }.toMap
         PaimonTruncateTableCommand(table, partitionSpec)
-
-      case t @ ShowPartitions(PaimonRelation(table), specOpt, _) if t.resolved =>
-        PaimonShowTablePartitionsCommand(
-          table,
-          specOpt.map(s => s.asInstanceOf[ResolvedPartitionSpec]))
 
       case _ => plan
     }
