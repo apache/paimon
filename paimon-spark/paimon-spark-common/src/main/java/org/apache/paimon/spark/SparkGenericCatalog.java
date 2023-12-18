@@ -219,12 +219,12 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     @Override
     public final void initialize(String name, CaseInsensitiveStringMap options) {
+        Configuration hadoopConf = SparkSession.active().sessionState().newHadoopConf();
         if (options.containsKey(METASTORE.key())
                 && options.get(METASTORE.key()).equalsIgnoreCase("hive")) {
             String uri = options.get(CatalogOptions.URI.key());
             if (uri != null) {
-                Configuration conf = SparkSession.active().sessionState().newHadoopConf();
-                String envHmsUri = conf.get("hive.metastore.uris", null);
+                String envHmsUri = hadoopConf.get("hive.metastore.uris", null);
                 if (envHmsUri != null) {
                     Preconditions.checkArgument(
                             uri.equals(envHmsUri),
@@ -243,24 +243,41 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
         this.sparkCatalog = new SparkCatalog();
 
         this.sparkCatalog.initialize(
-                name, autoFillConfigurations(options, SparkSession.active().sessionState().conf()));
+                name,
+                autoFillConfigurations(
+                        options, SparkSession.active().sessionState().conf(), hadoopConf));
     }
 
     private CaseInsensitiveStringMap autoFillConfigurations(
-            CaseInsensitiveStringMap options, SQLConf conf) {
+            CaseInsensitiveStringMap options, SQLConf sqlConf, Configuration hadoopConf) {
         Map<String, String> newOptions = new HashMap<>(options.asCaseSensitiveMap());
-        if (!options.containsKey(WAREHOUSE.key())) {
-            String warehouse = conf.warehousePath();
-            newOptions.put(WAREHOUSE.key(), warehouse);
-        }
+        fillAliyunConfigurations(newOptions, hadoopConf);
+        fillCommonConfigurations(newOptions, sqlConf);
+        return new CaseInsensitiveStringMap(newOptions);
+    }
+
+    private void fillAliyunConfigurations(Map<String, String> options, Configuration hadoopConf) {
         if (!options.containsKey(METASTORE.key())) {
-            String metastore = conf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
-            if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
-                newOptions.put(METASTORE.key(), metastore);
+            // In Alibaba Cloud EMR, `hive.metastore.type` has two types: DLF or LOCAL, for DLF, we
+            // set `metastore` to dlf, for LOCAL, do nothing.
+            String aliyunEMRHiveMetastoreType = hadoopConf.get("hive.metastore.type", null);
+            if ("dlf".equalsIgnoreCase(aliyunEMRHiveMetastoreType)) {
+                options.put(METASTORE.key(), "dlf");
             }
         }
+    }
 
-        return new CaseInsensitiveStringMap(newOptions);
+    private void fillCommonConfigurations(Map<String, String> options, SQLConf sqlConf) {
+        if (!options.containsKey(WAREHOUSE.key())) {
+            String warehouse = sqlConf.warehousePath();
+            options.put(WAREHOUSE.key(), warehouse);
+        }
+        if (!options.containsKey(METASTORE.key())) {
+            String metastore = sqlConf.getConf(StaticSQLConf.CATALOG_IMPLEMENTATION());
+            if (HiveCatalogOptions.IDENTIFIER.equals(metastore)) {
+                options.put(METASTORE.key(), metastore);
+            }
+        }
     }
 
     @Override
