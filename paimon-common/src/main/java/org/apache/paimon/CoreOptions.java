@@ -982,6 +982,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
+    public static final ConfigOption<Boolean> DATA_DIRECTORIES_IGNORE_CLEAN =
+            key("data-directories.ignore-clean")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to ignore clean data directories.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1411,6 +1417,10 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
+    }
+
+    public boolean dataDirectoriesIgnoreClean() {
+        return options.get(DATA_DIRECTORIES_IGNORE_CLEAN);
     }
 
     public Map<String, String> getFieldDefaultValues() {
