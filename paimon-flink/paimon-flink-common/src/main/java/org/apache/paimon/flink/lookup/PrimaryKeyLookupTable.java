@@ -20,6 +20,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.types.RowKind;
@@ -87,4 +88,41 @@ public class PrimaryKeyLookupTable implements LookupTable {
             }
         }
     }
+
+    @Override
+    public Predicate<InternalRow> recordFilter() {
+        return recordFilter;
+    }
+
+    @Override
+    public byte[] toKeyBytes(InternalRow row) throws IOException {
+        primaryKey.replaceRow(row);
+        return tableState.serializeKey(primaryKey);
+    }
+
+    @Override
+    public byte[] toValueBytes(InternalRow row) throws IOException {
+        return tableState.serializeValue(row);
+    }
+
+    @Override
+    public TableBulkLoader createBulkLoader() {
+        BulkLoader bulkLoader = tableState.createBulkLoader();
+        return new TableBulkLoader() {
+
+            @Override
+            public void write(byte[] key, byte[] value)
+                    throws BulkLoader.WriteException, IOException {
+                bulkLoader.write(key, value);
+                bulkLoadWritePlus(key, value);
+            }
+
+            @Override
+            public void finish() {
+                bulkLoader.finish();
+            }
+        };
+    }
+
+    public void bulkLoadWritePlus(byte[] key, byte[] value) throws IOException {}
 }

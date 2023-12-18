@@ -22,7 +22,6 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.utils.ListDelimitedSerializer;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 
 import java.io.IOException;
@@ -35,12 +34,12 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
     private final ListDelimitedSerializer listSerializer = new ListDelimitedSerializer();
 
     public RocksDBListState(
-            RocksDB db,
+            RocksDBStateFactory stateFactory,
             ColumnFamilyHandle columnFamily,
             Serializer<K> keySerializer,
             Serializer<V> valueSerializer,
             long lruCacheSize) {
-        super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
+        super(stateFactory, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     public void add(K key, V value) throws IOException {
@@ -73,9 +72,13 @@ public class RocksDBListState<K, V> extends RocksDBState<K, V, List<V>> {
                 });
     }
 
-    private byte[] serializeValue(V value) throws IOException {
+    public byte[] serializeValue(V value) throws IOException {
         valueOutputView.clear();
         valueSerializer.serialize(value, valueOutputView);
         return valueOutputView.getCopyOfBuffer();
+    }
+
+    public byte[] serializeList(List<byte[]> valueList) throws IOException {
+        return listSerializer.serializeList(valueList);
     }
 }
