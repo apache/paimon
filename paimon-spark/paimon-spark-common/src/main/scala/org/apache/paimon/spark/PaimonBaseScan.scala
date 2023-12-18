@@ -17,6 +17,7 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.CoreOptions
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
@@ -36,7 +37,8 @@ abstract class PaimonBaseScan(
     filters: Array[(Filter, Predicate)],
     pushDownLimit: Option[Int])
   extends Scan
-  with SupportsReportStatistics {
+  with SupportsReportStatistics
+  with ScanHelper {
 
   private val tableRowType = table.rowType
 
@@ -46,7 +48,9 @@ abstract class PaimonBaseScan(
 
   protected var splits: Array[Split] = _
 
-  protected lazy val readBuilder: ReadBuilder = {
+  override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+
+  lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
 
     val projection = readSchema().fieldNames.map(field => tableRowType.getFieldNames.indexOf(field))
@@ -60,9 +64,13 @@ abstract class PaimonBaseScan(
     _readBuilder
   }
 
+  def getOriginSplits: Array[Split] = {
+    readBuilder.newScan().plan().splits().asScala.toArray
+  }
+
   def getSplits: Array[Split] = {
     if (splits == null) {
-      splits = readBuilder.newScan().plan().splits().asScala.toArray
+      splits = reshuffleSplits(getOriginSplits)
     }
     splits
   }

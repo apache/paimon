@@ -56,7 +56,8 @@ case class PaimonScan(
     if (partitionFilter.nonEmpty) {
       this.runtimeFilters = filters
       readBuilder.withFilter(partitionFilter.head)
-      splits = readBuilder.newScan().plan().splits().asScala.toArray
+      // set splits null to trigger to get the new splits.
+      splits = null
     }
   }
 
