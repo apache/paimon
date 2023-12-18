@@ -41,11 +41,7 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.LinkedHashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -141,10 +137,16 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected Map<String, String> extractRowData(
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
         paimonFieldTypes.putAll(fillDefaultStringTypes(record));
-        Map<String, String> recordMap =
-                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, String>>() {});
+        Map<String, Object> recordMap =
+                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
 
-        Map<String, String> rowData = new HashMap<>(recordMap);
+        Map<String, String> rowData =
+                recordMap.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry -> Objects.toString(entry.getValue(), null)));
+
         evalComputedColumns(rowData, paimonFieldTypes);
         return rowData;
     }
