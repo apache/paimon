@@ -237,4 +237,36 @@ public class SparkWriteITCase {
             spark.sql("DROP TABLE IF EXISTS S");
         }
     }
+
+    @Test
+    public void testShowPartitionsPartitioned() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c LONG, d STRING)"
+                        + " PARTITIONED BY (c,d)"
+                        + " TBLPROPERTIES ('primary-key'='a,c,d')");
+        spark.sql(
+                "INSERT INTO T VALUES (1, 11, 111, 'a'), (2, 22, 222, 'b'), (3, 33, 333, 'b'), (4, 44, 444, 'a')");
+
+        List<Row> rows = spark.sql("SHOW PARTITIONS T").collectAsList();
+        assertThat(rows.toString())
+                .isEqualTo("[[c=111/d=a], [c=222/d=b], [c=333/d=b], [c=444/d=a]]");
+
+        rows = spark.sql("SHOW PARTITIONS T partition(d = 'a')").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[c=111/d=a], [c=444/d=a]]");
+
+        rows = spark.sql("SHOW PARTITIONS T partition(c= '111', d = 'a')").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[c=111/d=a]]");
+    }
+
+    @Test
+    public void testShowPartitionsNonPartitioned() {
+        spark.sql(
+                "CREATE TABLE T (a INT, b INT, c LONG, d STRING)"
+                        + " TBLPROPERTIES ('primary-key'='a,c,d')");
+        spark.sql(
+                "INSERT INTO T VALUES (1, 11, 111, 'a'), (2, 22, 222, 'b'), (3, 33, 333, 'b'), (4, 44, 444, 'a')");
+
+        List<Row> rows = spark.sql("SHOW PARTITIONS T").collectAsList();
+        assertThat(rows.toString()).isEqualTo("[[]]");
+    }
 }
