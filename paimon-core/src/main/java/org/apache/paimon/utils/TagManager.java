@@ -179,6 +179,21 @@ public class TagManager {
 
     /** Get all tagged snapshots with names sorted by snapshot id. */
     public SortedMap<Snapshot, String> tags() {
+        return tags(tagName -> true);
+    }
+
+    /**
+     * Retrieves a sorted map of snapshots filtered based on a provided predicate. The predicate
+     * determines which tag names should be included in the result. Only snapshots with tag names
+     * that pass the predicate test are included.
+     *
+     * @param filter A Predicate that tests each tag name. Snapshots with tag names that fail the
+     *     test are excluded from the result.
+     * @return A sorted map of filtered snapshots keyed by their IDs, each associated with its tag
+     *     name.
+     * @throws RuntimeException if an IOException occurs during retrieval of snapshots.
+     */
+    public SortedMap<Snapshot, String> tags(Predicate<String> filter) {
         TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
             List<Path> paths =
@@ -187,14 +202,15 @@ public class TagManager {
                             .collect(Collectors.toList());
 
             for (Path path : paths) {
+                String tagName = path.getName().substring(TAG_PREFIX.length());
+
+                if (!filter.test(tagName)) {
+                    continue;
+                }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 Snapshot.safelyFromPath(fileIO, path)
-                        .ifPresent(
-                                snapshot ->
-                                        tags.put(
-                                                snapshot,
-                                                path.getName().substring(TAG_PREFIX.length())));
+                        .ifPresent(snapshot -> tags.put(snapshot, tagName));
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
