@@ -20,7 +20,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.commands.{PaimonShowTablePartitionsCommand, PaimonTruncateTableCommand}
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.{ResolvedPartitionSpec, UnresolvedPartitionSpec}
+import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
 import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, ShowPartitions, TruncatePartition}
 import org.apache.spark.sql.catalyst.rules.Rule
 
