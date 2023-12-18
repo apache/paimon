@@ -28,8 +28,7 @@ import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Collections, UUID}
-import java.util.{Map => JMap}
+import java.util.{Collections, Map => JMap, UUID}
 
 import scala.collection.JavaConverters._
 
@@ -89,7 +88,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       s"Number of partition names (${partitionCols.length}) must be equal to " +
         s"the number of partition values (${internalRow.numFields})."
     )
-    val schema: StructType = partitionSchema
+    val schema: StructType = partitionSchema()
     assert(
       partitionCols.forall(fieldName => schema.fieldNames.contains(fieldName)),
       s"Some partition names ${partitionCols.mkString("[", ", ", "]")} don't belong to " +
@@ -111,12 +110,12 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
             .map {
               case (partitionName, index) =>
                 val internalRowIndex = schema.fieldIndex(partitionName)
-                val structField = schema.fields(index)
+                val structField = schema.fields(internalRowIndex)
                 sparkInternalRow
                   .get(internalRowIndex, structField.dataType)
                   .equals(internalRow.get(index, structField.dataType))
             }
-            .fold(true)(_ && _)
+            .forall(identity)
         })
       .toArray
   }
