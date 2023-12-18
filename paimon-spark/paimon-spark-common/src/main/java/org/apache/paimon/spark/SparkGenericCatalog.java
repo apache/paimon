@@ -258,7 +258,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     private void fillAliyunConfigurations(Map<String, String> options, Configuration hadoopConf) {
         if (!options.containsKey(METASTORE.key())) {
-            // For Alibaba Cloud EMR
+            // In Alibaba Cloud EMR, `hive.metastore.type` has two types: DLF or LOCAL, for DLF, we
+            // set `metastore` to dlf, for LOCAL, do nothing.
             String aliyunEMRHiveMetastoreType = hadoopConf.get("hive.metastore.type", null);
             if ("dlf".equalsIgnoreCase(aliyunEMRHiveMetastoreType)) {
                 options.put(METASTORE.key(), "dlf");
