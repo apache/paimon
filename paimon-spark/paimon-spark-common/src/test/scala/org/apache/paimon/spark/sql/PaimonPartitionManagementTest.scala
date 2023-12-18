@@ -103,7 +103,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             )
 
             checkAnswer(
-              spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
+              spark.sql("show partitions T PARTITION (dt=20230817, hh='1132')"),
               Row("dt=20230817/hh=1132") :: Nil)
 
             checkAnswer(
@@ -111,20 +111,20 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
               Row("dt=20230816/hh=1132") :: Row("dt=20230817/hh=1132") :: Nil)
 
             checkAnswer(
-              spark.sql("show partitions T PARTITION (dt='20230816')"),
+              spark.sql("show partitions T PARTITION (dt=20230816)"),
               Row("dt=20230816/hh=1132") :: Row("dt=20230816/hh=1133") :: Row(
                 "dt=20230816/hh=1134") :: Nil)
 
             checkAnswer(spark.sql("show partitions T PARTITION (hh='1135')"), Nil)
 
-            checkAnswer(spark.sql("show partitions T PARTITION (dt='20230818')"), Nil)
+            checkAnswer(spark.sql("show partitions T PARTITION (dt=20230818)"), Nil)
 
-            spark.sql("alter table T drop partition (dt='20230816', hh='1134')")
+            spark.sql("alter table T drop partition (dt=20230816, hh='1134')")
 
-            spark.sql("alter table T drop partition (dt='20230817', hh='1133')")
+            spark.sql("alter table T drop partition (dt=20230817, hh='1133')")
 
             assertThrows[AnalysisException] {
-              spark.sql("alter table T drop partition (dt='20230816')")
+              spark.sql("alter table T drop partition (dt=20230816)")
             }
 
             assertThrows[AnalysisException] {
@@ -137,7 +137,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
                 :: Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
 
             checkAnswer(
-              spark.sql("show partitions T PARTITION (dt='20230817', hh='1132')"),
+              spark.sql("show partitions T PARTITION (dt=20230817, hh='1132')"),
               Row("dt=20230817/hh=1132") :: Nil)
 
             checkAnswer(
@@ -149,7 +149,7 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
               Row("dt=20230817/hh=1134") :: Nil)
 
             checkAnswer(
-              spark.sql("show partitions T PARTITION (dt='20230817')"),
+              spark.sql("show partitions T PARTITION (dt=20230817)"),
               Row("dt=20230817/hh=1132") :: Row("dt=20230817/hh=1134") :: Nil)
 
             checkAnswer(
