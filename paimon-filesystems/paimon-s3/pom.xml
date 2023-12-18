@@ -113,6 +113,16 @@
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
                                     <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <excludes>META-INF/**</excludes>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.paimon</groupId>
+                                    <artifactId>paimon-s3-impl</artifactId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <includes>META-INF/services/**,META-INF/versions/**</includes>
                                 </artifactItem>
                             </artifactItems>
                         </configuration>
