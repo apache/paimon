@@ -46,7 +46,7 @@ public class DateTimeUtilsTest {
     }
 
     @Test
-    public void testAutoFormatDatetimeTz() {
+    public void testAutoFormatTimestampTz() {
         long millisPerHour = 3600000L;
         String testDatetime = "2023-12-12 10:12:12";
         long testTimestamp = 1702375932000L;

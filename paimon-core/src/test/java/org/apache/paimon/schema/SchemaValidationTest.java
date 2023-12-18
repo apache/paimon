@@ -67,40 +67,40 @@ class SchemaValidationTest {
 
     @Test
     public void testOnlyDatetime() {
-        String datetime =
+        String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_TIMESTAMP.toString());
-        options.put(CoreOptions.SCAN_DATETIME.key(), datetime);
+        options.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
         ThrowableAssert.ThrowingCallable validate = () -> validateTableSchemaExec(options);
         assertThatNoException().isThrownBy(validate);
     }
 
     @Test
     public void testFromTimestampConflict() {
-        String datetime =
+        String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_TIMESTAMP.toString());
-        options.put(CoreOptions.SCAN_DATETIME.key(), datetime);
+        options.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
         options.put(
                 CoreOptions.SCAN_TIMESTAMP_MILLIS.key(),
                 String.valueOf(System.currentTimeMillis()));
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
-                        "must set only one key in [scan.timestamp-millis,scan.datetime] when you use from-timestamp for scan.mode");
+                        "must set only one key in [scan.timestamp-millis,scan.timestamp] when you use from-timestamp for scan.mode");
     }
 
     @Test
     public void testFromSnapshotConflict() {
-        String datetime =
+        String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_TIMESTAMP.toString());
-        options.put(CoreOptions.SCAN_DATETIME.key(), datetime);
+        options.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
         options.put(SCAN_SNAPSHOT_ID.key(), String.valueOf(-1));
         assertThatThrownBy(() -> validateTableSchemaExec(options))
                 .hasMessageContaining(
-                        "[scan.snapshot-id] must be null when you set [scan.timestamp-millis,scan.datetime]");
+                        "[scan.snapshot-id] must be null when you set [scan.timestamp-millis,scan.timestamp]");
     }
 }

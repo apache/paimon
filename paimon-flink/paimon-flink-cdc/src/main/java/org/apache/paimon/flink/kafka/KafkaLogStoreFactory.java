@@ -47,7 +47,7 @@ import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_C
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
 import static org.apache.paimon.CoreOptions.LOG_CONSISTENCY;
 import static org.apache.paimon.CoreOptions.LogConsistency;
-import static org.apache.paimon.CoreOptions.SCAN_DATETIME;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.flink.factories.FlinkFactoryUtil.createFlinkTableFactoryHelper;
 import static org.apache.paimon.flink.kafka.KafkaLogOptions.TOPIC;
@@ -90,10 +90,10 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
                         .createRuntimeDecoder(sourceContext, physicalType);
         Options options = toOptions(helper.getOptions());
         Long timestampMills = options.get(SCAN_TIMESTAMP_MILLIS);
-        String datetime = options.get(SCAN_DATETIME);
+        String timestampString = options.get(SCAN_TIMESTAMP);
 
-        if (timestampMills == null && datetime != null) {
-            timestampMills = DateTimeUtils.autoFormatToTimestamp(datetime).getMillisecond();
+        if (timestampMills == null && timestampString != null) {
+            timestampMills = DateTimeUtils.autoFormatToTimestamp(timestampString).getMillisecond();
         }
         return new KafkaLogSourceProvider(
                 topic(context),

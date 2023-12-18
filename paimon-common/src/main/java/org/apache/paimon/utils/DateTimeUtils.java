@@ -75,8 +75,6 @@ public class DateTimeUtils {
     /** The local time zone. */
     public static final TimeZone LOCAL_TZ = TimeZone.getDefault();
 
-    public static final String DATETIME_UTC_FLAG = "/UTC";
-
     private static final DateTimeFormatter DEFAULT_TIMESTAMP_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendPattern("yyyy-[MM][M]-[dd][d]")
@@ -85,6 +83,8 @@ public class DateTimeUtils {
                     .appendFraction(NANO_OF_SECOND, 0, 9, true)
                     .optionalEnd()
                     .toFormatter();
+
+    public static final String TIMESTAMP_UTC_FLAG = "/UTC";
 
     public static final String[] AUTO_PARSE_PATTERNS = {
         "yyyy",
@@ -95,27 +95,27 @@ public class DateTimeUtils {
         "yyyy-MM-dd HH:mm:ss",
         "yyyy-MM-dd HH:mm:ss.SSS"
     };
-    private static final String FULL_DATE_DEF = "0000-01-01 00:00:00.000";
+    private static final String FULL_TIMESTAMP_DEF = "0000-01-01 00:00:00.000";
 
     /**
      * auto format date.
      *
-     * @param dateStr
+     * @param timestampString
      * @return
      */
-    public static Timestamp autoFormatToTimestamp(String dateStr) {
-        if (dateStr == null) {
+    public static Timestamp autoFormatToTimestamp(String timestampString) {
+        if (timestampString == null) {
             return Timestamp.now();
         }
         TimeZone timezone = LOCAL_TZ;
 
         // When using hivesql, there will be an additional quotation mark ,
-        dateStr = dateStr.replace("'", "");
+        timestampString = timestampString.replace("'", "");
 
         // use UTC offset format ， example： 2023-12-11 11:00/UTC+8, 2023-12-11 11:00/UTC-5
-        if (dateStr.contains(DATETIME_UTC_FLAG)) {
-            String[] split = dateStr.split(DATETIME_UTC_FLAG);
-            dateStr = split[0];
+        if (timestampString.contains(TIMESTAMP_UTC_FLAG)) {
+            String[] split = timestampString.split(TIMESTAMP_UTC_FLAG);
+            timestampString = split[0];
             try {
                 // example format： 2023-12-11 11:00/UTC
                 if (split.length == 1) {
@@ -127,7 +127,7 @@ public class DateTimeUtils {
             } catch (Exception e) {
                 throw new UnsupportedOperationException(
                         "auto format date:"
-                                + dateStr
+                                + timestampString
                                 + " error, correct example：2023-12-11 12:12/UTC+8");
             }
         }
@@ -135,19 +135,20 @@ public class DateTimeUtils {
         String errorMsg =
                 String.format(
                         "auto format not supported format： %s,Supported formats include：%s",
-                        dateStr,
+                        timestampString,
                         Arrays.stream(AUTO_PARSE_PATTERNS).collect(Collectors.joining(",")));
 
-        if (dateStr.length() < "yyyy".length() || dateStr.length() > FULL_DATE_DEF.length()) {
+        if (timestampString.length() < "yyyy".length()
+                || timestampString.length() > FULL_TIMESTAMP_DEF.length()) {
             throw new UnsupportedOperationException(errorMsg);
         }
         // format to full
-        dateStr += FULL_DATE_DEF.substring(dateStr.length());
+        timestampString += FULL_TIMESTAMP_DEF.substring(timestampString.length());
 
         try {
-            Timestamp timestamp = DateTimeUtils.parseTimestampData(dateStr, 3, timezone);
+            Timestamp timestamp = DateTimeUtils.parseTimestampData(timestampString, 3, timezone);
             LOG.debug(
-                    "auto format date:{},timezone:{},timestamp:{}" + dateStr,
+                    "auto format date:{},timezone:{},timestamp:{}" + timestampString,
                     timezone.getID(),
                     timestamp.getMillisecond());
             return timestamp;

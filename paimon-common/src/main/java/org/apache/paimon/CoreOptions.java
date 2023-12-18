@@ -471,15 +471,15 @@ public class CoreOptions implements Serializable {
                     .withDeprecatedKeys("log.scan")
                     .withDescription("Specify the scanning behavior of the source.");
 
-    public static final ConfigOption<String> SCAN_DATETIME =
-            key("scan.datetime")
+    public static final ConfigOption<String> SCAN_TIMESTAMP =
+            key("scan.timestamp")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional datetime used in case of \"from-timestamp\" scan mode,Supported datetime formats include："
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode,Supported timestamp formats include："
                                     + Arrays.stream(AUTO_PARSE_PATTERNS)
                                             .collect(Collectors.joining(","))
-                                    + " default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8");
+                                    + ", it will be automatically converted to timestamp in unix milliseconds, default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
             key("scan.timestamp-millis")
@@ -1264,7 +1264,7 @@ public class CoreOptions implements Serializable {
         StartupMode mode = options.get(SCAN_MODE);
         if (mode == StartupMode.DEFAULT) {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()
-                    || options.getOptional(SCAN_DATETIME).isPresent()) {
+                    || options.getOptional(SCAN_TIMESTAMP).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()) {
@@ -1285,16 +1285,16 @@ public class CoreOptions implements Serializable {
     }
 
     public Long scanTimestampMills() {
-        String datetime = scanDatetime();
-        Long timestamp = options.get(SCAN_TIMESTAMP_MILLIS);
-        if (timestamp == null && datetime != null) {
-            return DateTimeUtils.autoFormatToTimestamp(datetime).getMillisecond();
+        String timestampStr = scanTimestamp();
+        Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
+        if (timestampMillis == null && timestampStr != null) {
+            return DateTimeUtils.autoFormatToTimestamp(timestampStr).getMillisecond();
         }
-        return timestamp;
+        return timestampMillis;
     }
 
-    public String scanDatetime() {
-        return options.get(SCAN_DATETIME);
+    public String scanTimestamp() {
+        return options.get(SCAN_TIMESTAMP);
     }
 
     public Long scanFileCreationTimeMills() {
@@ -1873,7 +1873,7 @@ public class CoreOptions implements Serializable {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
 
-        if (options.contains(SCAN_DATETIME) && !options.contains(SCAN_MODE)) {
+        if (options.contains(SCAN_TIMESTAMP) && !options.contains(SCAN_MODE)) {
             options.set(SCAN_MODE, StartupMode.FROM_TIMESTAMP);
         }
 

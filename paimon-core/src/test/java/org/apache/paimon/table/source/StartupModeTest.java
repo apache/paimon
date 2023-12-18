@@ -146,10 +146,10 @@ public class StartupModeTest extends ScannerTestBase {
     }
 
     @Test
-    public void testStartFromDatetime() throws Exception {
+    public void testStartFromTimestampString() throws Exception {
         initializeTable(StartupMode.LATEST);
         initializeTestData(); // initialize 3 commits
-        String datetime =
+        String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Thread.sleep(10L);
 
@@ -158,7 +158,7 @@ public class StartupModeTest extends ScannerTestBase {
 
         Map<String, String> properties = new HashMap<>();
         properties.put(CoreOptions.SCAN_MODE.key(), StartupMode.FROM_TIMESTAMP.toString());
-        properties.put(CoreOptions.SCAN_DATETIME.key(), datetime);
+        properties.put(CoreOptions.SCAN_TIMESTAMP.key(), timestampString);
         FileStoreTable readTable = table.copy(properties);
 
         // streaming Mode

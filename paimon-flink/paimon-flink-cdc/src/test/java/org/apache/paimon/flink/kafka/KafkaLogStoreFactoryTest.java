@@ -51,9 +51,9 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.function.Consumer;
 
-import static org.apache.paimon.CoreOptions.SCAN_DATETIME;
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
+import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -73,9 +73,9 @@ public class KafkaLogStoreFactoryTest {
     @EnumSource(CoreOptions.StartupMode.class)
     public void testCreateKafkaLogStoreFactoryDatetime(CoreOptions.StartupMode startupMode) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
-        String datetime = LocalDateTime.now().format(formatter);
+        String timestampString = LocalDateTime.now().format(formatter);
         Consumer<Map<String, String>> setter =
-                (options) -> options.put(SCAN_DATETIME.key(), datetime);
+                (options) -> options.put(SCAN_TIMESTAMP.key(), timestampString);
         testCreateKafkaLogStoreFactory(startupMode, setter);
     }
 
