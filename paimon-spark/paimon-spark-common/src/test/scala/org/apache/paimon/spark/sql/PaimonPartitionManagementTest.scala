@@ -82,19 +82,18 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
             } else {
               ""
             }
-            spark.sql(
-              s"""
-                 |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt VARCHAR(8),hh VARCHAR(4))
-                 |PARTITIONED BY (dt, hh)
-                 |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
-                 |""".stripMargin)
+            spark.sql(s"""
+                         |CREATE TABLE T (a VARCHAR(10), b CHAR(10),c BIGINT,dt LONG,hh VARCHAR(4))
+                         |PARTITIONED BY (dt, hh)
+                         |TBLPROPERTIES ($primaryKeysProp 'bucket'='$bucket')
+                         |""".stripMargin)
 
-            spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1132')")
-            spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1133')")
-            spark.sql("INSERT INTO T VALUES('a','b',1,'20230816','1134')")
-            spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1132')")
-            spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1133')")
-            spark.sql("INSERT INTO T VALUES('a','b',2,'20230817','1134')")
+            spark.sql("INSERT INTO T VALUES('a','b',1,20230816,'1132')")
+            spark.sql("INSERT INTO T VALUES('a','b',1,20230816,'1133')")
+            spark.sql("INSERT INTO T VALUES('a','b',1,20230816,'1134')")
+            spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1132')")
+            spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1133')")
+            spark.sql("INSERT INTO T VALUES('a','b',2,20230817,'1134')")
 
             checkAnswer(
               spark.sql("show partitions T "),
@@ -155,12 +154,12 @@ class PaimonPartitionManagementTest extends PaimonSparkTestBase {
 
             checkAnswer(
               spark.sql("select * from T"),
-              Row("a", "b", 1L, "20230816", "1132") :: Row("a", "b", 1L, "20230816", "1133") :: Row(
+              Row("a", "b", 1L, 20230816L, "1132") :: Row("a", "b", 1L, 20230816L, "1133") :: Row(
                 "a",
                 "b",
                 2L,
-                "20230817",
-                "1132") :: Row("a", "b", 2L, "20230817", "1134") :: Nil
+                20230817L,
+                "1132") :: Row("a", "b", 2L, 20230817L, "1134") :: Nil
             )
           }
       }
