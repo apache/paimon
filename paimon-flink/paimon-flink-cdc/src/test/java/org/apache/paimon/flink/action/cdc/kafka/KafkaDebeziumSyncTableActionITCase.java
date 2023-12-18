@@ -154,12 +154,12 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.STRING().notNull(),
-                                DataTypes.STRING(),
-                                DataTypes.STRING(),
-                                DataTypes.STRING(),
-                                DataTypes.STRING(),
-                                DataTypes.STRING()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
                         },
                         new String[] {"id", "name", "row"});
         expected =
@@ -238,15 +238,11 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
 
         RowType rowType =
                 RowType.of(
-                        new DataType[] {
-                                DataTypes.STRING().notNull(),
-                                DataTypes.STRING()
-                        },
+                        new DataType[] {DataTypes.STRING().notNull(), DataTypes.STRING()},
                         new String[] {"id", "name", "row"});
         List<String> primaryKeys = Collections.singletonList("id");
         List<String> expected =
-                Collections.singletonList(
-                        "+I[101, scooter, {\"row_key\":\"value\"}]");
+                Collections.singletonList("+I[101, scooter, {\"row_key\":\"value\"}]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 }
