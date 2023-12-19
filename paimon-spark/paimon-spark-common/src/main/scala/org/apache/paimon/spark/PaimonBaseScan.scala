@@ -34,7 +34,7 @@ import scala.collection.JavaConverters._
 abstract class PaimonBaseScan(
     table: Table,
     requiredSchema: StructType,
-    filters: Array[(Filter, Predicate)],
+    filters: Array[Predicate],
     pushDownLimit: Option[Int])
   extends Scan
   with SupportsReportStatistics
@@ -56,7 +56,7 @@ abstract class PaimonBaseScan(
     val projection = readSchema().fieldNames.map(field => tableRowType.getFieldNames.indexOf(field))
     _readBuilder.withProjection(projection)
     if (filters.nonEmpty) {
-      val pushedPredicate = PredicateBuilder.and(filters.map(_._2): _*)
+      val pushedPredicate = PredicateBuilder.and(filters: _*)
       _readBuilder.withFilter(pushedPredicate)
     }
     pushDownLimit.foreach(_readBuilder.withLimit)
@@ -108,7 +108,7 @@ abstract class PaimonBaseScan(
 
   override def description(): String = {
     val pushedFiltersStr = if (filters.nonEmpty) {
-      ", PushedFilters: [" + filters.map(_._1).mkString(",") + "]"
+      ", PushedFilters: [" + filters.mkString(",") + "]"
     } else {
       ""
     }
