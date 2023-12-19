@@ -151,7 +151,7 @@ public class LeafPredicate implements Predicate {
         if (literals == null || literals.isEmpty()) {
             literalsStr = "";
         } else if (literals.size() == 1) {
-            literalsStr = literals.get(0).toString();
+            literalsStr = Objects.toString(literals.get(0));
         } else {
             literalsStr = literals.toString();
         }

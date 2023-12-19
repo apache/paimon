@@ -544,5 +544,33 @@ public class PredicateTest {
         PredicateBuilder builder5 = new PredicateBuilder(RowType.of(new IntType()));
         Predicate p5 = builder5.isNotNull(0);
         assertThat(p5.toString()).isEqualTo("IsNotNull(f0)");
+
+        PredicateBuilder builder6 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p6 = builder6.in(0, Arrays.asList(1, null, 3, 4));
+        assertThat(p6.toString())
+                .isEqualTo(
+                        "Or([Or([Or([Equal(f0, 1), Equal(f0, null)]), Equal(f0, 3)]), Equal(f0, 4)])");
+
+        PredicateBuilder builder7 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p7 = builder7.notIn(0, Arrays.asList(1, null, 3, 4));
+        assertThat(p7.toString())
+                .isEqualTo(
+                        "And([And([And([NotEqual(f0, 1), NotEqual(f0, null)]), NotEqual(f0, 3)]), NotEqual(f0, 4)])");
+
+        PredicateBuilder builder8 = new PredicateBuilder(RowType.of(new IntType()));
+        List<Object> literals = new ArrayList<>();
+        for (int i = 1; i <= 21; i++) {
+            literals.add(i);
+        }
+        Predicate p8 = builder8.in(0, literals);
+        assertThat(p8.toString())
+                .isEqualTo(
+                        "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
+
+        PredicateBuilder builder9 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p9 = builder9.notIn(0, literals);
+        assertThat(p9.toString())
+                .isEqualTo(
+                        "NotIn(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
     }
 }
