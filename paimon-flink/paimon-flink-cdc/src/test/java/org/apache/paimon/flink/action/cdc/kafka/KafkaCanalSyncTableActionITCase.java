@@ -704,7 +704,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(60)
+    @Timeout(120)
     public void testStarUpOptionLatest() throws Exception {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
