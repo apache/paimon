@@ -67,7 +67,7 @@ public class TagAutoCreation {
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, String> tags = tagManager.tags();
+        SortedMap<Snapshot, String> tags = tagManager.tags(t -> !t.startsWith("savepoint"));
 
         if (tags.isEmpty()) {
             this.nextSnapshot =
@@ -122,7 +122,7 @@ public class TagAutoCreation {
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
-                SortedMap<Snapshot, String> tags = tagManager.tags();
+                SortedMap<Snapshot, String> tags = tagManager.tags(t -> !t.startsWith("savepoint"));
                 if (tags.size() > numRetainedMax) {
                     int toDelete = tags.size() - numRetainedMax;
                     int i = 0;
