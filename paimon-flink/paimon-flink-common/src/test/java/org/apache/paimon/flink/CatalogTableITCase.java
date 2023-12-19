@@ -775,6 +775,20 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testShowTableMetadataComment() {
+        sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `name` VARCHAR(2147483647) METADATA COMMENT 'header1',\n"
+                                + "  `b` INT\n"
+                                + ")")
+                .doesNotContain("schema");
+    }
+
+    @Test
     public void testReadOptimizedTable() {
         sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
 

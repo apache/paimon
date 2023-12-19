@@ -29,20 +29,21 @@ import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
+
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.Schema;
 import org.apache.flink.table.api.TableDescriptor;
-import org.apache.flink.table.api.TableSchema;
 import org.apache.flink.table.catalog.Catalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
 import org.apache.flink.table.catalog.CatalogDatabaseImpl;
 import org.apache.flink.table.catalog.CatalogTable;
-import org.apache.flink.table.catalog.CatalogTableImpl;
 import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.catalog.ResolvedSchema;
+import org.apache.flink.table.catalog.UniqueConstraint;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -51,6 +52,8 @@ import org.apache.flink.table.catalog.exceptions.TableAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.TableNotExistException;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
 import org.apache.flink.table.connector.source.DynamicTableSource;
+import org.apache.flink.table.expressions.ResolvedExpression;
+import org.apache.flink.table.expressions.utils.ResolvedExpressionMock;
 import org.apache.flink.table.factories.DynamicTableFactory;
 import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.BeforeEach;
@@ -460,24 +463,39 @@ public class FlinkCatalogTest {
 
     @Test
     public void testCreateTableWithColumnOptions() throws Exception {
-        TableSchema schema =
-                TableSchema.builder()
-                        .field("pk", DataTypes.INT().notNull())
-                        .field("test", DataTypes.INT())
-                        .field("comp", DataTypes.INT(), "test + 1")
+        ResolvedExpression expression =
+                new ResolvedExpressionMock(DataTypes.INT(), () -> "test + 1");
+        ResolvedSchema resolvedSchema =
+                new ResolvedSchema(
+                        Arrays.asList(
+                                Column.physical("pk", DataTypes.INT().notNull()),
+                                Column.physical("test", DataTypes.INT()),
+                                Column.computed("comp", expression)),
+                        Collections.emptyList(),
+                        UniqueConstraint.primaryKey("pk", ImmutableList.of("pk")));
+
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT().notNull())
+                        .column("test", DataTypes.INT())
+                        .columnByExpression("comp", "test + 1")
                         .primaryKey("pk")
                         .build();
-        CatalogTable catalogTable = new CatalogTableImpl(schema, new HashMap<>(), "");
+
+        CatalogTable catalogTable =
+                new ResolvedCatalogTable(
+                        CatalogTable.of(schema, "", Collections.emptyList(), new HashMap<>()),
+                        resolvedSchema);
 
         catalog.createDatabase(path1.getDatabaseName(), null, false);
         catalog.createTable(path1, catalogTable, false);
 
         CatalogTable got = (CatalogTable) catalog.getTable(path1);
-        TableSchema newSchema = got.getSchema();
+        Schema newSchema = got.getUnresolvedSchema();
 
-        assertThat(schema.getTableColumns()).isEqualTo(newSchema.getTableColumns());
-        assertThat(schema.getPrimaryKey().get().getColumns())
-                .isEqualTo(newSchema.getPrimaryKey().get().getColumns());
+        assertThat(schema.getColumns()).isEqualTo(newSchema.getColumns());
+        assertThat(schema.getPrimaryKey().get().getColumnNames())
+                .isEqualTo(newSchema.getPrimaryKey().get().getColumnNames());
 
         Map<String, String> expected = got.getOptions();
         expected.remove("path");
@@ -489,21 +507,39 @@ public class FlinkCatalogTest {
     public void testCreateTableWithLogSystemRegister() throws Exception {
         catalog.createDatabase(path1.getDatabaseName(), null, false);
 
-        TableSchema schema =
-                TableSchema.builder()
-                        .field("pk", DataTypes.INT().notNull())
-                        .field("test", DataTypes.INT())
-                        .field("comp", DataTypes.INT(), "test + 1")
+        ResolvedExpression expression =
+                new ResolvedExpressionMock(DataTypes.INT(), () -> "test + 1");
+        ResolvedSchema resolvedSchema =
+                new ResolvedSchema(
+                        Arrays.asList(
+                                Column.physical("pk", DataTypes.INT().notNull()),
+                                Column.physical("test", DataTypes.INT()),
+                                Column.computed("comp", expression)),
+                        Collections.emptyList(),
+                        UniqueConstraint.primaryKey("pk", ImmutableList.of("pk")));
+
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT().notNull())
+                        .column("test", DataTypes.INT())
+                        .columnByExpression("comp", "test + 1")
                         .primaryKey("pk")
                         .build();
+
         Map<String, String> options = new HashMap<>();
-        CatalogTable catalogTable1 = new CatalogTableImpl(schema, options, "");
+        CatalogTable catalogTable1 =
+                new ResolvedCatalogTable(
+                        CatalogTable.of(schema, "", Collections.emptyList(), options),
+                        resolvedSchema);
         catalog.createTable(path1, catalogTable1, false);
         CatalogBaseTable storedTable1 = catalog.getTable(path1);
         assertThat(storedTable1.getOptions().containsKey("testing.log.store.topic")).isFalse();
 
         options.put(LOG_SYSTEM.key(), TESTING_LOG_STORE);
-        CatalogTable catalogTable2 = new CatalogTableImpl(schema, options, "");
+        CatalogTable catalogTable2 =
+                new ResolvedCatalogTable(
+                        CatalogTable.of(schema, "", Collections.emptyList(), options),
+                        resolvedSchema);
         catalog.createTable(path3, catalogTable2, false);
 
         CatalogBaseTable storedTable2 = catalog.getTable(path3);
