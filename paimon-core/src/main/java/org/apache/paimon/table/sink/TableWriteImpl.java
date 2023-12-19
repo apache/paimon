@@ -221,9 +221,9 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         List<CommitMessage> commitMessages = new ArrayList<>();
         if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
             // flush external row sort buffer.
-            MutableObjectIterator<BinaryRow> iterator = externalRowSortBuffer.sortedIterator();
+            MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
             BinaryRow lastPartition = new BinaryRow(fields.length);
-            BinaryRow binaryRow;
+            InternalRow binaryRow;
             while ((binaryRow = iterator.next()) != null) {
                 SinkRecord record = toSinkRecord(binaryRow);
                 if (!lastPartition.equals(record.partition())) {

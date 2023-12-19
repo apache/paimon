@@ -18,7 +18,6 @@
 
 package org.apache.paimon.sort;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.MutableObjectIterator;
 
@@ -40,5 +39,5 @@ public interface SortBuffer {
     boolean write(InternalRow record) throws IOException;
 
     /** @return iterator with sorting. */
-    MutableObjectIterator<BinaryRow> sortedIterator() throws IOException;
+    <T extends InternalRow> MutableObjectIterator<T> sortedIterator() throws IOException;
 }
