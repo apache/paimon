@@ -19,6 +19,7 @@
 package org.apache.paimon.security;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.HadoopUtils;
 
@@ -40,15 +41,22 @@ public class SecurityContext {
 
     private static HadoopSecurityContext installedContext;
 
-    /** Installs security configuration. */
+    /** Installs security configuration by {@link Options}. */
     public static void install(Options options) throws Exception {
+        install(options, HadoopUtils.getHadoopConfiguration(options));
+    }
+
+    /** Installs security configuration by {@link CatalogContext}. */
+    public static void install(CatalogContext catalogContext) throws Exception {
+        install(catalogContext.options(), catalogContext.hadoopConf());
+    }
+
+    private static void install(Options options, Configuration configuration) throws Exception {
         SecurityConfiguration config = new SecurityConfiguration(options);
         if (config.isLegal()) {
-            HadoopModule module = createModule(config);
-            if (module != null) {
-                module.install();
-                installedContext = new HadoopSecurityContext();
-            }
+            HadoopModule module = new HadoopModule(config, configuration);
+            module.install();
+            installedContext = new HadoopSecurityContext();
         }
     }
 
@@ -57,38 +65,5 @@ public class SecurityContext {
         return installedContext != null
                 ? installedContext.runSecured(securedCallable)
                 : securedCallable.call();
-    }
-
-    private static HadoopModule createModule(SecurityConfiguration securityConfig) {
-        // First check if we have Hadoop in the ClassPath. If not, we simply don't do anything.
-        if (!isHadoopCommonOnClasspath(HadoopModule.class.getClassLoader())) {
-            LOG.info(
-                    "Cannot create Hadoop Security Module because Hadoop cannot be found in the Classpath.");
-            return null;
-        }
-
-        try {
-            Configuration hadoopConfiguration =
-                    HadoopUtils.getHadoopConfiguration(securityConfig.getOptions());
-            return new HadoopModule(securityConfig, hadoopConfiguration);
-        } catch (LinkageError e) {
-            LOG.warn(
-                    "Cannot create Hadoop Security Module due to an error that happened while instantiating the module. No security module will be loaded.",
-                    e);
-            return null;
-        }
-    }
-
-    public static boolean isHadoopCommonOnClasspath(ClassLoader classLoader) {
-        try {
-            LOG.debug("Checking whether hadoop common dependency in on classpath.");
-            Class.forName("org.apache.hadoop.conf.Configuration", false, classLoader);
-            Class.forName("org.apache.hadoop.security.UserGroupInformation", false, classLoader);
-            LOG.debug("Hadoop common dependency found on classpath.");
-            return true;
-        } catch (ClassNotFoundException e) {
-            LOG.debug("Hadoop common dependency cannot be found on classpath.");
-            return false;
-        }
     }
 }
