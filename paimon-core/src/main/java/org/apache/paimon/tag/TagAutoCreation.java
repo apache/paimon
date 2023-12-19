@@ -67,7 +67,7 @@ public class TagAutoCreation {
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, String> tags = tagManager.tags(t -> !t.startsWith("savepoint"));
+        SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
 
         if (tags.isEmpty()) {
             this.nextSnapshot =
@@ -78,6 +78,15 @@ public class TagAutoCreation {
 
             LocalDateTime time = periodHandler.tagToTime(tags.get(lastTag));
             this.nextTag = periodHandler.nextTagTime(time);
+        }
+    }
+
+    private boolean isAutoTag(String tag) {
+        try {
+            periodHandler.tagToTime(tag);
+            return true;
+        } catch (Exception e) {
+            return false;
         }
     }
 
@@ -122,7 +131,7 @@ public class TagAutoCreation {
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
-                SortedMap<Snapshot, String> tags = tagManager.tags(t -> !t.startsWith("savepoint"));
+                SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
                 if (tags.size() > numRetainedMax) {
                     int toDelete = tags.size() - numRetainedMax;
                     int i = 0;
