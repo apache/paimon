@@ -18,7 +18,11 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.utils.SnapshotManager;
+
 import java.util.Map;
+import java.util.Objects;
 
 /** Create tag action for Flink. */
 public class CreateTagAction extends TableActionBase {
@@ -40,6 +44,11 @@ public class CreateTagAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        table.createTag(tagName, snapshotId);
+        SnapshotManager snapshotManager = ((AbstractFileStoreTable) table).snapshotManager();
+        long idToUse =
+                (snapshotId >= 0)
+                        ? snapshotId
+                        : Objects.requireNonNull(snapshotManager.latestSnapshot()).id();
+        table.createTag(tagName, idToUse);
     }
 }

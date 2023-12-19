@@ -108,7 +108,7 @@ You can create a tag with given name (cannot be number) and snapshot ID.
     --database <database-name> \ 
     --table <table-name> \
     --tag_name <tag-name> \
-    --snapshot <snapshot-id> \
+    [--snapshot <snapshot_id>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
