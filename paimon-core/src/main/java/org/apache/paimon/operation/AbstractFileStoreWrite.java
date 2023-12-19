@@ -229,7 +229,12 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                         bucketIter.remove();
                     }
                 } else {
-                    writerContainer.lastModifiedCommitIdentifier = commitIdentifier;
+                    // To support close writer while huge number of partitions batch inserting, we
+                    // set the lastModifiedCommitIdentifier to Long.MIN_VALUE
+                    // Modify here is only for convenient of close writers, see
+                    // `TableWriteImpl.prepareCommit` for detail.
+                    writerContainer.lastModifiedCommitIdentifier =
+                            commitIdentifier == Long.MAX_VALUE ? Long.MIN_VALUE : commitIdentifier;
                 }
             }
 
