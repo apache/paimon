@@ -144,6 +144,33 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
+    public void testAssignDecoupled() {
+        HashBucketAssigner assigner1 = createAssigner(3, 2, 1);
+        assertThat(assigner1.assign(row(1), 0)).isEqualTo(1);
+        assertThat(assigner1.assign(row(1), 2)).isEqualTo(1);
+        assertThat(assigner1.assign(row(1), 4)).isEqualTo(1);
+        assertThat(assigner1.assign(row(1), 6)).isEqualTo(1);
+        assertThat(assigner1.assign(row(1), 8)).isEqualTo(1);
+        assertThat(assigner1.assign(row(1), 10)).isEqualTo(3);
+
+        HashBucketAssigner assigner2 = createAssigner(3, 2, 2);
+        assertThat(assigner2.assign(row(1), 1)).isEqualTo(0);
+        assertThat(assigner2.assign(row(1), 3)).isEqualTo(0);
+        assertThat(assigner2.assign(row(1), 5)).isEqualTo(0);
+        assertThat(assigner2.assign(row(1), 7)).isEqualTo(0);
+        assertThat(assigner2.assign(row(1), 9)).isEqualTo(0);
+        assertThat(assigner2.assign(row(1), 11)).isEqualTo(2);
+
+        HashBucketAssigner assigner0 = createAssigner(3, 2, 0);
+        assertThat(assigner0.assign(row(2), 1)).isEqualTo(0);
+        assertThat(assigner0.assign(row(2), 3)).isEqualTo(0);
+        assertThat(assigner0.assign(row(2), 5)).isEqualTo(0);
+        assertThat(assigner0.assign(row(2), 7)).isEqualTo(0);
+        assertThat(assigner0.assign(row(2), 9)).isEqualTo(0);
+        assertThat(assigner0.assign(row(2), 11)).isEqualTo(2);
+    }
+
+    @Test
     public void testIndexEliminate() {
         HashBucketAssigner assigner = createAssigner(1, 1, 0);
 
