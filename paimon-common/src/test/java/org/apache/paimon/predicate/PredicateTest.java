@@ -540,5 +540,9 @@ public class PredicateTest {
         PredicateBuilder builder4 = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
         Predicate p4 = PredicateBuilder.or(builder4.equal(0, 3), builder4.equal(1, 5));
         assertThat(p4.toString()).isEqualTo("Or([Equal(f0, 3), Equal(f1, 5)])");
+
+        PredicateBuilder builder5 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p5 = builder5.isNotNull(0);
+        assertThat(p5.toString()).isEqualTo("IsNotNull(f0)");
     }
 }
