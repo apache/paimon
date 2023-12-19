@@ -21,31 +21,39 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.schema.TableSchema;
 
+import static org.apache.paimon.index.BucketAssigner.computeAssigner;
+
 /** Hash key of a {@link CdcRecord}. */
-public class CdcHashKeyChannelComputer implements ChannelComputer<CdcRecord> {
+public class CdcAssignerChannelComputer implements ChannelComputer<CdcRecord> {
 
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
+    private Integer numAssigners;
 
     private transient int numChannels;
     private transient CdcRecordKeyAndBucketExtractor extractor;
 
-    public CdcHashKeyChannelComputer(TableSchema schema) {
+    public CdcAssignerChannelComputer(TableSchema schema, Integer numAssigners) {
         this.schema = schema;
+        this.numAssigners = numAssigners;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
+        if (numAssigners == null) {
+            numAssigners = numChannels;
+        }
         this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
     }
 
     @Override
     public int channel(CdcRecord record) {
         extractor.setRecord(record);
-        int hash = extractor.trimmedPrimaryKey().hashCode();
-        return Math.abs(hash % numChannels);
+        int partitionHash = extractor.partition().hashCode();
+        int keyHash = extractor.trimmedPrimaryKey().hashCode();
+        return computeAssigner(partitionHash, keyHash, numChannels, numAssigners);
     }
 
     @Override

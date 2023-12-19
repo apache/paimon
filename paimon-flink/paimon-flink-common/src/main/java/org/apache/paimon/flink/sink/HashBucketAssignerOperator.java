@@ -42,6 +42,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
     private final String initialCommitUser;
 
     private final AbstractFileStoreTable table;
+    private final Integer numAssigners;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
     private final boolean overwrite;
 
@@ -51,10 +52,12 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
     public HashBucketAssignerOperator(
             String commitUser,
             Table table,
+            Integer numAssigners,
             SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
             boolean overwrite) {
         this.initialCommitUser = commitUser;
         this.table = (AbstractFileStoreTable) table;
+        this.numAssigners = numAssigners;
         this.extractorFunction = extractorFunction;
         this.overwrite = overwrite;
     }
@@ -70,19 +73,20 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                 StateUtils.getSingleValueFromState(
                         context, "commit_user_state", String.class, initialCommitUser);
 
+        int numberTasks = getRuntimeContext().getNumberOfParallelSubtasks();
+        int taskId = getRuntimeContext().getIndexOfThisSubtask();
+        long targetRowNum = table.coreOptions().dynamicBucketTargetRowNum();
         this.assigner =
                 overwrite
-                        ? new SimpleHashBucketAssigner(
-                                getRuntimeContext().getNumberOfParallelSubtasks(),
-                                getRuntimeContext().getIndexOfThisSubtask(),
-                                table.coreOptions().dynamicBucketTargetRowNum())
+                        ? new SimpleHashBucketAssigner(numberTasks, taskId, targetRowNum)
                         : new HashBucketAssigner(
                                 table.snapshotManager(),
                                 commitUser,
                                 table.store().newIndexFileHandler(),
-                                getRuntimeContext().getNumberOfParallelSubtasks(),
-                                getRuntimeContext().getIndexOfThisSubtask(),
-                                table.coreOptions().dynamicBucketTargetRowNum());
+                                numberTasks,
+                                numAssigners == null ? numberTasks : numAssigners,
+                                taskId,
+                                targetRowNum);
         this.extractor = extractorFunction.apply(table.schema());
     }
 

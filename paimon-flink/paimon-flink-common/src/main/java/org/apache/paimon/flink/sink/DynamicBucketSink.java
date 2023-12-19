@@ -46,7 +46,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         super(table, overwritePartition);
     }
 
-    protected abstract ChannelComputer<T> channelComputer1();
+    protected abstract ChannelComputer<T> assignerChannelComputer(Integer numAssigners);
 
     protected abstract ChannelComputer<Tuple2<T, Integer>> channelComputer2();
 
@@ -62,17 +62,23 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         // committer
 
         // 1. shuffle by key hash
-        Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
-        if (assignerParallelism == null) {
-            assignerParallelism = parallelism;
+        Integer numAssigners = table.coreOptions().dynamicBucketAssignerParallelism();
+        if (numAssigners == null) {
+            numAssigners = parallelism;
         }
+
+        Integer totalAssigners = numAssigners;
+        if (parallelism != null && parallelism > totalAssigners) {
+            totalAssigners = parallelism;
+        }
+
         DataStream<T> partitionByKeyHash =
-                partition(input, channelComputer1(), assignerParallelism);
+                partition(input, assignerChannelComputer(numAssigners), totalAssigners);
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =
                 new HashBucketAssignerOperator<>(
-                        initialCommitUser, table, extractorFunction(), false);
+                        initialCommitUser, table, numAssigners, extractorFunction(), false);
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =

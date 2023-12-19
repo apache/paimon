@@ -88,6 +88,15 @@ public class DynamicBucketTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testWriteWithAssignerParallelism1() {
+        sql(
+                "INSERT INTO T /*+ OPTIONS('dynamic-bucket.assigner-parallelism'='1') */ "
+                        + "VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
+        assertThat(sql("SELECT DISTINCT bucket FROM T$files"))
+                .containsExactlyInAnyOrder(Row.of(0), Row.of(1));
+    }
+
+    @Test
     public void testOverwrite() throws Exception {
         sql("INSERT INTO T VALUES (1, 1, 1), (1, 2, 2), (1, 3, 3), (1, 4, 4), (1, 5, 5)");
         assertThat(sql("SELECT * FROM T"))
