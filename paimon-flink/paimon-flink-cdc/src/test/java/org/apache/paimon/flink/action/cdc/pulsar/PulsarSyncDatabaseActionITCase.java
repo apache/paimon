@@ -67,7 +67,7 @@ public class PulsarSyncDatabaseActionITCase extends PulsarActionITCaseBase {
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
         pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
-        pulsarConfig.put(TOPIC.key(), String.join(",", topics));
+        pulsarConfig.put(TOPIC.key(), String.join(";", topics));
         PulsarSyncDatabaseAction action =
                 syncDatabaseActionBuilder(pulsarConfig)
                         .withTableConfig(getBasicTableConfig())
