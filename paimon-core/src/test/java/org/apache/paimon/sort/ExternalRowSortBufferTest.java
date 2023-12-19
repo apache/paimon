@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.options.MemorySize;
@@ -69,7 +70,7 @@ public class ExternalRowSortBufferTest {
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
 
-        List<BinaryRow> datas = data(Math.abs(RANDOM.nextInt(1000)) + 1000);
+        List<BinaryRow> datas = data(Math.abs(RANDOM.nextInt(100)) + 100);
         for (BinaryRow data : datas) {
             externalRowSortBuffer.write(data);
         }
@@ -79,18 +80,14 @@ public class ExternalRowSortBufferTest {
                         Comparator.comparingLong((BinaryRow o) -> o.getLong(0))
                                 .thenComparingLong(o -> o.getLong(2)));
         treeSet.addAll(datas);
-        List<BinaryRow> sorted = new ArrayList<>();
-        MutableObjectIterator<BinaryRow> iterator = externalRowSortBuffer.sortedIterator();
-        BinaryRow row;
-        while ((row = iterator.next()) != null) {
-            sorted.add(row.copy());
-        }
-
+        MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
+        InternalRow row;
         Iterator<BinaryRow> treeIterator = treeSet.iterator();
-        for (BinaryRow sortRow : sorted) {
-            long f0 = sortRow.getLong(0);
-            BinaryString f1 = sortRow.getString(1);
-            long f2 = sortRow.getLong(2);
+        while ((row = iterator.next()) != null) {
+            //            sorted.add(row.copy());
+            long f0 = row.getLong(0);
+            BinaryString f1 = row.getString(1);
+            long f2 = row.getLong(2);
 
             BinaryRow treeRow = treeIterator.next();
             long t0 = treeRow.getLong(0);

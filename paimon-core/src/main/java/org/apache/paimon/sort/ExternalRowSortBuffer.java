@@ -18,11 +18,12 @@
 
 package org.apache.paimon.sort;
 
+import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueSerializer;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -68,8 +69,10 @@ public class ExternalRowSortBuffer implements SortBuffer {
 
     private final BinaryExternalSortBuffer binaryExternalSortBuffer;
     private final int fullSize;
-    Projection rowPartitionKeyExtractor;
-    Projection valueProjection;
+    private final KeyValueSerializer serializer;
+    private final Projection rowPartitionKeyExtractor;
+
+    private long sequnceNum = 0;
 
     public ExternalRowSortBuffer(
             IOManager ioManager,
@@ -78,9 +81,8 @@ public class ExternalRowSortBuffer implements SortBuffer {
             long bufferSize,
             int pageSize,
             int maxNumFileHandles) {
-        RowType partitionType = org.apache.paimon.utils.Projection.of(fieldsIndex).project(rowType);
         List<DataField> rowFields = rowType.getFields();
-        List<DataField> fields = new ArrayList<>();
+        List<DataField> keyFields = new ArrayList<>();
 
         // construct the partition extractor to extract partition row from whole row.
         rowPartitionKeyExtractor = CodeGenUtils.newProjection(rowType, fieldsIndex);
@@ -88,27 +90,19 @@ public class ExternalRowSortBuffer implements SortBuffer {
         // construct the value projection to extract origin row from extended key_value row.
         for (int i : fieldsIndex) {
             // we put the KEY_PREFIX ahead of origin field name to avoid conflict
-            fields.add(rowFields.get(i).newName(KEY_PREFIX + rowFields.get(i).name()));
+            keyFields.add(rowFields.get(i).newName(KEY_PREFIX + rowFields.get(i).name()));
         }
-        fields.addAll(rowType.getFields());
-        int[] valueFields = new int[rowType.getFieldCount()];
-        int keySize = fieldsIndex.length;
-        for (int i = 0; i < valueFields.length; i++) {
-            valueFields[i] = keySize + i;
-        }
-        valueProjection = CodeGenUtils.newProjection(new RowType(fields), valueFields);
+
+        RowType keyRow = new RowType(keyFields);
+        RowType wholeRow = KeyValue.schema(keyRow, rowType);
 
         // construct the binary sorter to sort the extended key_value row
         binaryExternalSortBuffer =
                 BinaryExternalSortBuffer.create(
-                        ioManager,
-                        partitionType,
-                        new RowType(fields),
-                        bufferSize,
-                        pageSize,
-                        maxNumFileHandles);
+                        ioManager, keyRow, wholeRow, bufferSize, pageSize, maxNumFileHandles);
 
-        this.fullSize = rowType.getFieldCount() + fieldsIndex.length;
+        this.fullSize = KeyValue.schema(keyRow, rowType).getFieldCount();
+        this.serializer = new KeyValueSerializer(keyRow, rowType);
     }
 
     @Override
@@ -134,27 +128,32 @@ public class ExternalRowSortBuffer implements SortBuffer {
     @Override
     public boolean write(InternalRow record) throws IOException {
         BinaryRow partition = rowPartitionKeyExtractor.apply(record);
-        JoinedRow joinedRow = new JoinedRow(partition, record);
-        binaryExternalSortBuffer.write(joinedRow);
+        binaryExternalSortBuffer.write(
+                serializer.toRow(partition, sequnceNum++, record.getRowKind(), record));
         return false;
     }
 
     @Override
-    public MutableObjectIterator<BinaryRow> sortedIterator() throws IOException {
+    public MutableObjectIterator<InternalRow> sortedIterator() throws IOException {
         MutableObjectIterator<BinaryRow> iterator = binaryExternalSortBuffer.sortedIterator();
-        return new MutableObjectIterator<BinaryRow>() {
+        return new MutableObjectIterator<InternalRow>() {
             private BinaryRow binaryRow = new BinaryRow(fullSize);
 
             @Override
-            public BinaryRow next(BinaryRow reuse) throws IOException {
+            public InternalRow next(InternalRow reuse) throws IOException {
                 // use internal reuse object
                 return next();
             }
 
             @Override
-            public BinaryRow next() throws IOException {
+            public InternalRow next() throws IOException {
                 binaryRow = iterator.next(binaryRow);
-                return binaryRow == null ? null : valueProjection.apply(binaryRow);
+                if (binaryRow != null) {
+                    KeyValue keyValue = serializer.fromRow(binaryRow);
+                    binaryRow.setRowKind(keyValue.valueKind());
+                    return keyValue.value();
+                }
+                return null;
             }
         };
     }
