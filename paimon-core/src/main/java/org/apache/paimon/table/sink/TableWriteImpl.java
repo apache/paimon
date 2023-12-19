@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -29,9 +30,15 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
+import org.apache.paimon.sort.ExternalRowSortBuffer;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.Restorable;
 
+import javax.annotation.Nullable;
+
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -48,32 +55,61 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
 
+    private final RowType rowType;
+    private final int[] fields;
+    private final CoreOptions coreOptions;
+
+    private @Nullable ExternalRowSortBuffer externalRowSortBuffer;
+
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
+    private boolean streamingMode = true;
+    private boolean ignorePreviousFiles = true;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
-            RecordExtractor<T> recordExtractor) {
+            RecordExtractor<T> recordExtractor,
+            RowType rowType,
+            int[] fields,
+            CoreOptions coreOptions) {
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
+
+        this.rowType = rowType;
+        this.fields = fields;
+        this.coreOptions = coreOptions;
     }
 
     @Override
     public TableWriteImpl<T> withIgnorePreviousFiles(boolean ignorePreviousFiles) {
+        this.ignorePreviousFiles = ignorePreviousFiles;
         write.withIgnorePreviousFiles(ignorePreviousFiles);
         return this;
     }
 
     @Override
     public TableWriteImpl<T> withExecutionMode(boolean isStreamingMode) {
+        this.streamingMode = isStreamingMode;
         write.withExecutionMode(isStreamingMode);
         return this;
     }
 
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
+        if (coreOptions.sortPartitionBeforeBatchInsert()
+                && externalRowSortBuffer == null
+                && fields.length != 0) {
+            externalRowSortBuffer =
+                    ExternalRowSortBuffer.create(
+                            ioManager,
+                            rowType,
+                            fields,
+                            coreOptions.writeBufferSize(),
+                            coreOptions.pageSize(),
+                            coreOptions.localSortMaxNumFileHandles());
+        }
         write.withIOManager(ioManager);
         return this;
     }
@@ -123,21 +159,39 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
         SinkRecord record = toSinkRecord(row);
-        write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+        writeInternal(row);
         return record;
     }
 
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
         SinkRecord record = toSinkRecord(row, bucket);
-        write.write(record.partition(), bucket, recordExtractor.extract(record));
+        writeInternal(row, bucket);
         return record;
+    }
+
+    private void writeInternal(InternalRow row) throws Exception {
+        if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
+            externalRowSortBuffer.write(row);
+        } else {
+            SinkRecord record = toSinkRecord(row);
+            write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+        }
+    }
+
+    private void writeInternal(InternalRow row, int bucket) throws Exception {
+        if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
+            externalRowSortBuffer.write(row);
+        } else {
+            SinkRecord record = toSinkRecord(row, bucket);
+            write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+        }
     }
 
     @VisibleForTesting
     public T writeAndReturnData(InternalRow row) throws Exception {
         SinkRecord record = toSinkRecord(row);
         T data = recordExtractor.extract(record);
-        write.write(record.partition(), record.bucket(), data);
+        writeInternal(row);
         return data;
     }
 
@@ -193,7 +247,24 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        return write.prepareCommit(waitCompaction, commitIdentifier);
+        List<CommitMessage> commitMessages = new ArrayList<>();
+        if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
+            // flush external row sort buffer.
+            MutableObjectIterator<BinaryRow> iterator = externalRowSortBuffer.sortedIterator();
+            BinaryRow lastPartition = new BinaryRow(fields.length);
+            BinaryRow binaryRow;
+            while ((binaryRow = iterator.next()) != null) {
+                SinkRecord record = toSinkRecord(binaryRow);
+                if (!lastPartition.equals(record.partition())) {
+                    commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
+                }
+                write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+                record.partition().copy(lastPartition);
+            }
+            externalRowSortBuffer.clear();
+        }
+        commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
+        return commitMessages;
     }
 
     @Override
