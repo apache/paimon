@@ -228,3 +228,94 @@ Synchronization from multiple Pulsar topics to Paimon database.
     --table_conf changelog-producer=input \
     --table_conf sink.parallelism=4
 ```
+
+## Additional pulsar_config
+
+There are some useful options to build Flink Pulsar Source, but they are not provided by flink-pulsar-connector document. They are:
+
+<table class="table table-bordered">
+    <thead>
+      <tr>
+        <th class="text-left">Key</th>
+        <th class="text-left">Default</th>
+        <th class="text-left">Type</th>
+        <th class="text-left">Description</th>
+      </tr>
+    </thead>
+    <tbody>
+        <tr>
+         <td>value.format</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>Defines the format identifier for encoding value data.</td>
+        </tr>
+        <tr>
+          <td>topic</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>Topic name(s) from which the data is read. It also supports topic list by separating topic by semicolon 
+              like 'topic-1;topic-2'. Note, only one of "topic-pattern" and "topic" can be specified.
+          </td>
+        </tr>
+        <tr>
+          <td>pulsar.startCursor.fromMessageId</td>
+          <td>EARLIEST</td>
+          <td>Sting</td>
+          <td>Using a unique identifier of a single message to seek the start position. The common format is a triple 
+              '&ltlong&gtledgerId,&ltlong&gtentryId,&ltint&gtpartitionIndex'. Specially, you can set it to 
+              EARLIEST (-1, -1, -1) or LATEST (Long.MAX_VALUE, Long.MAX_VALUE, -1).
+          </td>
+        </tr>
+        <tr>
+          <td>pulsar.startCursor.fromPublishTime</td>
+          <td>(none)</td>
+          <td>Long</td>
+          <td>Using the message publish time to seek the start position.</td>
+        </tr>
+        <tr>
+          <td>pulsar.startCursor.fromMessageIdInclusive</td>
+          <td>true</td>
+          <td>Boolean</td>
+          <td>Whether to include the given message id. This option only works when the message id is not EARLIEST or LATEST.</td>
+        </tr>
+        <tr>
+          <td>pulsar.stopCursor.atMessageId</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>Stop consuming when the message id is equal or greater than the specified message id. Message that is equal 
+              to the specified message id will not be consumed. The common format is a triple '&ltlong&gtledgerId,&ltlong&gtentryId,&ltint&gtpartitionIndex'. 
+              Specially, you can set it to LATEST (Long.MAX_VALUE, Long.MAX_VALUE, -1).
+        <tr>
+          <td>pulsar.stopCursor.afterMessageId</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>Stop consuming when the message id is greater than the specified message id. Message that is equal to the 
+              specified message id will be consumed. The common format is a triple '&ltlong&gtledgerId,&ltlong&gtentryId,&ltint&gtpartitionIndex'. 
+              Specially, you can set it to LATEST (Long.MAX_VALUE, Long.MAX_VALUE, -1).
+          </td>
+        </tr>
+        <tr>
+          <td>pulsar.stopCursor.atEventTime</td>
+          <td>(none)</td>
+          <td>Long</td>
+          <td>Stop consuming when message event time is greater than or equals the specified timestamp. 
+              Message that even time is equal to the specified timestamp will not be consumed.
+          </td>
+        </tr>
+        <tr>
+          <td>pulsar.stopCursor.afterEventTime</td>
+          <td>(none)</td>
+          <td>Long</td>
+          <td>Stop consuming when message event time is greater than the specified timestamp. 
+              Message that even time is equal to the specified timestamp will be consumed.
+          </td>
+        </tr>
+        <tr>
+          <td>pulsar.source.unbounded</td>
+          <td>true</td>
+          <td>Boolean</td>
+          <td>To specify the boundedness of a stream.</td>
+        </tr>
+    </tbody>
+</table>
+
