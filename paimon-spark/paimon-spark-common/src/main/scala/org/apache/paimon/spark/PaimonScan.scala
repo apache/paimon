@@ -31,7 +31,7 @@ import scala.collection.JavaConverters._
 case class PaimonScan(
     table: Table,
     requiredSchema: StructType,
-    filters: Array[(Filter, Predicate)],
+    filters: Array[Predicate],
     pushDownLimit: Option[Int])
   extends PaimonBaseScan(table, requiredSchema, filters, pushDownLimit)
   with SupportsRuntimeFiltering {

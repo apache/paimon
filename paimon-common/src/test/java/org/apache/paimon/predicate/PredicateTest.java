@@ -522,4 +522,23 @@ public class PredicateTest {
         assertThat(predicate.test(3, new FieldStats[] {new FieldStats(null, null, 4L)}))
                 .isEqualTo(true);
     }
+
+    @Test
+    public void testPredicateToString() {
+        PredicateBuilder builder1 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p1 = builder1.equal(0, 5);
+        assertThat(p1.toString()).isEqualTo("Equal(f0, 5)");
+
+        PredicateBuilder builder2 = new PredicateBuilder(RowType.of(new IntType()));
+        Predicate p2 = builder2.greaterThan(0, 5);
+        assertThat(p2.toString()).isEqualTo("GreaterThan(f0, 5)");
+
+        PredicateBuilder builder3 = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        Predicate p3 = PredicateBuilder.and(builder3.equal(0, 3), builder3.equal(1, 5));
+        assertThat(p3.toString()).isEqualTo("And([Equal(f0, 3), Equal(f1, 5)])");
+
+        PredicateBuilder builder4 = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        Predicate p4 = PredicateBuilder.or(builder4.equal(0, 3), builder4.equal(1, 5));
+        assertThat(p4.toString()).isEqualTo("Or([Equal(f0, 3), Equal(f1, 5)])");
+    }
 }
