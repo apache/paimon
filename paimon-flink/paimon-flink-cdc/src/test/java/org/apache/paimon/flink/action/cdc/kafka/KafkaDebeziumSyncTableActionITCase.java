@@ -212,7 +212,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
     }
 
     @Test
-    @Timeout(160)
+    @Timeout(60)
     public void testRecordWithNestedDataType() throws Exception {
         String topic = "nested_type";
         createTestTopic(topic, 1, 1);
@@ -238,11 +238,13 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
 
         RowType rowType =
                 RowType.of(
-                        new DataType[] {DataTypes.STRING().notNull(), DataTypes.STRING()},
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
                         new String[] {"id", "name", "row"});
         List<String> primaryKeys = Collections.singletonList("id");
         List<String> expected =
-                Collections.singletonList("+I[101, scooter, {\"row_key\":\"value\"}]");
+                Collections.singletonList("+I[101, hammer, {\"row_key\":\"value\"}]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 }

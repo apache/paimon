@@ -27,7 +27,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -143,14 +145,25 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
         paimonFieldTypes.putAll(fillDefaultStringTypes(record));
         Map<String, Object> recordMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
-
         Map<String, String> rowData =
                 recordMap.entrySet().stream()
                         .collect(
                                 Collectors.toMap(
                                         Map.Entry::getKey,
-                                        entry -> Objects.toString(entry.getValue(), null)));
-
+                                        entry -> {
+                                            if (Objects.nonNull(entry.getValue())
+                                                    && !TypeUtils.isBasicType(entry.getValue())) {
+                                                try {
+                                                    return OBJECT_MAPPER
+                                                            .writer()
+                                                            .writeValueAsString(entry.getValue());
+                                                } catch (JsonProcessingException e) {
+                                                    LOG.error("Failed to deserialize record.", e);
+                                                    return Objects.toString(entry.getValue());
+                                                }
+                                            }
+                                            return Objects.toString(entry.getValue(), null);
+                                        }));
         evalComputedColumns(rowData, paimonFieldTypes);
         return rowData;
     }

@@ -229,4 +229,20 @@ public class TypeUtils {
                 return t1.copy(true).equals(t2.copy(true));
         }
     }
+
+    public static boolean isBasicType(Object obj) {
+        Class<?> clazz = obj.getClass();
+        return clazz.isPrimitive() || isWrapperType(clazz) || clazz.equals(String.class);
+    }
+
+    private static boolean isWrapperType(Class<?> clazz) {
+        return clazz.equals(Boolean.class)
+                || clazz.equals(Character.class)
+                || clazz.equals(Byte.class)
+                || clazz.equals(Short.class)
+                || clazz.equals(Integer.class)
+                || clazz.equals(Long.class)
+                || clazz.equals(Float.class)
+                || clazz.equals(Double.class);
+    }
 }
