@@ -764,6 +764,15 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final ConfigOption<Integer> DYNAMIC_BUCKET_INIT_BUCKETS =
+            key("dynamic-bucket.init-buckets")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Parallelism of assigner operator for dynamic bucket mode, it is"
+                                    + " related to the number of initialized bucket, too small will lead to"
+                                    + " insufficient processing speed of assigner.");
+
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
                     .intType()
