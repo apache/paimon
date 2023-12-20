@@ -28,7 +28,7 @@ import java.util.Objects;
 public class CreateTagAction extends TableActionBase {
 
     private final String tagName;
-    private final long snapshotId;
+    private final Long snapshotId;
 
     public CreateTagAction(
             String warehouse,
@@ -36,7 +36,7 @@ public class CreateTagAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig,
             String tagName,
-            long snapshotId) {
+            Long snapshotId) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.tagName = tagName;
         this.snapshotId = snapshotId;
@@ -45,10 +45,7 @@ public class CreateTagAction extends TableActionBase {
     @Override
     public void run() throws Exception {
         SnapshotManager snapshotManager = ((AbstractFileStoreTable) table).snapshotManager();
-        long idToUse =
-                (snapshotId >= 0)
-                        ? snapshotId
-                        : Objects.requireNonNull(snapshotManager.latestSnapshot()).id();
-        table.createTag(tagName, idToUse);
+        Long idToUse = snapshotId == null ? snapshotManager.latestSnapshotId() : snapshotId;
+        table.createTag(tagName, Objects.requireNonNull(idToUse));
     }
 }

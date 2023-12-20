@@ -20,9 +20,13 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import java.util.Objects;
 
 /**
  * Create tag procedure. Usage:
@@ -41,6 +45,16 @@ public class CreateTagProcedure extends ProcedureBase {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         table.createTag(tagName, snapshotId);
 
+        return new String[] {"Success"};
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        SnapshotManager snapshotManager = ((AbstractFileStoreTable) table).snapshotManager();
+        long latestSnapshotId = Objects.requireNonNull(snapshotManager.latestSnapshotId());
+
+        table.createTag(tagName, latestSnapshotId);
         return new String[] {"Success"};
     }
 

@@ -44,13 +44,9 @@ public class CreateTagActionFactory implements ActionFactory {
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tagName = params.get(TAG_NAME);
 
-        long snapshot = -1;
+        Long snapshot = null;
         if (params.has(SNAPSHOT)) {
-            try {
-                snapshot = Long.parseLong(params.get(SNAPSHOT));
-            } catch (NumberFormatException e) {
-                System.out.println("Warning: Invalid snapshot ID provided. Using latest snapshot.");
-            }
+            snapshot = Long.parseLong(params.get(SNAPSHOT));
         }
 
         CreateTagAction action =
