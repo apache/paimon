@@ -22,7 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -32,8 +34,11 @@ import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.sort.ExternalRowSortBuffer;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.OffsetRow;
 import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
@@ -54,10 +59,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
-
     private final RowType rowType;
-    private final int[] fields;
+    private final int[] partitionFields;
     private final CoreOptions coreOptions;
+    private final JoinedRow reusedJoinedRow;
+    private final GenericRow reusedBucketRow;
+    private final OffsetRow reusedOffsetRow;
 
     private @Nullable ExternalRowSortBuffer externalRowSortBuffer;
 
@@ -71,15 +78,18 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
             RecordExtractor<T> recordExtractor,
             RowType rowType,
-            int[] fields,
+            int[] partitionFields,
             CoreOptions coreOptions) {
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
-
         this.rowType = rowType;
-        this.fields = fields;
+        this.partitionFields = partitionFields;
         this.coreOptions = coreOptions;
+
+        this.reusedJoinedRow = new JoinedRow();
+        this.reusedBucketRow = new GenericRow(1);
+        this.reusedOffsetRow = new OffsetRow(rowType.getFieldCount(), 1);
     }
 
     @Override
@@ -100,12 +110,23 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
         if (coreOptions.sortPartitionBeforeBatchInsert()
                 && externalRowSortBuffer == null
-                && fields.length != 0) {
+                && partitionFields.length != 0) {
+            List<DataField> dataFields = new ArrayList<>();
+            dataFields.add(new DataField(0, "_BUCKET_", DataTypes.INT()));
+            dataFields.addAll(rowType.getFields());
+
+            // add bucket field in front of row, and selected field should include the bucket
+            int[] sortField = new int[partitionFields.length + 1];
+            for (int i = 0; i < sortField.length - 1; i++) {
+                sortField[i] = partitionFields[i] + 1;
+            }
+            // add bucket field to sort
+            sortField[sortField.length - 1] = 0;
             externalRowSortBuffer =
                     ExternalRowSortBuffer.create(
                             ioManager,
-                            rowType,
-                            fields,
+                            new RowType(dataFields),
+                            sortField,
                             coreOptions.writeBufferSize(),
                             coreOptions.pageSize(),
                             coreOptions.localSortMaxNumFileHandles());
@@ -170,21 +191,32 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private void writeInternal(InternalRow row) throws Exception {
-        if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
-            externalRowSortBuffer.write(row);
-        } else {
-            SinkRecord record = toSinkRecord(row);
-            write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
-        }
+        keyAndBucketExtractor.setRecord(row);
+        int bucket = keyAndBucketExtractor.bucket();
+        writeInternal(row, bucket);
     }
 
     private void writeInternal(InternalRow row, int bucket) throws Exception {
         if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
-            externalRowSortBuffer.write(row);
+            externalRowSortBuffer.write(toRowWithBucket(row, bucket));
         } else {
             SinkRecord record = toSinkRecord(row, bucket);
             write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         }
+    }
+
+    private InternalRow toRowWithBucket(InternalRow row, int bucket) {
+        reusedBucketRow.setField(0, bucket);
+        reusedJoinedRow.replace(reusedBucketRow, row);
+        return reusedJoinedRow;
+    }
+
+    private int bucket(InternalRow rowWithBucket) {
+        return rowWithBucket.getInt(0);
+    }
+
+    private InternalRow toOriginRow(InternalRow row) {
+        return reusedOffsetRow.replace(row);
     }
 
     @VisibleForTesting
@@ -236,7 +268,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     /**
      * Notify that some new files are created at given snapshot in given bucket.
      *
-     * <p>Most probably, these files are created by another job. Currently this method is only used
+     * <p>Most probably, these files are created by another job. Currently, this method is only used
      * by the dedicated compact job to see files created by writer jobs.
      */
     public void notifyNewFiles(
@@ -251,15 +283,18 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
             // flush external row sort buffer.
             MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
-            BinaryRow lastPartition = new BinaryRow(fields.length);
+            BinaryRow lastPartition = new BinaryRow(partitionFields.length);
             InternalRow binaryRow;
+            int lastBucket = -1;
             while ((binaryRow = iterator.next()) != null) {
-                SinkRecord record = toSinkRecord(binaryRow);
-                if (!lastPartition.equals(record.partition())) {
+                int bucket = bucket(binaryRow);
+                SinkRecord record = toSinkRecord(toOriginRow(binaryRow), bucket);
+                if (!lastPartition.equals(record.partition()) || lastBucket != bucket) {
                     commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
                 }
                 write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
                 record.partition().copy(lastPartition);
+                lastBucket = bucket;
             }
             externalRowSortBuffer.clear();
         }
