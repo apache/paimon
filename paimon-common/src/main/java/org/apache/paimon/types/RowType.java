@@ -104,6 +104,14 @@ public final class RowType extends DataType {
                 isNullable, fields.stream().map(DataField::copy).collect(Collectors.toList()));
     }
 
+    public RowType project(int[] selected) {
+        List<DataField> newFields = new ArrayList<>();
+        for (int i : selected) {
+            newFields.add(fields.get(i));
+        }
+        return new RowType(newFields);
+    }
+
     @Override
     public String asSQLString() {
         return withNullability(

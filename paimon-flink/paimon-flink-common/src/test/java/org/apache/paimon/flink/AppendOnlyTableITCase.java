@@ -299,7 +299,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING)",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt)",
-                "CREATE TABLE IF NOT EXISTS part_table2 (pk INT, data STRING, data2 STRING) PARTITIONED BY (pk)",
+                "CREATE TABLE IF NOT EXISTS part_table2 (pk INT, data STRING, data2 STRING) PARTITIONED BY (pk) WITH ('bucket' = '2')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>)");
     }
 

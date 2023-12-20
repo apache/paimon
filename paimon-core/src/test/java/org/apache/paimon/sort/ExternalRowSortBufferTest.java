@@ -65,7 +65,7 @@ public class ExternalRowSortBufferTest {
                 ExternalRowSortBuffer.create(
                         ioManager,
                         schema.rowType(),
-                        new int[] {0, 2},
+                        new int[] {2, 0},
                         MemorySize.parse("10 mb").getBytes(),
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
@@ -77,8 +77,8 @@ public class ExternalRowSortBufferTest {
 
         TreeSet<BinaryRow> treeSet =
                 new TreeSet<>(
-                        Comparator.comparingLong((BinaryRow o) -> o.getLong(0))
-                                .thenComparingLong(o -> o.getLong(2)));
+                        Comparator.comparingLong((BinaryRow o) -> o.getLong(2))
+                                .thenComparingLong(o -> o.getLong(0)));
         treeSet.addAll(datas);
         MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
         InternalRow row;
