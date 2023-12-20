@@ -120,12 +120,18 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
                 id <= latestSnapshotId - numRetainedMin;
                 id++) {
-            // Quickly exit the loop in advance for consumer
+            // Early exit the loop in advance for consumer
             if (consumerReading.isPresent() && id >= consumerReading.getAsLong()) {
                 long consumerSnapshot = consumerReading.getAsLong();
                 if (consumerSnapshot > earliest) {
                     expireUntil(earliest, consumerSnapshot);
                 }
+                return;
+            }
+
+            // Early exit the loop in advance for expireLimit
+            if (id - earliest >= expireLimit) {
+                expireUntil(earliest, id);
                 return;
             }
 
