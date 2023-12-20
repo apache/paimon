@@ -23,7 +23,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.lookup.RocksDBOptions;
-import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -71,8 +70,6 @@ public class FileStoreLookupFunctionTest {
         SchemaManager schemaManager = new SchemaManager(fileIO, path);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
-        conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
