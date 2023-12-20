@@ -26,7 +26,6 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.pulsar.common.config.PulsarClientFactory;
-import org.apache.flink.connector.pulsar.common.config.PulsarOptions;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 import org.apache.flink.connector.pulsar.source.PulsarSourceBuilder;
 import org.apache.flink.connector.pulsar.source.config.SourceConfiguration;
@@ -44,23 +43,20 @@ import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
 import org.apache.pulsar.client.internal.DefaultImplementation;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
 
-import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.CLIENT_CONFIG_PREFIX;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAMS;
+import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAM_MAP;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PLUGIN_CLASS_NAME;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_SERVICE_URL;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_CONSUMER_NAME;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME;
 import static org.apache.flink.connector.pulsar.source.config.PulsarSourceConfigUtils.createConsumerBuilder;
 import static org.apache.flink.connector.pulsar.source.enumerator.topic.range.TopicRangeUtils.isFullTopicRanges;
-import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.pulsar.client.api.KeySharedPolicy.stickyHashRange;
 
@@ -73,19 +69,15 @@ public class PulsarActionUtils {
                     .noDefaultValue()
                     .withDescription("Defines the format identifier for encoding value data.");
 
-    public static final ConfigOption<String> TOPIC =
+    public static final ConfigOption<List<String>> TOPIC =
             ConfigOptions.key("topic")
                     .stringType()
+                    .asList()
                     .noDefaultValue()
                     .withDescription(
-                            "Topic names from which the table is read. Either 'topic' or 'topic-pattern' must be set for source. "
-                                    + "Option 'topic' is required for sink.");
-
-    static final ConfigOption<String> PULSAR_AUTH_PARAM_MAP =
-            ConfigOptions.key(CLIENT_CONFIG_PREFIX + "authParamMap")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Parameters for the authentication plugin.");
+                            "Topic name(s) from which the data is read. It also supports topic list by separating topic "
+                                    + "by semicolon like 'topic-1;topic-2'. Note, only one of \"topic-pattern\" and \"topic\" "
+                                    + "can be specified.");
 
     static final ConfigOption<String> PULSAR_START_CURSOR_FROM_MESSAGE_ID =
             ConfigOptions.key("pulsar.startCursor.fromMessageId")
@@ -151,9 +143,7 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
-    public static PulsarSource<String> buildPulsarSource(Configuration rawConfig) {
-        Configuration pulsarConfig = preprocessPulsarConfig(rawConfig);
-
+    public static PulsarSource<String> buildPulsarSource(Configuration pulsarConfig) {
         PulsarSourceBuilder<String> pulsarSourceBuilder = PulsarSource.builder();
 
         // the minimum setup
@@ -161,10 +151,7 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setTopics(
-                        Arrays.stream(pulsarConfig.get(TOPIC).split(","))
-                                .map(String::trim)
-                                .collect(Collectors.toList()))
+                .setTopics(pulsarConfig.get(TOPIC))
                 .setDeserializationSchema(new SimpleStringSchema());
 
         // other settings
@@ -231,8 +218,7 @@ public class PulsarActionUtils {
         String authPluginClassName = pulsarConfig.get(PULSAR_AUTH_PLUGIN_CLASS_NAME);
         if (authPluginClassName != null) {
             String authParamsString = pulsarConfig.get(PULSAR_AUTH_PARAMS);
-            Map<String, String> authParamsMap =
-                    pulsarConfig.get(PulsarOptions.PULSAR_AUTH_PARAM_MAP);
+            Map<String, String> authParamsMap = pulsarConfig.get(PULSAR_AUTH_PARAM_MAP);
 
             checkArgument(
                     authParamsString != null || authParamsMap != null,
@@ -278,21 +264,6 @@ public class PulsarActionUtils {
         }
     }
 
-    static SourceConfiguration toSourceConfiguration(Configuration rawConfig) {
-        return new SourceConfiguration(preprocessPulsarConfig(rawConfig));
-    }
-
-    private static Configuration preprocessPulsarConfig(Configuration rawConfig) {
-        Configuration cloned = new Configuration(rawConfig);
-        if (cloned.contains(PULSAR_AUTH_PARAM_MAP)) {
-            Map<String, String> authParamsMap =
-                    parseCommaSeparatedKeyValues(cloned.get(PULSAR_AUTH_PARAM_MAP));
-            cloned.removeConfig(PULSAR_AUTH_PARAM_MAP);
-            cloned.set(PulsarOptions.PULSAR_AUTH_PARAM_MAP, authParamsMap);
-        }
-        return cloned;
-    }
-
     public static DataFormat getDataFormat(Configuration pulsarConfig) {
         return DataFormat.fromConfigString(pulsarConfig.get(VALUE_FORMAT));
     }
@@ -301,7 +272,7 @@ public class PulsarActionUtils {
     public static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
             Configuration pulsarConfig) {
         try {
-            SourceConfiguration pulsarSourceConfiguration = toSourceConfiguration(pulsarConfig);
+            SourceConfiguration pulsarSourceConfiguration = new SourceConfiguration(pulsarConfig);
             PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
 
             ConsumerBuilder<String> consumerBuilder =
@@ -313,7 +284,7 @@ public class PulsarActionUtils {
             // The default position is Latest
             consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
 
-            String topic = pulsarConfig.get(PulsarActionUtils.TOPIC).split(",")[0];
+            String topic = pulsarConfig.get(PulsarActionUtils.TOPIC).get(0);
             TopicPartition topicPartition = new TopicPartition(topic);
             consumerBuilder.topic(topicPartition.getFullTopicName());
 

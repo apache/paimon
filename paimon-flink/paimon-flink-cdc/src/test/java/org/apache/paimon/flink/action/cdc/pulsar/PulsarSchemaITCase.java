@@ -51,7 +51,7 @@ public class PulsarSchemaITCase extends PulsarActionITCaseBase {
         sendMessages(topic, messages);
 
         Configuration pulsarConfig = Configuration.fromMap(getBasicPulsarConfig());
-        pulsarConfig.set(TOPIC, topic);
+        pulsarConfig.setString(TOPIC.key(), topic);
         pulsarConfig.set(VALUE_FORMAT, "canal-json");
 
         Schema pulsarSchema =
