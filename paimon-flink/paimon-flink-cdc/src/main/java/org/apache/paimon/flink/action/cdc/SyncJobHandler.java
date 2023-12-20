@@ -42,6 +42,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkOneRequiredOption;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkRequiredOptions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -115,18 +116,26 @@ public class SyncJobHandler {
                         cdcSourceConfig,
                         KAFKA_CONF,
                         KafkaConnectorOptions.VALUE_FORMAT,
-                        KafkaConnectorOptions.TOPIC,
                         KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS);
+                checkOneRequiredOption(
+                        cdcSourceConfig,
+                        KAFKA_CONF,
+                        KafkaConnectorOptions.TOPIC,
+                        KafkaConnectorOptions.TOPIC_PATTERN);
                 break;
             case PULSAR:
                 checkRequiredOptions(
                         cdcSourceConfig,
                         PULSAR_CONF,
-                        PulsarActionUtils.TOPIC,
                         PulsarActionUtils.VALUE_FORMAT,
                         PulsarOptions.PULSAR_SERVICE_URL,
                         PulsarOptions.PULSAR_ADMIN_URL,
                         PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME);
+                checkOneRequiredOption(
+                        cdcSourceConfig,
+                        PULSAR_CONF,
+                        PulsarActionUtils.TOPIC,
+                        PulsarActionUtils.TOPIC_PATTERN);
                 break;
             case MONGODB:
                 checkRequiredOptions(

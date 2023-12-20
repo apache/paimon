@@ -37,6 +37,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
@@ -74,7 +75,12 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            kafkaConfig.put(TOPIC.key(), String.join(";", topics));
+        } else {
+            kafkaConfig.put(TOPIC_PATTERN.key(), "schema_evolution_.+");
+        }
+
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())

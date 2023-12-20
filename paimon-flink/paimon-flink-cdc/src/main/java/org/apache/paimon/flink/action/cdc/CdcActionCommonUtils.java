@@ -31,6 +31,7 @@ import org.apache.flink.configuration.Configuration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -311,5 +312,16 @@ public class CdcActionCommonUtils {
                     confName,
                     configOption.key());
         }
+    }
+
+    public static void checkOneRequiredOption(
+            Configuration config, String confName, ConfigOption<?>... configOptions) {
+        checkArgument(
+                Arrays.stream(configOptions).filter(config::contains).count() == 1,
+                "%s must and can only set one of the following options: %s",
+                confName,
+                Arrays.stream(configOptions)
+                        .map(ConfigOption::key)
+                        .collect(Collectors.joining(",")));
     }
 }

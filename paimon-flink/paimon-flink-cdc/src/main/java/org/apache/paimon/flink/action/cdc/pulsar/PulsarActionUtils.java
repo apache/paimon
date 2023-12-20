@@ -79,6 +79,16 @@ public class PulsarActionUtils {
                                     + "by semicolon like 'topic-1;topic-2'. Note, only one of \"topic-pattern\" and \"topic\" "
                                     + "can be specified.");
 
+    public static final ConfigOption<String> TOPIC_PATTERN =
+            ConfigOptions.key("topic-pattern")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The regular expression for a pattern of topic names to read from. All topics with names "
+                                    + "that match the specified regular expression will be subscribed by the consumer "
+                                    + "when the job starts running. Note, only one of \"topic-pattern\" and \"topic\" "
+                                    + "can be specified.");
+
     static final ConfigOption<String> PULSAR_START_CURSOR_FROM_MESSAGE_ID =
             ConfigOptions.key("pulsar.startCursor.fromMessageId")
                     .stringType()
@@ -151,8 +161,10 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setTopics(pulsarConfig.get(TOPIC))
                 .setDeserializationSchema(new SimpleStringSchema());
+
+        pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
+        pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
 
         // other settings
 
