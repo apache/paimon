@@ -198,6 +198,22 @@ public class LookupLevelsTest {
         assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
+    @Test
+    public void testLookupEmptyLevel() throws IOException {
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                // empty level 2
+                                newFile(3, kv(2, 22), kv(5, 55))),
+                        3);
+        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        KeyValue kv = lookupLevels.lookup(row(2), 1);
+        assertThat(kv).isNotNull();
+    }
+
     private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels(
                 levels,
