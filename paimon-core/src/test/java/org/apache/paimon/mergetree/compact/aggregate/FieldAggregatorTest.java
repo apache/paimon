@@ -198,6 +198,14 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
     }
 
+    @Test
+    public void testFieldReplaceAgg() {
+        FieldReplaceAgg fieldReplaceAgg = new FieldReplaceAgg(new IntType());
+        Integer accumulator = 10;
+        Integer inputField = 2;
+        assertThat(fieldReplaceAgg.agg(accumulator, inputField)).isEqualTo(2);
+    }
+
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);

@@ -288,6 +288,7 @@ Current supported aggregate functions and data types are:
 * `listagg`: supports STRING data type.
 * `bool_and` / `bool_or`: support BOOLEAN data type.
 * `first_value` / `first_not_null_value`: support all data types.
+* `replace`: support all data types.
 
 Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
