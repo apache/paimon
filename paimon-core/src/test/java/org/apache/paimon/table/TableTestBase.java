@@ -97,6 +97,18 @@ public abstract class TableTestBase {
         return identifier(DEFAULT_TABLE_NAME);
     }
 
+    @SafeVarargs
+    protected final void write(Table table, Pair<InternalRow, Integer>... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Pair<InternalRow, Integer> row : rows) {
+                write.write(row.getKey(), row.getValue());
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
     protected void write(Table table, InternalRow... rows) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();

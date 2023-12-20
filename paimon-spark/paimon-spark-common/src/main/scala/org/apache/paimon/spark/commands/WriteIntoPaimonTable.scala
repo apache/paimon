@@ -27,7 +27,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
 
 import org.apache.spark.TaskContext
@@ -149,7 +149,7 @@ case class WriteIntoPaimonTable(
                   rowType,
                   bucketColDropped,
                   SparkRowUtils.getRowKind(row, rowkindColIdx))
-                write.write(new DynamicBucketRow(sparkRow, bucket))
+                write.write(sparkRow, bucket)
             }
             val serializer = new CommitMessageSerializer
             write.prepareCommit().asScala.map(serializer.serialize).toIterator

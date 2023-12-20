@@ -25,8 +25,8 @@ import org.apache.paimon.schema.TableSchema;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * {@link KeyAndBucketExtractor} for {@link InternalRow} with extracting bucket from {@link
- * DynamicBucketRow}.
+ * {@link KeyAndBucketExtractor} for {@link InternalRow}, just throws error when extract bucket from
+ * dynamic row.
  */
 public class DynamicBucketRowKeyExtractor extends RowKeyExtractor {
 
@@ -41,10 +41,6 @@ public class DynamicBucketRowKeyExtractor extends RowKeyExtractor {
 
     @Override
     public int bucket() {
-        if (record instanceof DynamicBucketRow) {
-            return ((DynamicBucketRow) record).bucket();
-        }
-        throw new IllegalArgumentException(
-                "Only supports DynamicBucketRow, illegal record type: " + record.getClass());
+        throw new IllegalArgumentException("Can't extract bucket from row in dynamic bucket mode.");
     }
 }

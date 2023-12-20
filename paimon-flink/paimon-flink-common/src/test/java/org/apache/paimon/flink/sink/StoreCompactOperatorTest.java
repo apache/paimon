@@ -108,6 +108,11 @@ public class StoreCompactOperatorTest extends TableTestBase {
         }
 
         @Override
+        public SinkRecord write(InternalRow rowData, int bucket) {
+            return null;
+        }
+
+        @Override
         public SinkRecord toLogRecord(SinkRecord record) {
             return null;
         }
