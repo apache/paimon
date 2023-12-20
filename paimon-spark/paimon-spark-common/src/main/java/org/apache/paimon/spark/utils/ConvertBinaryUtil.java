@@ -20,6 +20,7 @@ package org.apache.paimon.spark.utils;
 
 import java.nio.charset.StandardCharsets;
 
+/** BinaryUtil util to convert the value to binary. */
 public class ConvertBinaryUtil {
     private ConvertBinaryUtil() {}
 

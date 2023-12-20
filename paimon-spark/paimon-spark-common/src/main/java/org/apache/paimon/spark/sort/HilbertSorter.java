@@ -28,6 +28,7 @@ import java.util.List;
 
 import static org.apache.spark.sql.functions.array;
 
+/** Sort table by hilbert curve. */
 public class HilbertSorter extends TableSorter {
 
     private static final String H_COLUMN = "HVALUE";
