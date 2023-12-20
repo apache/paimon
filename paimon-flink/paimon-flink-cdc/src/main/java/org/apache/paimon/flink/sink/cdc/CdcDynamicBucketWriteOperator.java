@@ -23,7 +23,6 @@ import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.TableWriteOperator;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.runtime.state.StateInitializationContext;
@@ -81,7 +80,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
         }
 
         try {
-            write.write(new DynamicBucketRow(optionalConverted.get(), record.f1));
+            write.write(optionalConverted.get(), record.f1);
         } catch (Exception e) {
             throw new IOException(e);
         }

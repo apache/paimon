@@ -34,8 +34,8 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -217,7 +217,8 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         try (BatchTableWrite batchTableWrite = builder.newWrite()) {
             for (int i = 0; i < size; i++) {
                 for (int j = 0; j < 100; j++) {
-                    batchTableWrite.write(data(i));
+                    Pair<InternalRow, Integer> rowWithBucket = data(i);
+                    batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
                 }
             }
             messages = batchTableWrite.prepareCommit();
@@ -245,7 +246,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         return Identifier.create(database, tableName);
     }
 
-    private static InternalRow data(int bucket) {
+    private static Pair<InternalRow, Integer> data(int bucket) {
         String in = String.valueOf(Math.abs(RANDOM.nextInt(10000)));
         int count = 4 - in.length();
         for (int i = 0; i < count; i++) {
@@ -259,6 +260,6 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         (long) RANDOM.nextInt(10000),
                         (long) RANDOM.nextInt(10000),
                         BinaryString.fromString("00000000" + in));
-        return new DynamicBucketRow(row, bucket);
+        return Pair.of(row, bucket);
     }
 }
