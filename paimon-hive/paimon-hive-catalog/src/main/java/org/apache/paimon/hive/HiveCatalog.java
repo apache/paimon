@@ -254,7 +254,7 @@ public class HiveCatalog extends AbstractCatalog {
                                 Identifier identifier = new Identifier(databaseName, tableName);
                                 // the environment here may not be able to access non-paimon
                                 // tables, so we just check the schema file first
-                                return schemaFileExists(identifier) && tableExists(identifier);
+                                return tableExists(identifier);
                             })
                     .collect(Collectors.toList());
         } catch (TException e) {
