@@ -208,6 +208,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private InternalRow toRowWithBucket(InternalRow row, int bucket) {
         reusedBucketRow.setField(0, bucket);
         reusedJoinedRow.replace(reusedBucketRow, row);
+        reusedJoinedRow.setRowKind(row.getRowKind());
         return reusedJoinedRow;
     }
 
