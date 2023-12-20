@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.MathUtils;
 
 import static org.apache.paimon.index.BucketAssigner.computeAssigner;
 
@@ -42,9 +43,7 @@ public class CdcAssignerChannelComputer implements ChannelComputer<CdcRecord> {
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        if (numAssigners == null) {
-            numAssigners = numChannels;
-        }
+        this.numAssigners = MathUtils.min(numAssigners, numChannels);
         this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
     }
 

@@ -53,7 +53,7 @@ an index to determine which key corresponds to which bucket.
 Paimon will automatically expand the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
-- Option2: `'dynamic-bucket.assigner-parallelism'`: controls the number of initialized bucket.
+- Option2: `'dynamic-bucket.initial-buckets'`: controls the number of initialized bucket.
 
 {{< hint info >}}
 Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition 

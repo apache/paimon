@@ -58,22 +58,17 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
 
         // Topology:
         // input -- shuffle by key hash --> bucket-assigner -- shuffle by partition & bucket -->
-        // writer -->
-        // committer
+        // writer --> committer
 
         // 1. shuffle by key hash
-        Integer numAssigners = table.coreOptions().dynamicBucketAssignerParallelism();
-        if (numAssigners == null) {
-            numAssigners = parallelism;
+        Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
+        if (assignerParallelism == null) {
+            assignerParallelism = parallelism;
         }
 
-        Integer totalAssigners = numAssigners;
-        if (parallelism != null && parallelism > totalAssigners) {
-            totalAssigners = parallelism;
-        }
-
+        Integer numAssigners = table.coreOptions().dynamicBucketInitialBuckets();
         DataStream<T> partitionByKeyHash =
-                partition(input, assignerChannelComputer(numAssigners), totalAssigners);
+                partition(input, assignerChannelComputer(numAssigners), assignerParallelism);
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =

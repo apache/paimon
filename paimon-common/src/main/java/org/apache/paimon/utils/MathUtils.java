@@ -51,4 +51,36 @@ public class MathUtils {
         }
         return 31 - Integer.numberOfLeadingZeros(value);
     }
+
+    public static Integer max(Integer v1, Integer v2) {
+        if (v1 == null && v2 == null) {
+            return null;
+        }
+
+        if (v1 != null && v2 == null) {
+            return v1;
+        }
+
+        if (v1 == null) {
+            return v2;
+        }
+
+        return Math.max(v1, v2);
+    }
+
+    public static Integer min(Integer v1, Integer v2) {
+        if (v1 == null && v2 == null) {
+            return null;
+        }
+
+        if (v1 != null && v2 == null) {
+            return v1;
+        }
+
+        if (v1 == null) {
+            return v2;
+        }
+
+        return Math.min(v1, v2);
+    }
 }

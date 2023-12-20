@@ -25,6 +25,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.SerializableFunction;
 
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -84,7 +85,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
                                 commitUser,
                                 table.store().newIndexFileHandler(),
                                 numberTasks,
-                                numAssigners == null ? numberTasks : numAssigners,
+                                MathUtils.min(numAssigners, numberTasks),
                                 taskId,
                                 targetRowNum);
         this.extractor = extractorFunction.apply(table.schema());

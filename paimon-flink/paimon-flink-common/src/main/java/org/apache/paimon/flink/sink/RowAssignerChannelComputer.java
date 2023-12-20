@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.utils.MathUtils;
 
 import org.apache.flink.table.data.RowData;
 
@@ -45,9 +46,7 @@ public class RowAssignerChannelComputer implements ChannelComputer<InternalRow> 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        if (numAssigners == null) {
-            numAssigners = numChannels;
-        }
+        this.numAssigners = MathUtils.min(numAssigners, numChannels);
         this.extractor = new RowPartitionKeyExtractor(schema);
     }
 
