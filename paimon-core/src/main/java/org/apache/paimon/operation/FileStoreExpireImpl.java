@@ -112,12 +112,23 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             return;
         }
 
+        OptionalLong consumerReading = consumerManager.minNextSnapshot();
+
         // locate the first snapshot between the numRetainedMax th and (numRetainedMin+1) th latest
         // snapshots to be retained. This snapshot needs to be preserved because it
         // doesn't fulfill the time threshold condition for expiration.
         for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
                 id <= latestSnapshotId - numRetainedMin;
                 id++) {
+            // Quickly exit the loop in advance for consumer
+            if (consumerReading.isPresent() && id >= consumerReading.getAsLong()) {
+                long consumerSnapshot = consumerReading.getAsLong();
+                if (consumerSnapshot > earliest) {
+                    expireUntil(earliest, consumerSnapshot);
+                }
+                return;
+            }
+
             if (snapshotManager.snapshotExists(id)
                     && currentMillis - snapshotManager.snapshot(id).timeMillis()
                             <= millisRetained) {
@@ -129,16 +140,15 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         // by default, expire until there are only numRetainedMin snapshots left
-        expireUntil(earliest, latestSnapshotId - numRetainedMin + 1);
+        long endExclusiveId = latestSnapshotId - numRetainedMin + 1;
+        if (consumerReading.isPresent()) {
+            endExclusiveId = Math.min(consumerReading.getAsLong(), endExclusiveId);
+        }
+        expireUntil(earliest, endExclusiveId);
     }
 
     @VisibleForTesting
     public void expireUntil(long earliestId, long endExclusiveId) {
-        OptionalLong minNextSnapshot = consumerManager.minNextSnapshot();
-        if (minNextSnapshot.isPresent()) {
-            endExclusiveId = Math.min(minNextSnapshot.getAsLong(), endExclusiveId);
-        }
-
         if (endExclusiveId <= earliestId) {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time

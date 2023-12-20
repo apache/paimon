@@ -44,7 +44,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Base test class for {@link FileStoreExpireImpl}. */
-public class FileStoreExpireTestBase {
+public abstract class FileStoreExpireTestBase {
 
     protected final FileIO fileIO = new LocalFileIO();
     protected TestKeyValueGenerator gen;
