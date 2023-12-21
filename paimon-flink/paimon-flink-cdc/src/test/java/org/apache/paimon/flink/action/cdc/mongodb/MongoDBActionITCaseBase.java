@@ -24,17 +24,13 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.junit.jupiter.api.BeforeAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.lifecycle.Startables;
 
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
@@ -96,41 +92,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             extends SyncTableActionBuilder<MongoDBSyncTableAction> {
 
         public MongoDBSyncTableActionBuilder(Map<String, String> mongodbConfig) {
-            super(mongodbConfig);
-        }
-
-        public MongoDBSyncTableActionBuilder withPrimaryKeys(String... primaryKeys) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncTableActionBuilder withTypeMappingModes(String... typeMappingModes) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncTableAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName));
-
-            args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-            args.addAll(listToArgs("--computed-column", computedColumnArgs));
-
-            args.addAll(listToArgs("--partition-keys", partitionKeys));
-
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (MongoDBSyncTableAction)
-                    new MongoDBSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            super(MongoDBSyncTableAction.class, mongodbConfig);
         }
     }
 
@@ -139,45 +101,7 @@ public abstract class MongoDBActionITCaseBase extends CdcActionITCaseBase {
             extends SyncDatabaseActionBuilder<MongoDBSyncDatabaseAction> {
 
         public MongoDBSyncDatabaseActionBuilder(Map<String, String> mongodbConfig) {
-            super(mongodbConfig);
-        }
-
-        public MongoDBSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncDatabaseActionBuilder withMode(String mode) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncDatabaseActionBuilder withTypeMappingModes(String... typeMappingModes) {
-            throw new UnsupportedOperationException();
-        }
-
-        public MongoDBSyncDatabaseAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
-
-            args.addAll(mapToArgs("--mongodb-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
-            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
-            args.addAll(nullableToArgs("--including-tables", includingTables));
-            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
-
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (MongoDBSyncDatabaseAction)
-                    new MongoDBSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            super(MongoDBSyncDatabaseAction.class, mongodbConfig);
         }
     }
 }

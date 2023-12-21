@@ -22,15 +22,16 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.HashIndexMaintainer;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.BatchWriteBuilderImpl;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -51,13 +52,13 @@ public class DynamicBucketTableTest extends TableTestBase {
         TableWriteImpl batchTableWrite = (TableWriteImpl) builder.withOverwrite().newWrite();
         HashIndexMaintainer indexMaintainer =
                 (HashIndexMaintainer)
-                        batchTableWrite
-                                .getWrite()
+                        ((AbstractFileStoreWrite<?>) (batchTableWrite.getWrite()))
                                 .createWriterContainer(BinaryRow.EMPTY_ROW, 0, true)
                                 .indexMaintainer;
 
         Assertions.assertThat(indexMaintainer.isEmpty()).isTrue();
-        batchTableWrite.write(data(0));
+        Pair<InternalRow, Integer> rowWithBucket = data(0);
+        batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
         Assertions.assertThat(
                         ((CommitMessageImpl) batchTableWrite.prepareCommit().get(0))
                                 .indexIncrement()
@@ -74,7 +75,8 @@ public class DynamicBucketTableTest extends TableTestBase {
         try (BatchTableWrite batchTableWrite = builder.newWrite()) {
             for (int i = 0; i < times; i++) {
                 for (int j = 0; j < size; j++) {
-                    batchTableWrite.write(data(i));
+                    Pair<InternalRow, Integer> rowWithBucket = data(i);
+                    batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
                 }
             }
             messages = batchTableWrite.prepareCommit();
@@ -97,13 +99,13 @@ public class DynamicBucketTableTest extends TableTestBase {
         return schemaBuilder.build();
     }
 
-    private static InternalRow data(int bucket) {
+    private static Pair<InternalRow, Integer> data(int bucket) {
         GenericRow row =
                 GenericRow.of(
                         RANDOM.nextLong(),
                         (long) RANDOM.nextInt(10000),
                         (long) RANDOM.nextInt(10000),
                         (long) RANDOM.nextInt(10000));
-        return new DynamicBucketRow(row, bucket);
+        return Pair.of(row, bucket);
     }
 }

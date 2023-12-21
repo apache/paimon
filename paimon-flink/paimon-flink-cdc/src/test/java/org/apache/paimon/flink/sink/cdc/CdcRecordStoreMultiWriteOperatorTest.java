@@ -26,7 +26,9 @@ import org.apache.paimon.flink.sink.MultiTableCommittable;
 import org.apache.paimon.flink.sink.MultiTableCommittableTypeInfo;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
+import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -43,6 +45,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.checkpoint.OperatorSubtaskState;
 import org.apache.flink.runtime.state.JavaSerializer;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
@@ -67,6 +70,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Predicate;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link CdcRecordStoreMultiWriteOperator}. */
@@ -354,7 +358,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
 
     private Options createCatalogOptions(Path warehouse) {
         Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
+        conf.set(CatalogOptions.WAREHOUSE, warehouse.toString());
         conf.set(CatalogOptions.URI, "");
 
         return conf;
@@ -683,7 +687,9 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         List<ExecutorService> compactExecutors = new ArrayList<>();
         for (StoreSinkWrite storeSinkWrite : storeSinkWrites) {
             StoreSinkWriteImpl storeSinkWriteImpl = (StoreSinkWriteImpl) storeSinkWrite;
-            compactExecutors.add(storeSinkWriteImpl.getWrite().getWrite().getCompactExecutor());
+            compactExecutors.add(
+                    ((AbstractFileStoreWrite<?>) storeSinkWriteImpl.getWrite().getWrite())
+                            .getCompactExecutor());
         }
         assertThat(compactExecutors.get(0) == compactExecutors.get(1)).isTrue();
 
@@ -702,12 +708,97 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         harness.close();
     }
 
+    @Test
+    public void testSingleTableCompactionMetrics() throws Exception {
+        Identifier tableId = firstTable;
+        FileStoreTable table = (FileStoreTable) catalog.getTable(tableId);
+
+        OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable> testHarness =
+                createTestHarness(catalogLoader);
+
+        testHarness.open();
+
+        CdcRecordStoreMultiWriteOperator operator =
+                (CdcRecordStoreMultiWriteOperator) testHarness.getOneInputOperator();
+
+        MetricGroup compactionMetricGroup =
+                operator.getMetricGroup()
+                        .addGroup("paimon")
+                        .addGroup("table", table.name())
+                        .addGroup("partition", "pt=0")
+                        .addGroup("bucket", "0")
+                        .addGroup("compaction");
+
+        long cpId = 1L;
+        Map<String, String> fields = new HashMap<>();
+        fields.put("pt", "0");
+        fields.put("k", "1");
+        fields.put("v", "10");
+
+        CdcMultiplexRecord record =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+
+        testHarness.processElement(record, 0);
+        operator.writes().get(tableId).compact(row(0), 0, true);
+        operator.writes().get(tableId).prepareCommit(true, cpId++);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
+                                .getValue())
+                .isEqualTo(0L);
+
+        fields.put("pt", "0");
+        fields.put("k", "2");
+        fields.put("v", "12");
+
+        CdcMultiplexRecord record1 =
+                CdcMultiplexRecord.fromCdcRecord(
+                        databaseName,
+                        tableId.getObjectName(),
+                        new CdcRecord(RowKind.INSERT, fields));
+
+        testHarness.processElement(record1, 1);
+        operator.writes().get(tableId).compact(row(0), 0, true);
+        operator.writes().get(tableId).prepareCommit(true, cpId);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
+                                .getValue())
+                .isEqualTo(2L);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
+                                .getValue())
+                .isEqualTo(0L);
+
+        // operator closed, metric groups should be unregistered
+        testHarness.close();
+        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
+                .isNull();
+        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
+                .isNull();
+        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
+                .isNull();
+    }
+
     private OneInputStreamOperatorTestHarness<CdcMultiplexRecord, MultiTableCommittable>
             createTestHarness(Catalog.Loader catalogLoader) throws Exception {
         CdcRecordStoreMultiWriteOperator operator =
                 new CdcRecordStoreMultiWriteOperator(
                         catalogLoader,
-                        (t, commitUser, state, ioManager, memoryPoolFactory) ->
+                        (t, commitUser, state, ioManager, memoryPoolFactory, metricGroup) ->
                                 new StoreSinkWriteImpl(
                                         t,
                                         commitUser,
@@ -716,7 +807,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                                         false,
                                         false,
                                         true,
-                                        memoryPoolFactory),
+                                        memoryPoolFactory,
+                                        metricGroup),
                         commitUser,
                         Options.fromMap(new HashMap<>()),
                         new HashMap<>());

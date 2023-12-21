@@ -50,4 +50,9 @@ public abstract class LeafFunction implements Serializable {
 
     public abstract <T> T visit(
             FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals);
+
+    @Override
+    public String toString() {
+        return getClass().getSimpleName();
+    }
 }

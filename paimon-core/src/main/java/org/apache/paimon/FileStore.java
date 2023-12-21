@@ -20,6 +20,8 @@ package org.apache.paimon;
 
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
+import org.apache.paimon.manifest.ManifestFile;
+import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.FileStoreRead;
@@ -29,14 +31,17 @@ import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.List;
 
 /**
  * File store interface.
@@ -44,6 +49,8 @@ import java.io.Serializable;
  * @param <T> type of record to read and write.
  */
 public interface FileStore<T> extends Serializable {
+
+    FileStorePathFactory pathFactory();
 
     SnapshotManager snapshotManager();
 
@@ -54,6 +61,10 @@ public interface FileStore<T> extends Serializable {
     BucketMode bucketMode();
 
     FileStoreScan newScan();
+
+    ManifestList.Factory manifestListFactory();
+
+    ManifestFile.Factory manifestFileFactory();
 
     IndexFileHandler newIndexFileHandler();
 
@@ -80,4 +91,6 @@ public interface FileStore<T> extends Serializable {
     TagAutoCreation newTagCreationManager();
 
     boolean mergeSchema(RowType rowType, boolean allowExplicitCast);
+
+    List<TagCallback> createTagCallbacks();
 }

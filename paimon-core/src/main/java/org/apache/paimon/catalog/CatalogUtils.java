@@ -32,16 +32,12 @@ public class CatalogUtils {
         return String.format("%s/%s.db/%s", warehouse, database, table);
     }
 
-    public static String warehouse(Path path) {
-        return path.getParent().getParent().getPath();
-    }
-
     public static String warehouse(String path) {
-        return new Path(path).getParent().getParent().getPath();
+        return new Path(path).getParent().getParent().toString();
     }
 
     public static String database(Path path) {
-        return SchemaManager.fromPath(path.getPath(), false).getDatabaseName();
+        return SchemaManager.fromPath(path.toString(), false).getDatabaseName();
     }
 
     public static String database(String path) {
@@ -49,7 +45,7 @@ public class CatalogUtils {
     }
 
     public static String table(Path path) {
-        return SchemaManager.fromPath(path.getPath(), false).getObjectName();
+        return SchemaManager.fromPath(path.toString(), false).getObjectName();
     }
 
     public static String table(String path) {

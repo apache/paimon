@@ -101,8 +101,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
-            KeyValueFieldsExtractor extractor) {
-        super(commitUser, snapshotManager, scan, options, indexFactory);
+            KeyValueFieldsExtractor extractor,
+            String tableName) {
+        super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -162,6 +163,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         : universalCompaction;
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
+
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
@@ -173,7 +175,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 writerFactory,
                 options.commitForceCompact(),
                 options.changelogProducer(),
-                restoreIncrement);
+                restoreIncrement,
+                getWriterMetrics(partition, bucket));
     }
 
     @VisibleForTesting
@@ -199,7 +202,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     keyComparator,
                     options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
-                    rewriter);
+                    rewriter,
+                    getCompactionMetrics(partition, bucket));
         }
     }
 

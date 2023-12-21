@@ -48,6 +48,7 @@ import org.apache.paimon.utils.TraceableFileIO;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -80,6 +81,14 @@ public abstract class ScannerTestBase {
         fileIO = FileIOFinder.find(tablePath);
         commitUser = UUID.randomUUID().toString();
         table = createFileStoreTable();
+        snapshotReader = table.newSnapshotReader();
+    }
+
+    protected void createAppenOnlyTable() throws Exception {
+        tempDir = Files.createTempDirectory("junit");
+        tablePath = new Path(TraceableFileIO.SCHEME + "://" + tempDir.toString());
+        fileIO = FileIOFinder.find(tablePath);
+        table = createFileStoreTable(false);
         snapshotReader = table.newSnapshotReader();
     }
 
@@ -125,17 +134,30 @@ public abstract class ScannerTestBase {
     }
 
     protected FileStoreTable createFileStoreTable() throws Exception {
-        return createFileStoreTable(new Options());
+        return createFileStoreTable(true, new Options());
     }
 
     protected FileStoreTable createFileStoreTable(Options conf) throws Exception {
+        return createFileStoreTable(true, conf);
+    }
+
+    protected FileStoreTable createFileStoreTable(boolean withPrimaryKeys) throws Exception {
+        return createFileStoreTable(withPrimaryKeys, new Options());
+    }
+
+    protected FileStoreTable createFileStoreTable(boolean withPrimaryKeys, Options conf)
+            throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        List<String> primaryKeys = new ArrayList<>();
+        if (withPrimaryKeys) {
+            primaryKeys = Arrays.asList("pt", "a");
+        }
         TableSchema tableSchema =
                 schemaManager.createTable(
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.singletonList("pt"),
-                                Arrays.asList("pt", "a"),
+                                primaryKeys,
                                 conf.toMap(),
                                 ""));
         return FileStoreTableFactory.create(

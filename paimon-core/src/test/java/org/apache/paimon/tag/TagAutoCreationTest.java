@@ -215,6 +215,37 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-19");
     }
 
+    @Test
+    public void testSavepointTag() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_NUM_RETAINED_MAX, 3);
+        FileStoreTable table;
+        TableCommitImpl commit;
+        TagManager tagManager;
+        table = this.table.copy(options.toMap());
+
+        commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        tagManager = table.store().newTagManager();
+
+        // test normal creation
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+
+        table.createTag("savepoint-11", 1);
+
+        // test newCommit create
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
+        assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-18 13");
+
+        // test expire old tag
+        commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:00:00")));
+        commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
+        assertThat(tagManager.tags().values())
+                .containsOnly("savepoint-11", "2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
+    }
+
     private long localZoneMills(String timestamp) {
         return LocalDateTime.parse(timestamp)
                 .atZone(ZoneId.systemDefault())

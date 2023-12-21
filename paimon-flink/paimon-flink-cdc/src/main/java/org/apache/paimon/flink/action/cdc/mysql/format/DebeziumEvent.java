@@ -46,6 +46,7 @@ public class DebeziumEvent {
     private static final String FIELD_OP = "op";
     private static final String FIELD_DB = "db";
     private static final String FIELD_TABLE = "table";
+    private static final String FIELD_TS_MS = "ts_ms";
     private static final String FIELD_FIELDS = "fields";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_TYPE = "type";
@@ -228,10 +229,17 @@ public class DebeziumEvent {
         @JsonProperty(FIELD_TABLE)
         private final String table;
 
+        @JsonProperty(FIELD_TS_MS)
+        private final Long tsMs;
+
         @JsonCreator
-        public Source(@JsonProperty(FIELD_DB) String db, @JsonProperty(FIELD_TABLE) String table) {
+        public Source(
+                @JsonProperty(FIELD_DB) String db,
+                @JsonProperty(FIELD_TABLE) String table,
+                @JsonProperty(FIELD_TS_MS) Long tsMs) {
             this.db = db;
             this.table = table;
+            this.tsMs = tsMs;
         }
 
         @JsonGetter(FIELD_DB)
@@ -242,6 +250,11 @@ public class DebeziumEvent {
         @JsonGetter(FIELD_TABLE)
         public String table() {
             return table;
+        }
+
+        @JsonGetter(FIELD_TS_MS)
+        public Long tsMs() {
+            return tsMs;
         }
     }
 }

@@ -64,13 +64,19 @@ public class TypeMapping implements Serializable {
      *   <li>TO_NULLABLE: ignores all NOT NULL constraints (except for primary keys).
      *   <li>TO_STRING: maps all MySQL types to STRING.
      *   <li>CHAR_TO_STRING: maps MySQL CHAR(length)/VARCHAR(length) types to STRING.
+     *   <li>LONGTEXT_TO_BYTES: maps MySQL LONGTEXT types to BYTES.
+     *   <li>BIGINT_UNSIGNED_TO_BIGINT: maps MySQL BIGINT UNSIGNED types to Paimon BIGINT. Notice
+     *       that there is potential overflow risk, and users should ensure the overflow won't
+     *       occur.
      * </ul>
      */
     public enum TypeMappingMode {
         TINYINT1_NOT_BOOL,
         TO_NULLABLE,
         TO_STRING,
-        CHAR_TO_STRING;
+        CHAR_TO_STRING,
+        LONGTEXT_TO_BYTES,
+        BIGINT_UNSIGNED_TO_BIGINT;
 
         private static final Map<String, TypeMappingMode> TYPE_MAPPING_OPTIONS =
                 Arrays.stream(TypeMappingMode.values())

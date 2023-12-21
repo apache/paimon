@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.options.CatalogOptions;
@@ -211,9 +212,9 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         assertThatThrownBy(action::run)
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage(
-                        "table-name cannot be set for mysql-sync-database. "
+                        "table-name cannot be set for mysql_sync_database. "
                                 + "If you want to sync several MySQL tables into one Paimon table, "
-                                + "use mysql-sync-table instead.");
+                                + "use mysql_sync_table instead.");
     }
 
     @Test
@@ -473,7 +474,7 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);

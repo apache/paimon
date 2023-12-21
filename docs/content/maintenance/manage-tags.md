@@ -42,6 +42,7 @@ Paimon supports automatic creation of tags in writing job.
 You can set `'tag.automatic-creation'` to `process-time` or `watermark`:
 - `process-time`: Create TAG based on the time of the machine.
 - `watermark`: Create TAG based on the watermark of the Sink input.
+- `batch`: In a batch processing scenario, a tag is generated after the current task is completed.
 
 {{< hint info >}}
 If you choose Watermark, you may need to specify the time zone of watermark, if watermark is not in the
@@ -106,9 +107,9 @@ You can create a tag with given name (cannot be number) and snapshot ID.
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --tag-name <tag-name> \
+    --tag_name <tag-name> \
     --snapshot <snapshot-id> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
 {{< /tab >}}
@@ -156,8 +157,8 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --tag-name <tag-name> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    --tag_name <tag-name> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
 {{< /tab >}}
@@ -207,8 +208,8 @@ Run the following command:
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
-    --vesion <tag-name> \
-    [--catalog-conf <paimon-catalog-conf> [--catalog-conf <paimon-catalog-conf> ...]]
+    --version <tag-name> \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
 
 {{< /tab >}}

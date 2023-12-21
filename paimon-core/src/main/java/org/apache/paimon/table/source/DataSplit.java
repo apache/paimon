@@ -31,8 +31,10 @@ import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.OptionalLong;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -40,7 +42,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 3L;
+    private static final long serialVersionUID = 5L;
 
     private long snapshotId = 0;
     private boolean isStreaming = false;
@@ -49,6 +51,8 @@ public class DataSplit implements Split {
     private BinaryRow partition;
     private int bucket = -1;
     private List<DataFileMeta> dataFiles;
+
+    private List<RawFile> rawFiles = Collections.emptyList();
 
     public DataSplit() {}
 
@@ -90,6 +94,15 @@ public class DataSplit implements Split {
     }
 
     @Override
+    public Optional<List<RawFile>> convertToRawFiles() {
+        if (rawFiles.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(rawFiles);
+        }
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -102,12 +115,13 @@ public class DataSplit implements Split {
                 && Objects.equals(partition, split.partition)
                 && Objects.equals(beforeFiles, split.beforeFiles)
                 && Objects.equals(dataFiles, split.dataFiles)
-                && isStreaming == split.isStreaming;
+                && isStreaming == split.isStreaming
+                && Objects.equals(rawFiles, split.rawFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, beforeFiles, dataFiles, isStreaming);
+        return Objects.hash(partition, bucket, beforeFiles, dataFiles, isStreaming, rawFiles);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -125,6 +139,7 @@ public class DataSplit implements Split {
         this.beforeFiles = other.beforeFiles;
         this.dataFiles = other.dataFiles;
         this.isStreaming = other.isStreaming;
+        this.rawFiles = other.rawFiles;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -144,6 +159,11 @@ public class DataSplit implements Split {
         }
 
         out.writeBoolean(isStreaming);
+
+        out.writeInt(rawFiles.size());
+        for (RawFile rawFile : rawFiles) {
+            rawFile.serialize(out);
+        }
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -166,6 +186,12 @@ public class DataSplit implements Split {
 
         boolean isStreaming = in.readBoolean();
 
+        int rawFileNum = in.readInt();
+        List<RawFile> rawFiles = new ArrayList<>();
+        for (int i = 0; i < rawFileNum; i++) {
+            rawFiles.add(RawFile.deserialize(in));
+        }
+
         return builder()
                 .withSnapshot(snapshotId)
                 .withPartition(partition)
@@ -173,6 +199,7 @@ public class DataSplit implements Split {
                 .withBeforeFiles(beforeFiles)
                 .withDataFiles(dataFiles)
                 .isStreaming(isStreaming)
+                .rawFiles(rawFiles)
                 .build();
     }
 
@@ -212,6 +239,11 @@ public class DataSplit implements Split {
 
         public Builder isStreaming(boolean isStreaming) {
             this.split.isStreaming = isStreaming;
+            return this;
+        }
+
+        public Builder rawFiles(List<RawFile> rawFiles) {
+            this.split.rawFiles = rawFiles;
             return this;
         }
 

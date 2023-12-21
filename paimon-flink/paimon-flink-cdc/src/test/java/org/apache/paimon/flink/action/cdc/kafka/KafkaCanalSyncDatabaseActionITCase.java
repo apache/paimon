@@ -18,9 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -37,7 +36,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC_PATTERN;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -71,8 +74,13 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            kafkaConfig.put(TOPIC.key(), String.join(";", topics));
+        } else {
+            kafkaConfig.put(TOPIC_PATTERN.key(), "schema_evolution_.+");
+        }
+
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())
@@ -107,8 +115,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
 
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -242,15 +250,15 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
     @Test
     public void testTopicIsEmpty() {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
 
         KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
 
         assertThatThrownBy(action::run)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "kafka-conf [topic] must be specified."));
+                                "kafka_conf must and can only set one of the following options: topic,topic-pattern."));
     }
 
     @Test
@@ -290,8 +298,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("test_prefix_")
@@ -341,8 +349,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("test_prefix_")
@@ -514,8 +522,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         }
         // try synchronization
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", String.join(";", topics));
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .includingTables(includingTables)
@@ -539,8 +547,8 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, readLines("kafka/canal/database/tostring/canal-data-1.txt"));
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
@@ -588,15 +596,15 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 topic, readLines("kafka/canal/database/case-insensitive/canal-data-1.txt"));
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
 
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTableConfig(getBasicTableConfig())
                         .withCatalogConfig(
                                 Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-case-insensitive"))
+                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -613,5 +621,33 @@ public class KafkaCanalSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 table,
                 rowType,
                 Collections.singletonList("k1"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testCannotSynchronizeIncompleteJson() throws Exception {
+        final String topic = "incomplete";
+        createTestTopic(topic, 1, 1);
+
+        writeRecordsToKafka(topic, readLines("kafka/canal/database/incomplete/canal-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        action.withStreamExecutionEnvironment(env).build();
+
+        assertThatThrownBy(() -> env.execute())
+                .satisfies(
+                        anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Cannot synchronize record when database name or table name is unknown. "
+                                        + "Invalid record is:\n"
+                                        + "{databaseName=null, tableName=null, fieldTypes={k=STRING, v0=STRING, v1=STRING}, "
+                                        + "primaryKeys=[], cdcRecord=+I {v0=five, k=5, v1=50}}"));
     }
 }

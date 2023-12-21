@@ -35,7 +35,7 @@ public class FileStoreTestUtils {
 
     public static final String TABLE_NAME = "hive_test_table";
 
-    public static final String DATABASE_NAME = "default";
+    public static final String DATABASE_NAME = "test_db";
 
     public static Table createFileStoreTable(
             Options conf, RowType rowType, List<String> partitionKeys, List<String> primaryKeys)

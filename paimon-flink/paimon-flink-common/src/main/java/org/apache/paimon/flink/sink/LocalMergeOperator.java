@@ -30,6 +30,7 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
+import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
@@ -62,6 +63,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
     private transient long recordCount;
     private transient SequenceGenerator sequenceGenerator;
+    private transient RowKindGenerator rowKindGenerator;
     private transient MergeFunction<KeyValue> mergeFunction;
 
     private transient SortBufferWriteBuffer buffer;
@@ -92,6 +94,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         recordCount = 0;
         sequenceGenerator = SequenceGenerator.create(schema, options);
+        rowKindGenerator = RowKindGenerator.create(schema, options);
         mergeFunction =
                 PrimaryKeyTableUtils.createMergeFunctionFactory(
                                 schema,
@@ -131,7 +134,8 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         recordCount++;
         InternalRow row = record.getValue();
 
-        RowKind rowKind = row.getRowKind();
+        RowKind rowKind =
+                rowKindGenerator == null ? row.getRowKind() : rowKindGenerator.generate(row);
         // row kind must be INSERT when it is divided into key and value
         row.setRowKind(RowKind.INSERT);
 

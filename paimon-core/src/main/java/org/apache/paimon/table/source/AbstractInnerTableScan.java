@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.Consumer;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.table.source.snapshot.CompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousCompactorStartingScanner;
@@ -31,6 +32,7 @@ import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotFullStartin
 import org.apache.paimon.table.source.snapshot.ContinuousFromSnapshotStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousFromTimestampStartingScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousLatestStartingScanner;
+import org.apache.paimon.table.source.snapshot.FileCreationTimeStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullCompactedStartingScanner;
 import org.apache.paimon.table.source.snapshot.FullStartingScanner;
 import org.apache.paimon.table.source.snapshot.IncrementalStartingScanner;
@@ -70,6 +72,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
 
     public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    public AbstractInnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
+        snapshotReader.withMetricRegistry(metricsRegistry);
         return this;
     }
 
@@ -126,6 +133,9 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 return isStreaming
                         ? new ContinuousFromTimestampStartingScanner(snapshotManager, startupMillis)
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
+            case FROM_FILE_CREATION_TIME:
+                Long fileCreationTimeMills = options.scanFileCreationTimeMills();
+                return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
@@ -187,6 +197,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         }
     }
 
+    @Override
     public List<BinaryRow> listPartitions() {
         return snapshotReader.partitions();
     }

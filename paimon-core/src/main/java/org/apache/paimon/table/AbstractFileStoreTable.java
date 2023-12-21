@@ -21,8 +21,6 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.metastore.AddPartitionCommitCallback;
@@ -33,38 +31,31 @@ import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
-import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.tag.TagPreview;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -136,6 +127,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 splitGenerator(),
                 nonPartitionFilterConsumer(),
                 DefaultValueAssigner.create(tableSchema),
+                store().pathFactory(),
                 name());
     }
 
@@ -160,7 +152,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     public abstract SplitGenerator splitGenerator();
 
-    protected abstract boolean supportStreamingReadOverwrite();
+    public abstract boolean supportStreamingReadOverwrite();
 
     public abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
@@ -168,6 +160,22 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        checkImmutability(dynamicOptions);
+        return copyInternal(dynamicOptions, true);
+    }
+
+    @Override
+    public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        checkImmutability(dynamicOptions);
+        return copyInternal(dynamicOptions, false);
+    }
+
+    @Override
+    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+        return copyInternal(dynamicOptions, true);
+    }
+
+    private void checkImmutability(Map<String, String> dynamicOptions) {
         Map<String, String> options = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
@@ -176,12 +184,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                         SchemaManager.checkAlterTableOption(k);
                     }
                 });
-
-        return internalCopyWithoutCheck(dynamicOptions);
     }
 
-    @Override
-    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+    private FileStoreTable copyInternal(Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options
@@ -208,8 +213,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema);
 
-        // see if merged options contain time travel option
-        newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+        if (tryTimeTravel) {
+            // see if merged options contain time travel option
+            newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+        }
 
         return copy(newTableSchema);
     }
@@ -274,7 +281,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private List<CommitCallback> createCommitCallbacks() {
-        List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
+        List<CommitCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
         MetastoreClient.Factory metastoreClientFactory =
                 catalogEnvironment.metastoreClientFactory();
@@ -296,62 +304,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             callbacks.add(callback);
         }
         return callbacks;
-    }
-
-    private List<TagCallback> createTagCallbacks() {
-        List<TagCallback> callbacks = new ArrayList<>(loadTagCallbacks());
-        String partitionField = coreOptions().tagToPartitionField();
-        MetastoreClient.Factory metastoreClientFactory =
-                catalogEnvironment.metastoreClientFactory();
-        if (partitionField != null && metastoreClientFactory != null) {
-            callbacks.add(
-                    new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
-        }
-        return callbacks;
-    }
-
-    private List<TagCallback> loadTagCallbacks() {
-        return loadCallbacks(coreOptions().tagCallbacks(), TagCallback.class);
-    }
-
-    private List<CommitCallback> loadCommitCallbacks() {
-        return loadCallbacks(coreOptions().commitCallbacks(), CommitCallback.class);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> List<T> loadCallbacks(Map<String, String> clazzParamMaps, Class<T> expectClass) {
-        List<T> result = new ArrayList<>();
-
-        for (Map.Entry<String, String> classParamEntry : clazzParamMaps.entrySet()) {
-            String className = classParamEntry.getKey();
-            String param = classParamEntry.getValue();
-
-            Class<?> clazz;
-            try {
-                clazz = Class.forName(className, true, this.getClass().getClassLoader());
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            }
-
-            Preconditions.checkArgument(
-                    expectClass.isAssignableFrom(clazz),
-                    "Class " + clazz + " must implement " + expectClass);
-
-            try {
-                if (param == null) {
-                    result.add((T) clazz.newInstance());
-                } else {
-                    result.add((T) clazz.getConstructor(String.class).newInstance(param));
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(
-                        "Failed to initialize commit callback "
-                                + className
-                                + (param == null ? "" : " with param " + param),
-                        e);
-            }
-        }
-        return result;
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
@@ -400,50 +352,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
-    abstract InnerTableRead innerRead();
-
-    @Override
-    public InnerTableRead newRead() {
-        InnerTableRead innerTableRead = innerRead();
-        DefaultValueAssigner defaultValueAssigner = DefaultValueAssigner.create(tableSchema);
-        if (!defaultValueAssigner.needToAssign()) {
-            return innerTableRead;
-        }
-
-        return new InnerTableRead() {
-            @Override
-            public InnerTableRead withFilter(Predicate predicate) {
-                innerTableRead.withFilter(defaultValueAssigner.handlePredicate(predicate));
-                return this;
-            }
-
-            @Override
-            public InnerTableRead withProjection(int[][] projection) {
-                defaultValueAssigner.handleProject(projection);
-                innerTableRead.withProjection(projection);
-                return this;
-            }
-
-            @Override
-            public TableRead withIOManager(IOManager ioManager) {
-                innerTableRead.withIOManager(ioManager);
-                return this;
-            }
-
-            @Override
-            public RecordReader<InternalRow> createReader(Split split) throws IOException {
-                return defaultValueAssigner.assignFieldsDefaultValue(
-                        innerTableRead.createReader(split));
-            }
-
-            @Override
-            public InnerTableRead forceKeepDelete() {
-                innerTableRead.forceKeepDelete();
-                return this;
-            }
-        };
-    }
-
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
@@ -453,17 +361,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fromSnapshotId);
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
-        tagManager().createTag(snapshot, tagName);
-
-        List<TagCallback> callbacks = Collections.emptyList();
-        try {
-            callbacks = createTagCallbacks();
-            callbacks.forEach(callback -> callback.notifyCreation(tagName));
-        } finally {
-            for (TagCallback tagCallback : callbacks) {
-                IOUtils.closeQuietly(tagCallback);
-            }
-        }
+        tagManager().createTag(snapshot, tagName, store().createTagCallbacks());
     }
 
     @Override

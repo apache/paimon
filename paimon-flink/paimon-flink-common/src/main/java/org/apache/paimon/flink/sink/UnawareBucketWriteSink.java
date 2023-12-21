@@ -40,16 +40,19 @@ public class UnawareBucketWriteSink extends FileStoreSink {
     private final boolean enableCompaction;
     private final AppendOnlyFileStoreTable table;
     private final Integer parallelism;
+    private final boolean boundedInput;
 
     public UnawareBucketWriteSink(
             AppendOnlyFileStoreTable table,
             Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
-            Integer parallelism) {
+            Integer parallelism,
+            boolean boundedInput) {
         super(table, overwritePartitions, logSinkFunction);
         this.table = table;
         this.enableCompaction = !table.coreOptions().writeOnly();
         this.parallelism = parallelism;
+        this.boundedInput = boundedInput;
     }
 
     @Override
@@ -63,7 +66,8 @@ public class UnawareBucketWriteSink extends FileStoreSink {
                                 .get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
         // if enable compaction, we need to add compaction topology to this job
-        if (enableCompaction && isStreamingMode) {
+        if (enableCompaction && isStreamingMode && !boundedInput) {
+            // if streaming mode with bounded input, we disable compaction topology
             UnawareBucketCompactionTopoBuilder builder =
                     new UnawareBucketCompactionTopoBuilder(
                             input.getExecutionEnvironment(), table.name(), table);

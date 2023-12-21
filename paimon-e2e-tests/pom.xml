@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-e2e-tests</artifactId>
@@ -280,7 +280,7 @@ under the License.
             <id>flink-1.17</id>
             <properties>
                 <test.flink.main.version>1.17</test.flink.main.version>
-                <test.flink.version>1.17.1</test.flink.version>
+                <test.flink.version>1.17.2</test.flink.version>
                 <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
             </properties>
         </profile>
@@ -289,7 +289,7 @@ under the License.
             <id>flink-1.16</id>
             <properties>
                 <test.flink.main.version>1.16</test.flink.main.version>
-                <test.flink.version>1.16.2</test.flink.version>
+                <test.flink.version>1.16.3</test.flink.version>
                 <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
             </properties>
         </profile>

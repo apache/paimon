@@ -519,7 +519,7 @@ class StoreMultiCommitterTest {
         testHarness.snapshot(cpId, timestamp);
         testHarness.notifyOfCompletedCheckpoint(cpId);
         assertThat(Objects.requireNonNull(table1.snapshotManager().latestSnapshot()).id())
-                .isEqualTo(2);
+                .isEqualTo(1);
         assertThat(Objects.requireNonNull(table2.snapshotManager().latestSnapshot()).id())
                 .isEqualTo(1);
 
@@ -674,7 +674,7 @@ class StoreMultiCommitterTest {
 
     private Options createCatalogOptions(Path warehouse) {
         Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, warehouse.getPath());
+        conf.set(CatalogOptions.WAREHOUSE, warehouse.toString());
         conf.set(CatalogOptions.URI, "");
 
         return conf;

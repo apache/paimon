@@ -27,6 +27,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
 
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
 
 import javax.annotation.Nullable;
@@ -39,6 +40,8 @@ import java.util.List;
 public interface StoreSinkWrite {
 
     SinkRecord write(InternalRow rowData) throws Exception;
+
+    SinkRecord write(InternalRow rowData, int bucket) throws Exception;
 
     SinkRecord toLogRecord(SinkRecord record);
 
@@ -75,7 +78,8 @@ public interface StoreSinkWrite {
                 String commitUser,
                 StoreSinkWriteState state,
                 IOManager ioManager,
-                @Nullable MemorySegmentPool memoryPool);
+                @Nullable MemorySegmentPool memoryPool,
+                @Nullable MetricGroup metricGroup);
     }
 
     /** Provider of {@link StoreSinkWrite} that uses given write buffer. */
@@ -87,6 +91,7 @@ public interface StoreSinkWrite {
                 String commitUser,
                 StoreSinkWriteState state,
                 IOManager ioManager,
-                @Nullable MemoryPoolFactory memoryPoolFactory);
+                @Nullable MemoryPoolFactory memoryPoolFactory,
+                MetricGroup metricGroup);
     }
 }

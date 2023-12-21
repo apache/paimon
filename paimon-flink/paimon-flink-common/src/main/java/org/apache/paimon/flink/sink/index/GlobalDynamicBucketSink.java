@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.index;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.crosspartition.IndexBootstrap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.Committable;
@@ -30,6 +31,7 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MathUtils;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -45,7 +47,9 @@ import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.crosspartition.IndexBootstrap.bootstrapType;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_CROSS_PARTITION_MANAGED_MEMORY;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
+import static org.apache.paimon.flink.utils.ManagedMemoryUtils.declareManagedMemory;
 
 /** Sink for global dynamic bucket table. */
 public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, Integer>> {
@@ -67,6 +71,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
         String initialCommitUser = UUID.randomUUID().toString();
 
         TableSchema schema = table.schema();
+        CoreOptions options = table.coreOptions();
         RowType rowType = schema.logicalRowType();
         List<String> primaryKeys = schema.primaryKeys();
         InternalRowTypeSerializer rowSerializer = new InternalRowTypeSerializer(rowType);
@@ -89,7 +94,10 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
                         .setParallelism(input.getParallelism());
 
         // 1. shuffle by key hash
-        Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
+        Integer assignerParallelism =
+                MathUtils.max(
+                        options.dynamicBucketInitialBuckets(),
+                        options.dynamicBucketAssignerParallelism());
         if (assignerParallelism == null) {
             assignerParallelism = parallelism;
         }
@@ -109,6 +117,10 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
                                 rowWithBucketType,
                                 GlobalIndexAssignerOperator.forRowData(table))
                         .setParallelism(partitionByKeyHash.getParallelism());
+
+        // declare managed memory for RocksDB
+        declareManagedMemory(
+                bucketAssigned, options.toConfiguration().get(SINK_CROSS_PARTITION_MANAGED_MEMORY));
 
         // 3. shuffle by bucket
 

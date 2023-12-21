@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -470,5 +471,86 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                         + "VALUES ('1', '2', '3'), ('4', '5', '6')",
                 "T1");
         assertThat(batchSql("SELECT * FROM T1").size()).isEqualTo(2);
+    }
+
+    @Test
+    public void testDynamicPartitionPruningNotWork() throws Exception {
+        // dim table
+        sql("CREATE TABLE dim (x INT PRIMARY KEY NOT ENFORCED, y STRING, z INT)");
+        sql("INSERT INTO dim VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2)");
+
+        // partitioned fact table
+        sql(
+                "CREATE TABLE fact (a INT, b BIGINT, c STRING, p INT, `proctime` AS PROCTIME(), PRIMARY KEY (a, p) NOT ENFORCED) PARTITIONED BY (p)\n");
+        sql(
+                "INSERT INTO fact PARTITION (p = 1) VALUES (10, 100, 'aaa'), (11, 101, 'bbb'), (12, 102, 'ccc')");
+        sql(
+                "INSERT INTO fact PARTITION (p = 2) VALUES (20, 200, 'aaa'), (21, 201, 'bbb'), (22, 202, 'ccc')");
+        sql(
+                "INSERT INTO fact PARTITION (p = 3) VALUES (30, 300, 'aaa'), (31, 301, 'bbb'), (32, 302, 'ccc')");
+
+        String joinSql = "SELECT a, b, c, p, x, y FROM fact INNER JOIN dim ON x = p and z = 1";
+
+        // check dynamic partition pruning isn't working
+        assertThat(sEnv.explainSql(joinSql)).doesNotContain("DynamicFilteringDataCollector");
+
+        // check results
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(streamSqlIter(joinSql));
+        assertThat(iterator.collect(6))
+                .containsExactlyInAnyOrder(
+                        Row.of(10, 100L, "aaa", 1, 1, "a"),
+                        Row.of(11, 101L, "bbb", 1, 1, "a"),
+                        Row.of(12, 102L, "ccc", 1, 1, "a"),
+                        Row.of(20, 200L, "aaa", 2, 2, "b"),
+                        Row.of(21, 201L, "bbb", 2, 2, "b"),
+                        Row.of(22, 202L, "ccc", 2, 2, "b"));
+        iterator.close();
+    }
+
+    @Test
+    public void testIgnoreDelete() {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
+                        + "WITH ('deduplicate.ignore-delete' = 'true')");
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
+        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+    }
+
+    @Test
+    public void testScanFromOldSchema() throws Exception {
+        sql("CREATE TABLE select_old (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
+
+        sql("INSERT INTO select_old VALUES (1, 'a'), (2, 'b')");
+
+        Thread.sleep(1_000);
+        long timestamp = System.currentTimeMillis();
+
+        sql("ALTER TABLE select_old ADD f2 STRING");
+        sql("INSERT INTO select_old VALUES (3, 'c', 'C')");
+
+        // this way will initialize source with the latest schema
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM select_old /*+ OPTIONS('scan.timestamp-millis'='%s') */",
+                                timestamp));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c", "C"));
+        iterator.close();
+
+        // this way will initialize source with time-travelled schema
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM select_old FOR SYSTEM_TIME AS OF TIMESTAMP '%s'",
+                                DateTimeUtils.formatTimestamp(
+                                        DateTimeUtils.toInternal(timestamp, 0), 0)));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c"));
     }
 }

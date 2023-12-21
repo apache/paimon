@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-oss-impl</artifactId>
@@ -116,17 +116,6 @@
                                     <include>*:*</include>
                                 </includes>
                             </artifactSet>
-                            <relocations>
-                                <!-- relocate the OSS dependencies -->
-                                <relocation>
-                                    <pattern>com.aliyun</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyun</shadedPattern>
-                                </relocation>
-                                <relocation>
-                                    <pattern>com.aliyuncs</pattern>
-                                    <shadedPattern>org.apache.paimon.oss.shade.com.aliyuncs</shadedPattern>
-                                </relocation>
-                            </relocations>
                             <filters>
                                 <filter>
                                     <artifact>*</artifact>

@@ -35,6 +35,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -54,13 +56,12 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
-        kafkaConfig.setString("value.format", "canal-json");
-        kafkaConfig.setString("topic", topic);
+        kafkaConfig.setString(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.setString(TOPIC.key(), topic);
 
         Schema kafkaSchema =
                 MessageQueueSchemaUtils.getSchema(
-                        getKafkaEarliestConsumer(kafkaConfig, topic),
-                        topic,
+                        getKafkaEarliestConsumer(kafkaConfig),
                         getDataFormat(kafkaConfig),
                         TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();
@@ -80,8 +81,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(topic, readLines("kafka/canal/table/optionschange/canal-data-1.txt"));
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");
@@ -122,8 +123,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         writeRecordsToKafka(
                 topic, readLines("kafka/canal/database/schemaevolution/topic0/canal-data-1.txt"));
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "canal-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");

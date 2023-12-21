@@ -22,6 +22,8 @@ import org.apache.paimon.table.source.Split;
 
 import org.apache.spark.sql.connector.read.InputPartition;
 
+import java.util.Objects;
+
 /** A Spark {@link InputPartition} for paimon. */
 public class SparkInputPartition implements InputPartition {
 
@@ -35,5 +37,24 @@ public class SparkInputPartition implements InputPartition {
 
     public Split split() {
         return split;
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+
+        SparkInputPartition that = (SparkInputPartition) o;
+        return this.split.equals(that.split);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(split);
     }
 }

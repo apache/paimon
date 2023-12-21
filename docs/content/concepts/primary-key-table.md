@@ -38,19 +38,26 @@ A bucket is the smallest storage unit for reads and writes, each bucket director
 
 ### Fixed Bucket
 
-Configure a bucket greater than 0, rescaling buckets can only be done through offline processes,
-see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}). A too large number of buckets leads to too many
-small files, and a too small number of buckets leads to poor write performance.
+Configure a bucket greater than 0, using Fixed Bucket mode, according to `Math.abs(key_hashcode % numBuckets)` to compute
+the bucket of record.
+
+Rescaling buckets can only be done through offline processes, see [Rescale Bucket]({{< ref "/maintenance/rescale-bucket" >}}).
+A too large number of buckets leads to too many small files, and a too small number of buckets leads to poor write performance.
 
 ### Dynamic Bucket
 
-Configure `'bucket' = '-1'`, Paimon dynamically maintains the index, automatic expansion of the number of buckets.
+Configure `'bucket' = '-1'`. The keys that arrive first will fall into the old buckets, and the new keys will fall into
+the new buckets, the distribution of buckets and keys depends on the order in which the data arrives. Paimon maintains
+an index to determine which key corresponds to which bucket.
+
+Paimon will automatically expand the number of buckets.
 
 - Option1: `'dynamic-bucket.target-row-num'`: controls the target row number for one bucket.
-- Option2: `'dynamic-bucket.assigner-parallelism'`: Parallelism of assigner operator, controls the number of initialized bucket.
+- Option2: `'dynamic-bucket.initial-buckets'`: controls the number of initialized bucket.
 
 {{< hint info >}}
-Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition.
+Dynamic Bucket only support single write job. Please do not start multiple jobs to write to the same partition 
+(this can lead to duplicate data). Even if you enable `'write-only'` and start a dedicated compaction job, it won't work.
 {{< /hint >}}
 
 #### Normal Dynamic Bucket Mode
@@ -171,6 +178,36 @@ SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 
 For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
+#### Aggregation
+
+You can specify aggregation function for the input field, all the functions in the [Aggregation]({{< ref "concepts/primary-key-table#aggregation-1" >}}) are supported. 
+
+See example:
+
+```sql
+CREATE TABLE T (
+          k INT,
+          a INT,
+          b INT,
+          c INT,
+          d INT,
+          PRIMARY KEY (k) NOT ENFORCED
+) WITH (
+     'merge-engine'='partial-update',
+     'fields.a.sequence-group' = 'b',
+     'fields.b.aggregate-function' = 'first_value',
+     'fields.c.sequence-group' = 'd',
+     'fields.d.aggregate-function' = 'sum'
+ );
+INSERT INTO T VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
+INSERT INTO T VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
+
+
+SELECT * FROM T; -- output 1, 2, 1, 2, 3
+```
+
 #### Default Value
 If the order of the data cannot be guaranteed and field is written only by overwriting null values,
 fields that have not been overwritten will be displayed as null when reading table.
@@ -185,8 +222,8 @@ CREATE TABLE T (
 ) WITH (
      'merge-engine'='partial-update'
      );
-INSERT INTO T VALUES (1, 1,null,null);
-INSERT INTO T VALUES (1, null,null,1);
+INSERT INTO T VALUES (1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1);
 
 SELECT * FROM T; -- output 1, 1, null, 1
 ```
@@ -204,8 +241,8 @@ CREATE TABLE T (
     'fields.b.default-value'='0'
 );
 
-INSERT INTO T VALUES (1, 1,null,null);
-INSERT INTO T VALUES (1, null,null,1);
+INSERT INTO T VALUES (1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1);
 
 SELECT * FROM T; -- output 1, 1, 0, 1
 ```
@@ -246,10 +283,11 @@ Field `price` will be aggregated by the `max` function, and field `sales` will b
 Current supported aggregate functions and data types are:
 
 * `sum`: supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT and DOUBLE.
-* `min`/`max`: support DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP and TIMESTAMP_LTZ.
+* `min`/`max`: support CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP and TIMESTAMP_LTZ.
 * `last_value` / `last_non_null_value`: support all data types.
 * `listagg`: supports STRING data type.
 * `bool_and` / `bool_or`: support BOOLEAN data type.
+* `first_value` / `first_not_null_value`: support all data types.
 
 Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
@@ -269,15 +307,18 @@ This is an experimental feature.
 By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
 
+{{< hint info >}}
 1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "concepts/primary-key-table#changelog-producers" >}}).
 2. You can not specify `sequence.field`.
-3. Not accept `DELETE` and `UPDATE_BEFORE` message.
+3. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `first-row.ignore-delete` to ignore these two kinds records.
+{{< /hint >}}
+
 
 This is of great help in replacing log deduplication in streaming computation.
 
 ## Changelog Producers
 
-Streaming queries will continuously produce the latest changes. These changes can come from the underlying table files or from an [external log system]({{< ref "concepts/external-log-systems" >}}) like Kafka. Compared to the external log system, changes from table files have lower cost but higher latency (depending on how often snapshots are created).
+Streaming queries will continuously produce the latest changes.
 
 By specifying the `changelog-producer` table property when creating the table, users can choose the pattern of changes produced from table files.
 
@@ -417,3 +458,10 @@ of sequence number will be made up to microsecond by system.
 
 3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
 pad the row kind flag.
+
+## Row Kind Field
+
+By default, the primary key table determines the row kind according to the input row. You can also define the 
+`'rowkind.field'` to use a field to extract row kind.
+
+The valid row kind string should be `'+I'`, `'-U'`, `'+U'` or `'-D'`.

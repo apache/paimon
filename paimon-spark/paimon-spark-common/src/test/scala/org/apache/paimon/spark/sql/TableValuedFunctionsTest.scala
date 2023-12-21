@@ -18,18 +18,10 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
-import org.apache.spark.SparkConf
 import org.apache.spark.sql.{DataFrame, Row}
 
 class TableValuedFunctionsTest extends PaimonSparkTestBase {
-
-  override protected def sparkConf: SparkConf = {
-    super.sparkConf
-      .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
-      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
-  }
 
   withPk.foreach {
     hasPk =>

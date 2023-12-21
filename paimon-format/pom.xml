@@ -25,14 +25,14 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-format</artifactId>
     <name>Paimon : Format</name>
 
     <properties>
-        <parquet.version>1.12.3</parquet.version>
+        <parquet.version>1.13.1</parquet.version>
         <orc.version>1.8.3</orc.version>
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
@@ -140,12 +140,6 @@ under the License.
         <!-- Avro End -->
 
         <!-- Parquet Start -->
-
-        <dependency>
-            <groupId>org.apache.parquet</groupId>
-            <artifactId>parquet-avro</artifactId>
-            <version>${parquet.version}</version>
-        </dependency>
 
         <dependency>
             <groupId>org.apache.parquet</groupId>
@@ -294,7 +288,6 @@ under the License.
                                     <include>org.apache.commons:commons-compress</include>
 
                                     <!-- Parquet -->
-                                    <include>org.apache.parquet:parquet-avro</include>
                                     <include>org.apache.parquet:parquet-hadoop</include>
                                     <include>org.apache.parquet:parquet-format</include>
                                     <include>org.apache.parquet:parquet-column</include>

@@ -34,14 +34,13 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.Random;
 
@@ -155,15 +154,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
     private void zorder(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
-            new SortCompactAction(
-                            warehouse,
-                            database,
-                            tableName,
-                            Collections.emptyMap(),
-                            Collections.emptyMap())
-                    .withOrderStrategy("zorder")
-                    .withOrderColumns(columns)
-                    .run();
+            createAction("zorder", columns).run();
         } else {
             callProcedure("zorder", columns);
         }
@@ -171,18 +162,26 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
 
     private void order(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
-            new SortCompactAction(
-                            warehouse,
-                            database,
-                            tableName,
-                            Collections.emptyMap(),
-                            Collections.emptyMap())
-                    .withOrderStrategy("order")
-                    .withOrderColumns(columns)
-                    .run();
+            createAction("order", columns).run();
         } else {
             callProcedure("order", columns);
         }
+    }
+
+    private SortCompactAction createAction(String orderStrategy, List<String> columns) {
+        return createAction(
+                SortCompactAction.class,
+                "compact",
+                "--warehouse",
+                warehouse,
+                "--database",
+                database,
+                "--table",
+                tableName,
+                "--order_strategy",
+                orderStrategy,
+                "--order_by",
+                String.join(",", columns));
     }
 
     private void callProcedure(String orderStrategy, List<String> orderByColumns) {
@@ -218,7 +217,8 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         try (BatchTableWrite batchTableWrite = builder.newWrite()) {
             for (int i = 0; i < size; i++) {
                 for (int j = 0; j < 100; j++) {
-                    batchTableWrite.write(data(i));
+                    Pair<InternalRow, Integer> rowWithBucket = data(i);
+                    batchTableWrite.write(rowWithBucket.getKey(), rowWithBucket.getValue());
                 }
             }
             messages = batchTableWrite.prepareCommit();
@@ -246,7 +246,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
         return Identifier.create(database, tableName);
     }
 
-    private static InternalRow data(int bucket) {
+    private static Pair<InternalRow, Integer> data(int bucket) {
         String in = String.valueOf(Math.abs(RANDOM.nextInt(10000)));
         int count = 4 - in.length();
         for (int i = 0; i < count; i++) {
@@ -260,6 +260,6 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                         (long) RANDOM.nextInt(10000),
                         (long) RANDOM.nextInt(10000),
                         BinaryString.fromString("00000000" + in));
-        return new DynamicBucketRow(row, bucket);
+        return Pair.of(row, bucket);
     }
 }

@@ -45,6 +45,7 @@ public class FlinkConnectorOptions {
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_SYSTEM =
             ConfigOptions.key("log.system")
                     .stringType()
@@ -70,6 +71,7 @@ public class FlinkConnectorOptions {
                                                             + "."))
                                     .build());
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<Integer> LOG_SYSTEM_PARTITIONS =
             ConfigOptions.key("log.system.partitions")
                     .intType()
@@ -77,6 +79,7 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "The number of partitions of the log system. If log system is kafka, this is kafka partitions.");
 
+    @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<Integer> LOG_SYSTEM_REPLICATION =
             ConfigOptions.key("log.system.replication")
                     .intType()
@@ -233,6 +236,14 @@ public class FlinkConnectorOptions {
                     .withDescription(
                             "Weight of writer buffer in managed memory, Flink will compute the memory size "
                                     + "for writer according to the weight, the actual memory used depends on the running environment.");
+
+    public static final ConfigOption<MemorySize> SINK_CROSS_PARTITION_MANAGED_MEMORY =
+            ConfigOptions.key("sink.cross-partition.managed-memory")
+                    .memoryType()
+                    .defaultValue(MemorySize.ofMebiBytes(256))
+                    .withDescription(
+                            "Weight of managed memory for RocksDB in cross-partition update, Flink will compute the memory size "
+                                    + "according to the weight, the actual memory used depends on the running environment.");
 
     public static final ConfigOption<Boolean> SCAN_PUSH_DOWN =
             ConfigOptions.key("scan.push-down")

@@ -1,0 +1,154 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
+package org.apache.paimon.flink.action.cdc;
+
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.flink.action.Action;
+import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.sink.cdc.EventParser;
+import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+
+import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FlatMapFunction;
+import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStream;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.functions.source.SourceFunction;
+
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+
+/** Base {@link Action} for table/database synchronizing job. */
+public abstract class SynchronizationActionBase extends ActionBase {
+
+    private static final long DEFAULT_CHECKPOINT_INTERVAL = 3 * 60 * 1000;
+
+    protected final String database;
+    protected final Configuration cdcSourceConfig;
+    protected final SyncJobHandler syncJobHandler;
+    protected final boolean caseSensitive;
+
+    protected Map<String, String> tableConfig = new HashMap<>();
+    protected TypeMapping typeMapping = TypeMapping.defaultMapping();
+    protected CdcMetadataConverter[] metadataConverters = new CdcMetadataConverter[] {};
+
+    public SynchronizationActionBase(
+            String warehouse,
+            String database,
+            Map<String, String> catalogConfig,
+            Map<String, String> cdcSourceConfig,
+            SyncJobHandler syncJobHandler) {
+        super(warehouse, catalogConfig);
+        this.database = database;
+        this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
+        this.syncJobHandler = syncJobHandler;
+        this.caseSensitive = catalog.caseSensitive();
+
+        this.syncJobHandler.registerJdbcDriver();
+    }
+
+    public SynchronizationActionBase withTableConfig(Map<String, String> tableConfig) {
+        this.tableConfig = tableConfig;
+        return this;
+    }
+
+    public SynchronizationActionBase withTypeMapping(TypeMapping typeMapping) {
+        this.typeMapping = typeMapping;
+        return this;
+    }
+
+    public SynchronizationActionBase withMetadataColumns(List<String> metadataColumns) {
+        this.metadataConverters =
+                metadataColumns.stream()
+                        .map(this::metadataConverter)
+                        .filter(Optional::isPresent)
+                        .map(Optional::get)
+                        .toArray(CdcMetadataConverter[]::new);
+        return this;
+    }
+
+    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
+        return Optional.empty();
+    }
+
+    @VisibleForTesting
+    public Map<String, String> tableConfig() {
+        return tableConfig;
+    }
+
+    @Override
+    public void build() throws Exception {
+        syncJobHandler.checkRequiredOption();
+
+        catalog.createDatabase(database, true);
+
+        validateCaseSensitivity();
+
+        beforeBuildingSourceSink();
+
+        DataStream<RichCdcMultiplexRecord> input =
+                buildDataStreamSource(buildSource()).flatMap(recordParse()).name("Parse");
+
+        EventParser.Factory<RichCdcMultiplexRecord> parserFactory = buildEventParserFactory();
+
+        buildSink(input, parserFactory);
+    }
+
+    protected abstract void validateCaseSensitivity();
+
+    protected void beforeBuildingSourceSink() throws Exception {}
+
+    protected Object buildSource() {
+        return syncJobHandler.provideSource();
+    }
+
+    private DataStreamSource<String> buildDataStreamSource(Object source) {
+        if (source instanceof Source) {
+            return env.fromSource(
+                    (Source<String, ?, ?>) source,
+                    WatermarkStrategy.noWatermarks(),
+                    syncJobHandler.provideSourceName());
+        }
+        if (source instanceof SourceFunction) {
+            return env.addSource(
+                    (SourceFunction<String>) source, syncJobHandler.provideSourceName());
+        }
+        throw new UnsupportedOperationException("Unrecognized source type");
+    }
+
+    protected abstract FlatMapFunction<String, RichCdcMultiplexRecord> recordParse();
+
+    protected abstract EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory();
+
+    protected abstract void buildSink(
+            DataStream<RichCdcMultiplexRecord> input,
+            EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
+
+    @Override
+    public void run() throws Exception {
+        build();
+        if (!env.getCheckpointConfig().isCheckpointingEnabled()) {
+            env.enableCheckpointing(DEFAULT_CHECKPOINT_INTERVAL);
+        }
+        execute(syncJobHandler.provideDefaultJobName());
+    }
+}

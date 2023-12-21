@@ -23,7 +23,6 @@ import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.pulsar.client.admin.PulsarAdmin;
 import org.apache.pulsar.client.admin.PulsarAdminException;
 import org.apache.pulsar.client.api.Producer;
@@ -49,7 +48,6 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -81,6 +79,7 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
 
     private PulsarAdmin admin;
     private PulsarClient client;
+    protected List<String> topics = new ArrayList<>();
 
     @RegisterExtension
     public static final PulsarContainerExtension PULSAR_CONTAINER =
@@ -191,7 +190,6 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void deleteTopics() throws Exception {
-        List<String> topics = admin.topics().getList("public/default");
         for (String topic : topics) {
             String topicName = topicName(topic);
             PartitionedTopicMetadata metadata =
@@ -260,41 +258,26 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
         return new PulsarSyncTableActionBuilder(pulsarConfig);
     }
 
+    protected PulsarSyncDatabaseActionBuilder syncDatabaseActionBuilder(
+            Map<String, String> pulsarConfig) {
+        return new PulsarSyncDatabaseActionBuilder(pulsarConfig);
+    }
+
     /** Builder to build {@link PulsarSyncTableAction} from action arguments. */
     protected class PulsarSyncTableActionBuilder
             extends SyncTableActionBuilder<PulsarSyncTableAction> {
 
         public PulsarSyncTableActionBuilder(Map<String, String> pulsarConfig) {
-            super(pulsarConfig);
+            super(PulsarSyncTableAction.class, pulsarConfig);
         }
+    }
 
-        public PulsarSyncTableAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName));
+    /** Builder to build {@link PulsarSyncDatabaseAction} from action arguments. */
+    protected class PulsarSyncDatabaseActionBuilder
+            extends SyncDatabaseActionBuilder<PulsarSyncDatabaseAction> {
 
-            args.addAll(mapToArgs("--pulsar-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(listToArgs("--partition-keys", partitionKeys));
-            args.addAll(listToArgs("--primary-keys", primaryKeys));
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
-
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (PulsarSyncTableAction)
-                    new PulsarSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+        public PulsarSyncDatabaseActionBuilder(Map<String, String> pulsarConfig) {
+            super(PulsarSyncDatabaseAction.class, pulsarConfig);
         }
     }
 

@@ -79,7 +79,7 @@ public abstract class ActionBase implements Action {
         batchTEnv.useCatalog(flinkCatalog.getName());
     }
 
-    protected void execute(StreamExecutionEnvironment env, String defaultName) throws Exception {
+    protected void execute(String defaultName) throws Exception {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultName);
         env.execute(name);

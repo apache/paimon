@@ -37,7 +37,7 @@ public class FieldSumAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         Object sum;
 
         if (accumulator == null || inputField == null) {
@@ -85,7 +85,7 @@ public class FieldSumAgg extends FieldAggregator {
     }
 
     @Override
-    Object retract(Object accumulator, Object inputField) {
+    public Object retract(Object accumulator, Object inputField) {
         Object sum;
 
         if (accumulator == null || inputField == null) {

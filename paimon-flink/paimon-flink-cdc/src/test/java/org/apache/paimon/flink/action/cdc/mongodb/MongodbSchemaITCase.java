@@ -83,7 +83,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.CONNECTION_OPTIONS, "authSource=admin");
         mongodbConfig.setString(MongoDBSourceOptions.DATABASE, "testDatabase");
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
-        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true);
+        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig);
         assertNotNull(schema);
     }
 
@@ -99,8 +99,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         assertThrows(
-                RuntimeException.class,
-                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
+                RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
     }
 
     @Test
@@ -111,7 +110,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         // Expect an exception to be thrown due to missing necessary settings
         assertThrows(
                 NullPointerException.class,
-                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
+                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
     }
 
     @Test
@@ -127,7 +126,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         // Call the method and check the results
-        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true);
+        Schema schema = MongodbSchemaUtils.getMongodbSchema(mongodbConfig);
 
         // Verify the schema
         assertNotNull(schema);
@@ -152,8 +151,7 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "testCollection");
 
         assertThrows(
-                RuntimeException.class,
-                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
+                RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
     }
 
     @Test
@@ -168,7 +166,6 @@ public class MongodbSchemaITCase extends MongoDBActionITCaseBase {
         mongodbConfig.setString(MongoDBSourceOptions.COLLECTION, "invalidCollection");
 
         assertThrows(
-                RuntimeException.class,
-                () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig, true));
+                RuntimeException.class, () -> MongodbSchemaUtils.getMongodbSchema(mongodbConfig));
     }
 }

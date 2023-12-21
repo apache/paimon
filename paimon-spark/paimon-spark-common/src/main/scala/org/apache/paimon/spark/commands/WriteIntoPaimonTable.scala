@@ -21,14 +21,15 @@ import org.apache.paimon.CoreOptions.DYNAMIC_PARTITION_OVERWRITE
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.index.PartitionIndex
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.{DynamicOverWrite, InsertInto, Overwrite, SaveMode, SparkConnectorOptions, SparkRow}
+import org.apache.paimon.spark._
 import org.apache.paimon.spark.SparkUtils.createIOManager
 import org.apache.paimon.spark.schema.SparkSystemColumns
 import org.apache.paimon.spark.schema.SparkSystemColumns.{BUCKET_COL, ROW_KIND_COL}
 import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, DynamicBucketRow, RowPartitionKeyExtractor}
+import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.MathUtils
 
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
@@ -97,12 +98,24 @@ case class WriteIntoPaimonTable(
     val rowType = table.rowType()
     val writeBuilder = table.newBatchWriteBuilder()
 
+    if (overwritePartition != null) {
+      writeBuilder.withOverwrite(overwritePartition.asJava)
+    }
+
     val df =
       bucketMode match {
         case BucketMode.DYNAMIC =>
           val partitioned = if (primaryKeyCols.nonEmpty) {
             // Make sure that the records with the same bucket values is within a task.
-            withBucketCol.repartition(primaryKeyCols: _*)
+            // TODO supports decoupling of initialBuckets and assignerParallelism
+            var assignerParallelism = MathUtils.max(
+              table.coreOptions.dynamicBucketInitialBuckets,
+              table.coreOptions.dynamicBucketAssignerParallelism)
+            if (assignerParallelism != null) {
+              withBucketCol.repartition(assignerParallelism, primaryKeyCols: _*)
+            } else {
+              withBucketCol.repartition(primaryKeyCols: _*)
+            }
           } else {
             withBucketCol
           }
@@ -140,7 +153,7 @@ case class WriteIntoPaimonTable(
                   rowType,
                   bucketColDropped,
                   SparkRowUtils.getRowKind(row, rowkindColIdx))
-                write.write(new DynamicBucketRow(sparkRow, bucket))
+                write.write(sparkRow, bucket)
             }
             val serializer = new CommitMessageSerializer
             write.prepareCommit().asScala.map(serializer.serialize).toIterator
@@ -152,11 +165,7 @@ case class WriteIntoPaimonTable(
       .collect()
       .map(deserializeCommitMessage(serializer, _))
 
-    val tableCommit = if (overwritePartition == null) {
-      writeBuilder.newCommit()
-    } else {
-      writeBuilder.withOverwrite(overwritePartition.asJava).newCommit()
-    }
+    val tableCommit = writeBuilder.newCommit()
     try {
       tableCommit.commit(commitMessages.toList.asJava)
     } catch {
@@ -230,7 +239,7 @@ object WriteIntoPaimonTable {
       fileStoreTable: FileStoreTable,
       rowType: RowType,
       bucketColIndex: Int,
-      numSparkPartitions: Long,
+      numSparkPartitions: Int,
       toRow: ExpressionEncoder.Serializer[Row],
       fromRow: ExpressionEncoder.Deserializer[Row]
   ) extends BucketProcessor {

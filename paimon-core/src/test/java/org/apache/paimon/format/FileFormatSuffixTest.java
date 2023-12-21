@@ -60,7 +60,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         String format = "avro";
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         Path path = writerFactory.pathFactory(0).newPath();
-        assertThat(path.getPath().endsWith(format)).isTrue();
+        assertThat(path.toString().endsWith(format)).isTrue();
 
         DataFilePathFactory dataFilePathFactory =
                 new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
@@ -76,7 +76,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         10,
                         SCHEMA,
                         0,
-                        new AppendOnlyCompactManager(null, toCompact, 4, 10, 10, null), // not used
+                        new AppendOnlyCompactManager(
+                                null, toCompact, 4, 10, 10, null, null), // not used
                         false,
                         dataFilePathFactory,
                         null,
@@ -84,7 +85,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, SCHEMA.getFieldNames()));
+                                options, SCHEMA.getFieldNames()),
+                        null);
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

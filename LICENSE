@@ -244,6 +244,7 @@ paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/an
 paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/analysis/ResolveProcedures.scala
 paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/parser/extensions/PaimonSparkSqlExtensionsParser.scala
 paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/parser/extensions/PaimonSqlExtensionsAstBuilder.scala
+paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/sort/SparkZOrderUDF.java
 from http://iceberg.apache.org/ version 1.3.0
 
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql

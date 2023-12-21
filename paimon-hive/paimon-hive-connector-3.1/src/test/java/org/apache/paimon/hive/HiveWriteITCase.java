@@ -90,51 +90,13 @@ public class HiveWriteITCase {
         hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
     }
 
-    private String createChangelogExternalTable(
-            RowType rowType,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<InternalRow> data)
-            throws Exception {
-
-        return createChangelogExternalTable(rowType, partitionKeys, primaryKeys, data, "");
-    }
-
-    private String createChangelogExternalTable(
-            RowType rowType,
-            List<String> partitionKeys,
-            List<String> primaryKeys,
-            List<InternalRow> data,
-            String tableName)
-            throws Exception {
-        String path = folder.newFolder().toURI().toString();
-        String tableNameNotNull =
-                StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
-        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
-        Options conf = new Options();
-        conf.set(CatalogOptions.WAREHOUSE, path);
-        conf.set(CoreOptions.BUCKET, 1);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
-        Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
-        Table table =
-                FileStoreTestUtils.createFileStoreTable(
-                        conf, rowType, partitionKeys, primaryKeys, identifier);
-
-        return writeData(table, tablePath, data);
-    }
-
-    private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<InternalRow> data) throws Exception {
-        return createAppendOnlyExternalTable(rowType, partitionKeys, data, "");
-    }
-
     private String createAppendOnlyExternalTable(
             RowType rowType, List<String> partitionKeys, List<InternalRow> data, String tableName)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
         String tableNameNotNull =
                 StringUtils.isNullOrWhitespaceOnly(tableName) ? TABLE_NAME : tableName;
-        String tablePath = String.format("%s/default.db/%s", path, tableNameNotNull);
+        String tablePath = String.format("%s/test_db.db/%s", path, tableNameNotNull);
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);

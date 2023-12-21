@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase.SchemaRetrievalException;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.schema.Schema;
@@ -37,14 +38,13 @@ public class MessageQueueSchemaUtils {
      * Retrieves the Kafka schema for a given topic.
      *
      * @param consumer The wrapper of message queue consumer to fetch messages.
-     * @param topic The topic to retrieve the schema for.
      * @param dataFormat The data format for the messages in the message queue.
      * @param typeMapping Data type mapping options.
      * @return The schema for the topic.
      * @throws SchemaRetrievalException If unable to retrieve the schema after max retries.
      */
     public static Schema getSchema(
-            ConsumerWrapper consumer, String topic, DataFormat dataFormat, TypeMapping typeMapping)
+            ConsumerWrapper consumer, DataFormat dataFormat, TypeMapping typeMapping)
             throws SchemaRetrievalException {
         int retry = 0;
         int retryInterval = 1000;
@@ -54,7 +54,7 @@ public class MessageQueueSchemaUtils {
 
         while (true) {
             Optional<Schema> schema =
-                    consumer.getRecords(topic, POLL_TIMEOUT_MILLIS).stream()
+                    consumer.getRecords(POLL_TIMEOUT_MILLIS).stream()
                             .map(recordParser::buildSchema)
                             .filter(Objects::nonNull)
                             .findFirst();
@@ -65,7 +65,11 @@ public class MessageQueueSchemaUtils {
 
             if (retry >= MAX_RETRY) {
                 throw new SchemaRetrievalException(
-                        String.format("Could not get metadata from server, topic: %s", topic));
+                        String.format(
+                                "Could not get metadata from server, topic: %s. If this topic is not empty, "
+                                        + "please check the configuration of synchronization job. "
+                                        + "Otherwise, you should create the Paimon table first.",
+                                consumer.topic()));
             }
 
             sleepSafely(retryInterval);
@@ -82,16 +86,11 @@ public class MessageQueueSchemaUtils {
         }
     }
 
-    /** Custom exception to indicate issues with schema retrieval. */
-    public static class SchemaRetrievalException extends Exception {
-        public SchemaRetrievalException(String message) {
-            super(message);
-        }
-    }
-
     /** Wrap the consumer for different message queues. */
     public interface ConsumerWrapper extends AutoCloseable {
 
-        List<String> getRecords(String topic, int pollTimeOutMills);
+        List<String> getRecords(int pollTimeOutMills);
+
+        String topic();
     }
 }

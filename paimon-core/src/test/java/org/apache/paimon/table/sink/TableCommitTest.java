@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
@@ -37,10 +38,12 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -54,6 +57,7 @@ import java.util.stream.Collectors;
 import java.util.stream.LongStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link TableCommit}. */
 public class TableCommitTest {
@@ -166,5 +170,67 @@ public class TableCommitTest {
 
         @Override
         public void close() throws Exception {}
+    }
+
+    @Test
+    public void testRecoverDeletedFiles() throws Exception {
+        String path = tempDir.toString();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, path);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), new Path(path)),
+                        new Schema(
+                                rowType.getFields(),
+                                Collections.emptyList(),
+                                Collections.singletonList("k"),
+                                conf.toMap(),
+                                ""));
+
+        FileStoreTable table =
+                FileStoreTableFactory.create(
+                        LocalFileIO.create(),
+                        new Path(path),
+                        tableSchema,
+                        new CatalogEnvironment(Lock.emptyFactory(), null, null));
+
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = table.newWrite(commitUser);
+        write.write(GenericRow.of(0, 0L));
+        List<CommitMessage> messages0 = write.prepareCommit(true, 0);
+
+        write.write(GenericRow.of(1, 1L));
+        List<CommitMessage> messages1 = write.prepareCommit(true, 1);
+        write.close();
+
+        StreamTableCommit commit = table.newCommit(commitUser);
+        commit.commit(0, messages0);
+
+        // delete files for commit0 and commit1
+        for (CommitMessageImpl message :
+                Arrays.asList(
+                        (CommitMessageImpl) messages0.get(0),
+                        (CommitMessageImpl) messages1.get(0))) {
+            DataFilePathFactory pathFactory =
+                    new FileStorePathFactory(new Path(path))
+                            .createDataFilePathFactory(message.partition(), message.bucket());
+            Path file =
+                    message.newFilesIncrement().newFiles().get(0).collectFiles(pathFactory).get(0);
+            LocalFileIO.create().delete(file, true);
+        }
+
+        // commit 0, fine, it will be filtered
+        commit.filterAndCommit(Collections.singletonMap(0L, messages0));
+
+        // commit 1, exception now.
+        assertThatThrownBy(() -> commit.filterAndCommit(Collections.singletonMap(1L, messages1)))
+                .hasMessageContaining(
+                        "Cannot recover from this checkpoint because some files in the"
+                                + " snapshot that need to be resubmitted have been deleted");
     }
 }

@@ -25,8 +25,10 @@ import org.apache.paimon.metrics.MetricRegistry;
 
 /** Metrics to measure scan operation. */
 public class ScanMetrics {
-    private static final int HISTOGRAM_WINDOW_SIZE = 10_000;
+
+    private static final int HISTOGRAM_WINDOW_SIZE = 100;
     @VisibleForTesting protected static final String GROUP_NAME = "scan";
+
     private final MetricGroup metricGroup;
 
     public ScanMetrics(MetricRegistry registry, String tableName) {

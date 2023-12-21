@@ -26,8 +26,10 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.AbstractFileStoreWrite;
+import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite.State;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.utils.Restorable;
 
 import java.util.List;
@@ -40,20 +42,20 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  *
  * @param <T> type of record to write into {@link FileStore}.
  */
-public class TableWriteImpl<T>
-        implements InnerTableWrite, Restorable<List<AbstractFileStoreWrite.State<T>>> {
+public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
 
-    private final AbstractFileStoreWrite<T> write;
+    private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
 
     private boolean batchCommitted = false;
+    private BucketMode bucketMode;
 
     public TableWriteImpl(
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
             RecordExtractor<T> recordExtractor) {
-        this.write = (AbstractFileStoreWrite<T>) write;
+        this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
     }
@@ -65,8 +67,8 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public TableWriteImpl<T> isStreamingMode(boolean isStreamingMode) {
-        write.isStreamingMode(isStreamingMode);
+    public TableWriteImpl<T> withExecutionMode(boolean isStreamingMode) {
+        write.withExecutionMode(isStreamingMode);
         return this;
     }
 
@@ -92,6 +94,11 @@ public class TableWriteImpl<T>
         return this;
     }
 
+    public TableWriteImpl<T> withBucketMode(BucketMode bucketMode) {
+        this.bucketMode = bucketMode;
+        return this;
+    }
+
     @Override
     public BinaryRow getPartition(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
@@ -109,9 +116,20 @@ public class TableWriteImpl<T>
         writeAndReturn(row);
     }
 
+    @Override
+    public void write(InternalRow row, int bucket) throws Exception {
+        writeAndReturn(row, bucket);
+    }
+
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
         SinkRecord record = toSinkRecord(row);
         write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
+        return record;
+    }
+
+    public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
+        SinkRecord record = toSinkRecord(row, bucket);
+        write.write(record.partition(), bucket, recordExtractor.extract(record));
         return record;
     }
 
@@ -132,11 +150,20 @@ public class TableWriteImpl<T>
                 row);
     }
 
+    private SinkRecord toSinkRecord(InternalRow row, int bucket) {
+        keyAndBucketExtractor.setRecord(row);
+        return new SinkRecord(
+                keyAndBucketExtractor.partition(),
+                bucket,
+                keyAndBucketExtractor.trimmedPrimaryKey(),
+                row);
+    }
+
     public SinkRecord toLogRecord(SinkRecord record) {
         keyAndBucketExtractor.setRecord(record.row());
         return new SinkRecord(
                 record.partition(),
-                record.bucket(),
+                bucketMode == BucketMode.UNAWARE ? -1 : record.bucket(),
                 keyAndBucketExtractor.logPrimaryKey(),
                 record.row());
     }
@@ -144,6 +171,12 @@ public class TableWriteImpl<T>
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         write.compact(partition, bucket, fullCompaction);
+    }
+
+    @Override
+    public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
+        write.withMetricRegistry(metricRegistry);
+        return this;
     }
 
     /**
@@ -176,17 +209,17 @@ public class TableWriteImpl<T>
     }
 
     @Override
-    public List<AbstractFileStoreWrite.State<T>> checkpoint() {
+    public List<State<T>> checkpoint() {
         return write.checkpoint();
     }
 
     @Override
-    public void restore(List<AbstractFileStoreWrite.State<T>> state) {
+    public void restore(List<State<T>> state) {
         write.restore(state);
     }
 
     @VisibleForTesting
-    public AbstractFileStoreWrite<T> getWrite() {
+    public FileStoreWrite<T> getWrite() {
         return write;
     }
 

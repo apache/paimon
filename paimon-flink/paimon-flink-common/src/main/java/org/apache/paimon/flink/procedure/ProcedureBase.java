@@ -34,29 +34,16 @@ import org.apache.flink.table.procedures.Procedure;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-
 import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
-import static org.apache.paimon.flink.action.ActionFactory.parseCommaSeparatedKeyValues;
 
 /** Base implementation for flink {@link Procedure}. */
 public abstract class ProcedureBase implements Procedure, Factory {
 
     protected Catalog catalog;
 
-    ProcedureBase withCatalog(Catalog catalog) {
+    public ProcedureBase withCatalog(Catalog catalog) {
         this.catalog = catalog;
         return this;
-    }
-
-    protected List<Map<String, String>> getPartitions(String... partitionStrings) {
-        List<Map<String, String>> partitions = new ArrayList<>();
-        for (String partition : partitionStrings) {
-            partitions.add(parseCommaSeparatedKeyValues(partition));
-        }
-        return partitions;
     }
 
     @Nullable

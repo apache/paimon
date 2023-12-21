@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -27,7 +26,10 @@ import java.util.Optional;
 /** Factory to create {@link ResetConsumerAction}. */
 public class ResetConsumerActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "reset-consumer";
+    public static final String IDENTIFIER = "reset_consumer";
+
+    private static final String CONSUMER_ID = "consumer_id";
+    private static final String NEXT_SNAPSHOT = "next_snapshot";
 
     @Override
     public String identifier() {
@@ -35,19 +37,19 @@ public class ResetConsumerActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "consumer-id");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, CONSUMER_ID);
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String consumerId = params.get("consumer-id");
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String consumerId = params.get(CONSUMER_ID);
 
         ResetConsumerAction action =
                 new ResetConsumerAction(
                         tablePath.f0, tablePath.f1, tablePath.f2, catalogConfig, consumerId);
 
-        if (params.has("next-snapshot")) {
-            action.withNextSnapshotIds(Long.parseLong(params.get("next-snapshot")));
+        if (params.has(NEXT_SNAPSHOT)) {
+            action.withNextSnapshotIds(Long.parseLong(params.get(NEXT_SNAPSHOT)));
         }
 
         return Optional.of(action);
@@ -56,18 +58,18 @@ public class ResetConsumerActionFactory implements ActionFactory {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"reset-consumer\" reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.");
+                "Action \"reset_consumer\" reset a consumer with a given consumer ID and next snapshot ID and delete a consumer with a given consumer ID.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  reset-consumer --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --consumer-id <consumer-id> [--next-snapshot <next-snapshot-id>]");
+                "  reset_consumer --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --consumer_id <consumer_id> [--next_snapshot <next_snapshot_id>]");
 
         System.out.println();
         System.out.println("Note:");
         System.out.println(
-                "  please don't specify --next-snapshot parameter if you want to delete the consumer.");
+                "  please don't specify --next_snapshot parameter if you want to delete the consumer.");
         System.out.println();
     }
 }

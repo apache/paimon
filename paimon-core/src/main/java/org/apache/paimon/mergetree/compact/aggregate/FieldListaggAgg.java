@@ -40,7 +40,7 @@ public class FieldListaggAgg extends FieldAggregator {
     }
 
     @Override
-    Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField) {
         Object concatenate;
 
         if (inputField == null || accumulator == null) {

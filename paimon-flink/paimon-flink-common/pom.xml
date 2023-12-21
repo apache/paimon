@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-flink</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -35,6 +35,7 @@ under the License.
 
     <properties>
         <flink.version>1.18.0</flink.version>
+        <hive.version>2.3.9</hive.version>
     </properties>
 
     <dependencies>
@@ -209,6 +210,15 @@ under the License.
             <version>${flink.version}</version>
             <scope>test</scope>
         </dependency>
+
+        <dependency>
+            <groupId>org.apache.flink</groupId>
+            <artifactId>flink-table-common</artifactId>
+            <version>${flink.version}</version>
+            <type>test-jar</type>
+            <scope>test</scope>
+        </dependency>
+
     </dependencies>
 
     <build>

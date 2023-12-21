@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 
 import java.util.Map;
 import java.util.Optional;
@@ -27,7 +26,10 @@ import java.util.Optional;
 /** Factory to create {@link CreateTagAction}. */
 public class CreateTagActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "create-tag";
+    public static final String IDENTIFIER = "create_tag";
+
+    private static final String TAG_NAME = "tag_name";
+    private static final String SNAPSHOT = "snapshot";
 
     @Override
     public String identifier() {
@@ -35,14 +37,14 @@ public class CreateTagActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterTool params) {
-        checkRequiredArgument(params, "tag-name");
-        checkRequiredArgument(params, "snapshot");
+    public Optional<Action> create(MultipleParameterToolAdapter params) {
+        checkRequiredArgument(params, TAG_NAME);
+        checkRequiredArgument(params, SNAPSHOT);
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
-        Map<String, String> catalogConfig = optionalConfigMap(params, "catalog-conf");
-        String tagName = params.get("tag-name");
-        long snapshot = Long.parseLong(params.get("snapshot"));
+        Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
+        String tagName = params.get(TAG_NAME);
+        long snapshot = Long.parseLong(params.get(SNAPSHOT));
 
         CreateTagAction action =
                 new CreateTagAction(
@@ -52,13 +54,13 @@ public class CreateTagActionFactory implements ActionFactory {
 
     @Override
     public void printHelp() {
-        System.out.println("Action \"create-tag\" creates a tag from given snapshot.");
+        System.out.println("Action \"create_tag\" creates a tag from given snapshot.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  create-tag --warehouse <warehouse-path> --database <database-name> "
-                        + "--table <table-name> --tag-name <tag-name> --snapshot <snapshot-id>");
+                "  create_tag --warehouse <warehouse_path> --database <database_name> "
+                        + "--table <table_name> --tag_name <tag_name> --snapshot <snapshot_id>");
         System.out.println();
     }
 }

@@ -276,31 +276,13 @@ public class RocksDBOptions {
         currentOptions.setInfoLogLevel(options.get(LOG_LEVEL));
 
         String logDir = options.get(LOG_DIR);
-        if (logDir == null || logDir.isEmpty()) {
-            relocateDefaultDbLogDir(currentOptions);
-        } else {
+        if (logDir != null && !logDir.isEmpty()) {
             currentOptions.setDbLogDir(logDir);
         }
 
         currentOptions.setMaxLogFileSize(options.get(LOG_MAX_FILE_SIZE).getBytes());
         currentOptions.setKeepLogFileNum(options.get(LOG_FILE_NUM));
         return currentOptions;
-    }
-
-    /**
-     * Relocates the default log directory of RocksDB with the Flink log directory. Finds the Flink
-     * log directory using log.file Java property that is set during startup.
-     *
-     * @param dbOptions The RocksDB {@link DBOptions}.
-     */
-    private static void relocateDefaultDbLogDir(DBOptions dbOptions) {
-        String logFilePath = System.getProperty("log.file");
-        if (logFilePath != null) {
-            File logFile = resolveFileLocation(logFilePath);
-            if (logFile != null && resolveFileLocation(logFile.getParent()) != null) {
-                dbOptions.setDbLogDir(logFile.getParent());
-            }
-        }
     }
 
     /**

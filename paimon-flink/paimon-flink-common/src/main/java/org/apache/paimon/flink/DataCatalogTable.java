@@ -40,15 +40,18 @@ import java.util.stream.Collectors;
 public class DataCatalogTable extends CatalogTableImpl {
 
     private final Table table;
+    private final Map<String, String> nonPhysicalColumnComments;
 
     public DataCatalogTable(
             Table table,
             TableSchema tableSchema,
             List<String> partitionKeys,
             Map<String, String> properties,
-            String comment) {
+            String comment,
+            Map<String, String> nonPhysicalColumnComments) {
         super(tableSchema, partitionKeys, properties, comment);
         this.table = table;
+        this.nonPhysicalColumnComments = nonPhysicalColumnComments;
     }
 
     public Table table() {
@@ -97,6 +100,8 @@ public class DataCatalogTable extends CatalogTableImpl {
                             String colName = column.getName();
                             if (comments.containsKey(colName)) {
                                 builder.withComment(comments.get(colName));
+                            } else if (nonPhysicalColumnComments.containsKey(colName)) {
+                                builder.withComment(nonPhysicalColumnComments.get(colName));
                             }
                         });
 
@@ -122,11 +127,18 @@ public class DataCatalogTable extends CatalogTableImpl {
                 getSchema().copy(),
                 new ArrayList<>(getPartitionKeys()),
                 new HashMap<>(getOptions()),
-                getComment());
+                getComment(),
+                nonPhysicalColumnComments);
     }
 
     @Override
     public CatalogTable copy(Map<String, String> options) {
-        return new DataCatalogTable(table, getSchema(), getPartitionKeys(), options, getComment());
+        return new DataCatalogTable(
+                table,
+                getSchema(),
+                getPartitionKeys(),
+                options,
+                getComment(),
+                nonPhysicalColumnComments);
     }
 }

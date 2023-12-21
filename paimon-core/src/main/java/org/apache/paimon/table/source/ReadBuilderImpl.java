@@ -19,12 +19,14 @@
 package org.apache.paimon.table.source;
 
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.util.Arrays;
+import java.util.Map;
 import java.util.Objects;
 
 /** Implementation for {@link ReadBuilder}. */
@@ -36,6 +38,10 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     private Predicate filter;
     private int[][] projection;
+
+    private Integer limit = null;
+
+    private Map<String, String> partitionSpec;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
@@ -56,7 +62,17 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public ReadBuilder withFilter(Predicate filter) {
-        this.filter = filter;
+        if (this.filter == null) {
+            this.filter = filter;
+        } else {
+            this.filter = PredicateBuilder.and(this.filter, filter);
+        }
+        return this;
+    }
+
+    @Override
+    public ReadBuilder withPartitionFilter(Map<String, String> partitionSpec) {
+        this.partitionSpec = partitionSpec;
         return this;
     }
 
@@ -67,8 +83,19 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder withLimit(int limit) {
+        this.limit = limit;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
-        return table.newScan().withFilter(filter);
+        InnerTableScan tableScan =
+                table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
+        if (limit != null) {
+            tableScan.withLimit(limit);
+        }
+        return tableScan;
     }
 
     @Override

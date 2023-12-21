@@ -1,0 +1,81 @@
+{{/*
+Licensed to the Apache Software Foundation (ASF) under one
+or more contributor license agreements.  See the NOTICE file
+distributed with this work for additional information
+regarding copyright ownership.  The ASF licenses this file
+to you under the Apache License, Version 2.0 (the
+"License"); you may not use this file except in compliance
+with the License.  You may obtain a copy of the License at
+
+http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing,
+software distributed under the License is distributed on an
+"AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY
+KIND, either express or implied.  See the License for the
+specific language governing permissions and limitations
+under the License.
+*/}}
+{{ $ref := ref . "maintenance/configurations.md" }}
+<table class="configuration table table-bordered">
+    <thead>
+    <tr>
+        <th class="text-left" style="width: 15%">Configuration</th>
+        <th class="text-left" style="width: 85%">Description</th>
+    </tr>
+    </thead>
+    <tbody>
+    <tr>
+        <td><h5>--warehouse</h5></td>
+        <td>The path to Paimon warehouse.</td>
+    </tr>
+    <tr>
+        <td><h5>--database</h5></td>
+        <td>The database name in Paimon catalog.</td>
+    </tr>
+    <tr>
+        <td><h5>--table</h5></td>
+        <td>The Paimon table name.</td>
+    </tr>
+    <tr>
+        <td><h5>--partition_keys</h5></td>
+        <td>The partition keys for Paimon table. If there are multiple partition keys, connect them with comma, for example "dt,hh,mm".</td>
+    </tr>
+    <tr>
+        <td><h5>--primary_keys</h5></td>
+        <td>The primary keys for Paimon table. If there are multiple primary keys, connect them with comma, for example "buyer_id,seller_id".</td>
+    </tr>
+    <tr>
+        <td><h5>--type_mapping</h5></td>
+        <td>It is used to specify how to map MySQL data type to Paimon type.<br />
+            Supported options:
+            <ul>
+                <li>"tinyint1-not-bool": maps MySQL TINYINT(1) to TINYINT instead of BOOLEAN.</li>
+                <li>"to-nullable": ignores all NOT NULL constraints (except for primary keys).
+                    This is used to solve the problem that Flink cannot accept the MySQL 'ALTER TABLE ADD COLUMN column type NOT NULL DEFAULT x' operation.
+                </li>
+                <li>"to-string": maps all MySQL types to STRING.</li>
+                <li>"char-to-string": maps MySQL CHAR(length)/VARCHAR(length) types to STRING.</li>
+                <li>"longtext-to-bytes": maps MySQL LONGTEXT types to BYTES.</li>
+                <li>"bigint-unsigned-to-bigint": maps MySQL BIGINT UNSIGNED, BIGINT UNSIGNED ZEROFILL, SERIAL to BIGINT. You should ensure overflow won't occur when using this option.</li>
+            </ul>
+        </td>
+    </tr>
+    <tr>
+        <td><h5>--computed_column</h5></td>
+        <td>The definitions of computed columns. The argument field is from Pulsar topic's table field name. See <a href="../overview/#computed-functions">here</a> for a complete list of configurations. </td>
+    </tr>
+    <tr>
+        <td><h5>--pulsar_conf</h5></td>
+        <td>The configuration for Flink Pulsar sources. Each configuration should be specified in the format `key=value`. `topic/topic-pattern`, `value.format`, `pulsar.client.serviceUrl`, `pulsar.admin.adminUrl`, and `pulsar.consumer.subscriptionName` are required configurations, others are optional.See its <a href="https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/datastream/pulsar/#source-configurable-options">document</a> for a complete list of configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--catalog_conf</h5></td>
+        <td>The configuration for Paimon catalog. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of catalog configurations.</td>
+    </tr>
+    <tr>
+        <td><h5>--table_conf</h5></td>
+        <td>The configuration for Paimon table sink. Each configuration should be specified in the format "key=value". See <a href="{{ $ref }}">here</a> for a complete list of table configurations.</td>
+    </tr>
+    </tbody>
+</table>

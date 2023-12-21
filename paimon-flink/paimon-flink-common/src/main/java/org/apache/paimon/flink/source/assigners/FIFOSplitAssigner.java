@@ -28,6 +28,9 @@ import java.util.Collections;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.ListIterator;
+import java.util.Optional;
+
+import static org.apache.paimon.flink.utils.TableScanUtils.getSnapshotId;
 
 /**
  * Splits are assigned preemptively in the order requested by the task. Only one split is assigned
@@ -64,5 +67,12 @@ public class FIFOSplitAssigner implements SplitAssigner {
     @Override
     public Collection<FileStoreSourceSplit> remainingSplits() {
         return new ArrayList<>(pendingSplitAssignment);
+    }
+
+    @Override
+    public Optional<Long> getNextSnapshotId(int subtask) {
+        return pendingSplitAssignment.isEmpty()
+                ? Optional.empty()
+                : getSnapshotId(pendingSplitAssignment.peekFirst());
     }
 }

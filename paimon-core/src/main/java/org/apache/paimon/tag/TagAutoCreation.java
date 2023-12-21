@@ -21,6 +21,8 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -28,6 +30,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
+import java.util.List;
 import java.util.Optional;
 import java.util.SortedMap;
 
@@ -44,6 +47,7 @@ public class TagAutoCreation {
     private final TagPeriodHandler periodHandler;
     private final Duration delay;
     private final Integer numRetainedMax;
+    private final List<TagCallback> callbacks;
 
     private LocalDateTime nextTag;
     private long nextSnapshot;
@@ -55,7 +59,8 @@ public class TagAutoCreation {
             TagTimeExtractor timeExtractor,
             TagPeriodHandler periodHandler,
             Duration delay,
-            Integer numRetainedMax) {
+            Integer numRetainedMax,
+            List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
         this.tagDeletion = tagDeletion;
@@ -63,10 +68,11 @@ public class TagAutoCreation {
         this.periodHandler = periodHandler;
         this.delay = delay;
         this.numRetainedMax = numRetainedMax;
+        this.callbacks = callbacks;
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, String> tags = tagManager.tags();
+        SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
 
         if (tags.isEmpty()) {
             this.nextSnapshot =
@@ -80,8 +86,21 @@ public class TagAutoCreation {
         }
     }
 
+    private boolean isAutoTag(String tag) {
+        try {
+            periodHandler.tagToTime(tag);
+            return true;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     public boolean forceCreatingSnapshot() {
-        return timeExtractor.forceCreatingSnapshot();
+        return timeExtractor instanceof ProcessTimeExtractor
+                && (nextTag == null
+                        || isAfterOrEqual(
+                                LocalDateTime.now().minus(delay),
+                                periodHandler.nextTagTime(nextTag)));
     }
 
     public void run() {
@@ -113,11 +132,11 @@ public class TagAutoCreation {
                 || isAfterOrEqual(time.minus(delay), periodHandler.nextTagTime(nextTag))) {
             LocalDateTime thisTag = periodHandler.normalizeToPreviousTag(time);
             String tagName = periodHandler.timeToTag(thisTag);
-            tagManager.createTag(snapshot, tagName);
+            tagManager.createTag(snapshot, tagName, callbacks);
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
-                SortedMap<Snapshot, String> tags = tagManager.tags();
+                SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
                 if (tags.size() > numRetainedMax) {
                     int toDelete = tags.size() - numRetainedMax;
                     int i = 0;
@@ -142,7 +161,8 @@ public class TagAutoCreation {
             CoreOptions options,
             SnapshotManager snapshotManager,
             TagManager tagManager,
-            TagDeletion tagDeletion) {
+            TagDeletion tagDeletion,
+            List<TagCallback> callbacks) {
         TagTimeExtractor extractor = TagTimeExtractor.createForAutoTag(options);
         if (extractor == null) {
             return null;
@@ -154,6 +174,7 @@ public class TagAutoCreation {
                 extractor,
                 TagPeriodHandler.create(options),
                 options.tagCreationDelay(),
-                options.tagNumRetainedMax());
+                options.tagNumRetainedMax(),
+                callbacks);
     }
 }

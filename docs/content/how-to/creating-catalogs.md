@@ -86,7 +86,12 @@ To use Hive catalog, Database name, Table name and Field names should be **lower
 
 {{< tab "Flink" >}}
 
-Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Flink Hive connector bundled jar and add it to classpath. See [here](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/hive/overview/#using-bundled-hive-jar) for more info.
+Paimon Hive catalog in Flink relies on Flink Hive connector bundled jar. You should first download Hive connector bundled jar and add it to classpath.
+
+| Metastore version |  Bundle Name  | SQL Client JAR                                                                                                                                                                                                                                                                                                   |
+|:------------------|:--------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| 2.3.0 - 3.1.3     | Flink Bundle  | [Download](https://nightlies.apache.org/flink/flink-docs-stable/docs/connectors/table/hive/overview/#using-bundled-hive-jar) |
+| 1.2.0 - x.x.x     | Presto Bundle | [Download](https://repo.maven.apache.org/maven2/com/facebook/presto/hive/hive-apache/1.2.2-2/hive-apache-1.2.2-2.jar) |
 
 The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`. Metadata and table files are stored under `hdfs:///path/to/warehouse`. In addition, metadata is also stored in Hive metastore.
 
@@ -98,10 +103,10 @@ hadoop-conf-dir parameter to the hive-site.xml file path.
 CREATE CATALOG my_hive WITH (
     'type' = 'paimon',
     'metastore' = 'hive',
-    'uri' = 'thrift://<hive-metastore-host-name>:<port>',
+    -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
     -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
     -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-    'warehouse' = 'hdfs:///path/to/warehouse'
+    -- 'warehouse' = 'hdfs:///path/to/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
 );
 
 USE CATALOG my_hive;
@@ -135,7 +140,7 @@ After `spark-sql` is started, you can switch to the `default` database of the `p
 USE paimon.default;
 ```
 
-Also, you can create [SparkGenericCatalog]({{< ref "engines/spark3" >}}).
+Also, you can create [SparkGenericCatalog]({{< ref "engines/spark" >}}).
 
 {{< /tab >}}
 

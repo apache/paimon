@@ -27,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
@@ -45,6 +46,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
 
     private void runSingleTableSchemaEvolution(String sourceDir) throws Exception {
         final String topic = "schema_evolution";
+        topics = Collections.singletonList(topic);
         createTopic(topic, 1);
         // ---------- Write the Canal json into Pulsar -------------------
         sendMessages(

@@ -52,6 +52,6 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -pl '!paimon-e2e-tests,!org.apache.paimon:paimon-flink-common',!org.apache.paimon:paimon-hive-connector-3.1' -Duser.timezone=$jvm_timezone
+          mvn -T 1C -B clean install -pl '!paimon-e2e-tests,!org.apache.paimon:paimon-hive-connector-3.1' -Pskip-paimon-flink-tests -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

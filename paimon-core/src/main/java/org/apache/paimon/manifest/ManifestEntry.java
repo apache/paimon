@@ -25,6 +25,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.FileStorePathFactory;
+import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import java.util.ArrayList;
@@ -33,6 +34,9 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
@@ -116,6 +120,30 @@ public class ManifestEntry {
         LinkedHashMap<Identifier, ManifestEntry> map = new LinkedHashMap<>();
         mergeEntries(entries, map);
         return map.values();
+    }
+
+    public static void mergeEntries(
+            ManifestFile manifestFile,
+            List<ManifestFileMeta> manifestFiles,
+            Map<Identifier, ManifestEntry> map) {
+        List<CompletableFuture<List<ManifestEntry>>> manifestReadFutures =
+                manifestFiles.stream()
+                        .map(
+                                manifestFileMeta ->
+                                        CompletableFuture.supplyAsync(
+                                                () ->
+                                                        manifestFile.read(
+                                                                manifestFileMeta.fileName()),
+                                                FileUtils.COMMON_IO_FORK_JOIN_POOL))
+                        .collect(Collectors.toList());
+
+        try {
+            for (CompletableFuture<List<ManifestEntry>> taskResult : manifestReadFutures) {
+                mergeEntries(taskResult.get(), map);
+            }
+        } catch (ExecutionException | InterruptedException e) {
+            throw new RuntimeException("Failed to read manifest file.", e);
+        }
     }
 
     public static void mergeEntries(

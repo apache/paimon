@@ -29,7 +29,7 @@ import org.apache.hadoop.hive.ql.exec.vector.StructColumnVector;
 public class OrcRowColumnVector extends AbstractOrcColumnVector
         implements org.apache.paimon.data.columnar.RowColumnVector {
 
-    private final ColumnarRow columnarRow;
+    private final VectorizedColumnBatch batch;
 
     public OrcRowColumnVector(StructColumnVector hiveVector, RowType type) {
         super(hiveVector);
@@ -38,12 +38,11 @@ public class OrcRowColumnVector extends AbstractOrcColumnVector
         for (int i = 0; i < len; i++) {
             paimonVectors[i] = createPaimonVector(hiveVector.fields[i], type.getTypeAt(i));
         }
-        this.columnarRow = new ColumnarRow(new VectorizedColumnBatch(paimonVectors));
+        this.batch = new VectorizedColumnBatch(paimonVectors);
     }
 
     @Override
     public ColumnarRow getRow(int i) {
-        this.columnarRow.setRowId(i);
-        return this.columnarRow;
+        return new ColumnarRow(batch, i);
     }
 }

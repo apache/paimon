@@ -25,7 +25,7 @@ object SparkSystemColumns {
   // for assigning bucket when writing
   val BUCKET_COL = "_bucket_"
 
-  // for row lever operation
+  // for row level operation
   val ROW_KIND_COL = "_row_kind_"
 
   val SPARK_SYSTEM_COLUMNS_NAME: Seq[String] = Seq(BUCKET_COL, ROW_KIND_COL)

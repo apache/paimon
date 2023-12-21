@@ -18,12 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.MessageQueueSyncTableActionBase;
-import org.apache.paimon.flink.action.cdc.format.DataFormat;
-
-import org.apache.flink.api.connector.source.Source;
-import org.apache.pulsar.client.api.PulsarClientException;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 
 import java.util.Map;
 
@@ -36,40 +32,12 @@ public class PulsarSyncTableAction extends MessageQueueSyncTableActionBase {
             String table,
             Map<String, String> catalogConfig,
             Map<String, String> pulsarConfig) {
-        super(warehouse, database, table, catalogConfig, pulsarConfig);
-    }
-
-    @Override
-    protected Source<String, ?, ?> buildSource() {
-        return PulsarActionUtils.buildPulsarSource(mqConfig);
-    }
-
-    @Override
-    protected String topic() {
-        return mqConfig.get(PulsarActionUtils.TOPIC).split(",")[0].trim();
-    }
-
-    @Override
-    protected MessageQueueSchemaUtils.ConsumerWrapper consumer(String topic) {
-        try {
-            return PulsarActionUtils.createPulsarConsumer(mqConfig, topic);
-        } catch (PulsarClientException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    protected DataFormat getDataFormat() {
-        return PulsarActionUtils.getDataFormat(mqConfig);
-    }
-
-    @Override
-    protected String sourceName() {
-        return "Pulsar Source";
-    }
-
-    @Override
-    protected String jobName() {
-        return String.format("Pulsar-Paimon Table Sync: %s.%s", database, table);
+        super(
+                warehouse,
+                database,
+                table,
+                catalogConfig,
+                pulsarConfig,
+                SyncJobHandler.SourceType.PULSAR);
     }
 }

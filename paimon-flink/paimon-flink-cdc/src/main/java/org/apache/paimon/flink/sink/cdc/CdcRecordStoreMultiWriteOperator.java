@@ -142,7 +142,8 @@ public class CdcRecordStoreMultiWriteOperator
                                         commitUser,
                                         state,
                                         getContainingTask().getEnvironment().getIOManager(),
-                                        memoryPoolFactory));
+                                        memoryPoolFactory,
+                                        getMetricGroup()));
 
         ((StoreSinkWriteImpl) write).withCompactExecutor(compactExecutor);
 

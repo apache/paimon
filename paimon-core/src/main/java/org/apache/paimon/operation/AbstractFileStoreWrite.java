@@ -22,18 +22,22 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.metrics.MetricRegistry;
+import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
+import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
-import org.apache.paimon.utils.Restorable;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -55,8 +59,7 @@ import java.util.concurrent.Executors;
  *
  * @param <T> type of record to write.
  */
-public abstract class AbstractFileStoreWrite<T>
-        implements FileStoreWrite<T>, Restorable<List<AbstractFileStoreWrite.State<T>>> {
+public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AbstractFileStoreWrite.class);
 
@@ -73,18 +76,26 @@ public abstract class AbstractFileStoreWrite<T>
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
+    private MetricRegistry metricRegistry = null;
+
+    protected final String tableName;
+    private final FileStorePathFactory pathFactory;
 
     protected AbstractFileStoreWrite(
             String commitUser,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            @Nullable IndexMaintainer.Factory<T> indexFactory) {
+            @Nullable IndexMaintainer.Factory<T> indexFactory,
+            String tableName,
+            FileStorePathFactory pathFactory) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
         this.indexFactory = indexFactory;
 
         this.writers = new HashMap<>();
+        this.tableName = tableName;
+        this.pathFactory = pathFactory;
     }
 
     @Override
@@ -103,6 +114,7 @@ public abstract class AbstractFileStoreWrite<T>
         this.ignorePreviousFiles = ignorePreviousFiles;
     }
 
+    @Override
     public void withCompactExecutor(ExecutorService compactExecutor) {
         this.lazyCompactExecutor = compactExecutor;
         this.closeCompactExecutorWhenLeaving = false;
@@ -339,8 +351,41 @@ public abstract class AbstractFileStoreWrite<T>
     }
 
     @Override
-    public void isStreamingMode(boolean isStreamingMode) {
+    public void withExecutionMode(boolean isStreamingMode) {
         this.isStreamingMode = isStreamingMode;
+    }
+
+    @Override
+    public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
+        this.metricRegistry = metricRegistry;
+        return this;
+    }
+
+    @Nullable
+    public CompactionMetrics getCompactionMetrics(BinaryRow partition, int bucket) {
+        if (metricRegistry != null) {
+            return new CompactionMetrics(
+                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
+        }
+        return null;
+    }
+
+    @Nullable
+    public WriterMetrics getWriterMetrics(BinaryRow partition, int bucket) {
+        if (this.metricRegistry != null) {
+            return new WriterMetrics(
+                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
+        }
+        return null;
+    }
+
+    private String getPartitionString(FileStorePathFactory pathFactory, BinaryRow partition) {
+        String partitionStr =
+                pathFactory.getPartitionString(partition).replace(Path.SEPARATOR, "_");
+        if (partitionStr.length() > 0) {
+            return partitionStr.substring(0, partitionStr.length() - 1);
+        }
+        return "_";
     }
 
     private List<DataFileMeta> scanExistingFileMetas(
@@ -397,48 +442,6 @@ public abstract class AbstractFileStoreWrite<T>
             this.baseSnapshotId =
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
-        }
-    }
-
-    /** Recoverable state of {@link AbstractFileStoreWrite}. */
-    public static class State<T> {
-        protected final BinaryRow partition;
-        protected final int bucket;
-
-        protected final long baseSnapshotId;
-        protected final long lastModifiedCommitIdentifier;
-        protected final List<DataFileMeta> dataFiles;
-        @Nullable protected final IndexMaintainer<T> indexMaintainer;
-        protected final CommitIncrement commitIncrement;
-
-        protected State(
-                BinaryRow partition,
-                int bucket,
-                long baseSnapshotId,
-                long lastModifiedCommitIdentifier,
-                Collection<DataFileMeta> dataFiles,
-                @Nullable IndexMaintainer<T> indexMaintainer,
-                CommitIncrement commitIncrement) {
-            this.partition = partition;
-            this.bucket = bucket;
-            this.baseSnapshotId = baseSnapshotId;
-            this.lastModifiedCommitIdentifier = lastModifiedCommitIdentifier;
-            this.dataFiles = new ArrayList<>(dataFiles);
-            this.indexMaintainer = indexMaintainer;
-            this.commitIncrement = commitIncrement;
-        }
-
-        @Override
-        public String toString() {
-            return String.format(
-                    "{%s, %d, %d, %d, %s, %s, %s}",
-                    partition,
-                    bucket,
-                    baseSnapshotId,
-                    lastModifiedCommitIdentifier,
-                    dataFiles,
-                    indexMaintainer,
-                    commitIncrement);
         }
     }
 }

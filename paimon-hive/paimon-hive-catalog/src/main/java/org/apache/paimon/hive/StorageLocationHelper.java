@@ -24,20 +24,18 @@ import org.apache.paimon.fs.Path;
 import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.Table;
 
-import java.io.IOException;
-
 /** Helper for Setting Location in Hive Table Storage. */
 public final class StorageLocationHelper implements LocationHelper {
 
     public StorageLocationHelper() {}
 
     @Override
-    public void createPathIfRequired(Path dbPath, FileIO fileIO) throws IOException {
+    public void createPathIfRequired(Path dbPath, FileIO fileIO) {
         // do nothing
     }
 
     @Override
-    public void dropPathIfRequired(Path path, FileIO fileIO) throws IOException {
+    public void dropPathIfRequired(Path path, FileIO fileIO) {
         // do nothing
     }
 
@@ -47,7 +45,17 @@ public final class StorageLocationHelper implements LocationHelper {
     }
 
     @Override
+    public String getTableLocation(Table table) {
+        return table.getSd().getLocation();
+    }
+
+    @Override
     public void specifyDatabaseLocation(Path path, Database database) {
         database.setLocationUri(path.toString());
+    }
+
+    @Override
+    public String getDatabaseLocation(Database database) {
+        return database.getLocationUri();
     }
 }

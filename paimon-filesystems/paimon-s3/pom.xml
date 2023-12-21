@@ -24,7 +24,7 @@
     <parent>
         <artifactId>paimon-filesystems</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.6-SNAPSHOT</version>
+        <version>0.7-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-s3</artifactId>
@@ -113,8 +113,46 @@
                                     <type>jar</type>
                                     <overWrite>true</overWrite>
                                     <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <excludes>META-INF/**</excludes>
+                                </artifactItem>
+                                <artifactItem>
+                                    <groupId>org.apache.paimon</groupId>
+                                    <artifactId>paimon-s3-impl</artifactId>
+                                    <version>${project.version}</version>
+                                    <type>jar</type>
+                                    <overWrite>true</overWrite>
+                                    <outputDirectory>${project.build.directory}/classes/paimon-plugin-s3</outputDirectory>
+                                    <includes>META-INF/services/**,META-INF/versions/**</includes>
                                 </artifactItem>
                             </artifactItems>
+                        </configuration>
+                    </execution>
+                </executions>
+            </plugin>
+
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-shade-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>shade-paimon</id>
+                        <configuration>
+                            <artifactSet>
+                                <includes combine.children="append">
+                                    <include>org.apache.paimon:paimon-s3-impl</include>
+                                </includes>
+                            </artifactSet>
+                            <filters>
+                                <filter>
+                                    <artifact>org.apache.paimon:paimon-s3-impl</artifact>
+                                    <includes>
+                                        <include>META-INF/**</include>
+                                    </includes>
+                                    <excludes>
+                                        <exclude>META-INF/services/**</exclude>
+                                    </excludes>
+                                </filter>
+                            </filters>
                         </configuration>
                     </execution>
                 </executions>

@@ -24,7 +24,6 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
-import org.apache.flink.api.java.utils.MultipleParameterTool;
 import org.apache.flink.util.DockerImageVersions;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.admin.AdminClient;
@@ -56,7 +55,6 @@ import java.net.URL;
 import java.nio.file.Files;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -209,6 +207,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         standardProps.put("max.partition.fetch.bytes", 256);
         standardProps.put("zookeeper.session.timeout.ms", zkTimeoutMills);
         standardProps.put("zookeeper.connection.timeout.ms", zkTimeoutMills);
+        standardProps.put("default.api.timeout.ms", "120000");
         return standardProps;
     }
 
@@ -239,36 +238,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             extends SyncTableActionBuilder<KafkaSyncTableAction> {
 
         public KafkaSyncTableActionBuilder(Map<String, String> kafkaConfig) {
-            super(kafkaConfig);
-        }
-
-        public KafkaSyncTableAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList(
-                                    "--warehouse",
-                                    warehouse,
-                                    "--database",
-                                    database,
-                                    "--table",
-                                    tableName));
-
-            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(listToArgs("--partition-keys", partitionKeys));
-            args.addAll(listToArgs("--primary-keys", primaryKeys));
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            args.addAll(listToMultiArgs("--computed-column", computedColumnArgs));
-
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (KafkaSyncTableAction)
-                    new KafkaSyncTableActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            super(KafkaSyncTableAction.class, kafkaConfig);
         }
     }
 
@@ -277,43 +247,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             extends SyncDatabaseActionBuilder<KafkaSyncDatabaseAction> {
 
         public KafkaSyncDatabaseActionBuilder(Map<String, String> kafkaConfig) {
-            super(kafkaConfig);
-        }
-
-        public KafkaSyncDatabaseActionBuilder ignoreIncompatible(boolean ignoreIncompatible) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseActionBuilder mergeShards(boolean mergeShards) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseActionBuilder withMode(String mode) {
-            throw new UnsupportedOperationException();
-        }
-
-        public KafkaSyncDatabaseAction build() {
-            List<String> args =
-                    new ArrayList<>(
-                            Arrays.asList("--warehouse", warehouse, "--database", database));
-
-            args.addAll(mapToArgs("--kafka-conf", sourceConfig));
-            args.addAll(mapToArgs("--catalog-conf", catalogConfig));
-            args.addAll(mapToArgs("--table-conf", tableConfig));
-
-            args.addAll(nullableToArgs("--table-prefix", tablePrefix));
-            args.addAll(nullableToArgs("--table-suffix", tableSuffix));
-            args.addAll(nullableToArgs("--including-tables", includingTables));
-            args.addAll(nullableToArgs("--excluding-tables", excludingTables));
-
-            args.addAll(listToArgs("--type-mapping", typeMappingModes));
-
-            MultipleParameterTool params =
-                    MultipleParameterTool.fromArgs(args.toArray(args.toArray(new String[0])));
-            return (KafkaSyncDatabaseAction)
-                    new KafkaSyncDatabaseActionFactory()
-                            .create(params)
-                            .orElseThrow(RuntimeException::new);
+            super(KafkaSyncDatabaseAction.class, kafkaConfig);
         }
     }
 

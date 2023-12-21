@@ -21,10 +21,10 @@ package org.apache.paimon.tests.cdc;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlContainer;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlVersion;
 import org.apache.paimon.tests.E2eTestBase;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 
-import org.apache.hadoop.shaded.org.apache.commons.lang3.StringUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;

@@ -424,6 +424,7 @@ public abstract class MergeTreeTestBase {
                         writerFactory,
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,
+                        null,
                         null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
@@ -444,7 +445,8 @@ public abstract class MergeTreeTestBase {
                 comparator,
                 options.compactionFileSize(),
                 options.numSortedRunStopTrigger(),
-                new TestRewriter());
+                new TestRewriter(),
+                null);
     }
 
     static class MockFailResultCompactionManager extends MergeTreeCompactManager {
@@ -463,7 +465,8 @@ public abstract class MergeTreeTestBase {
                     keyComparator,
                     minFileSize,
                     numSortedRunStopTrigger,
-                    rewriter);
+                    rewriter,
+                    null);
         }
 
         protected CompactResult obtainCompactResult()

@@ -31,6 +31,9 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+
 /** IT cases for {@link KafkaDebeziumSyncTableActionITCase}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
 
@@ -52,8 +55,8 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
@@ -153,11 +156,12 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put("value.format", "debezium-json");
-        kafkaConfig.put("topic", topic);
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
-                        .withPrimaryKeys("id")
+                        .withPartitionKeys("_year")
+                        .withPrimaryKeys("id", "_year")
                         .withComputedColumnArgs("_year=year(date)")
                         .withTableConfig(getBasicTableConfig())
                         .build();
@@ -166,13 +170,52 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.INT()
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.INT().notNull()
                         },
                         new String[] {"id", "date", "_year"});
         waitForResult(
                 Collections.singletonList("+I[101, 2023-03-23, 2023]"),
                 getFileStoreTable(tableName),
                 rowType,
-                Collections.singletonList("id"));
+                Arrays.asList("id", "_year"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testRecordWithNestedDataType() throws Exception {
+        String topic = "nested_type";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/debezium/table/nestedtype/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "row"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        List<String> expected =
+                Collections.singletonList("+I[101, hammer, {\"row_key\":\"value\"}]");
+        waitForResult(expected, table, rowType, primaryKeys);
     }
 }

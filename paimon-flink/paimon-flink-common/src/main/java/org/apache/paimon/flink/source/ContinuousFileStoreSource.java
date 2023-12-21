@@ -19,13 +19,16 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.metrics.FlinkMetricRegistry;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.StreamTableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -73,8 +76,22 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         StreamTableScan scan = readBuilder.newStreamScan();
+        if (metricGroup(context) != null) {
+            ((InnerStreamTableScan) scan)
+                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+        }
         scan.restore(nextSnapshotId);
         return buildEnumerator(context, splits, nextSnapshotId, scan);
+    }
+
+    @Nullable
+    private SplitEnumeratorMetricGroup metricGroup(SplitEnumeratorContext<?> context) {
+        try {
+            return context.metricGroup();
+        } catch (NullPointerException ignore) {
+            // ignore NPE for some Flink versions
+            return null;
+        }
     }
 
     protected SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> buildEnumerator(
@@ -82,12 +99,14 @@ public class ContinuousFileStoreSource extends FlinkSource {
             Collection<FileStoreSourceSplit> splits,
             @Nullable Long nextSnapshotId,
             StreamTableScan scan) {
+        CoreOptions coreOptions = CoreOptions.fromMap(options);
         return new ContinuousFileSplitEnumerator(
                 context,
                 splits,
                 nextSnapshotId,
-                CoreOptions.fromMap(options).continuousDiscoveryInterval().toMillis(),
+                coreOptions.continuousDiscoveryInterval().toMillis(),
                 scan,
-                bucketMode);
+                bucketMode,
+                coreOptions.scanSplitMaxPerTask());
     }
 }

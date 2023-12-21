@@ -91,7 +91,9 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
         // runtime context, we can test to construct a writer here
         state = new StoreSinkWriteState(context, stateFilter);
 
-        write = storeSinkWriteProvider.provide(table, commitUser, state, ioManager, memoryPool);
+        write =
+                storeSinkWriteProvider.provide(
+                        table, commitUser, state, ioManager, memoryPool, getMetricGroup());
     }
 
     protected abstract boolean containLogSystem();
@@ -116,5 +118,10 @@ public abstract class TableWriteOperator<IN> extends PrepareCommitOperator<IN, C
     protected List<Committable> prepareCommit(boolean waitCompaction, long checkpointId)
             throws IOException {
         return write.prepareCommit(waitCompaction, checkpointId);
+    }
+
+    @VisibleForTesting
+    public StoreSinkWrite getWrite() {
+        return write;
     }
 }

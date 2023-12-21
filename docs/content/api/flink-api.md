@@ -26,6 +26,14 @@ under the License.
 
 # Flink API
 
+{{< hint warning >}}
+We do not recommend using programming API. Paimon is designed for SQL first, unless you are a professional Flink developer, even if you do, it can be very difficult.
+
+We strongly recommend that you use Flink SQL or Spark SQL, or simply use SQL APIs in programs.
+
+The following documents are not detailed and are for reference only.
+{{< /hint >}}
+
 ## Dependency
 
 Maven dependency:
@@ -73,6 +81,8 @@ public class WriteToTable {
     public static void writeTo() {
         // create environments of both APIs
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
+        // env.enableCheckpointing(60_000);
         StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 
         // create a changelog DataStream
@@ -173,6 +183,8 @@ public class WriteCdcToTable {
 
     public static void writeTo() throws Exception {
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        // for CONTINUOUS_UNBOUNDED source, set checkpoint interval
+        // env.enableCheckpointing(60_000);
 
         DataStream<RichCdcRecord> dataStream =
                 env.fromElements(
@@ -195,7 +207,7 @@ public class WriteCdcToTable {
         
         new RichCdcSinkBuilder()
                 .withInput(dataStream)
-                .withTable(createTableIfNotExists(identifier))
+                .withTable(createTableIfNotExists(catalogLoader.load(), identifier))
                 .withIdentifier(identifier)
                 .withCatalogLoader(catalogLoader)
                 .build();
@@ -203,10 +215,7 @@ public class WriteCdcToTable {
         env.execute();
     }
 
-    private static Table createTableIfNotExists(Identifier identifier) throws Exception {
-        CatalogContext context = CatalogContext.create(new Path("..."));
-        Catalog catalog = CatalogFactory.createCatalog(context);
-
+    private static Table createTableIfNotExists(Catalog catalog, Identifier identifier) throws Exception {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.primaryKey("order_id");
         schemaBuilder.column("order_id", DataTypes.BIGINT());

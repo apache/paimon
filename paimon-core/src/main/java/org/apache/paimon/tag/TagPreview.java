@@ -47,7 +47,8 @@ public class TagPreview {
     }
 
     public static TagPreview create(CoreOptions options) {
-        if (options.tagToPartitionPreview() != CoreOptions.TagCreationMode.NONE) {
+        if (options.tagToPartitionPreview() != CoreOptions.TagCreationMode.NONE
+                && options.tagToPartitionPreview() != CoreOptions.TagCreationMode.BATCH) {
             return new TagPreview(options);
         }
         return null;

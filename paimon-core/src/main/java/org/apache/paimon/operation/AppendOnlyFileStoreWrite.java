@@ -81,8 +81,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             FileStorePathFactory pathFactory,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
-            CoreOptions options) {
-        super(commitUser, snapshotManager, scan, options, null);
+            CoreOptions options,
+            String tableName) {
+        super(commitUser, snapshotManager, scan, options, null, tableName, pathFactory);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -121,7 +122,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 compactionMinFileNum,
                                 compactionMaxFileNum,
                                 targetFileSize,
-                                compactRewriter(partition, bucket));
+                                compactRewriter(partition, bucket),
+                                getCompactionMetrics(partition, bucket));
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -138,7 +140,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 useWriteBuffer,
                 spillable,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                getWriterMetrics(partition, bucket));
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -158,15 +161,18 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors);
-            rewriter.write(
-                    new RecordReaderIterator<>(
-                            read.createReader(
-                                    DataSplit.builder()
-                                            .withPartition(partition)
-                                            .withBucket(bucket)
-                                            .withDataFiles(toCompact)
-                                            .build())));
-            rewriter.close();
+            try {
+                rewriter.write(
+                        new RecordReaderIterator<>(
+                                read.createReader(
+                                        DataSplit.builder()
+                                                .withPartition(partition)
+                                                .withBucket(bucket)
+                                                .withDataFiles(toCompact)
+                                                .build())));
+            } finally {
+                rewriter.close();
+            }
             return rewriter.result();
         };
     }

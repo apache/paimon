@@ -27,6 +27,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
 import org.apache.flink.table.data.RowData;
@@ -36,6 +37,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -102,6 +104,26 @@ public class FileStoreSourceReaderTest {
             Thread.sleep(10);
         }
         assertThat(context.getNumSplitRequests()).isEqualTo(2);
+    }
+
+    @Test
+    public void testReaderOnSplitFinished() throws Exception {
+        final TestingReaderContext context = new TestingReaderContext();
+        final FileStoreSourceReader reader = createReader(context);
+
+        reader.start();
+        reader.addSplits(Collections.singletonList(createTestFileSplit("id1")));
+        TestingReaderOutput<RowData> output = new TestingReaderOutput<>();
+        while (reader.getNumberOfCurrentlyAssignedSplits() > 0) {
+            reader.pollNext(output);
+            Thread.sleep(10);
+        }
+
+        List<SourceEvent> sourceEvents = context.getSentEvents();
+        assertThat(sourceEvents.size()).isEqualTo(1);
+        assertThat(sourceEvents.get(0)).isExactlyInstanceOf(ReaderConsumeProgressEvent.class);
+        assertThat(((ReaderConsumeProgressEvent) sourceEvents.get(0)))
+                .matches(event -> event.lastConsumeSnapshotId() == 1L);
     }
 
     protected FileStoreSourceReader createReader(TestingReaderContext context) {

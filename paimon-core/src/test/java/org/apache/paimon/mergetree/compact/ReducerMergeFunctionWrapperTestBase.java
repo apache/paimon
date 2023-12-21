@@ -77,7 +77,7 @@ public abstract class ReducerMergeFunctionWrapperTestBase {
 
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
-            return new DeduplicateMergeFunction();
+            return DeduplicateMergeFunction.factory().create();
         }
 
         @Override
