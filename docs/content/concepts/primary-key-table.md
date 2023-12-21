@@ -282,12 +282,56 @@ Field `price` will be aggregated by the `max` function, and field `sales` will b
 
 Current supported aggregate functions and data types are:
 
-* `sum`: supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT and DOUBLE.
-* `min`/`max`: support CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP and TIMESTAMP_LTZ.
-* `last_value` / `last_non_null_value`: support all data types.
-* `listagg`: supports STRING data type.
-* `bool_and` / `bool_or`: support BOOLEAN data type.
-* `first_value` / `first_not_null_value`: support all data types.
+* `sum` function: 
+   
+   The sum function aggregates the values across multiple rows. 
+
+   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
+* `max`function:
+
+   The max function identifies and retains the maximum value. 
+   
+   It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
+* `min`:
+
+   The min function identifies and retains the minimum value. 
+
+   It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
+* `last_value`: 
+
+  The last_value function replaces the previous value with the most recently imported value. 
+
+  It supports all data types.
+* `last_non_null_value`: 
+
+  The last_non_null_value function replaces the previous value with the latest non-null value. 
+
+  It supports all data types.
+* `listagg`: 
+
+  The listagg function concatenates multiple string values into a single string. 
+  
+  It supports STRING data type.
+* `bool_and`: 
+
+  The bool_and function evaluates whether all values in a boolean set are true. 
+
+  It supports BOOLEAN data type.
+* `bool_or`:
+
+  The bool_or function checks if at least one value in a boolean set is true. 
+
+  It supports BOOLEAN data type.
+* `first_value`:
+
+  The first_value function retrieves the first null value from a data set. 
+
+  It supports all data types.
+* `first_not_null_value`:
+
+  The first_not_null_value function selects the first non-null value in a data set. 
+
+  It supports all data types.
 
 Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
