@@ -214,7 +214,7 @@ public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaActionITCaseBase 
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "kafka_conf [topic] must be specified."));
+                                "kafka_conf must and can only set one of the following options: topic,topic-pattern."));
     }
 
     @Test

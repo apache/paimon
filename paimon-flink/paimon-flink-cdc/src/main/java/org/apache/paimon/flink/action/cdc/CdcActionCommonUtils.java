@@ -318,7 +318,7 @@ public class CdcActionCommonUtils {
             Configuration config, String confName, ConfigOption<?>... configOptions) {
         checkArgument(
                 Arrays.stream(configOptions).filter(config::contains).count() == 1,
-                "%s must and can only set one of the following options: %s",
+                "%s must and can only set one of the following options: %s.",
                 confName,
                 Arrays.stream(configOptions)
                         .map(ConfigOption::key)
