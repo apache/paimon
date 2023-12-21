@@ -44,7 +44,8 @@ public class PluginLoader {
                             Stream.of(
                                     "org.codehaus.janino",
                                     "org.codehaus.commons",
-                                    "org.apache.commons.lang3"))
+                                    "org.apache.commons.lang3",
+                                    "javax.xml.bind"))
                     .toArray(String[]::new);
 
     private static final String[] COMPONENT_CLASSPATH = new String[] {"org.apache.paimon"};
