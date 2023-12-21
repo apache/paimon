@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.table.sink.TagCallback;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +67,7 @@ public class TagManager {
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
-    public void createTag(Snapshot snapshot, String tagName) {
+    public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
         checkArgument(
@@ -84,6 +85,14 @@ public class TagManager {
                                     + "Cannot clean up because we can't determine the success.",
                             tagName, newTagPath),
                     e);
+        }
+
+        try {
+            callbacks.forEach(callback -> callback.notifyCreation(tagName));
+        } finally {
+            for (TagCallback tagCallback : callbacks) {
+                IOUtils.closeQuietly(tagCallback);
+            }
         }
     }
 

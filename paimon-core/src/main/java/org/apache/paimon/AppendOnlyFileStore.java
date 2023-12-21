@@ -29,6 +29,7 @@ import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
@@ -53,8 +54,9 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
             RowType partitionType,
             RowType bucketKeyType,
             RowType rowType,
-            String tableName) {
-        super(fileIO, schemaManager, schemaId, options, partitionType);
+            String tableName,
+            CatalogEnvironment catalogEnvironment) {
+        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
         this.tableName = tableName;
