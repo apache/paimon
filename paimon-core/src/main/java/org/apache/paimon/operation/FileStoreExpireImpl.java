@@ -31,7 +31,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.List;
-import java.util.OptionalLong;
 import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.function.Predicate;
@@ -112,29 +111,18 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             return;
         }
 
-        OptionalLong consumerReading = consumerManager.minNextSnapshot();
+        long min = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
+        long maxExclusive =
+                Math.min(
+                        latestSnapshotId - numRetainedMin + 1,
+                        Math.min(
+                                consumerManager.minNextSnapshot().orElse(Long.MAX_VALUE),
+                                earliest + expireLimit));
 
         // locate the first snapshot between the numRetainedMax th and (numRetainedMin+1) th latest
         // snapshots to be retained. This snapshot needs to be preserved because it
         // doesn't fulfill the time threshold condition for expiration.
-        for (long id = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
-                id <= latestSnapshotId - numRetainedMin;
-                id++) {
-            // Early exit the loop in advance for consumer
-            if (consumerReading.isPresent() && id >= consumerReading.getAsLong()) {
-                long consumerSnapshot = consumerReading.getAsLong();
-                if (consumerSnapshot > earliest) {
-                    expireUntil(earliest, consumerSnapshot);
-                }
-                return;
-            }
-
-            // Early exit the loop in advance for expireLimit
-            if (id - earliest >= expireLimit) {
-                expireUntil(earliest, id);
-                return;
-            }
-
+        for (long id = min; id < maxExclusive; id++) {
             if (snapshotManager.snapshotExists(id)
                     && currentMillis - snapshotManager.snapshot(id).timeMillis()
                             <= millisRetained) {
@@ -145,12 +133,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
         }
 
-        // by default, expire until there are only numRetainedMin snapshots left
-        long endExclusiveId = latestSnapshotId - numRetainedMin + 1;
-        if (consumerReading.isPresent()) {
-            endExclusiveId = Math.min(consumerReading.getAsLong(), endExclusiveId);
-        }
-        expireUntil(earliest, endExclusiveId);
+        expireUntil(earliest, maxExclusive);
     }
 
     @VisibleForTesting
@@ -177,8 +160,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
                 break;
             }
         }
-
-        endExclusiveId = Math.min(beginInclusiveId + expireLimit, endExclusiveId);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug(
