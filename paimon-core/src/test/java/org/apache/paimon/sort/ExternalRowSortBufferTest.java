@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -29,6 +30,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.assertj.core.api.Assertions;
@@ -65,14 +67,18 @@ public class ExternalRowSortBufferTest {
                 ExternalRowSortBuffer.create(
                         ioManager,
                         schema.rowType(),
-                        new int[] {2, 0},
+                        new int[] {2},
                         MemorySize.parse("10 mb").getBytes(),
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
 
         List<BinaryRow> datas = data(Math.abs(RANDOM.nextInt(100)) + 100);
+        int i = 1;
         for (BinaryRow data : datas) {
             externalRowSortBuffer.write(data);
+            if (i++ / 10 == 0) {
+                externalRowSortBuffer.flushMemory();
+            }
         }
 
         TreeSet<BinaryRow> treeSet =
@@ -100,17 +106,79 @@ public class ExternalRowSortBufferTest {
         }
     }
 
+    @Test
+    public void testRowKindWithFlush() throws Exception {
+        Schema schema =
+                Schema.newBuilder()
+                        .column("f0", DataTypes.INT())
+                        .column("f1", DataTypes.INT())
+                        .build();
+        IOManager ioManager = new IOManagerImpl(dir.toString());
+        CoreOptions coreOptions = new CoreOptions(new Options());
+
+        ExternalRowSortBuffer externalRowSortBuffer =
+                ExternalRowSortBuffer.create(
+                        ioManager,
+                        schema.rowType(),
+                        new int[] {0},
+                        MemorySize.parse("10 mb").getBytes(),
+                        coreOptions.pageSize(),
+                        coreOptions.localSortMaxNumFileHandles());
+
+        ExternalRowSortBuffer externalRowSortBuffer2 =
+                ExternalRowSortBuffer.create(
+                        ioManager,
+                        schema.rowType(),
+                        new int[] {0},
+                        MemorySize.parse("10 mb").getBytes(),
+                        coreOptions.pageSize(),
+                        coreOptions.localSortMaxNumFileHandles());
+
+        List<InternalRow> rows = new ArrayList<>();
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 0, 0, 0));
+        rows.add(GenericRow.of(0, 1, 0, 0));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 1, 1, 0));
+        rows.add(GenericRow.of(0, 0, 1, 0));
+        rows.add(GenericRow.of(0, 0, 1, 0));
+        rows.add(GenericRow.of(0, 1, 0, 0));
+        rows.add(GenericRow.of(0, 1, 0, 0));
+        rows.add(GenericRow.of(0, 0, 1, 0));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 0, 1, 0));
+        rows.add(GenericRow.of(0, 1, 1, 0));
+        rows.add(GenericRow.of(0, 1, 1, 0));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 1, 0, 0));
+        rows.add(GenericRow.of(0, 0, 0, 0));
+        rows.add(GenericRow.of(0, 1, 1, 0));
+
+        for (InternalRow row : rows) {
+            externalRowSortBuffer.write(row);
+            externalRowSortBuffer.flushMemory();
+            externalRowSortBuffer2.write(row);
+        }
+
+        MutableObjectIterator<InternalRow> i1 = externalRowSortBuffer.sortedIterator();
+        MutableObjectIterator<InternalRow> i2 = externalRowSortBuffer2.sortedIterator();
+
+        InternalRow row;
+        while ((row = i1.next()) != null) {
+            InternalRow row2 = i2.next();
+            Assertions.assertThat(row.getRowKind()).isEqualTo(row2.getRowKind());
+        }
+    }
+
     private List<BinaryRow> data(int size) {
         List<BinaryRow> datas = new ArrayList<>();
         BinaryRow binaryRow = new BinaryRow(3);
         BinaryRowWriter writer = new BinaryRowWriter(binaryRow);
         byte[] bytes = new byte[1024];
 
+        long l = 0;
         for (int i = 0; i < size; i++) {
-            writer.writeLong(0, RANDOM.nextLong());
+            writer.writeLong(0, l++);
             RANDOM.nextBytes(bytes);
             writer.writeString(1, BinaryString.fromBytes(bytes));
-            writer.writeLong(2, RANDOM.nextLong());
+            // use int to bound the value
+            writer.writeLong(2, RANDOM.nextInt(10));
             writer.complete();
             datas.add(binaryRow.copy());
         }

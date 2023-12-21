@@ -25,6 +25,7 @@ import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -32,6 +33,8 @@ import org.apache.paimon.utils.MutableObjectIterator;
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /**
  * External sort for Interval Row. This is a wrapper of {@link BinaryExternalSortBuffer}, in
@@ -93,13 +96,23 @@ public class ExternalRowSortBuffer implements SortBuffer {
             keyFields.add(rowFields.get(i).newName(KEY_PREFIX + rowFields.get(i).name()));
         }
 
+        // user key + sequenceNumber
+        List<DataField> sortKeyTypes = new ArrayList<>(keyFields);
+        sortKeyTypes.add(
+                new DataField(sortKeyTypes.size(), SEQUENCE_NUMBER, new BigIntType(false)));
+
         RowType keyRow = new RowType(keyFields);
         RowType wholeRow = KeyValue.schema(keyRow, rowType);
 
         // construct the binary sorter to sort the extended key_value row
         binaryExternalSortBuffer =
                 BinaryExternalSortBuffer.create(
-                        ioManager, keyRow, wholeRow, bufferSize, pageSize, maxNumFileHandles);
+                        ioManager,
+                        new RowType(sortKeyTypes),
+                        wholeRow,
+                        bufferSize,
+                        pageSize,
+                        maxNumFileHandles);
 
         this.fullSize = KeyValue.schema(keyRow, rowType).getFieldCount();
         this.serializer = new KeyValueSerializer(keyRow, rowType);
