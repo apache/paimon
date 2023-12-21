@@ -70,7 +70,7 @@ public class ExternalRowSortBuffer implements SortBuffer {
     private final BinaryExternalSortBuffer binaryExternalSortBuffer;
     private final int fullSize;
     private final KeyValueSerializer serializer;
-    private final Projection rowPartitionKeyExtractor;
+    private final Projection sortKeyExtract;
 
     private long sequnceNum = 0;
 
@@ -84,8 +84,8 @@ public class ExternalRowSortBuffer implements SortBuffer {
         List<DataField> rowFields = rowType.getFields();
         List<DataField> keyFields = new ArrayList<>();
 
-        // construct the partition extractor to extract partition row from whole row.
-        rowPartitionKeyExtractor = CodeGenUtils.newProjection(rowType, fieldsIndex);
+        // construct the partition extractor to extract key row from whole row.
+        sortKeyExtract = CodeGenUtils.newProjection(rowType, fieldsIndex);
 
         // construct the value projection to extract origin row from extended key_value row.
         for (int i : fieldsIndex) {
@@ -112,6 +112,7 @@ public class ExternalRowSortBuffer implements SortBuffer {
 
     @Override
     public void clear() {
+        sequnceNum = 0;
         binaryExternalSortBuffer.clear();
     }
 
@@ -127,7 +128,7 @@ public class ExternalRowSortBuffer implements SortBuffer {
 
     @Override
     public boolean write(InternalRow record) throws IOException {
-        BinaryRow keyRow = rowPartitionKeyExtractor.apply(record);
+        BinaryRow keyRow = sortKeyExtract.apply(record);
         return binaryExternalSortBuffer.write(
                 serializer.toRow(keyRow, sequnceNum++, record.getRowKind(), record));
     }
