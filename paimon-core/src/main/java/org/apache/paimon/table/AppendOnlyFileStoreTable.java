@@ -82,7 +82,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.logicalBucketKeyType(),
                             tableSchema.logicalRowType(),
                             name(),
-                            createTagCallbacks());
+                            catalogEnvironment);
         }
         return lazyStore;
     }

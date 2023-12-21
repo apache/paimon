@@ -117,7 +117,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                 tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
             }
             // Create a new tag
-            tagManager.createTag(snapshot, tagName, table.createTagCallbacks());
+            tagManager.createTag(snapshot, tagName, table.store().createTagCallbacks());
             // Expire the tag
             expireTag();
         } catch (Exception e) {

@@ -26,7 +26,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
-import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
@@ -100,6 +99,4 @@ public interface FileStoreTable extends DataTable {
     default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {
         return dataFileMeta.valueStats();
     }
-
-    List<TagCallback> createTagCallbacks();
 }

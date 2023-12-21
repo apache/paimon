@@ -110,7 +110,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             extractor,
                             mfFactory,
                             name(),
-                            createTagCallbacks());
+                            catalogEnvironment);
         }
         return lazyStore;
     }

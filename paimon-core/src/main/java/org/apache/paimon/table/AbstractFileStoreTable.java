@@ -40,7 +40,6 @@ import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
-import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
@@ -307,19 +306,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return callbacks;
     }
 
-    public List<TagCallback> createTagCallbacks() {
-        List<TagCallback> callbacks =
-                new ArrayList<>(CallbackUtils.loadTagCallbacks(coreOptions()));
-        String partitionField = coreOptions().tagToPartitionField();
-        MetastoreClient.Factory metastoreClientFactory =
-                catalogEnvironment.metastoreClientFactory();
-        if (partitionField != null && metastoreClientFactory != null) {
-            callbacks.add(
-                    new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
-        }
-        return callbacks;
-    }
-
     private Optional<TableSchema> tryTimeTravel(Options options) {
         CoreOptions coreOptions = new CoreOptions(options);
 
@@ -375,7 +361,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fromSnapshotId);
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
-        tagManager().createTag(snapshot, tagName, createTagCallbacks());
+        tagManager().createTag(snapshot, tagName, store().createTagCallbacks());
     }
 
     @Override

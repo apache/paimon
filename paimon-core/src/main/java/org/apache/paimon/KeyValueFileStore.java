@@ -34,7 +34,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
@@ -81,8 +81,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
-            List<TagCallback> callbacks) {
-        super(fileIO, schemaManager, schemaId, options, partitionType, callbacks);
+            CatalogEnvironment catalogEnvironment) {
+        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
