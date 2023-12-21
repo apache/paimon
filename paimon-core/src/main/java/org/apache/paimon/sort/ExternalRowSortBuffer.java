@@ -127,10 +127,15 @@ public class ExternalRowSortBuffer implements SortBuffer {
 
     @Override
     public boolean write(InternalRow record) throws IOException {
-        BinaryRow partition = rowPartitionKeyExtractor.apply(record);
-        binaryExternalSortBuffer.write(
-                serializer.toRow(partition, sequnceNum++, record.getRowKind(), record));
-        return false;
+        BinaryRow keyRow = rowPartitionKeyExtractor.apply(record);
+        return binaryExternalSortBuffer.write(
+                serializer.toRow(keyRow, sequnceNum++, record.getRowKind(), record));
+    }
+
+    // if keyRow is already calculated, use this to avoid excess cpu consumption
+    public boolean write(BinaryRow keyRow, InternalRow record) throws IOException {
+        return binaryExternalSortBuffer.write(
+                serializer.toRow(keyRow, sequnceNum++, record.getRowKind(), record));
     }
 
     @Override

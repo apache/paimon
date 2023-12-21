@@ -180,27 +180,21 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     public SinkRecord writeAndReturn(InternalRow row) throws Exception {
         SinkRecord record = toSinkRecord(row);
-        writeInternal(row);
+        writeInternal(record);
         return record;
     }
 
     public SinkRecord writeAndReturn(InternalRow row, int bucket) throws Exception {
         SinkRecord record = toSinkRecord(row, bucket);
-        writeInternal(row, bucket);
+        writeInternal(record);
         return record;
     }
 
-    private void writeInternal(InternalRow row) throws Exception {
-        keyAndBucketExtractor.setRecord(row);
-        int bucket = keyAndBucketExtractor.bucket();
-        writeInternal(row, bucket);
-    }
-
-    private void writeInternal(InternalRow row, int bucket) throws Exception {
+    private void writeInternal(SinkRecord record) throws Exception {
         if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
-            externalRowSortBuffer.write(toRowWithBucket(row, bucket));
+            externalRowSortBuffer.write(
+                    record.partition(), toRowWithBucket(record.row(), record.bucket()));
         } else {
-            SinkRecord record = toSinkRecord(row, bucket);
             write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         }
     }
@@ -224,7 +218,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public T writeAndReturnData(InternalRow row) throws Exception {
         SinkRecord record = toSinkRecord(row);
         T data = recordExtractor.extract(record);
-        writeInternal(row);
+        writeInternal(record);
         return data;
     }
 
