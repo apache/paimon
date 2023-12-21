@@ -115,15 +115,15 @@ public class MySqlActionUtils {
                             while (tables.next()) {
                                 String tableName = tables.getString("TABLE_NAME");
                                 String tableComment = tables.getString("REMARKS");
-                                Schema schema =
-                                        MySqlSchemaUtils.buildSchema(
-                                                metaData,
-                                                databaseName,
-                                                tableName,
-                                                tableComment,
-                                                typeMapping);
                                 Identifier identifier = Identifier.create(databaseName, tableName);
                                 if (monitorTablePredication.test(tableName)) {
+                                    Schema schema =
+                                            MySqlSchemaUtils.buildSchema(
+                                                    metaData,
+                                                    databaseName,
+                                                    tableName,
+                                                    tableComment,
+                                                    typeMapping);
                                     mySqlSchemasInfo.addSchema(identifier, schema);
                                 } else {
                                     excludedTables.add(identifier);
