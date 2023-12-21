@@ -21,33 +21,40 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
+import org.apache.paimon.utils.MathUtils;
 
 import org.apache.flink.table.data.RowData;
 
+import static org.apache.paimon.index.BucketAssigner.computeAssigner;
+
 /** Hash key of a {@link RowData}. */
-public class RowHashKeyChannelComputer implements ChannelComputer<InternalRow> {
+public class RowAssignerChannelComputer implements ChannelComputer<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
     private final TableSchema schema;
+    private Integer numAssigners;
 
     private transient int numChannels;
     private transient RowPartitionKeyExtractor extractor;
 
-    public RowHashKeyChannelComputer(TableSchema schema) {
+    public RowAssignerChannelComputer(TableSchema schema, Integer numAssigners) {
         this.schema = schema;
+        this.numAssigners = numAssigners;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
+        this.numAssigners = MathUtils.min(numAssigners, numChannels);
         this.extractor = new RowPartitionKeyExtractor(schema);
     }
 
     @Override
     public int channel(InternalRow record) {
-        int hash = extractor.trimmedPrimaryKey(record).hashCode();
-        return Math.abs(hash % numChannels);
+        int partitionHash = extractor.partition(record).hashCode();
+        int keyHash = extractor.trimmedPrimaryKey(record).hashCode();
+        return computeAssigner(partitionHash, keyHash, numChannels, numAssigners);
     }
 
     @Override

@@ -29,6 +29,7 @@ import org.apache.paimon.spark.util.{EncoderUtils, SparkRowUtils}
 import org.apache.paimon.table.{BucketMode, FileStoreTable}
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessageSerializer, RowPartitionKeyExtractor}
 import org.apache.paimon.types.RowType
+import org.apache.paimon.utils.MathUtils
 
 import org.apache.spark.TaskContext
 import org.apache.spark.internal.Logging
@@ -106,7 +107,10 @@ case class WriteIntoPaimonTable(
         case BucketMode.DYNAMIC =>
           val partitioned = if (primaryKeyCols.nonEmpty) {
             // Make sure that the records with the same bucket values is within a task.
-            val assignerParallelism = table.coreOptions.dynamicBucketAssignerParallelism
+            // TODO supports decoupling of initialBuckets and assignerParallelism
+            var assignerParallelism = MathUtils.max(
+              table.coreOptions.dynamicBucketInitialBuckets,
+              table.coreOptions.dynamicBucketAssignerParallelism)
             if (assignerParallelism != null) {
               withBucketCol.repartition(assignerParallelism, primaryKeyCols: _*)
             } else {

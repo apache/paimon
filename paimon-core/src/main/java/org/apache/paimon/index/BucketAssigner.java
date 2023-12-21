@@ -26,4 +26,10 @@ public interface BucketAssigner {
     int assign(BinaryRow partition, int hash);
 
     void prepareCommit(long commitIdentifier);
+
+    static int computeAssigner(int partitionHash, int keyHash, int numChannels, int numAssigners) {
+        int start = Math.abs(partitionHash % numChannels);
+        int id = Math.abs(keyHash % numAssigners);
+        return (start + id) % numChannels;
+    }
 }
