@@ -163,6 +163,22 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
+        checkImmutability(dynamicOptions);
+        return copyInternal(dynamicOptions, true);
+    }
+
+    @Override
+    public FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions) {
+        checkImmutability(dynamicOptions);
+        return copyInternal(dynamicOptions, false);
+    }
+
+    @Override
+    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+        return copyInternal(dynamicOptions, true);
+    }
+
+    private void checkImmutability(Map<String, String> dynamicOptions) {
         Map<String, String> options = tableSchema.options();
         // check option is not immutable
         dynamicOptions.forEach(
@@ -171,12 +187,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                         SchemaManager.checkAlterTableOption(k);
                     }
                 });
-
-        return internalCopyWithoutCheck(dynamicOptions);
     }
 
-    @Override
-    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
+    private FileStoreTable copyInternal(Map<String, String> dynamicOptions, boolean tryTimeTravel) {
         Map<String, String> options = new HashMap<>(tableSchema.options());
 
         // merge non-null dynamic options into schema.options
@@ -203,8 +216,10 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // validate schema with new options
         SchemaValidation.validateTableSchema(newTableSchema);
 
-        // see if merged options contain time travel option
-        newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+        if (tryTimeTravel) {
+            // see if merged options contain time travel option
+            newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
+        }
 
         return copy(newTableSchema);
     }
