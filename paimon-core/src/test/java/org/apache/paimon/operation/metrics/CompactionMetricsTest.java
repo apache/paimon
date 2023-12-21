@@ -79,8 +79,8 @@ public class CompactionMetricsTest {
                 (Gauge<Long>)
                         registeredGenericMetrics.get(
                                 CompactionMetrics.LAST_REWRITE_CHANGELOG_FILE_SIZE);
-        Gauge<Integer> runningCompaction = (Gauge<Integer>) registeredGenericMetrics.get(
-                CompactionMetrics.RUNNING_COMPACTION);
+        Gauge<Integer> runningCompaction =
+                (Gauge<Integer>) registeredGenericMetrics.get(CompactionMetrics.RUNNING_COMPACTION);
 
         assertThat(lastCompactionDuration.getValue()).isEqualTo(0);
         assertThat(compactionDuration.getCount()).isEqualTo(0);
