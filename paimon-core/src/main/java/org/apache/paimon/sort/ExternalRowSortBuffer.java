@@ -133,12 +133,6 @@ public class ExternalRowSortBuffer implements SortBuffer {
                 serializer.toRow(keyRow, sequnceNum++, record.getRowKind(), record));
     }
 
-    // if keyRow is already calculated, use this to avoid excess cpu consumption
-    public boolean write(BinaryRow keyRow, InternalRow record) throws IOException {
-        return binaryExternalSortBuffer.write(
-                serializer.toRow(keyRow, sequnceNum++, record.getRowKind(), record));
-    }
-
     @Override
     public MutableObjectIterator<InternalRow> sortedIterator() throws IOException {
         MutableObjectIterator<BinaryRow> iterator = binaryExternalSortBuffer.sortedIterator();

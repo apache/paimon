@@ -192,8 +192,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     private void writeInternal(SinkRecord record) throws Exception {
         if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
-            externalRowSortBuffer.write(
-                    record.partition(), toRowWithBucket(record.row(), record.bucket()));
+            externalRowSortBuffer.write(toRowWithBucket(record.row(), record.bucket()));
         } else {
             write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         }
