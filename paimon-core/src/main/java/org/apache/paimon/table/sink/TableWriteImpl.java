@@ -279,11 +279,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             // flush external row sort buffer.
             MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
             BinaryRow lastPartition = new BinaryRow(partitionFields.length);
-            InternalRow binaryRow;
+            InternalRow sortedRow;
             int lastBucket = -1;
-            while ((binaryRow = iterator.next()) != null) {
-                int bucket = bucket(binaryRow);
-                SinkRecord record = toSinkRecord(toOriginRow(binaryRow), bucket);
+            while ((sortedRow = iterator.next()) != null) {
+                int bucket = bucket(sortedRow);
+                SinkRecord record = toSinkRecord(toOriginRow(sortedRow), bucket);
                 if (!lastPartition.equals(record.partition()) || lastBucket != bucket) {
                     commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
                 }
