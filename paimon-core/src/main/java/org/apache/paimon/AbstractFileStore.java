@@ -32,6 +32,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagAutoCreation;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -43,6 +44,7 @@ import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.List;
 
 /**
  * Base {@link FileStore} implementation.
@@ -56,6 +58,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     protected final long schemaId;
     protected final CoreOptions options;
     protected final RowType partitionType;
+    private final List<TagCallback> callbacks;
 
     @Nullable private final SegmentsCache<String> writeManifestCache;
 
@@ -64,12 +67,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
             SchemaManager schemaManager,
             long schemaId,
             CoreOptions options,
-            RowType partitionType) {
+            RowType partitionType,
+            List<TagCallback> callbacks) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
         this.options = options;
         this.partitionType = partitionType;
+        this.callbacks = callbacks;
         MemorySize writeManifestCache = options.writeManifestCache();
         this.writeManifestCache =
                 writeManifestCache.getBytes() == 0
@@ -229,6 +234,6 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     @Nullable
     public TagAutoCreation newTagCreationManager() {
         return TagAutoCreation.create(
-                options, snapshotManager(), newTagManager(), newTagDeletion());
+                options, snapshotManager(), newTagManager(), newTagDeletion(), callbacks);
     }
 }

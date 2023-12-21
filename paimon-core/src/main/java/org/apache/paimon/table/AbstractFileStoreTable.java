@@ -34,6 +34,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
@@ -50,15 +51,12 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.tag.TagPreview;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -284,7 +282,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     private List<CommitCallback> createCommitCallbacks() {
-        List<CommitCallback> callbacks = new ArrayList<>(loadCommitCallbacks());
+        List<CommitCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadCommitCallbacks(coreOptions()));
         CoreOptions options = coreOptions();
         MetastoreClient.Factory metastoreClientFactory =
                 catalogEnvironment.metastoreClientFactory();
@@ -308,8 +307,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return callbacks;
     }
 
-    private List<TagCallback> createTagCallbacks() {
-        List<TagCallback> callbacks = new ArrayList<>(loadTagCallbacks());
+    public List<TagCallback> createTagCallbacks() {
+        List<TagCallback> callbacks =
+                new ArrayList<>(CallbackUtils.loadTagCallbacks(coreOptions()));
         String partitionField = coreOptions().tagToPartitionField();
         MetastoreClient.Factory metastoreClientFactory =
                 catalogEnvironment.metastoreClientFactory();
@@ -318,50 +318,6 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                     new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
         }
         return callbacks;
-    }
-
-    private List<TagCallback> loadTagCallbacks() {
-        return loadCallbacks(coreOptions().tagCallbacks(), TagCallback.class);
-    }
-
-    private List<CommitCallback> loadCommitCallbacks() {
-        return loadCallbacks(coreOptions().commitCallbacks(), CommitCallback.class);
-    }
-
-    @SuppressWarnings("unchecked")
-    private <T> List<T> loadCallbacks(Map<String, String> clazzParamMaps, Class<T> expectClass) {
-        List<T> result = new ArrayList<>();
-
-        for (Map.Entry<String, String> classParamEntry : clazzParamMaps.entrySet()) {
-            String className = classParamEntry.getKey();
-            String param = classParamEntry.getValue();
-
-            Class<?> clazz;
-            try {
-                clazz = Class.forName(className, true, this.getClass().getClassLoader());
-            } catch (ClassNotFoundException e) {
-                throw new RuntimeException(e);
-            }
-
-            Preconditions.checkArgument(
-                    expectClass.isAssignableFrom(clazz),
-                    "Class " + clazz + " must implement " + expectClass);
-
-            try {
-                if (param == null) {
-                    result.add((T) clazz.newInstance());
-                } else {
-                    result.add((T) clazz.getConstructor(String.class).newInstance(param));
-                }
-            } catch (Exception e) {
-                throw new RuntimeException(
-                        "Failed to initialize commit callback "
-                                + className
-                                + (param == null ? "" : " with param " + param),
-                        e);
-            }
-        }
-        return result;
     }
 
     private Optional<TableSchema> tryTimeTravel(Options options) {
@@ -419,17 +375,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fromSnapshotId);
 
         Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
-        tagManager().createTag(snapshot, tagName);
-
-        List<TagCallback> callbacks = Collections.emptyList();
-        try {
-            callbacks = createTagCallbacks();
-            callbacks.forEach(callback -> callback.notifyCreation(tagName));
-        } finally {
-            for (TagCallback tagCallback : callbacks) {
-                IOUtils.closeQuietly(tagCallback);
-            }
-        }
+        tagManager().createTag(snapshot, tagName, createTagCallbacks());
     }
 
     @Override

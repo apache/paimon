@@ -76,11 +76,13 @@ public class FileDeletionTest {
 
     private long commitIdentifier;
     private String root;
+    private TagManager tagManager;
 
     @BeforeEach
     public void setup() throws Exception {
         commitIdentifier = 0L;
         root = tempDir.toString();
+        tagManager = null;
     }
 
     /**
@@ -221,7 +223,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithExistingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -237,7 +239,7 @@ public class FileDeletionTest {
 
         // step 2: commit -A (by clean bucket 0) and create tag1
         cleanBucket(store, gen.getPartition(gen.next()), 0);
-        tagManager.createTag(snapshotManager.snapshot(2), "tag1");
+        createTag(snapshotManager.snapshot(2), "tag1");
         assertThat(tagManager.tagExists("tag1")).isTrue();
 
         // step 3: commit C to bucket 2
@@ -248,7 +250,7 @@ public class FileDeletionTest {
 
         // step 4: commit -B (by clean bucket 1) and create tag2
         cleanBucket(store, partition, 1);
-        tagManager.createTag(snapshotManager.snapshot(4), "tag2");
+        createTag(snapshotManager.snapshot(4), "tag2");
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         // step 5: commit D to bucket 3
@@ -299,7 +301,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -328,7 +330,7 @@ public class FileDeletionTest {
         // snapshot 3: commit -A (by clean bucket 0)
         cleanBucket(store, gen.getPartition(gen.next()), 0);
 
-        tagManager.createTag(snapshotManager.snapshot(1), "tag1");
+        createTag(snapshotManager.snapshot(1), "tag1");
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check data file and manifests
@@ -353,7 +355,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithSnapshot() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -385,7 +387,7 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
 
         // create tag1
-        tagManager.createTag(snapshot1, "tag1");
+        createTag(snapshot1, "tag1");
 
         // expire snapshot 1, 2
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -426,7 +428,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithOtherTag() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -459,9 +461,9 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot2.baseManifestList(), snapshot2.deltaManifestList());
 
         // create tags
-        tagManager.createTag(snapshotManager.snapshot(1), "tag1");
-        tagManager.createTag(snapshotManager.snapshot(2), "tag2");
-        tagManager.createTag(snapshotManager.snapshot(4), "tag3");
+        createTag(snapshotManager.snapshot(1), "tag1");
+        createTag(snapshotManager.snapshot(2), "tag2");
+        createTag(snapshotManager.snapshot(4), "tag3");
 
         // expire snapshot 1, 2, 3, 4
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -702,5 +704,9 @@ public class FileDeletionTest {
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
                         null);
+    }
+
+    private void createTag(Snapshot snapshot, String tagName) {
+        tagManager.createTag(snapshot, tagName, Collections.emptyList());
     }
 }

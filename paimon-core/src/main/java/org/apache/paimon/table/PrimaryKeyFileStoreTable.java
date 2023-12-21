@@ -109,7 +109,8 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             rowType,
                             extractor,
                             mfFactory,
-                            name());
+                            name(),
+                            createTagCallbacks());
         }
         return lazyStore;
     }
