@@ -258,6 +258,15 @@ There are some useful options to build Flink Pulsar Source, but they are not pro
           </td>
         </tr>
         <tr>
+          <td>topic-pattern</td>
+          <td>(none)</td>
+          <td>String</td>
+          <td>The regular expression for a pattern of topic names to read from. All topics with names that match the 
+              specified regular expression will be subscribed by the consumer when the job starts running. Note, only 
+              one of "topic-pattern" and "topic" can be specified.
+          </td>
+        </tr>
+        <tr>
           <td>pulsar.startCursor.fromMessageId</td>
           <td>EARLIEST</td>
           <td>Sting</td>
