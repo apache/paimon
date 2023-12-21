@@ -940,4 +940,50 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                         "+I[b, STRING, true, null, null, null, from column b]",
                         "+I[c, STRING, true, null, null, null, null]");
     }
+
+    @Test
+    public void testAlterTableNonPhysicalColumn() {
+        sql(
+                "CREATE TABLE T (a INT,  c ROW < a INT, d INT> METADATA, b INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts)");
+        sql("ALTER TABLE T ADD e VARCHAR METADATA");
+        sql("ALTER TABLE T DROP c ");
+        sql("ALTER TABLE T RENAME e TO ee");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `b` INT,\n"
+                                + "  `ts` TIMESTAMP(3),\n"
+                                + "  `ee` VARCHAR(2147483647) METADATA,\n"
+                                + "  WATERMARK FOR `ts` AS `ts`\n"
+                                + ") ")
+                .doesNotContain("schema");
+    }
+
+    @Test
+    public void testAlterTableMetadataComment() {
+        sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
+        List<Row> result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `name` VARCHAR(2147483647) METADATA COMMENT 'header1',\n"
+                                + "  `b` INT\n"
+                                + ")")
+                .doesNotContain("schema");
+        sql("ALTER TABLE T MODIFY name VARCHAR METADATA COMMENT 'header2'");
+        result = sql("SHOW CREATE TABLE T");
+        assertThat(result.get(0).toString())
+                .contains(
+                        "CREATE TABLE `PAIMON`.`default`.`T` (\n"
+                                + "  `a` INT,\n"
+                                + "  `name` VARCHAR(2147483647) METADATA COMMENT 'header2',\n"
+                                + "  `b` INT\n"
+                                + ")")
+                .doesNotContain("schema");
+        // change name from non-physical column to physical column is not allowed
+        assertThatThrownBy(() -> sql("ALTER TABLE T MODIFY name VARCHAR COMMENT 'header3'"));
+    }
 }
