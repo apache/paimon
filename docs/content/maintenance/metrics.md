@@ -341,6 +341,12 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>Gauge</td>
             <td>Size of changelog files compacted in last compaction.</td>
         </tr>
+        <tr>
+            <td>runningCompactionCount</td>
+            <td>Bucket</td>
+            <td>Gauge</td>
+            <td>Count of the running compaction, 0 or 1.</td>
+        </tr>
     </tbody>
 </table>
 

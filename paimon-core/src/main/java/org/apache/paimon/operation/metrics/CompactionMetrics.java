@@ -69,7 +69,7 @@ public class CompactionMetrics {
     static final String LAST_REWRITE_CHANGELOG_FILE_SIZE = "lastRewriteChangelogFileSize";
 
     @VisibleForTesting
-    static final String RUNNING_COMPACTION = "runningCompaction";
+    static final String RUNNING_COMPACTION = "runningCompactionCount";
 
     private void registerGenericCompactionMetrics() {
         metricGroup.gauge(
