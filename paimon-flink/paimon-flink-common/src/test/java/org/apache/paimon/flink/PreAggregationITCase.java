@@ -18,18 +18,24 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.Arrays;
 import java.util.Collections;
+import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -967,6 +973,183 @@ public class PreAggregationITCase {
             sql("INSERT INTO T VALUES(1, 1, 1), (2, 1, 1), (1, 2, 1)");
             assertThat(batchSql("SELECT * FROM T"))
                     .containsExactlyInAnyOrder(Row.of(1, 3, 1), Row.of(2, 1, 1));
+        }
+    }
+
+    /** ITCase for {@link FieldNestedUpdateAgg}. */
+    public static class NestedUpdateAggregationITCase extends CatalogITCaseBase {
+
+        @Override
+        protected long checkpointInterval() {
+            return 2_000;
+        }
+
+        @Override
+        protected List<String> ddl() {
+            String ordersTable =
+                    "CREATE TABLE orders (\n"
+                            + "  order_id INT PRIMARY KEY NOT ENFORCED,\n"
+                            + "  user_name STRING,\n"
+                            + "  address STRING\n"
+                            + ");";
+
+            String subordersTable =
+                    "CREATE TABLE sub_orders (\n"
+                            + "  order_id INT,\n"
+                            + "  daily_id INT,\n"
+                            + "  today STRING,\n"
+                            + "  product_name STRING,\n"
+                            + "  price BIGINT,\n"
+                            + "  PRIMARY KEY (order_id, daily_id, today) NOT ENFORCED\n"
+                            + ");";
+
+            String wideTable =
+                    "CREATE TABLE order_wide (\n"
+                            + "  order_id INT PRIMARY KEY NOT ENFORCED,\n"
+                            + "  user_name STRING,\n"
+                            + "  address STRING,\n"
+                            + "  sub_orders ARRAY<ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>>\n"
+                            + ") WITH (\n"
+                            + "  'merge-engine' = 'aggregation',\n"
+                            + "  'fields.sub_orders.aggregate-function' = 'nested-update',\n"
+                            + "  'fields.sub_orders.nested-keys' = 'daily_id;today'\n"
+                            + ")";
+
+            return Arrays.asList(ordersTable, subordersTable, wideTable);
+        }
+
+        @Test
+        @Timeout(60)
+        public void testUseCase() throws Exception {
+            sEnv.getConfig()
+                    .set(
+                            ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
+                            ExecutionConfigOptions.UpsertMaterialize.NONE);
+
+            // widen
+            sEnv.executeSql(
+                    "INSERT INTO order_wide\n"
+                            + "SELECT order_id, user_name, address, "
+                            + "CAST (NULL AS ARRAY<ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>>) FROM orders\n"
+                            + "UNION ALL\n"
+                            + "SELECT order_id, CAST (NULL AS STRING), CAST (NULL AS STRING), "
+                            + "ARRAY[ROW(daily_id, today, product_name, price)] FROM sub_orders");
+
+            sEnv.executeSql(
+                    "INSERT INTO orders VALUES "
+                            + "(1, 'Wang', 'HangZhou'),"
+                            + "(2, 'Zhao', 'ChengDu'),"
+                            + "(3, 'Liu', 'NanJing')");
+
+            sEnv.executeSql(
+                    "INSERT INTO sub_orders VALUES "
+                            + "(1, 1, '12-20', 'Apple', 8000),"
+                            + "(1, 2, '12-20', 'Tesla', 400000),"
+                            + "(1, 1, '12-21', 'Sangsung', 5000),"
+                            + "(2, 1, '12-20', 'Tea', 40),"
+                            + "(2, 2, '12-20', 'Pot', 60),"
+                            + "(3, 1, '12-25', 'Bat', 15),"
+                            + "(3, 1, '12-26', 'Cup', 30)");
+
+            while (true) {
+                List<Row> result = waitExpectedSizeRecordsSorted(3);
+                boolean allChecked =
+                        checkOneRecord(
+                                        result.get(0),
+                                        1,
+                                        "Wang",
+                                        "HangZhou",
+                                        Row.of(1, "12-20", "Apple", 8000L),
+                                        Row.of(1, "12-21", "Sangsung", 5000L),
+                                        Row.of(2, "12-20", "Tesla", 400000L))
+                                && checkOneRecord(
+                                        result.get(1),
+                                        2,
+                                        "Zhao",
+                                        "ChengDu",
+                                        Row.of(1, "12-20", "Tea", 40L),
+                                        Row.of(2, "12-20", "Pot", 60L))
+                                && checkOneRecord(
+                                        result.get(2),
+                                        3,
+                                        "Liu",
+                                        "NanJing",
+                                        Row.of(1, "12-25", "Bat", 15L),
+                                        Row.of(1, "12-26", "Cup", 30L));
+                if (allChecked) {
+                    break;
+                }
+            }
+
+            // query using UNNEST
+            List<Row> unnested =
+                    sql(
+                            "SELECT order_id, user_name, address, daily_id, today, product_name, price "
+                                    + "FROM order_wide, UNNEST(sub_orders) AS so(daily_id, today, product_name, price)");
+
+            assertThat(unnested)
+                    .containsExactlyInAnyOrder(
+                            Row.of(1, "Wang", "HangZhou", 1, "12-20", "Apple", 8000L),
+                            Row.of(1, "Wang", "HangZhou", 2, "12-20", "Tesla", 400000L),
+                            Row.of(1, "Wang", "HangZhou", 1, "12-21", "Sangsung", 5000L),
+                            Row.of(2, "Zhao", "ChengDu", 1, "12-20", "Tea", 40L),
+                            Row.of(2, "Zhao", "ChengDu", 2, "12-20", "Pot", 60L),
+                            Row.of(3, "Liu", "NanJing", 1, "12-25", "Bat", 15L),
+                            Row.of(3, "Liu", "NanJing", 1, "12-26", "Cup", 30L));
+        }
+
+        // TODO: test DELETE statement after solving
+        // https://github.com/apache/incubator-paimon/issues/2561
+
+        private List<Row> waitExpectedSizeRecordsSorted(int size) throws InterruptedException {
+            List<Row> result;
+            do {
+                Thread.sleep(500);
+                result = sql("SELECT * FROM order_wide");
+            } while (result.size() != size);
+
+            return result.stream()
+                    .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                    .collect(Collectors.toList());
+        }
+
+        private boolean checkOneRecord(
+                Row record, int orderId, String userName, String address, Row... subOrders) {
+            if ((int) record.getField(0) != orderId) {
+                return false;
+            }
+            if (!record.getFieldAs(1).equals(userName)) {
+                return false;
+            }
+            if (!record.getFieldAs(2).equals(address)) {
+                return false;
+            }
+
+            return checkNestedTable(record.getFieldAs(3), subOrders);
+        }
+
+        private boolean checkNestedTable(Row[] nestedTable, Row... subOrders) {
+            if (nestedTable.length != subOrders.length) {
+                return false;
+            }
+
+            Comparator<Row> comparator =
+                    (Comparator)
+                            Comparator.comparingInt(r -> ((Row) r).getFieldAs(0))
+                                    .thenComparing(r -> (String) ((Row) r).getField(1));
+
+            List<Row> sortedActual =
+                    Arrays.stream(nestedTable).sorted(comparator).collect(Collectors.toList());
+            List<Row> sortedExpected =
+                    Arrays.stream(subOrders).sorted(comparator).collect(Collectors.toList());
+
+            for (int i = 0; i < sortedActual.size(); i++) {
+                if (!sortedActual.get(i).equals(sortedExpected.get(i))) {
+                    return false;
+                }
+            }
+
+            return true;
         }
     }
 }

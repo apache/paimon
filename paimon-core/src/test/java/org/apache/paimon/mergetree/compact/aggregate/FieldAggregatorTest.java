@@ -20,8 +20,13 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
@@ -33,6 +38,9 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -273,5 +281,72 @@ public class FieldAggregatorTest {
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);
+    }
+
+    @Test
+    public void testFieldNestedUpdateAgg() {
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v", DataTypes.STRING()))),
+                        Arrays.asList("k0", "k1"));
+
+        GenericArray accumulator = validateNestedUpdate(agg, null, 0, 0, "A");
+        assertThat(accumulator).isEqualTo(agg.agg(accumulator, null));
+        accumulator = validateNestedUpdate(agg, accumulator, 0, 1, "B");
+        accumulator = validateNestedUpdate(agg, accumulator, 1, 0, "C");
+        accumulator = validateNestedUpdate(agg, accumulator, 1, 1, "D");
+
+        InternalArray retracted =
+                (InternalArray) agg.retract(accumulator, makeSingletonArray(0, 0, "A"));
+        assertThat(retracted.size()).isEqualTo(3);
+        List<InternalRow> rows = new ArrayList<>(3);
+        for (int i = 0; i < 3; i++) {
+            rows.add(retracted.getRow(i, 3));
+        }
+        assertThat(rows)
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(0, 1, BinaryString.fromString("B")),
+                        GenericRow.of(1, 0, BinaryString.fromString("C")),
+                        GenericRow.of(1, 1, BinaryString.fromString("D")));
+    }
+
+    private GenericArray validateNestedUpdate(
+            FieldNestedUpdateAgg agg, GenericArray accumulator, int k0, int k1, String v) {
+        GenericArray input = makeSingletonArray(k0, k1, v);
+        GenericArray next = (GenericArray) agg.agg(accumulator, input);
+        assertThat(next).isEqualTo(mergeArray(accumulator, input));
+        return next;
+    }
+
+    private GenericArray makeSingletonArray(int k0, int k1, String v) {
+        return new GenericArray(
+                new GenericRow[] {GenericRow.of(k0, k1, BinaryString.fromString(v))});
+    }
+
+    private GenericArray mergeArray(GenericArray a1, GenericArray a2) {
+        if (a1 == null) {
+            return a2;
+        } else if (a2 == null) {
+            return a1;
+        }
+
+        InternalArray.ElementGetter getter =
+                InternalArray.createElementGetter(
+                        DataTypes.ROW(DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()));
+
+        Object[] rows = new Object[a1.size() + a2.size()];
+        for (int i = 0; i < a1.size() + a2.size(); i++) {
+            if (i < a1.size()) {
+                rows[i] = getter.getElementOrNull(a1, i);
+            } else {
+                rows[i] = getter.getElementOrNull(a2, i - a1.size());
+            }
+        }
+
+        return new GenericArray(rows);
     }
 }
