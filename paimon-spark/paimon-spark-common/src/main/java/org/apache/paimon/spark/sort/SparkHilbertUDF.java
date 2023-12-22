@@ -62,7 +62,7 @@ public class SparkHilbertUDF implements Serializable {
     }
 
     byte[] hilbertCurvePosBytes(Seq<Long> points) {
-        List<Long> longs = (List<Long>) JavaConverters.seqAsJavaList(points);
+        List<Long> longs = JavaConverters.seqAsJavaList(points);
         long[] data = longs.stream().mapToLong(Long::longValue).toArray();
         HilbertCurve hilbertCurve = HilbertCurve.bits(BITS_NUM).dimensions(points.size());
         BigInteger index = hilbertCurve.index(data);

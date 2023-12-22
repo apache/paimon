@@ -22,6 +22,7 @@ import java.nio.charset.StandardCharsets;
 
 /** BinaryUtil util to convert the value to binary. */
 public class ConvertBinaryUtil {
+
     private ConvertBinaryUtil() {}
 
     public static byte[] paddingTo8Byte(byte[] data) {
