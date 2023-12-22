@@ -145,6 +145,15 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCountIntAgg() {
+        FieldCountAgg fieldAvgAgg = new FieldCountAgg(new IntType());
+        assertThat(fieldAvgAgg.agg(null, 10)).isEqualTo(1);
+        assertThat(fieldAvgAgg.agg(1, 5)).isEqualTo(2);
+        assertThat(fieldAvgAgg.agg(2, 15)).isEqualTo(3);
+        assertThat(fieldAvgAgg.agg(3, 25)).isEqualTo(4);
+    }
+
+    @Test
     public void testFieldSumByteAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new TinyIntType());
         assertThat(fieldSumAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
