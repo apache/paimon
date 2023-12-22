@@ -32,7 +32,6 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
-import static org.apache.paimon.CoreOptions.AUTO_CREATE;
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for {@link FileIO}. */
@@ -123,9 +122,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
         Path path = getDataTableLocation(identifier);
-        if (schema.options().containsKey(AUTO_CREATE.key())) {
-            schema.options().put(AUTO_CREATE.key(), String.valueOf(Boolean.FALSE));
-        }
         uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
     }
 
