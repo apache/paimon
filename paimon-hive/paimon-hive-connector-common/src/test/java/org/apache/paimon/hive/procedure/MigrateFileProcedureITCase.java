@@ -62,6 +62,11 @@ public class MigrateFileProcedureITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testAvro() throws Exception {
+        test("avro");
+    }
+
+    @Test
     public void testParquet() throws Exception {
         test("parquet");
     }
