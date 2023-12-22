@@ -21,6 +21,7 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.source.align.PlaceholderSplit;
 import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -74,6 +75,12 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     @Override
     public void processElement(StreamRecord<Split> record) throws Exception {
         Split split = record.getValue();
+        // There is no split from source currently.
+        if (split instanceof PlaceholderSplit) {
+            sourceReaderMetrics.nothingAvailable();
+            return;
+        }
+
         // update metric when reading a new split
         long eventTime =
                 ((DataSplit) split)

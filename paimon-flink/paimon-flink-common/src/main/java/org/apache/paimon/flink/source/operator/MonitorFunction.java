@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.source.operator;
 
+import org.apache.paimon.flink.source.align.PlaceholderSplit;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
@@ -78,6 +79,8 @@ public class MonitorFunction extends RichSourceFunction<Split>
     private static final long serialVersionUID = 1L;
 
     private static final Logger LOG = LoggerFactory.getLogger(MonitorFunction.class);
+
+    private static final PlaceholderSplit EMPTY_SPLIT = new PlaceholderSplit(-1);
 
     private final ReadBuilder readBuilder;
     private final long monitorInterval;
@@ -182,7 +185,11 @@ public class MonitorFunction extends RichSourceFunction<Split>
                 try {
                     List<Split> splits = scan.plan().splits();
                     isEmpty = splits.isEmpty();
-                    splits.forEach(ctx::collect);
+                    if (isEmpty) {
+                        ctx.collect(EMPTY_SPLIT);
+                    } else {
+                        splits.forEach(ctx::collect);
+                    }
 
                     if (emitSnapshotWatermark) {
                         Long watermark = scan.watermark();
