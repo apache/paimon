@@ -30,6 +30,8 @@ public class FileStoreSourceReaderMetrics {
 
     public static final long UNDEFINED = -1L;
 
+    private boolean nothingAvailable;
+
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
         sourceReaderMetricGroup.gauge(
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
@@ -39,14 +41,22 @@ public class FileStoreSourceReaderMetrics {
     public void recordSnapshotUpdate(long fileCreationTime) {
         this.latestFileCreationTime = fileCreationTime;
         lastSplitUpdateTime = System.currentTimeMillis();
+        this.nothingAvailable = false;
     }
 
     @VisibleForTesting
     long getFetchTimeLag() {
         if (latestFileCreationTime != UNDEFINED) {
+            if (nothingAvailable && System.currentTimeMillis() - lastSplitUpdateTime > 60000) {
+                return 0;
+            }
             return lastSplitUpdateTime - latestFileCreationTime;
         }
         return UNDEFINED;
+    }
+
+    public void nothingAvailable() {
+        this.nothingAvailable = true;
     }
 
     @VisibleForTesting
@@ -57,5 +67,10 @@ public class FileStoreSourceReaderMetrics {
     @VisibleForTesting
     long getLastSplitUpdateTime() {
         return lastSplitUpdateTime;
+    }
+
+    @VisibleForTesting
+    void setLastSplitUpdateTime(long lastSplitUpdateTime) {
+        this.lastSplitUpdateTime = lastSplitUpdateTime;
     }
 }

@@ -52,4 +52,19 @@ class FileStoreSourceReaderMetricsTest {
         assertThat(sourceReaderMetrics.getFetchTimeLag())
                 .isNotEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
     }
+
+    @Test
+    public void testNoSplits() {
+        MetricListener metricListener = new MetricListener();
+        final FileStoreSourceReaderMetrics sourceReaderMetrics =
+                new FileStoreSourceReaderMetrics(metricListener.getMetricGroup());
+        assertThat(sourceReaderMetrics.getFetchTimeLag())
+                .isEqualTo(FileStoreSourceReaderMetrics.UNDEFINED);
+        sourceReaderMetrics.recordSnapshotUpdate(123);
+        sourceReaderMetrics.nothingAvailable();
+        sourceReaderMetrics.setLastSplitUpdateTime(System.currentTimeMillis() - 70000);
+        assertThat(sourceReaderMetrics.getFetchTimeLag()).isEqualTo(0);
+        sourceReaderMetrics.recordSnapshotUpdate(1234);
+        assertThat(sourceReaderMetrics.getFetchTimeLag()).isGreaterThan(0);
+    }
 }

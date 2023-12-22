@@ -165,6 +165,10 @@ public class FileStoreSourceSplitReader
                 currentReader.lazyRecordReader.close();
             }
         }
+
+        if (sourceReaderMetrics != null) {
+            sourceReaderMetrics.nothingAvailable();
+        }
     }
 
     private void checkSplitOrStartNext() throws IOException {
