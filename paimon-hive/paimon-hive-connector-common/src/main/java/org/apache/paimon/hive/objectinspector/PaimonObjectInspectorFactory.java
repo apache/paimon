@@ -53,9 +53,6 @@ public class PaimonObjectInspectorFactory {
             case DOUBLE:
             case BINARY:
             case VARBINARY:
-                if (logicalType instanceof TimestampType) {
-                    return new PaimonTimestampObjectInspector();
-                }
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
                         (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
             case DECIMAL:
