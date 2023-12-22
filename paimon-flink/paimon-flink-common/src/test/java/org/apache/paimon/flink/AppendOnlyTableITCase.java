@@ -168,7 +168,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                         + "    'fields.f0.min' = '0',\n"
                         + "    'fields.f0.max' = '100',\n"
                         + "    'fields.f1.length' = '102400',\n"
-                        + "    'fields.f1.length' = '102400',\n"
+                        + "    'fields.f2.length' = '102400',\n"
                         + "    'number-of-rows' = '"
                         + size
                         + "'\n"
