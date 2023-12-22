@@ -916,6 +916,12 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
+    public static final ConfigOption<TagDateFormatter> TAG_FORMATTER_DATE =
+            key("tag.formatter-date")
+                    .enumType(TagDateFormatter.class)
+                    .defaultValue(TagDateFormatter.WITH_DASHES)
+                    .withDescription("Specifies the date format to be used for tags.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -1420,6 +1426,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagCreationDelay() {
         return options.get(TAG_CREATION_DELAY);
+    }
+
+    public TagDateFormatter tagFormatterDate() {
+        return options.get(TAG_FORMATTER_DATE);
     }
 
     public Integer tagNumRetainedMax() {
@@ -1985,6 +1995,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The date format options for tag creation. */
+    public enum TagDateFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Represents yyyy-MM-dd format."),
+        WITHOUT_DASHES("without_dashes", "Represents yyyyMMdd format.");
+
+        private final String value;
+        private final String description;
+
+        TagDateFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

@@ -33,6 +33,8 @@ import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
 import static java.time.temporal.ChronoField.MONTH_OF_YEAR;
 import static java.time.temporal.ChronoField.YEAR;
+import static org.apache.paimon.CoreOptions.TagDateFormatter.WITHOUT_DASHES;
+import static org.apache.paimon.CoreOptions.TagDateFormatter.WITH_DASHES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Handle time for tag. */
@@ -56,6 +58,14 @@ public interface TagPeriodHandler {
                     .appendLiteral('-')
                     .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
                     .appendLiteral('-')
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
+    DateTimeFormatter FORMATTER_WITHOUT_DASHES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
                     .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
@@ -127,6 +137,12 @@ public interface TagPeriodHandler {
     /** Daily {@link TagPeriodHandler}. */
     class DailyTagPeriodHandler extends BaseTagPeriodHandler {
 
+        CoreOptions.TagDateFormatter formatter;
+
+        public DailyTagPeriodHandler(CoreOptions.TagDateFormatter formatter) {
+            this.formatter = formatter;
+        }
+
         static final Duration ONE_PERIOD = Duration.ofDays(1);
 
         @Override
@@ -136,7 +152,14 @@ public interface TagPeriodHandler {
 
         @Override
         protected DateTimeFormatter formatter() {
-            return DAY_FORMATTER;
+            switch (formatter) {
+                case WITH_DASHES:
+                    return DAY_FORMATTER;
+                case WITHOUT_DASHES:
+                    return FORMATTER_WITHOUT_DASHES;
+                default:
+                    throw new IllegalArgumentException("Unsupported date format type");
+            }
         }
 
         @Override
@@ -165,7 +188,7 @@ public interface TagPeriodHandler {
     static TagPeriodHandler create(CoreOptions options) {
         switch (options.tagCreationPeriod()) {
             case DAILY:
-                return new DailyTagPeriodHandler();
+                return new DailyTagPeriodHandler(options.tagFormatterDate());
             case HOURLY:
                 return new HourlyTagPeriodHandler();
             case TWO_HOURS:
