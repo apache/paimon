@@ -233,8 +233,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     // set the lastModifiedCommitIdentifier to Long.MIN_VALUE
                     // Modify here is only for convenient of close writers, see
                     // `TableWriteImpl.prepareCommit` for detail.
-                    writerContainer.lastModifiedCommitIdentifier =
-                            commitIdentifier == Long.MAX_VALUE ? Long.MIN_VALUE : commitIdentifier;
+                    writerContainer.lastModifiedCommitIdentifier = commitIdentifier;
                 }
             }
 
@@ -247,13 +246,18 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void close() throws Exception {
+    public void closeWriters() throws Exception {
         for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
             for (WriterContainer<T> writerContainer : bucketWriters.values()) {
                 writerContainer.writer.close();
             }
         }
         writers.clear();
+    }
+
+    @Override
+    public void close() throws Exception {
+        closeWriters();
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
         }

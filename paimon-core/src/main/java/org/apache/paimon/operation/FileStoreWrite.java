@@ -130,6 +130,13 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
             throws Exception;
 
     /**
+     * Clear all writer by hand. No mather what happens.
+     *
+     * @throws Exception the thrown exception
+     */
+    void closeWriters() throws Exception;
+
+    /**
      * Close the writer.
      *
      * @throws Exception the thrown exception

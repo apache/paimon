@@ -177,7 +177,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThatCode(
                         () ->
                                 tEnv.executeSql(
-                                                "INSERT INTO part_table2 /*+ OPTIONS('sort-partition-before-batch-insert' = 'false') */ SELECT * FROM Orders_in")
+                                                "INSERT INTO part_table2 /*+ OPTIONS('write-batch-sort-bucket' = 'false') */ SELECT * FROM Orders_in")
                                         .await())
                 .hasRootCauseInstanceOf(OutOfMemoryError.class);
         assertThatCode(

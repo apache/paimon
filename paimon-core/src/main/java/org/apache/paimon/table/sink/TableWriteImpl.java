@@ -301,6 +301,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
                 SinkRecord record = toSinkRecord(toOriginRow(sortedRow), bucket);
                 if (!lastPartition.equals(record.partition()) || lastBucket != bucket) {
                     commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
+                    write.closeWriters();
                 }
                 write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
                 record.partition().copy(lastPartition);

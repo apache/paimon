@@ -270,8 +270,8 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 mb"))
                     .withDescription("Amount of data to spill records to disk in spilled sort.");
 
-    public static final ConfigOption<Boolean> SORT_PARTITION_BEFORE_BATCH_INSERT =
-            key("sort-partition-before-batch-insert")
+    public static final ConfigOption<Boolean> WRITE_BATCH_SORT_BUCKET =
+            key("write-batch-sort-bucket")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
@@ -1170,7 +1170,7 @@ public class CoreOptions implements Serializable {
     }
 
     public boolean sortPartitionBeforeBatchInsert() {
-        return options.get(SORT_PARTITION_BEFORE_BATCH_INSERT);
+        return options.get(WRITE_BATCH_SORT_BUCKET);
     }
 
     public Duration continuousDiscoveryInterval() {
