@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.catalyst.analysis.expressions
 
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, NullType}
@@ -88,6 +88,8 @@ trait ExpressionHelper extends PredicateHelper {
       Seq(attr.name)
     case GetStructField(child, _, Some(name)) =>
       toRefSeq(child) :+ name
+    case Alias(child, _) =>
+      toRefSeq(child)
     case other =>
       throw new UnsupportedOperationException(
         s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
