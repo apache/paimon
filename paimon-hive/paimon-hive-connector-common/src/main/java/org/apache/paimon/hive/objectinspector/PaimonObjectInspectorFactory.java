@@ -27,6 +27,7 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimeType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
@@ -52,6 +53,9 @@ public class PaimonObjectInspectorFactory {
             case DOUBLE:
             case BINARY:
             case VARBINARY:
+                if (logicalType instanceof TimestampType) {
+                    return new PaimonTimestampObjectInspector();
+                }
                 return PrimitiveObjectInspectorFactory.getPrimitiveJavaObjectInspector(
                         (PrimitiveTypeInfo) HiveTypeUtils.toTypeInfo(logicalType));
             case DECIMAL:
