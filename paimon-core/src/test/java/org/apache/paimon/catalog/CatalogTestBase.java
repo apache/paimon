@@ -232,8 +232,8 @@ public abstract class CatalogTestBase {
         assertThatExceptionOfType(IllegalArgumentException.class)
                 .isThrownBy(() -> catalog.createTable(identifier, schema, false))
                 .withMessage("The value of auto-create property should be false.");
-
         schema.options().remove(CoreOptions.AUTO_CREATE.key());
+
         catalog.createTable(identifier, schema, false);
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isTrue();
