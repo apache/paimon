@@ -30,7 +30,7 @@ case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
   override def resolveNotMatchedBySourceActions(
       merge: MergeIntoTable,
       targetOutput: Seq[AttributeReference]): Seq[MergeAction] = {
-    merge.notMatchedBySourceActions.map(checkAndAlignActionAssignment(_, targetOutput))
+    Seq.empty
   }
 
   override def buildMergeIntoPaimonTable(
@@ -39,6 +39,10 @@ case class PaimonMergeInto(spark: SparkSession) extends PaimonMergeIntoBase {
       alignedMatchedActions: Seq[MergeAction],
       alignedNotMatchedActions: Seq[MergeAction],
       alignedNotMatchedBySourceActions: Seq[MergeAction]): MergeIntoPaimonTable = {
+    if (alignedNotMatchedBySourceActions.nonEmpty) {
+      throw new RuntimeException("WHEN NOT MATCHED BY SOURCE is not supported here.")
+    }
+
     MergeIntoPaimonTable(
       v2Table,
       merge.targetTable,
