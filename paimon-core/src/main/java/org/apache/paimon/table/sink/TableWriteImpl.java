@@ -250,6 +250,22 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
+        if (fullCompaction) {
+            // we need to write all the datas before triggering a full compaction, otherwise, the
+            // changelog producer of full-compaction will not be able to generate changelog in time.
+            if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
+                MutableObjectIterator<InternalRow> iterator =
+                        externalRowSortBuffer.sortedIterator();
+                InternalRow sortedRow;
+                while ((sortedRow = iterator.next()) != null) {
+                    int rowBucket = bucket(sortedRow);
+                    SinkRecord record = toSinkRecord(toOriginRow(sortedRow), rowBucket);
+                    write.write(
+                            record.partition(), record.bucket(), recordExtractor.extract(record));
+                }
+                externalRowSortBuffer.clear();
+            }
+        }
         write.compact(partition, bucket, fullCompaction);
     }
 
