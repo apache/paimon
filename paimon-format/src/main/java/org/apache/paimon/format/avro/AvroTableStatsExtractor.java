@@ -30,10 +30,13 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 
-import java.io.*;
+import java.io.FileInputStream;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Paths;
 import java.util.stream.IntStream;
 
+/** {@link TableStatsExtractor} for avro files. */
 public class AvroTableStatsExtractor implements TableStatsExtractor {
 
     private final RowType rowType;
