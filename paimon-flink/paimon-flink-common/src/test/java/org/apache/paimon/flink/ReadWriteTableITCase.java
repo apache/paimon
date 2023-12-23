@@ -1923,4 +1923,37 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         .toString();
         assertThat(showResult.contains("schema.")).isFalse();
     }
+
+    @Test
+    public void testNestTable() throws Exception {
+        Map<String, String> option = new HashMap<>();
+        option.put("merge-engine", "nest-table");
+        option.put("fields.nt.agg-func", "nt");
+        String table =
+                createTable(
+                        Arrays.asList(
+                                "id INT",
+                                "value1 STRING",
+                                "value2 STRING",
+                                "nt ARRAY<ROW<nt_id INT,nt_value STRING>>"),
+                        Collections.singletonList("id"),
+                        Collections.emptyList(),
+                        option);
+
+        insertInto(
+                table,
+                "(0, '1','1', ARRAY[ROW(1,'2')])",
+                "(0, '2', '2',ARRAY[ROW(3,'4')])",
+                "(0, '3', '3',ARRAY[ROW(5,'6')])",
+                "(1, '1', '1',ARRAY[ROW(1,'2')])",
+                "(1, '2', '2',ARRAY[ROW(3,'4')])",
+                "(1, '3', '3',ARRAY[ROW(5,'6')])");
+
+        List<Row> expectedRecords =
+                Arrays.asList(
+                        changelogRow("+I", 0, '3', '3', "[+I[1, '2'], +I[3, '4'], +I[5, '6']]"),
+                        changelogRow("+I", 1, '3', '3', "[+I[1, '2'], +I[3, '4'], +I[5, '6']]"));
+
+        testBatchRead(buildSimpleQuery(table), expectedRecords);
+    }
 }

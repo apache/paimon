@@ -1488,7 +1488,9 @@ public class CoreOptions implements Serializable {
 
         AGGREGATE("aggregation", "Aggregate fields with same primary key."),
 
-        FIRST_ROW("first-row", "De-duplicate and keep the first row.");
+        FIRST_ROW("first-row", "De-duplicate and keep the first row."),
+
+        NEST_TABLE("nest-table", "nest table poc");
 
         private final String value;
         private final String description;

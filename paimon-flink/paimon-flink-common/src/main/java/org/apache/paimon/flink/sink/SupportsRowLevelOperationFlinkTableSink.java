@@ -109,8 +109,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                             throw new UnsupportedOperationException(errMsg);
                         }
                     });
-            if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE
-                    || options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE) {
+            MergeEngine mergeEngine = options.get(MERGE_ENGINE);
+            if (mergeEngine == MergeEngine.DEDUPLICATE
+                    || mergeEngine == MergeEngine.PARTIAL_UPDATE
+                    || mergeEngine == MergeEngine.NEST_TABLE) {
                 // Even with partial-update we still need all columns. Because the topology
                 // structure is source -> cal -> constraintEnforcer -> sink, in the
                 // constraintEnforcer operator, the constraint check will be performed according to
@@ -122,7 +124,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
             throw new UnsupportedOperationException(
                     String.format(
                             "%s can not support update, currently only %s of %s and %s can support update.",
-                            options.get(MERGE_ENGINE),
+                            mergeEngine,
                             MERGE_ENGINE.key(),
                             MergeEngine.DEDUPLICATE,
                             MergeEngine.PARTIAL_UPDATE));

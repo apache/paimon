@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.NestTableMergeFunction;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.Options;
@@ -67,6 +68,8 @@ public class PrimaryKeyTableUtils {
                 return DeduplicateMergeFunction.factory(conf);
             case PARTIAL_UPDATE:
                 return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
+            case NEST_TABLE:
+                return NestTableMergeFunction.factory(conf, rowType);
             case AGGREGATE:
                 return AggregateMergeFunction.factory(
                         conf,
