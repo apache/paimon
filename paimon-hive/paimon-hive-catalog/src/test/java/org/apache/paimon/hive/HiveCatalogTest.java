@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.hive.pool.ClientPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
@@ -33,6 +34,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
@@ -201,10 +203,12 @@ public class HiveCatalogTest extends CatalogTestBase {
                     addHiveTableParametersSchema,
                     false);
 
-            Field clientField = HiveCatalog.class.getDeclaredField("client");
+            Field clientField = HiveCatalog.class.getDeclaredField("clients");
             clientField.setAccessible(true);
-            IMetaStoreClient client = (IMetaStoreClient) clientField.get(catalog);
-            Table table = client.getTable(databaseName, tableName);
+            @SuppressWarnings("unchecked")
+            ClientPool<IMetaStoreClient, TException> clients =
+                    (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+            Table table = clients.run(client -> client.getTable(databaseName, tableName));
             Map<String, String> tableProperties = table.getParameters();
 
             // Verify the transformed parameters

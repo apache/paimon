@@ -21,6 +21,8 @@ package org.apache.paimon.hive;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
+import java.util.concurrent.TimeUnit;
+
 /** Options for hive catalog. */
 public final class HiveCatalogOptions {
 
@@ -51,6 +53,18 @@ public final class HiveCatalogOptions {
                             "Setting the location in properties of hive table/database.\n"
                                     + "If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss\n"
                                     + "you can set this option to true.\n");
+
+    public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
+            ConfigOptions.key("clients")
+                    .intType()
+                    .defaultValue(1)
+                    .withDescription("Setting the client pool's num.\n");
+
+    public static final ConfigOption<Long> CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS =
+            ConfigOptions.key("client.pool.cache.eviction-interval-ms")
+                    .longType()
+                    .defaultValue(TimeUnit.MINUTES.toMillis(5))
+                    .withDescription("Setting the client's pool cache eviction interval(ms).\n");
 
     private HiveCatalogOptions() {}
 }
