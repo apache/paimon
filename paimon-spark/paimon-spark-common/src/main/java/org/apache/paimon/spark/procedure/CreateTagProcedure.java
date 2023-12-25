@@ -18,8 +18,6 @@
 
 package org.apache.paimon.spark.procedure;
 
-import org.apache.paimon.table.AbstractFileStoreTable;
-
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -27,8 +25,6 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
-
-import java.util.Objects;
 
 import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -67,19 +63,16 @@ public class CreateTagProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String tag = args.getString(1);
-        long snapshot = args.getLong(2);
+        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    long snapshotToUse =
-                            (snapshot == 0)
-                                    ? Objects.requireNonNull(
-                                            ((AbstractFileStoreTable) table)
-                                                    .snapshotManager()
-                                                    .latestSnapshotId())
-                                    : snapshot;
-                    table.createTag(tag, snapshotToUse);
+                    if (snapshot == null) {
+                        table.createTag(tag);
+                    } else {
+                        table.createTag(tag, snapshot);
+                    }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};
                 });

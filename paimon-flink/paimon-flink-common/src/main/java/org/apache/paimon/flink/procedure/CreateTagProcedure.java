@@ -20,13 +20,11 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
-import java.util.Objects;
+import javax.annotation.Nullable;
 
 /**
  * Create tag procedure. Usage:
@@ -42,19 +40,22 @@ public class CreateTagProcedure extends ProcedureBase {
     public String[] call(
             ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
             throws Catalog.TableNotExistException {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.createTag(tagName, snapshotId);
-
-        return new String[] {"Success"};
+        return innerCall(tableId, tagName, snapshotId);
     }
 
     public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
             throws Catalog.TableNotExistException {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        SnapshotManager snapshotManager = ((AbstractFileStoreTable) table).snapshotManager();
-        long latestSnapshotId = Objects.requireNonNull(snapshotManager.latestSnapshotId());
+        return innerCall(tableId, tagName, null);
+    }
 
-        table.createTag(tagName, latestSnapshotId);
+    private String[] innerCall(String tableId, String tagName, @Nullable Long snapshotId)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        if (snapshotId == null) {
+            table.createTag(tagName);
+        } else {
+            table.createTag(tagName, snapshotId);
+        }
         return new String[] {"Success"};
     }
 
