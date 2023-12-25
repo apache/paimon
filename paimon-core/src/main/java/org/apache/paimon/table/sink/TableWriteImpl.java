@@ -30,10 +30,9 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.sort.BatchBucketSorter;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.NextIterator;
 import org.apache.paimon.utils.Pair;
@@ -57,9 +56,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final FileStoreWrite<T> write;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
-    private final RowType rowType;
-    private final int[] partitionFields;
-    private final CoreOptions coreOptions;
+    private final TableSchema schema;
 
     private @Nullable BatchBucketSorter batchBucketSorter;
 
@@ -72,15 +69,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
             FileStoreWrite<T> write,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
             RecordExtractor<T> recordExtractor,
-            RowType rowType,
-            int[] partitionFields,
-            CoreOptions coreOptions) {
+            TableSchema schema) {
         this.write = write;
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
-        this.rowType = rowType;
-        this.partitionFields = partitionFields;
-        this.coreOptions = coreOptions;
+        this.schema = schema;
     }
 
     @Override
@@ -99,17 +92,16 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
+        RowType rowType = schema.logicalRowType();
+        CoreOptions coreOptions = new CoreOptions(schema.options());
+        int[] partitionFields = schema.projection(schema.partitionKeys());
         if (coreOptions.writeBatchSortBucket()
                 && batchBucketSorter == null
                 && partitionFields.length != 0) {
-            List<DataField> dataFields = new ArrayList<>();
-            dataFields.add(new DataField(0, "_BUCKET_", DataTypes.INT()));
-            dataFields.addAll(rowType.getFields());
-
             batchBucketSorter =
                     BatchBucketSorter.create(
                             ioManager,
-                            new RowType(dataFields),
+                            rowType,
                             partitionFields,
                             coreOptions.writeBufferSize(),
                             coreOptions.pageSize(),
@@ -261,7 +253,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         if (batchBucketSorter != null && batchBucketSorter.size() != 0) {
             // flush external row sort buffer.
             NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
-            BinaryRow lastPartition = new BinaryRow(partitionFields.length);
+            BinaryRow lastPartition = new BinaryRow(batchBucketSorter.fieldsSize());
             Pair<InternalRow, Integer> sortedRow;
             int lastBucket = -1;
             while ((sortedRow = iterator.nextOrNull()) != null) {

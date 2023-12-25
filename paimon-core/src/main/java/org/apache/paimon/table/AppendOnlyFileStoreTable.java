@@ -146,8 +146,6 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind());
                     return record.row();
                 },
-                rowType(),
-                schema().projection(schema().partitionKeys()),
-                coreOptions());
+                schema());
     }
 }

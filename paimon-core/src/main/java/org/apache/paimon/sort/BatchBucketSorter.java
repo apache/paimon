@@ -71,6 +71,7 @@ public class BatchBucketSorter {
     private static final String KEY_PREFIX = "_SORT_KEY_";
 
     private final BinaryExternalSortBuffer binaryExternalSortBuffer;
+    private final int fieldsSize;
     private final int fullSize;
     private final KeyValueSerializer serializer;
     private final Projection sortKeyExtract;
@@ -130,12 +131,17 @@ public class BatchBucketSorter {
                         pageSize,
                         maxNumFileHandles);
 
+        this.fieldsSize = fieldsIndex.length;
         this.fullSize = wholeRow.getFieldCount();
         this.serializer = new KeyValueSerializer(keyRow, dataRowType);
 
         this.reusedJoinedRow = new JoinedRow();
         this.reusedBucketRow = new GenericRow(1);
         this.reusedOffsetRow = new OffsetRow(dataRowType.getFieldCount(), 1);
+    }
+
+    public int fieldsSize() {
+        return fieldsSize;
     }
 
     public int size() {

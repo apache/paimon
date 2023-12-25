@@ -203,8 +203,6 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                     : rowKindGenerator.generate(row);
                     return kv.replace(record.primaryKey(), sequenceNumber, rowKind, row);
                 },
-                rowType(),
-                schema().projection(schema.partitionKeys()),
-                coreOptions());
+                schema);
     }
 }

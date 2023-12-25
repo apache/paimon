@@ -275,8 +275,8 @@ public class CoreOptions implements Serializable {
                     .booleanType()
                     .defaultValue(true)
                     .withDescription(
-                            "Batch inserting lots of data without partition specified among huge number of partitions, sort the records by partitions before inserting."
-                                    + "Set this to true to avoid out-of-memory by opening two many writers in lots of partitions.");
+                            "Batch inserting lots of data without partition specified among huge number of partition buckets, sort the records by partition buckets before inserting."
+                                    + "Set this to true to avoid out-of-memory by opening two many writers in lots of partition buckets.");
 
     public static final ConfigOption<Boolean> WRITE_ONLY =
             key("write-only")
