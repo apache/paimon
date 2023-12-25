@@ -21,7 +21,6 @@ package org.apache.paimon.lookup;
 import org.apache.paimon.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.RocksDB;
 
 import javax.annotation.Nullable;
 
@@ -33,12 +32,12 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class RocksDBValueState<K, V> extends RocksDBState<K, V, RocksDBState.Reference> {
 
     public RocksDBValueState(
-            RocksDB db,
+            RocksDBStateFactory stateFactory,
             ColumnFamilyHandle columnFamily,
             Serializer<K> keySerializer,
             Serializer<V> valueSerializer,
             long lruCacheSize) {
-        super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
+        super(stateFactory, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     @Nullable
