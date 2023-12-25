@@ -86,7 +86,9 @@ public class BulkLoader {
             }
 
             if (files.size() > 0) {
-                db.ingestExternalFile(columnFamily, files, new IngestExternalFileOptions());
+                IngestExternalFileOptions ingestOptions = new IngestExternalFileOptions();
+                db.ingestExternalFile(columnFamily, files, ingestOptions);
+                ingestOptions.close();
             }
         } catch (RocksDBException e) {
             throw new RuntimeException(e);
