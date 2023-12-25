@@ -137,7 +137,7 @@ public class BatchBucketSorter {
 
         this.reusedJoinedRow = new JoinedRow();
         this.reusedBucketRow = new GenericRow(1);
-        this.reusedOffsetRow = new OffsetRow(dataRowType.getFieldCount(), 1);
+        this.reusedOffsetRow = new OffsetRow(rowType.getFieldCount(), 1);
     }
 
     public int fieldsSize() {
