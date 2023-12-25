@@ -111,4 +111,50 @@ public class TagActionITCase extends ActionITCaseBase {
         }
         assertThat(tagManager.tagExists("tag2")).isFalse();
     }
+
+    @Test
+    public void testCreateLatestTag() throws Exception {
+        init(warehouse);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            createAction(
+                            CreateTagAction.class,
+                            "create_tag",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--tag_name",
+                            "tag2")
+                    .run();
+        } else {
+            callProcedure(
+                    String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+        }
+        assertThat(tagManager.tagExists("tag2")).isTrue();
+    }
 }
