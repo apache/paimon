@@ -227,11 +227,11 @@ public class FileDeletionTest {
 
         // step 5: expire and check file paths
         store.newExpire(1, 1, Long.MAX_VALUE, false).expire();
-        // whole dt=0401 is deleted
+        // whole dt=0401 is exist
         assertPathExists(fileIO, new Path(root, "dt=0401"));
-        // whole dt=0402/hr=8 is deleted
+        // whole dt=0402/hr=8 is exist
         assertPathExists(fileIO, new Path(root, "dt=0402/hr=8"));
-        // for dt=0402/hr=12, bucket-0 is delete but bucket-1 survives
+        // for dt=0402/hr=12, bucket-0 is exist and bucket-1 survives
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
