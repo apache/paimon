@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
@@ -178,6 +179,7 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "createTable");
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
+        validateAutoCreateClose(schema.options());
 
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
@@ -439,5 +441,16 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
         validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
+    }
+
+    private void validateAutoCreateClose(Map<String, String> options) {
+        checkArgument(
+                !Boolean.valueOf(
+                        options.getOrDefault(
+                                CoreOptions.AUTO_CREATE.key(),
+                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
+                String.format(
+                        "The value of %s property should be %s.",
+                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 }
