@@ -21,7 +21,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
-class MergeIntoTableTest extends PaimonSparkTestBase {
+abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
@@ -94,33 +94,6 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
         Row(1, 10, "c1") :: Row(2, 20, "c2") :: Row(3, 300, "c33") :: Nil)
-    }
-  }
-
-  test(s"Paimon MergeInto: only not matched by source") {
-    withTable("source", "target") {
-
-      Seq((1, 100, "c11"), (3, 300, "c33")).toDF("a", "b", "c").createOrReplaceTempView("source")
-
-      spark.sql(s"""
-                   |CREATE TABLE target (a INT, b INT, c STRING)
-                   |TBLPROPERTIES ('primary-key'='a', 'bucket'='2')
-                   |""".stripMargin)
-      spark.sql("INSERT INTO target values (1, 10, 'c1'), (2, 20, 'c2'), (5, 50, 'c5')")
-
-      spark.sql(s"""
-                   |MERGE INTO target
-                   |USING source
-                   |ON target.a = source.a
-                   |WHEN NOT MATCHED BY SOURCE AND a % 2 = 0 THEN
-                   |UPDATE SET b = b * 10
-                   |WHEN NOT MATCHED BY SOURCE THEN
-                   |DELETE
-                   |""".stripMargin)
-
-      checkAnswer(
-        spark.sql("SELECT * FROM target ORDER BY a, b"),
-        Row(1, 10, "c1") :: Row(2, 200, "c2") :: Nil)
     }
   }
 
@@ -280,13 +253,11 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                    |UPDATE SET *
                    |WHEN NOT MATCHED THEN
                    |INSERT *
-                   |WHEN NOT MATCHED BY SOURCE THEN
-                   |DELETE
                    |""".stripMargin)
 
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
-        Row(1, 100, "c11") :: Row(3, 300, "c33") :: Nil)
+        Row(1, 100, "c11") :: Row(2, 20, "c2") :: Row(3, 300, "c33") :: Nil)
     }
   }
 
@@ -318,18 +289,14 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                    |INSERT (a, b, c) VALUES (a, b * 1.1, c)
                    |WHEN NOT MATCHED THEN
                    |INSERT *
-                   |WHEN NOT MATCHED BY SOURCE AND a = 2 THEN
-                   |UPDATE SET b = b * 10
-                   |WHEN NOT MATCHED BY SOURCE THEN
-                   |DELETE
                    |""".stripMargin)
 
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a, b"),
-        Row(2, 200, "c2") :: Row(3, 300, "c33") :: Row(5, 550, "c5") :: Row(7, 700, "c77") :: Row(
-          9,
-          990,
-          "c99") :: Nil
+        Row(2, 20, "c2") :: Row(3, 300, "c33") :: Row(4, 40, "c4") :: Row(5, 550, "c5") :: Row(
+          7,
+          700,
+          "c77") :: Row(9, 990, "c99") :: Nil
       )
     }
   }
@@ -580,13 +547,11 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                    |ON target.a = source.a
                    |WHEN MATCHED THEN
                    |UPDATE SET c.c1 = source.c1
-                   |WHEN NOT MATCHED BY SOURCE THEN
-                   |UPDATE set c.c2 = "y2"
                    |""".stripMargin)
 
       checkAnswer(
         spark.sql("SELECT * FROM target ORDER BY a"),
-        Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y2")) :: Nil)
+        Row(1, 10, Row("x1", "y")) :: Row(2, 20, Row("x", "y")) :: Nil)
     }
   }
 
