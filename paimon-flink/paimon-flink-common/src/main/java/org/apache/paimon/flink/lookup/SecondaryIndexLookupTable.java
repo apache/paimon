@@ -96,4 +96,10 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
             }
         }
     }
+
+    @Override
+    public void bulkLoadWritePlus(byte[] key, byte[] value) throws IOException {
+        InternalRow row = tableState.deserializeValue(value);
+        indexState.add(secKeyRow.replaceRow(row), primaryKey.replaceRow(row));
+    }
 }

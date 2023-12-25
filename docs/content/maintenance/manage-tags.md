@@ -108,9 +108,11 @@ You can create a tag with given name (cannot be number) and snapshot ID.
     --database <database-name> \ 
     --table <table-name> \
     --tag_name <tag-name> \
-    --snapshot <snapshot-id> \
+    [--snapshot <snapshot_id>] \
     [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
 ```
+
+If `snapshot` unset, snapshot_id defaults to the latest.
 
 {{< /tab >}}
 
@@ -134,6 +136,11 @@ public class CreateTag {
 Run the following sql:
 ```sql
 CALL create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2);
+```
+
+To create a tag based on the latest snapshot id, run the following sql:
+```sql
+CALL create_tag(table => 'test.T', tag => 'test_tag');
 ```
 
 {{< /tab >}}

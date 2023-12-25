@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowType;
 
@@ -33,7 +34,15 @@ public interface LookupTable {
 
     List<InternalRow> get(InternalRow key) throws IOException;
 
-    void refresh(Iterator<InternalRow> incremental) throws IOException;
+    void refresh(Iterator<InternalRow> input) throws IOException;
+
+    Predicate<InternalRow> recordFilter();
+
+    byte[] toKeyBytes(InternalRow row) throws IOException;
+
+    byte[] toValueBytes(InternalRow row) throws IOException;
+
+    TableBulkLoader createBulkLoader();
 
     static LookupTable create(
             RocksDBStateFactory stateFactory,
@@ -55,5 +64,13 @@ public interface LookupTable {
                         stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
             }
         }
+    }
+
+    /** Bulk loader for the table. */
+    interface TableBulkLoader {
+
+        void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
+
+        void finish() throws IOException;
     }
 }

@@ -74,6 +74,25 @@ public final class ListDelimitedSerializer {
         return dataOutputView.getCopyOfBuffer();
     }
 
+    public byte[] serializeList(List<byte[]> valueList) throws IOException {
+
+        dataOutputView.clear();
+        boolean first = true;
+
+        for (byte[] value : valueList) {
+            checkNotNull(value, "You cannot add null to a value list.");
+
+            if (first) {
+                first = false;
+            } else {
+                dataOutputView.write(DELIMITER);
+            }
+            dataOutputView.write(value);
+        }
+
+        return dataOutputView.getCopyOfBuffer();
+    }
+
     /** Deserializes a single element from a serialized list. */
     public static <T> T deserializeNextElement(
             DataInputDeserializer in, Serializer<T> elementSerializer) {
