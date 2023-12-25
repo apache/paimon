@@ -22,7 +22,6 @@ package org.apache.paimon.hive;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.hive.pool.ClientPoolImpl;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.MetaException;
@@ -40,15 +39,14 @@ public class HiveClientPool extends ClientPoolImpl<IMetaStoreClient, TException>
 
     private final String clientClassName;
 
-    public HiveClientPool(int poolSize, Configuration conf) {
+    public HiveClientPool(int poolSize, HiveConf conf) {
         this(poolSize, conf, "org.apache.hadoop.hive.metastore.HiveMetaStoreClient");
     }
 
-    public HiveClientPool(int poolSize, Configuration conf, String clientClassName) {
+    public HiveClientPool(int poolSize, HiveConf conf, String clientClassName) {
         // Do not allow retry by default as we rely on RetryingHiveClient
         super(poolSize, TTransportException.class, false);
-        this.hiveConf = new HiveConf(conf, HiveClientPool.class);
-        this.hiveConf.addResource(conf);
+        this.hiveConf = conf;
         this.clientClassName = clientClassName;
     }
 

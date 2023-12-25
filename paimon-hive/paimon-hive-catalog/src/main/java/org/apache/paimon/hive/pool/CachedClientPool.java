@@ -25,7 +25,6 @@ import org.apache.paimon.options.Options;
 
 import com.github.benmanes.caffeine.cache.Cache;
 import com.github.benmanes.caffeine.cache.Caffeine;
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.thrift.TException;
@@ -44,7 +43,7 @@ public class CachedClientPool implements ClientPool<IMetaStoreClient, TException
 
     private static Cache<String, HiveClientPool> clientPoolCache;
 
-    private final Configuration conf;
+    private final HiveConf conf;
     private final String metastoreUri;
     private final int clientPoolSize;
     private final long evictionInterval;

@@ -19,7 +19,6 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
@@ -66,7 +65,7 @@ public class TestHiveClientPool {
 
     @Before
     public void before() {
-        HiveClientPool clientPool = new HiveClientPool(2, new Configuration());
+        HiveClientPool clientPool = new HiveClientPool(2, new HiveConf());
         clients = Mockito.spy(clientPool);
     }
 

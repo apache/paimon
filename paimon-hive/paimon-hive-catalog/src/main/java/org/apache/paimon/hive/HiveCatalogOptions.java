@@ -57,7 +57,7 @@ public final class HiveCatalogOptions {
     public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
             ConfigOptions.key("clients")
                     .intType()
-                    .defaultValue(1)
+                    .defaultValue(2)
                     .withDescription("Setting the client pool's num.\n");
 
     public static final ConfigOption<Long> CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS =
