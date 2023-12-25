@@ -621,7 +621,7 @@ This config option does not affect the default filesystem metastore.</td>
             <td><h5>write-batch-sort-bucket</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>
-            <td>Batch inserting lots of data without partition specified among huge number of partitions, sort the records by partitions before inserting.Set this to true to avoid out-of-memory by opening two many writers in lots of partitions.</td>
+            <td>Batch inserting lots of data without partition specified among huge number of partition buckets, sort the records by partition buckets before inserting.Set this to true to avoid out-of-memory by opening two many writers in lots of partition buckets.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>
