@@ -77,6 +77,9 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldFirstNotNullValueAgg.NAME:
                         fieldAggregator = new FieldFirstNotNullValueAgg(fieldType);
                         break;
+                    case FieldCountAgg.NAME:
+                        fieldAggregator = new FieldCountAgg(fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
                                 String.format(
