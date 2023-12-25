@@ -18,11 +18,10 @@
 
 package org.apache.paimon.lookup;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 
 /** An interface to provide lookup function. */
 public interface QueryLookup {
 
-    BinaryRow[] lookup(Identifier identifier, BinaryRow partition, int bucket, BinaryRow[] keys);
+    BinaryRow[] lookup(BinaryRow partition, int bucket, BinaryRow[] keys);
 }

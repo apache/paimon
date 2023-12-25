@@ -59,7 +59,6 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
             final QueryLookup lookup,
             final MessageSerializer<KvRequest, KvResponse> serializer,
             final ServiceRequestStats stats) {
-
         super(server, serializer, stats);
         this.lookup = Preconditions.checkNotNull(lookup);
     }
@@ -71,11 +70,7 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
 
         try {
             BinaryRow[] values =
-                    lookup.lookup(
-                            request.identifier(),
-                            request.partition(),
-                            request.bucket(),
-                            request.keys());
+                    lookup.lookup(request.partition(), request.bucket(), request.keys());
             responseFuture.complete(new KvResponse(values));
             return responseFuture;
         } catch (Throwable t) {
