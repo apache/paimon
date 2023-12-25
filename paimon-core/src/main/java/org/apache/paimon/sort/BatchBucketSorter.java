@@ -43,7 +43,8 @@ import java.util.List;
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /**
- * Sort the given {@link InternalRow} and bucket with specified field. Order with the sort is, given fields, bucket, orderNumber.
+ * Sort the given {@link InternalRow} and bucket with specified field. Order with the sort is, given
+ * fields, bucket, orderNumber.
  *
  * <p>For example, table (f0 String, f1 int, f2 int), we sort rows by f2 and bucket field is f1 :
  *
@@ -62,8 +63,7 @@ import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
  *     a, 3, 1
  *     a, 3, 100
  * </pre>
- *
- * <p> The sorter will spill the data to disk. 
+ * <p>The sorter will spill the data to disk.
  */
 public class BatchBucketSorter {
 
@@ -176,7 +176,7 @@ public class BatchBucketSorter {
         MutableObjectIterator<BinaryRow> iterator = binaryExternalSortBuffer.sortedIterator();
         return new NextIterator<Pair<InternalRow, Integer>>() {
             private BinaryRow binaryRow = new BinaryRow(fullSize);
-            private Pair<InternalRow, Integer> reusePair = Pair.of(null, null);
+            private final Pair<InternalRow, Integer> reusePair = Pair.of(null, null);
 
             @Override
             public Pair<InternalRow, Integer> nextOrNull() {
