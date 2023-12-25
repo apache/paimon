@@ -202,7 +202,8 @@ public abstract class FlinkSink<T> implements Serializable {
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
                             table::snapshotManager,
                             table::tagManager,
-                            () -> table.store().newTagDeletion());
+                            () -> table.store().newTagDeletion(),
+                            () -> table.store().createTagCallbacks());
         }
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
                 && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {

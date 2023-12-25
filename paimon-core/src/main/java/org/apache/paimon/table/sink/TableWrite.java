@@ -49,6 +49,9 @@ public interface TableWrite extends AutoCloseable {
     /** Write a row to the writer. */
     void write(InternalRow row) throws Exception;
 
+    /** Write a row with bucket. */
+    void write(InternalRow row, int bucket) throws Exception;
+
     /**
      * Compact a bucket of a partition. By default, it will determine whether to perform the
      * compaction according to the 'num-sorted-run.compaction-trigger' option. If fullCompaction is

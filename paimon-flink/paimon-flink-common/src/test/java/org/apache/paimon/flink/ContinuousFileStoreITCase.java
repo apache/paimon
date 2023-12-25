@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -520,5 +521,36 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+    }
+
+    @Test
+    public void testScanFromOldSchema() throws Exception {
+        sql("CREATE TABLE select_old (f0 INT PRIMARY KEY NOT ENFORCED, f1 STRING)");
+
+        sql("INSERT INTO select_old VALUES (1, 'a'), (2, 'b')");
+
+        Thread.sleep(1_000);
+        long timestamp = System.currentTimeMillis();
+
+        sql("ALTER TABLE select_old ADD f2 STRING");
+        sql("INSERT INTO select_old VALUES (3, 'c', 'C')");
+
+        // this way will initialize source with the latest schema
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM select_old /*+ OPTIONS('scan.timestamp-millis'='%s') */",
+                                timestamp));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c", "C"));
+        iterator.close();
+
+        // this way will initialize source with time-travelled schema
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM select_old FOR SYSTEM_TIME AS OF TIMESTAMP '%s'",
+                                DateTimeUtils.formatTimestamp(
+                                        DateTimeUtils.toInternal(timestamp, 0), 0)));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c"));
     }
 }

@@ -31,6 +31,7 @@ import org.apache.paimon.flink.utils.InternalTypeInfo;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.MathUtils;
 
 import org.apache.flink.api.common.typeinfo.BasicTypeInfo;
 import org.apache.flink.api.java.tuple.Tuple2;
@@ -93,7 +94,10 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
                         .setParallelism(input.getParallelism());
 
         // 1. shuffle by key hash
-        Integer assignerParallelism = options.dynamicBucketAssignerParallelism();
+        Integer assignerParallelism =
+                MathUtils.max(
+                        options.dynamicBucketInitialBuckets(),
+                        options.dynamicBucketAssignerParallelism());
         if (assignerParallelism == null) {
             assignerParallelism = parallelism;
         }

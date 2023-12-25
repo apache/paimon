@@ -48,6 +48,7 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogBaseTable;
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
@@ -459,10 +460,19 @@ public class FlinkCatalog extends AbstractCatalog {
             ResetOption resetOption = (ResetOption) change;
             schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
             return schemaChanges;
-        } else {
-            throw new UnsupportedOperationException(
-                    "Change is not supported: " + change.getClass());
+        } else if (change instanceof TableChange.ModifyColumn) {
+            // let non-physical column handle by option
+            if (oldTableNonPhysicalColumnIndex.containsKey(
+                            ((TableChange.ModifyColumn) change).getOldColumn().getName())
+                    && !(((TableChange.ModifyColumn) change).getNewColumn()
+                            instanceof Column.PhysicalColumn)) {
+                return schemaChanges;
+            } else {
+                throw new UnsupportedOperationException(
+                        "Change is not supported: " + change.getClass());
+            }
         }
+        throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
 
     @Override

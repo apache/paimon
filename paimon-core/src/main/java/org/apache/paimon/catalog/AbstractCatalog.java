@@ -294,7 +294,13 @@ public abstract class AbstractCatalog implements Catalog {
                         lineageMetaFactory));
     }
 
-    @VisibleForTesting
+    /**
+     * Get warehouse path for specified database. If a catalog would like to provide individual path
+     * for each database, this method can be `Override` in that catalog.
+     *
+     * @param database The given database name
+     * @return The warehouse path for the database
+     */
     public Path newDatabasePath(String database) {
         return newDatabasePath(warehouse(), database);
     }
@@ -315,6 +321,11 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
+    /**
+     * Get the warehouse path for the catalog if exists.
+     *
+     * @return The catalog warehouse path.
+     */
     public abstract String warehouse();
 
     public Map<String, String> options() {
@@ -326,7 +337,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        return newTableLocation(warehouse(), identifier);
+        return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getObjectName());
     }
 
     private static boolean isSpecifiedSystemTable(Identifier identifier) {

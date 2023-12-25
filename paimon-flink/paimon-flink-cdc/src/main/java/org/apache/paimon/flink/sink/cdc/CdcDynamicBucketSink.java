@@ -41,8 +41,8 @@ public class CdcDynamicBucketSink extends DynamicBucketSink<CdcRecord> {
     }
 
     @Override
-    protected ChannelComputer<CdcRecord> channelComputer1() {
-        return new CdcHashKeyChannelComputer(table.schema());
+    protected ChannelComputer<CdcRecord> assignerChannelComputer(Integer numAssigners) {
+        return new CdcAssignerChannelComputer(table.schema(), numAssigners);
     }
 
     @Override

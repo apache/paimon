@@ -51,6 +51,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Properties;
 import java.util.UUID;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -67,13 +68,18 @@ public class KafkaActionUtils {
     public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
         KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
 
-        List<String> topics =
-                kafkaConfig.get(KafkaConnectorOptions.TOPIC).stream()
-                        .flatMap(topic -> Arrays.stream(topic.split(",")))
-                        .collect(Collectors.toList());
+        if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
+            List<String> topics =
+                    kafkaConfig.get(KafkaConnectorOptions.TOPIC).stream()
+                            .flatMap(topic -> Arrays.stream(topic.split(",")))
+                            .collect(Collectors.toList());
+            kafkaSourceBuilder.setTopics(topics);
+        } else {
+            kafkaSourceBuilder.setTopicPattern(
+                    Pattern.compile(kafkaConfig.get(KafkaConnectorOptions.TOPIC_PATTERN)));
+        }
 
         kafkaSourceBuilder
-                .setTopics(topics)
                 .setValueOnlyDeserializer(new SimpleStringSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = createKafkaProperties(kafkaConfig);

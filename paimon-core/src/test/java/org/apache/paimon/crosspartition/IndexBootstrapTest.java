@@ -28,9 +28,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.utils.Pair;
 
 import org.junit.jupiter.api.Test;
 
@@ -135,8 +135,8 @@ public class IndexBootstrapTest extends TableTestBase {
                                 .toLocalDateTime()));
     }
 
-    private DynamicBucketRow row(int pt, int col, int pk, int bucket) {
+    private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {
         GenericRow row = GenericRow.of(pt, col, pk);
-        return new DynamicBucketRow(row, bucket);
+        return Pair.of(row, bucket);
     }
 }

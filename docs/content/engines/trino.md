@@ -43,15 +43,15 @@ https://paimon.apache.org/docs/master/project/download/
 
 {{< unstable >}}
 
-| Version    | Jar                                                                                                                                 |
-|------------|-------------------------------------------------------------------------------------------------------------------------------------|
-| [358, 368) | [paimon-trino-358-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/{{< version >}}/) |
-| [368, 369) | [paimon-trino-368-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/{{< version >}}/) |
-| [369, 370) | [paimon-trino-369-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/{{< version >}}/) |
-| [370, 388) | [paimon-trino-370-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/{{< version >}}/) |
-| [388, 393) | [paimon-trino-388-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/{{< version >}}/) |
-| [393, 422] | [paimon-trino-393-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/{{< version >}}/) |
-| [422, latest] | [paimon-trino-422-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
+| Version    | Package                                                                                                                                       |
+|------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
+| [358, 368) | [paimon-trino-358-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-358/{{< version >}}/) |
+| [368, 369) | [paimon-trino-368-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-368/{{< version >}}/) |
+| [369, 370) | [paimon-trino-369-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-369/{{< version >}}/) |
+| [370, 388) | [paimon-trino-370-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-370/{{< version >}}/) |
+| [388, 393) | [paimon-trino-388-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-388/{{< version >}}/) |
+| [393, 422] | [paimon-trino-393-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-393/{{< version >}}/) |
+| [422, latest] | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
 
 {{< /unstable >}}
 
@@ -82,11 +82,16 @@ Then,you can build bundled jar with the following command:
 mvn clean install -DskipTests
 ```
 
-You can find Trino connector jar in `./paimon-trino-<trino-version>/target/paimon-trino-*.jar`.
+You can find Trino connector jar in `./paimon-trino-<trino-version>/target/paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz`.
 
-Then, copy `paimon-trino-*.jar and flink-shaded-hadoop-*-uber-*.jar` to plugin/paimon.
+We use [hadoop-apache](https://mvnrepository.com/artifact/io.trino.hadoop/hadoop-apache) as a dependency for Hadoop,
+and the default Hadoop dependency typically supports both Hadoop 2 and Hadoop 3. 
+If you encounter an unsupported scenario, you can specify the corresponding Apache Hadoop version.
 
-> NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
+For example, if you want to use Hadoop 3.3.5-1, you can use the following command to build the jar:
+```
+mvn clean install -DskipTests -Dhadoop.apache.version=3.3.5-1
+```
 
 ## Tmp Dir
 
@@ -102,6 +107,14 @@ Let Paimon use a secure temporary directory.
 
 ## Configure Paimon Catalog
 
+### Install Paimon Connector
+```bash
+tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_HOME}/plugin
+```
+the variable `trino-version` is module name, must be one of 358, 368, 369, 370, 388, 393, 422.
+> NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
+
+### Configure
 Catalogs are registered by creating a catalog properties file in the etc/catalog directory. For example, create etc/catalog/paimon.properties with the following contents to mount the paimon connector as the paimon catalog:
 
 ```

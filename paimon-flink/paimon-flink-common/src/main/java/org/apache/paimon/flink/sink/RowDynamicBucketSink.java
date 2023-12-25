@@ -43,8 +43,8 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
     }
 
     @Override
-    protected ChannelComputer<InternalRow> channelComputer1() {
-        return new RowHashKeyChannelComputer(table.schema());
+    protected ChannelComputer<InternalRow> assignerChannelComputer(Integer numAssigners) {
+        return new RowAssignerChannelComputer(table.schema(), numAssigners);
     }
 
     @Override

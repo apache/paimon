@@ -764,6 +764,13 @@ public class CoreOptions implements Serializable {
                             "If the bucket is -1, for primary key table, is dynamic bucket mode, "
                                     + "this option controls the target row number for one bucket.");
 
+    public static final ConfigOption<Integer> DYNAMIC_BUCKET_INITIAL_BUCKETS =
+            key("dynamic-bucket.initial-buckets")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Initial buckets for a partition in assigner operator for dynamic bucket mode.");
+
     public static final ConfigOption<Integer> DYNAMIC_BUCKET_ASSIGNER_PARALLELISM =
             key("dynamic-bucket.assigner-parallelism")
                     .intType()
@@ -1316,6 +1323,10 @@ public class CoreOptions implements Serializable {
 
     public Integer scanManifestParallelism() {
         return options.get(SCAN_MANIFEST_PARALLELISM);
+    }
+
+    public Integer dynamicBucketInitialBuckets() {
+        return options.get(DYNAMIC_BUCKET_INITIAL_BUCKETS);
     }
 
     public Integer dynamicBucketAssignerParallelism() {

@@ -181,4 +181,41 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
                 rowType,
                 Arrays.asList("id", "_year"));
     }
+
+    @Test
+    @Timeout(60)
+    public void testRecordWithNestedDataType() throws Exception {
+        String topic = "nested_type";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/debezium/table/nestedtype/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(), DataTypes.STRING(), DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "row"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        List<String> expected =
+                Collections.singletonList("+I[101, hammer, {\"row_key\":\"value\"}]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
 }
