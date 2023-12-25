@@ -16,29 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.sort;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.utils.MutableObjectIterator;
+import javax.annotation.Nullable;
 
-import java.io.IOException;
+/** Return the next value or null with method nextOrNull. */
+public interface NextIterator<T> {
 
-/** Sort buffer to sort records. */
-public interface SortBuffer {
-
-    int size();
-
-    void clear();
-
-    long getOccupancy();
-
-    /** Flush memory, return false if not supported. */
-    boolean flushMemory() throws IOException;
-
-    /** @return false if the buffer is full. */
-    boolean write(InternalRow record) throws IOException;
-
-    /** @return iterator with sorting. */
-    MutableObjectIterator<BinaryRow> sortedIterator() throws IOException;
+    @Nullable
+    T nextOrNull();
 }

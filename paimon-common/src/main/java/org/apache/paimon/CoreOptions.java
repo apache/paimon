@@ -1169,7 +1169,7 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
-    public boolean sortPartitionBeforeBatchInsert() {
+    public boolean writeBatchSortBucket() {
         return options.get(WRITE_BATCH_SORT_BUCKET);
     }
 

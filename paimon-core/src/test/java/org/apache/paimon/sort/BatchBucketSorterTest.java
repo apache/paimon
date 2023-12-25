@@ -31,7 +31,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.NextIterator;
+import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -45,8 +46,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.TreeSet;
 
-/** Tests for {@link ExternalRowSortBuffer}. */
-public class ExternalRowSortBufferTest {
+/** Tests for {@link BatchBucketSorter}. */
+public class BatchBucketSorterTest {
 
     private static final Random RANDOM = new Random();
 
@@ -63,8 +64,8 @@ public class ExternalRowSortBufferTest {
         IOManager ioManager = new IOManagerImpl(dir.toString());
         CoreOptions coreOptions = new CoreOptions(new Options());
 
-        ExternalRowSortBuffer externalRowSortBuffer =
-                ExternalRowSortBuffer.create(
+        BatchBucketSorter batchBucketSorter =
+                BatchBucketSorter.create(
                         ioManager,
                         schema.rowType(),
                         new int[] {2},
@@ -75,9 +76,9 @@ public class ExternalRowSortBufferTest {
         List<BinaryRow> datas = data(Math.abs(RANDOM.nextInt(100)) + 100);
         int i = 1;
         for (BinaryRow data : datas) {
-            externalRowSortBuffer.write(data);
+            batchBucketSorter.write(data, 0);
             if (i++ / 10 == 0) {
-                externalRowSortBuffer.flushMemory();
+                batchBucketSorter.flushMemory();
             }
         }
 
@@ -86,11 +87,11 @@ public class ExternalRowSortBufferTest {
                         Comparator.comparingLong((BinaryRow o) -> o.getLong(2))
                                 .thenComparingLong(o -> o.getLong(0)));
         treeSet.addAll(datas);
-        MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
-        InternalRow row;
+        NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
+        Pair<InternalRow, Integer> pair;
         Iterator<BinaryRow> treeIterator = treeSet.iterator();
-        while ((row = iterator.next()) != null) {
-            //            sorted.add(row.copy());
+        while ((pair = iterator.nextOrNull()) != null) {
+            InternalRow row = pair.getLeft();
             long f0 = row.getLong(0);
             BinaryString f1 = row.getString(1);
             long f2 = row.getLong(2);
@@ -116,8 +117,8 @@ public class ExternalRowSortBufferTest {
         IOManager ioManager = new IOManagerImpl(dir.toString());
         CoreOptions coreOptions = new CoreOptions(new Options());
 
-        ExternalRowSortBuffer externalRowSortBuffer =
-                ExternalRowSortBuffer.create(
+        BatchBucketSorter batchBucketSorter =
+                BatchBucketSorter.create(
                         ioManager,
                         schema.rowType(),
                         new int[] {0},
@@ -125,8 +126,8 @@ public class ExternalRowSortBufferTest {
                         coreOptions.pageSize(),
                         coreOptions.localSortMaxNumFileHandles());
 
-        ExternalRowSortBuffer externalRowSortBuffer2 =
-                ExternalRowSortBuffer.create(
+        BatchBucketSorter batchBucketSorter2 =
+                BatchBucketSorter.create(
                         ioManager,
                         schema.rowType(),
                         new int[] {0},
@@ -151,18 +152,19 @@ public class ExternalRowSortBufferTest {
         rows.add(GenericRow.of(0, 1, 1, 0));
 
         for (InternalRow row : rows) {
-            externalRowSortBuffer.write(row);
-            externalRowSortBuffer.flushMemory();
-            externalRowSortBuffer2.write(row);
+            batchBucketSorter.write(row, 0);
+            batchBucketSorter.flushMemory();
+            batchBucketSorter2.write(row, 0);
         }
 
-        MutableObjectIterator<InternalRow> i1 = externalRowSortBuffer.sortedIterator();
-        MutableObjectIterator<InternalRow> i2 = externalRowSortBuffer2.sortedIterator();
+        NextIterator<Pair<InternalRow, Integer>> i1 = batchBucketSorter.sortedIterator();
+        NextIterator<Pair<InternalRow, Integer>> i2 = batchBucketSorter2.sortedIterator();
 
-        InternalRow row;
-        while ((row = i1.next()) != null) {
-            InternalRow row2 = i2.next();
-            Assertions.assertThat(row.getRowKind()).isEqualTo(row2.getRowKind());
+        Pair<InternalRow, Integer> row;
+        while ((row = i1.nextOrNull()) != null) {
+            Pair<InternalRow, Integer> row2 = i2.nextOrNull();
+            Assertions.assertThat(row.getLeft().getRowKind())
+                    .isEqualTo(row2.getLeft().getRowKind());
         }
     }
 

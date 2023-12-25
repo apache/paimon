@@ -22,9 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.MemoryPoolFactory;
@@ -32,13 +30,13 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
-import org.apache.paimon.sort.ExternalRowSortBuffer;
+import org.apache.paimon.sort.BatchBucketSorter;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.MutableObjectIterator;
-import org.apache.paimon.utils.OffsetRow;
+import org.apache.paimon.utils.NextIterator;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Restorable;
 
 import javax.annotation.Nullable;
@@ -62,11 +60,8 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     private final RowType rowType;
     private final int[] partitionFields;
     private final CoreOptions coreOptions;
-    private final JoinedRow reusedJoinedRow;
-    private final GenericRow reusedBucketRow;
-    private final OffsetRow reusedOffsetRow;
 
-    private @Nullable ExternalRowSortBuffer externalRowSortBuffer;
+    private @Nullable BatchBucketSorter batchBucketSorter;
 
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
@@ -86,10 +81,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         this.rowType = rowType;
         this.partitionFields = partitionFields;
         this.coreOptions = coreOptions;
-
-        this.reusedJoinedRow = new JoinedRow();
-        this.reusedBucketRow = new GenericRow(1);
-        this.reusedOffsetRow = new OffsetRow(rowType.getFieldCount(), 1);
     }
 
     @Override
@@ -108,25 +99,18 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
-        if (coreOptions.sortPartitionBeforeBatchInsert()
-                && externalRowSortBuffer == null
+        if (coreOptions.writeBatchSortBucket()
+                && batchBucketSorter == null
                 && partitionFields.length != 0) {
             List<DataField> dataFields = new ArrayList<>();
             dataFields.add(new DataField(0, "_BUCKET_", DataTypes.INT()));
             dataFields.addAll(rowType.getFields());
 
-            // add bucket field in front of row, and selected field should include the bucket
-            int[] sortField = new int[partitionFields.length + 1];
-            for (int i = 0; i < sortField.length - 1; i++) {
-                sortField[i] = partitionFields[i] + 1;
-            }
-            // add bucket field to sort
-            sortField[sortField.length - 1] = 0;
-            externalRowSortBuffer =
-                    ExternalRowSortBuffer.create(
+            batchBucketSorter =
+                    BatchBucketSorter.create(
                             ioManager,
                             new RowType(dataFields),
-                            sortField,
+                            partitionFields,
                             coreOptions.writeBufferSize(),
                             coreOptions.pageSize(),
                             coreOptions.localSortMaxNumFileHandles());
@@ -191,26 +175,11 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private void writeInternal(SinkRecord record) throws Exception {
-        if (externalRowSortBuffer != null && !streamingMode && !ignorePreviousFiles) {
-            externalRowSortBuffer.write(toRowWithBucket(record.row(), record.bucket()));
+        if (batchBucketSorter != null && !streamingMode && !ignorePreviousFiles) {
+            batchBucketSorter.write(record.row(), record.bucket());
         } else {
             write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
         }
-    }
-
-    private InternalRow toRowWithBucket(InternalRow row, int bucket) {
-        reusedBucketRow.setField(0, bucket);
-        reusedJoinedRow.replace(reusedBucketRow, row);
-        reusedJoinedRow.setRowKind(row.getRowKind());
-        return reusedJoinedRow;
-    }
-
-    private int bucket(InternalRow rowWithBucket) {
-        return rowWithBucket.getInt(0);
-    }
-
-    private InternalRow toOriginRow(InternalRow row) {
-        return reusedOffsetRow.replace(row);
     }
 
     @VisibleForTesting
@@ -253,17 +222,16 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         if (fullCompaction) {
             // we need to write all the datas before triggering a full compaction, otherwise, the
             // changelog producer of full-compaction will not be able to generate changelog in time.
-            if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
-                MutableObjectIterator<InternalRow> iterator =
-                        externalRowSortBuffer.sortedIterator();
-                InternalRow sortedRow;
-                while ((sortedRow = iterator.next()) != null) {
-                    int rowBucket = bucket(sortedRow);
-                    SinkRecord record = toSinkRecord(toOriginRow(sortedRow), rowBucket);
+            if (batchBucketSorter != null && batchBucketSorter.size() != 0) {
+                NextIterator<Pair<InternalRow, Integer>> iterator =
+                        batchBucketSorter.sortedIterator();
+                Pair<InternalRow, Integer> sortedRow;
+                while ((sortedRow = iterator.nextOrNull()) != null) {
+                    SinkRecord record = toSinkRecord(sortedRow.getKey(), sortedRow.getValue());
                     write.write(
                             record.partition(), record.bucket(), recordExtractor.extract(record));
                 }
-                externalRowSortBuffer.clear();
+                batchBucketSorter.clear();
             }
         }
         write.compact(partition, bucket, fullCompaction);
@@ -290,24 +258,24 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         List<CommitMessage> commitMessages = new ArrayList<>();
-        if (externalRowSortBuffer != null && externalRowSortBuffer.size() != 0) {
+        if (batchBucketSorter != null && batchBucketSorter.size() != 0) {
             // flush external row sort buffer.
-            MutableObjectIterator<InternalRow> iterator = externalRowSortBuffer.sortedIterator();
+            NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
             BinaryRow lastPartition = new BinaryRow(partitionFields.length);
-            InternalRow sortedRow;
+            Pair<InternalRow, Integer> sortedRow;
             int lastBucket = -1;
-            while ((sortedRow = iterator.next()) != null) {
-                int bucket = bucket(sortedRow);
-                SinkRecord record = toSinkRecord(toOriginRow(sortedRow), bucket);
-                if (!lastPartition.equals(record.partition()) || lastBucket != bucket) {
+            while ((sortedRow = iterator.nextOrNull()) != null) {
+                SinkRecord record = toSinkRecord(sortedRow.getKey(), sortedRow.getValue());
+                if (!lastPartition.equals(record.partition())
+                        || lastBucket != sortedRow.getValue()) {
                     commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
                     write.closeWriters();
                 }
                 write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
                 record.partition().copy(lastPartition);
-                lastBucket = bucket;
+                lastBucket = sortedRow.getValue();
             }
-            externalRowSortBuffer.clear();
+            batchBucketSorter.clear();
         }
         commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
         return commitMessages;
