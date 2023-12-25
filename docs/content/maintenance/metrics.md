@@ -437,6 +437,18 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
             <td>Flink Source Operator</td>
             <td>Gauge</td>
             <td>Time difference between reading the data file and file creation.</td>
+        </tr>    
+        <tr>
+            <td>numRecordsIn</td>
+            <td>Flink Source Operator</td>
+            <td>Counter</td>
+            <td>The total number of records this source operator has received.</td>
+        </tr>
+        <tr>
+            <td>numRecordsInPerSecond</td>
+            <td>Flink Source Operator</td>
+            <td>Meter</td>
+            <td>The number of records this source operator receives per second.</td>
         </tr>
     </tbody>
 </table>

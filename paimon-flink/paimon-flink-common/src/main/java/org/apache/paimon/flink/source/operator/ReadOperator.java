@@ -102,6 +102,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
             while (iterator.hasNext()) {
                 reuseRow.replace(iterator.next());
                 output.collect(reuseRecord);
+                sourceReaderMetrics.emitRecord();
             }
         }
     }

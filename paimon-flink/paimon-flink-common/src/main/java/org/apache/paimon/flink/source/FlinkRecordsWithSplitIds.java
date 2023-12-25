@@ -117,6 +117,7 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
         while ((record = element.next()) != null) {
             output.collect(record.getRecord(), timestamp);
             state.setPosition(record);
+            metrics.emitRecord();
         }
     }
 }

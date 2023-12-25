@@ -19,6 +19,9 @@
 package org.apache.paimon.flink.source.metrics;
 
 import org.apache.flink.annotation.VisibleForTesting;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.Meter;
+import org.apache.flink.metrics.MeterView;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.metrics.MetricNames;
 
@@ -30,9 +33,15 @@ public class FileStoreSourceReaderMetrics {
 
     public static final long UNDEFINED = -1L;
 
+    private final Meter numRecordsIn;
+
     public FileStoreSourceReaderMetrics(MetricGroup sourceReaderMetricGroup) {
         sourceReaderMetricGroup.gauge(
                 MetricNames.CURRENT_FETCH_EVENT_TIME_LAG, this::getFetchTimeLag);
+        final Counter counter = sourceReaderMetricGroup.counter(MetricNames.IO_NUM_RECORDS_IN);
+        this.numRecordsIn =
+                sourceReaderMetricGroup.meter(
+                        MetricNames.IO_NUM_RECORDS_IN_RATE, new MeterView(counter));
     }
 
     /** Called when consumed snapshot changes. */
@@ -56,5 +65,11 @@ public class FileStoreSourceReaderMetrics {
     @VisibleForTesting
     long getLastSplitUpdateTime() {
         return lastSplitUpdateTime;
+    }
+
+    public void emitRecord() {
+        if (numRecordsIn != null) {
+            numRecordsIn.markEvent();
+        }
     }
 }
