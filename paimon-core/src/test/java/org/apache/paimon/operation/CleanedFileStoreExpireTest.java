@@ -55,7 +55,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testExpireExtraFiles() throws IOException {
-        FileStoreExpireImpl expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        FileStoreExpireImpl expire = store.newExpire(1, 3, Long.MAX_VALUE, true);
 
         // write test files
         BinaryRow partition = gen.getPartition(gen.next());
@@ -98,7 +98,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testNoSnapshot() {
-        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE, true);
         expire.expire();
 
         assertThat(snapshotManager.latestSnapshotId()).isNull();
@@ -110,7 +110,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
-        FileStoreExpire expire = store.newExpire(1, latestSnapshotId + 1, Long.MAX_VALUE);
+        FileStoreExpire expire = store.newExpire(1, latestSnapshotId + 1, Long.MAX_VALUE, true);
         expire.expire();
 
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -125,7 +125,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
-        FileStoreExpire expire = store.newExpire(1, Integer.MAX_VALUE, Long.MAX_VALUE);
+        FileStoreExpire expire = store.newExpire(1, Integer.MAX_VALUE, Long.MAX_VALUE, true);
         expire.expire();
 
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -144,7 +144,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         commit(numRetainedMin + random.nextInt(5), allData, snapshotPositions);
         int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
         Thread.sleep(100);
-        FileStoreExpire expire = store.newExpire(numRetainedMin, Integer.MAX_VALUE, 1);
+        FileStoreExpire expire = store.newExpire(numRetainedMin, Integer.MAX_VALUE, 1, true);
         expire.expire();
 
         for (int i = 1; i <= latestSnapshotId - numRetainedMin; i++) {
@@ -158,7 +158,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testExpireWithNumber() throws Exception {
-        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE, true);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -194,7 +194,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testExpireWithTime() throws Exception {
-        FileStoreExpire expire = store.newExpire(1, Integer.MAX_VALUE, 1000);
+        FileStoreExpire expire = store.newExpire(1, Integer.MAX_VALUE, 1000, true);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -252,7 +252,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
 
         // the data file still exists after expire
-        FileStoreExpire expire = store.newExpire(1, 1, Long.MAX_VALUE);
+        FileStoreExpire expire = store.newExpire(1, 1, Long.MAX_VALUE, true);
         expire.expire();
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
     }

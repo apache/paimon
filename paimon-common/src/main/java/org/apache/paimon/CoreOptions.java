@@ -982,11 +982,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
-    public static final ConfigOption<Boolean> DATA_DIRECTORIES_IGNORE_CLEAN =
-            key("data-directories.ignore-clean")
+    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_IGNORE_CLEAN_DIRECTORIES =
+            key("snapshot.expire.ignore-clean-directories")
                     .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to ignore clean data directories.");
+                    .defaultValue(true)
+                    .withDescription("Whether to try to clean empty directories when expiring snapshots. " +
+                            "Note that trying to clean directories might throw exceptions in filesystem, " +
+                            "but in most cases it won't cause problems.");
 
     private final Options options;
 
@@ -1419,8 +1421,8 @@ public class CoreOptions implements Serializable {
         return options.get(SINK_WATERMARK_TIME_ZONE);
     }
 
-    public boolean dataDirectoriesIgnoreClean() {
-        return options.get(DATA_DIRECTORIES_IGNORE_CLEAN);
+    public boolean snapshotExpireIgnoreCleanDirectories() {
+        return options.get(SNAPSHOT_EXPIRE_IGNORE_CLEAN_DIRECTORIES);
     }
 
     public Map<String, String> getFieldDefaultValues() {

@@ -60,7 +60,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
     private final TagManager tagManager;
     private final int expireLimit;
-    private final boolean dataDirectoriesIgnoreClean;
+    private final boolean snapshotExpireIgnoreCleanDirectories;
 
     private Lock lock;
 
@@ -72,7 +72,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
             int expireLimit,
-            boolean dataDirectoriesIgnoreClean) {
+            boolean snapshotExpireIgnoreCleanDirectories) {
         Preconditions.checkArgument(
                 numRetainedMin >= 1,
                 "The minimum number of completed snapshots to retain should be >= 1.");
@@ -91,7 +91,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
         this.expireLimit = expireLimit;
-        this.dataDirectoriesIgnoreClean = dataDirectoriesIgnoreClean;
+        this.snapshotExpireIgnoreCleanDirectories = snapshotExpireIgnoreCleanDirectories;
     }
 
     @Override
@@ -211,7 +211,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
-        if (!dataDirectoriesIgnoreClean) {
+        if (snapshotExpireIgnoreCleanDirectories) {
             snapshotDeletion.cleanDataDirectories();
         }
 

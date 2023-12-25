@@ -45,7 +45,7 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testExpireWithMissingFiles() throws Exception {
-        FileStoreExpire expire = store.newExpire(1, 1, 1);
+        FileStoreExpire expire = store.newExpire(1, 1, 1, true);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
@@ -103,7 +103,7 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         // randomly expire snapshots
         int expired = random.nextInt(latestSnapshotId / 2) + 1;
         int retained = latestSnapshotId - expired;
-        store.newExpire(retained, retained, Long.MAX_VALUE).expire();
+        store.newExpire(retained, retained, Long.MAX_VALUE, true).expire();
 
         // randomly delete tags
         for (int id = 1; id <= latestSnapshotId; id++) {
