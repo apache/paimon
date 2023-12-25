@@ -63,6 +63,7 @@ import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
  *     a, 3, 1
  *     a, 3, 100
  * </pre>
+ *
  * <p>The sorter will spill the data to disk.
  */
 public class BatchBucketSorter {
