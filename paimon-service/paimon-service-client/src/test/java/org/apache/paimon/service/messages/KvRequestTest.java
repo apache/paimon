@@ -18,7 +18,6 @@
 
 package org.apache.paimon.service.messages;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 
@@ -53,11 +52,10 @@ public class KvRequestTest {
 
     public static KvRequest random() {
         Random rnd = new Random();
-        Identifier identifier = new Identifier(rnd.nextInt() + "", rnd.nextInt() + "");
         BinaryRow[] keys = new BinaryRow[rnd.nextInt(100)];
         for (int i = 0; i < keys.length; i++) {
             keys[i] = row(rnd.nextInt());
         }
-        return new KvRequest(identifier, row(rnd.nextInt()), rnd.nextInt(1000), keys);
+        return new KvRequest(row(rnd.nextInt()), rnd.nextInt(1000), keys);
     }
 }

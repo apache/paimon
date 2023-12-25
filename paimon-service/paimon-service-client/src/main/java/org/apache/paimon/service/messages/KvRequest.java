@@ -18,7 +18,6 @@
 
 package org.apache.paimon.service.messages;
 
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.service.network.messages.MessageBody;
 import org.apache.paimon.service.network.messages.MessageDeserializer;
@@ -26,7 +25,6 @@ import org.apache.paimon.service.network.messages.MessageDeserializer;
 import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
 
 import java.nio.ByteBuffer;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -39,20 +37,14 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** The request to query values for keys. */
 public class KvRequest extends MessageBody {
 
-    private final Identifier identifier;
     private final BinaryRow partition;
     private final int bucket;
     private final BinaryRow[] keys;
 
-    public KvRequest(Identifier identifier, BinaryRow partition, int bucket, BinaryRow[] keys) {
-        this.identifier = identifier;
+    public KvRequest(BinaryRow partition, int bucket, BinaryRow[] keys) {
         this.partition = partition;
         this.bucket = bucket;
         this.keys = keys;
-    }
-
-    public Identifier identifier() {
-        return identifier;
     }
 
     public BinaryRow partition() {
@@ -71,12 +63,6 @@ public class KvRequest extends MessageBody {
     public byte[] serialize() {
         int size = 0;
 
-        byte[] dbBytes = identifier.getDatabaseName().getBytes(StandardCharsets.UTF_8);
-        size += 4 + dbBytes.length;
-
-        byte[] tableBytes = identifier.getObjectName().getBytes(StandardCharsets.UTF_8);
-        size += 4 + tableBytes.length;
-
         byte[] partitionBytes = serializeBinaryRow(partition);
         size += 4 + partitionBytes.length;
 
@@ -94,11 +80,7 @@ public class KvRequest extends MessageBody {
         }
 
         ByteBuffer buffer = ByteBuffer.allocate(size);
-        buffer.putInt(dbBytes.length)
-                .put(dbBytes)
-                .putInt(tableBytes.length)
-                .put(tableBytes)
-                .putInt(partitionBytes.length)
+        buffer.putInt(partitionBytes.length)
                 .put(partitionBytes)
                 .putInt(bucket)
                 .putInt(keyBytesList.size());
@@ -120,14 +102,13 @@ public class KvRequest extends MessageBody {
         }
         KvRequest kvRequest = (KvRequest) o;
         return bucket == kvRequest.bucket
-                && Objects.equals(identifier, kvRequest.identifier)
                 && Objects.equals(partition, kvRequest.partition)
                 && Arrays.equals(keys, kvRequest.keys);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(identifier, partition, bucket);
+        int result = Objects.hash(partition, bucket);
         result = 31 * result + Arrays.hashCode(keys);
         return result;
     }
@@ -137,8 +118,6 @@ public class KvRequest extends MessageBody {
 
         @Override
         public KvRequest deserializeMessage(ByteBuf buf) {
-            String db = new String(readBytes(buf, buf.readInt()), StandardCharsets.UTF_8);
-            String table = new String(readBytes(buf, buf.readInt()), StandardCharsets.UTF_8);
             BinaryRow partition = deserializeBinaryRow(readBytes(buf, buf.readInt()));
             int bucket = buf.readInt();
 
@@ -148,8 +127,7 @@ public class KvRequest extends MessageBody {
                 keys.add(deserializeBinaryRow(readBytes(buf, buf.readInt())));
             }
 
-            return new KvRequest(
-                    new Identifier(db, table), partition, bucket, keys.toArray(new BinaryRow[0]));
+            return new KvRequest(partition, bucket, keys.toArray(new BinaryRow[0]));
         }
     }
 }
