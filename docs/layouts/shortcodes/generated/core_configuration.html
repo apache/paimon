@@ -540,12 +540,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Specify the sort engine for table with primary key.<br /><br />Possible values:<ul><li>"min-heap": Use min-heap for multiway sorting.</li><li>"loser-tree": Use loser-tree for multiway sorting. Compared with heapsort, loser-tree has fewer comparisons and is more efficient.</li></ul></td>
         </tr>
         <tr>
-            <td><h5>sort-partition-before-batch-insert</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Batch inserting lots of data without partition specified among huge number of partitions, sort the records by partitions before inserting.Set this to true to avoid out-of-memory by opening two many writers in lots of partitions.</td>
-        </tr>
-        <tr>
             <td><h5>sort-spill-buffer-size</h5></td>
             <td style="word-wrap: break-word;">64 mb</td>
             <td>MemorySize</td>
