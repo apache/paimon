@@ -278,19 +278,19 @@ Field `price` will be aggregated by the `max` function, and field `sales` will b
 
 Current supported aggregate functions and data types are:
 
-* `sum` function:
+* `sum`:
    The sum function aggregates the values across multiple rows.
    It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
-* `product` function:
+* `product`:
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
   
-* `count` function:
+* `count`:
   The count function counts the values across multiple rows.
   It supports INTEGER, BIGINT data types.
 
-* `max`function:
+* `max`:
    The max function identifies and retains the maximum value.
    It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
 
