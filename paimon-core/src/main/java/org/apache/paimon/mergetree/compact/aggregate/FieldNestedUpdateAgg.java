@@ -25,10 +25,13 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -41,13 +44,15 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     public static final String NAME = "nested-update";
 
-    private final InternalArray.ElementGetter rowGetter;
+    private final BiFunction<InternalArray, Integer, InternalRow> rowGetter;
     private final List<InternalRow.FieldGetter> keyGetters;
 
     public FieldNestedUpdateAgg(ArrayType dataType, List<String> nestedKeys) {
         super(dataType);
         RowType rowType = (RowType) dataType.getElementType();
-        this.rowGetter = InternalArray.createElementGetter(rowType);
+
+        InternalArray.ElementGetter objectGetter = InternalArray.createElementGetter(rowType);
+        this.rowGetter = (array, pos) -> (InternalRow) objectGetter.getElementOrNull(array, pos);
 
         this.keyGetters = new ArrayList<>(nestedKeys.size());
         List<DataField> dataFields = rowType.getFields();
@@ -68,52 +73,37 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
     @Override
     public Object agg(Object accumulator, Object inputField) {
         if (accumulator == null || inputField == null) {
-            return inputField == null ? accumulator : inputField;
+            return accumulator == null ? inputField : accumulator;
         }
 
-        InternalArray acc = (InternalArray) accumulator;
-        Object[] nestedRows = new Object[acc.size() + 1];
-        for (int i = 0; i < acc.size(); i++) {
-            nestedRows[i] = rowGetter.getElementOrNull(acc, i);
+        Map<List<Object>, InternalRow> unnestedAcc = unnest(accumulator);
+        InternalArray inputs = (InternalArray) inputField;
+
+        for (int i = 0; i < inputs.size(); i++) {
+            InternalRow row = rowGetter.apply(inputs, i);
+            List<Object> keys = getKeys(row);
+            // update by nested keys
+            unnestedAcc.put(keys, row);
         }
 
-        InternalArray input = (InternalArray) inputField;
-        checkArgument(input.size() == 1);
-        nestedRows[acc.size()] = rowGetter.getElementOrNull(input, 0);
-
-        return new GenericArray(nestedRows);
+        return new GenericArray(unnestedAcc.values().toArray());
     }
 
-    @Override
-    public Object retract(Object accumulator, Object retractField) {
-        if (accumulator == null || retractField == null) {
-            return null;
+    private Map<List<Object>, InternalRow> unnest(@Nullable Object accumulator) {
+        Map<List<Object>, InternalRow> unnested = new HashMap<>();
+        if (accumulator != null) {
+            InternalArray array = (InternalArray) accumulator;
+            for (int i = 0; i < array.size(); i++) {
+                InternalRow row = rowGetter.apply(array, i);
+                List<Object> keys = getKeys(row);
+                unnested.put(keys, row);
+            }
         }
 
-        InternalArray array = (InternalArray) retractField;
-        checkArgument(array.size() == 1);
-        Object retract = rowGetter.getElementOrNull(array, 0);
-        List<Object> keys = getKeys(retract);
-
-        Map<List<Object>, Object> unnested = unnest(accumulator);
-        unnested.remove(keys);
-
-        return new GenericArray(unnested.values().toArray(new Object[0]));
-    }
-
-    private Map<List<Object>, Object> unnest(Object accumulator) {
-        Map<List<Object>, Object> unnested = new HashMap<>();
-        InternalArray array = (InternalArray) accumulator;
-        for (int i = 0; i < array.size(); i++) {
-            Object row = rowGetter.getElementOrNull(array, i);
-            unnested.put(getKeys(rowGetter.getElementOrNull(array, i)), row);
-        }
         return unnested;
     }
 
-    private List<Object> getKeys(Object row) {
-        return keyGetters.stream()
-                .map(g -> g.getFieldOrNull((InternalRow) row))
-                .collect(Collectors.toList());
+    private List<Object> getKeys(InternalRow row) {
+        return keyGetters.stream().map(g -> g.getFieldOrNull(row)).collect(Collectors.toList());
     }
 }

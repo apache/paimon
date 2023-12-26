@@ -86,9 +86,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         tEnv.useCatalog(catalog);
 
         sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(CHECKPOINTING_INTERVAL, Duration.ofMillis(checkpointInterval()));
+        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
         sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
         sEnv.useCatalog(catalog);
 
@@ -128,10 +126,6 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     protected int defaultParallelism() {
         return 2;
-    }
-
-    protected long checkpointInterval() {
-        return 100;
     }
 
     protected List<String> ddl() {

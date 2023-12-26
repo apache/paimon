@@ -980,11 +980,6 @@ public class PreAggregationITCase {
     public static class NestedUpdateAggregationITCase extends CatalogITCaseBase {
 
         @Override
-        protected long checkpointInterval() {
-            return 2_000;
-        }
-
-        @Override
         protected List<String> ddl() {
             String ordersTable =
                     "CREATE TABLE orders (\n"
@@ -1012,36 +1007,24 @@ public class PreAggregationITCase {
                             + ") WITH (\n"
                             + "  'merge-engine' = 'aggregation',\n"
                             + "  'fields.sub_orders.aggregate-function' = 'nested-update',\n"
-                            + "  'fields.sub_orders.nested-keys' = 'daily_id;today'\n"
+                            + "  'fields.sub_orders.nested-keys' = 'daily_id;today',\n"
+                            + "  'fields.sub_orders.ignore-retract' = 'true',"
+                            + "  'fields.user_name.ignore-retract' = 'true',"
+                            + "  'fields.address.ignore-retract' = 'true'"
                             + ")";
 
             return Arrays.asList(ordersTable, subordersTable, wideTable);
         }
 
         @Test
-        @Timeout(60)
-        public void testUseCase() throws Exception {
-            sEnv.getConfig()
-                    .set(
-                            ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
-                            ExecutionConfigOptions.UpsertMaterialize.NONE);
-
-            // widen
-            sEnv.executeSql(
-                    "INSERT INTO order_wide\n"
-                            + "SELECT order_id, user_name, address, "
-                            + "CAST (NULL AS ARRAY<ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>>) FROM orders\n"
-                            + "UNION ALL\n"
-                            + "SELECT order_id, CAST (NULL AS STRING), CAST (NULL AS STRING), "
-                            + "ARRAY[ROW(daily_id, today, product_name, price)] FROM sub_orders");
-
-            sEnv.executeSql(
+        public void testUseCase() {
+            sql(
                     "INSERT INTO orders VALUES "
                             + "(1, 'Wang', 'HangZhou'),"
                             + "(2, 'Zhao', 'ChengDu'),"
                             + "(3, 'Liu', 'NanJing')");
 
-            sEnv.executeSql(
+            sql(
                     "INSERT INTO sub_orders VALUES "
                             + "(1, 1, '12-20', 'Apple', 8000),"
                             + "(1, 2, '12-20', 'Tesla', 400000),"
@@ -1051,35 +1034,41 @@ public class PreAggregationITCase {
                             + "(3, 1, '12-25', 'Bat', 15),"
                             + "(3, 1, '12-26', 'Cup', 30)");
 
-            while (true) {
-                List<Row> result = waitExpectedSizeRecordsSorted(3);
-                boolean allChecked =
-                        checkOneRecord(
-                                        result.get(0),
-                                        1,
-                                        "Wang",
-                                        "HangZhou",
-                                        Row.of(1, "12-20", "Apple", 8000L),
-                                        Row.of(1, "12-21", "Sangsung", 5000L),
-                                        Row.of(2, "12-20", "Tesla", 400000L))
-                                && checkOneRecord(
-                                        result.get(1),
-                                        2,
-                                        "Zhao",
-                                        "ChengDu",
-                                        Row.of(1, "12-20", "Tea", 40L),
-                                        Row.of(2, "12-20", "Pot", 60L))
-                                && checkOneRecord(
-                                        result.get(2),
-                                        3,
-                                        "Liu",
-                                        "NanJing",
-                                        Row.of(1, "12-25", "Bat", 15L),
-                                        Row.of(1, "12-26", "Cup", 30L));
-                if (allChecked) {
-                    break;
-                }
-            }
+            sql(widenSql());
+
+            List<Row> result =
+                    sql("SELECT * FROM order_wide").stream()
+                            .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
+                            .collect(Collectors.toList());
+
+            assertThat(
+                            checkOneRecord(
+                                    result.get(0),
+                                    1,
+                                    "Wang",
+                                    "HangZhou",
+                                    Row.of(1, "12-20", "Apple", 8000L),
+                                    Row.of(1, "12-21", "Sangsung", 5000L),
+                                    Row.of(2, "12-20", "Tesla", 400000L)))
+                    .isTrue();
+            assertThat(
+                            checkOneRecord(
+                                    result.get(1),
+                                    2,
+                                    "Zhao",
+                                    "ChengDu",
+                                    Row.of(1, "12-20", "Tea", 40L),
+                                    Row.of(2, "12-20", "Pot", 60L)))
+                    .isTrue();
+            assertThat(
+                            checkOneRecord(
+                                    result.get(2),
+                                    3,
+                                    "Liu",
+                                    "NanJing",
+                                    Row.of(1, "12-25", "Bat", 15L),
+                                    Row.of(1, "12-26", "Cup", 30L)))
+                    .isTrue();
 
             // query using UNNEST
             List<Row> unnested =
@@ -1098,19 +1087,67 @@ public class PreAggregationITCase {
                             Row.of(3, "Liu", "NanJing", 1, "12-26", "Cup", 30L));
         }
 
-        // TODO: test DELETE statement after solving
-        // https://github.com/apache/incubator-paimon/issues/2561
+        @Test
+        @Timeout(60)
+        public void testUpdateWithIgnoreRetract() throws Exception {
+            sEnv.getConfig()
+                    .set(
+                            ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
+                            ExecutionConfigOptions.UpsertMaterialize.NONE);
 
-        private List<Row> waitExpectedSizeRecordsSorted(int size) throws InterruptedException {
+            sql("INSERT INTO orders VALUES (1, 'Wang', 'HangZhou')");
+
+            sql(
+                    "INSERT INTO sub_orders VALUES "
+                            + "(1, 1, '12-20', 'Apple', 8000),"
+                            + "(1, 2, '12-20', 'Tesla', 400000),"
+                            + "(1, 1, '12-21', 'Sangsung', 5000)");
+
+            sEnv.executeSql(widenSql());
+
+            boolean checkResult;
             List<Row> result;
+
             do {
                 Thread.sleep(500);
                 result = sql("SELECT * FROM order_wide");
-            } while (result.size() != size);
+                checkResult =
+                        !result.isEmpty()
+                                && checkOneRecord(
+                                        result.get(0),
+                                        1,
+                                        "Wang",
+                                        "HangZhou",
+                                        Row.of(1, "12-20", "Apple", 8000L),
+                                        Row.of(1, "12-21", "Sangsung", 5000L),
+                                        Row.of(2, "12-20", "Tesla", 400000L));
+            } while (!checkResult);
 
-            return result.stream()
-                    .sorted(Comparator.comparingInt(r -> r.getFieldAs(0)))
-                    .collect(Collectors.toList());
+            sql("INSERT INTO sub_orders VALUES (1, 2, '12-20', 'Benz', 380000)");
+
+            do {
+                Thread.sleep(500);
+                result = sql("SELECT * FROM order_wide");
+                checkResult =
+                        !result.isEmpty()
+                                && checkOneRecord(
+                                        result.get(0),
+                                        1,
+                                        "Wang",
+                                        "HangZhou",
+                                        Row.of(1, "12-20", "Apple", 8000L),
+                                        Row.of(1, "12-21", "Sangsung", 5000L),
+                                        Row.of(2, "12-20", "Benz", 380000L));
+            } while (!checkResult);
+        }
+
+        private String widenSql() {
+            return "INSERT INTO order_wide\n"
+                    + "SELECT order_id, user_name, address, "
+                    + "CAST (NULL AS ARRAY<ROW<daily_id INT, today STRING, product_name STRING, price BIGINT>>) FROM orders\n"
+                    + "UNION ALL\n"
+                    + "SELECT order_id, CAST (NULL AS STRING), CAST (NULL AS STRING), "
+                    + "ARRAY[ROW(daily_id, today, product_name, price)] FROM sub_orders";
         }
 
         private boolean checkOneRecord(

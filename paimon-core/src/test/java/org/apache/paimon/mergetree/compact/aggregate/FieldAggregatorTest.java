@@ -38,9 +38,11 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
-import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -294,59 +296,35 @@ public class FieldAggregatorTest {
                                         DataTypes.FIELD(2, "v", DataTypes.STRING()))),
                         Arrays.asList("k0", "k1"));
 
-        GenericArray accumulator = validateNestedUpdate(agg, null, 0, 0, "A");
-        assertThat(accumulator).isEqualTo(agg.agg(accumulator, null));
-        accumulator = validateNestedUpdate(agg, accumulator, 0, 1, "B");
-        accumulator = validateNestedUpdate(agg, accumulator, 1, 0, "C");
-        accumulator = validateNestedUpdate(agg, accumulator, 1, 1, "D");
+        InternalArray accumulator;
 
-        InternalArray retracted =
-                (InternalArray) agg.retract(accumulator, makeSingletonArray(0, 0, "A"));
-        assertThat(retracted.size()).isEqualTo(3);
-        List<InternalRow> rows = new ArrayList<>(3);
-        for (int i = 0; i < 3; i++) {
-            rows.add(retracted.getRow(i, 3));
-        }
-        assertThat(rows)
-                .containsExactlyInAnyOrder(
-                        GenericRow.of(0, 1, BinaryString.fromString("B")),
-                        GenericRow.of(1, 0, BinaryString.fromString("C")),
-                        GenericRow.of(1, 1, BinaryString.fromString("D")));
+        InternalRow current = row(0, 0, "A");
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "B")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
     }
 
-    private GenericArray validateNestedUpdate(
-            FieldNestedUpdateAgg agg, GenericArray accumulator, int k0, int k1, String v) {
-        GenericArray input = makeSingletonArray(k0, k1, v);
-        GenericArray next = (GenericArray) agg.agg(accumulator, input);
-        assertThat(next).isEqualTo(mergeArray(accumulator, input));
-        return next;
+    private List<InternalRow> unnest(InternalArray array) {
+        return IntStream.range(0, array.size())
+                .mapToObj(i -> array.getRow(i, 3))
+                .collect(Collectors.toList());
     }
 
-    private GenericArray makeSingletonArray(int k0, int k1, String v) {
-        return new GenericArray(
-                new GenericRow[] {GenericRow.of(k0, k1, BinaryString.fromString(v))});
+    private GenericArray singletonArray(InternalRow row) {
+        return new GenericArray(new InternalRow[] {row});
     }
 
-    private GenericArray mergeArray(GenericArray a1, GenericArray a2) {
-        if (a1 == null) {
-            return a2;
-        } else if (a2 == null) {
-            return a1;
-        }
-
-        InternalArray.ElementGetter getter =
-                InternalArray.createElementGetter(
-                        DataTypes.ROW(DataTypes.INT(), DataTypes.INT(), DataTypes.STRING()));
-
-        Object[] rows = new Object[a1.size() + a2.size()];
-        for (int i = 0; i < a1.size() + a2.size(); i++) {
-            if (i < a1.size()) {
-                rows[i] = getter.getElementOrNull(a1, i);
-            } else {
-                rows[i] = getter.getElementOrNull(a2, i - a1.size());
-            }
-        }
-
-        return new GenericArray(rows);
+    private InternalRow row(int k0, int k1, String v) {
+        return GenericRow.of(k0, k1, BinaryString.fromString(v));
     }
 }
