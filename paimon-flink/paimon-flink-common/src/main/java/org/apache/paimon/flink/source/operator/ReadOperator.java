@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.utils.CloseableIterator;
 
+import org.apache.flink.runtime.metrics.MetricNames;
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -59,7 +60,22 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
     @Override
     public void open() throws Exception {
         super.open();
+
         this.sourceReaderMetrics = new FileStoreSourceReaderMetrics(getMetricGroup());
+        // we create our own gauge for currentEmitEventTimeLag, because this operator is not a
+        // FLIP-27 source and Flink can't automatically calculate this metric
+        getMetricGroup()
+                .gauge(
+                        MetricNames.CURRENT_EMIT_EVENT_TIME_LAG,
+                        () -> {
+                            long eventTime = sourceReaderMetrics.getLatestFileCreationTime();
+                            if (eventTime == FileStoreSourceReaderMetrics.UNDEFINED) {
+                                return FileStoreSourceReaderMetrics.UNDEFINED;
+                            } else {
+                                return System.currentTimeMillis() - eventTime;
+                            }
+                        });
+
         this.ioManager =
                 IOManager.create(
                         getContainingTask()
@@ -80,6 +96,7 @@ public class ReadOperator extends AbstractStreamOperator<RowData>
                         .getLatestFileCreationEpochMillis()
                         .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
         sourceReaderMetrics.recordSnapshotUpdate(eventTime);
+
         try (CloseableIterator<InternalRow> iterator =
                 read.createReader(split).toCloseableIterator()) {
             while (iterator.hasNext()) {

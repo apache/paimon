@@ -60,7 +60,7 @@ public class FlinkRecordsWithSplitIdsTest {
 
         BulkFormat.RecordIterator<RowData> iterator = records.nextRecordFromSplit();
         assertThat(iterator).isNotNull();
-        FlinkRecordsWithSplitIds.emitRecord(iterator, output, state);
+        FlinkRecordsWithSplitIds.emitRecord(iterator, output, state, null);
         assertThat(output.getEmittedRecords()).containsExactly(rows);
         assertThat(state.recordsToSkip()).isEqualTo(2);
         assertThat(records.nextRecordFromSplit()).isNull();
