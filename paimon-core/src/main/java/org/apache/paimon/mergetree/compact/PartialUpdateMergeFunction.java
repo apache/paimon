@@ -23,7 +23,6 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
-import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataType;
@@ -45,7 +44,6 @@ import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A {@link MergeFunction} where key is primary key (unique) and value is the partial record, update
@@ -375,21 +373,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
 
                 if (strAggFunc != null) {
-                    if (FieldAggregator.isNestedUpdateAgg(strAggFunc)) {
-                        List<String> nestedKeys = options.fieldNestedUpdateAggNestedKeys(fieldName);
-                        checkArgument(
-                                nestedKeys != null && !nestedKeys.isEmpty(),
-                                "Must set nested keys when using " + FieldNestedUpdateAgg.NAME);
-                        fieldAggregators.put(
-                                i,
-                                FieldAggregator.createFieldNestedUpdateAgg(
-                                        fieldType, nestedKeys, ignoreRetract));
-                    } else {
-                        fieldAggregators.put(
-                                i,
-                                FieldAggregator.createFieldAggregator(
-                                        fieldType, strAggFunc, ignoreRetract, isPrimaryKey));
-                    }
+                    fieldAggregators.put(
+                            i,
+                            FieldAggregator.createFieldAggregator(
+                                    fieldType,
+                                    strAggFunc,
+                                    ignoreRetract,
+                                    isPrimaryKey,
+                                    options,
+                                    fieldName));
                 }
             }
             return fieldAggregators;

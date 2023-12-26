@@ -35,7 +35,6 @@ import java.util.Arrays;
 import java.util.List;
 
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -140,20 +139,14 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc = options.fieldAggFunc(fieldName);
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
-
-                if (FieldAggregator.isNestedUpdateAgg(strAggFunc)) {
-                    List<String> nestedKeys = options.fieldNestedUpdateAggNestedKeys(fieldName);
-                    checkArgument(
-                            nestedKeys != null && !nestedKeys.isEmpty(),
-                            "Must set nested keys when using " + FieldNestedUpdateAgg.NAME);
-                    fieldAggregators[i] =
-                            FieldAggregator.createFieldNestedUpdateAgg(
-                                    fieldType, nestedKeys, ignoreRetract);
-                } else {
-                    fieldAggregators[i] =
-                            FieldAggregator.createFieldAggregator(
-                                    fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
-                }
+                fieldAggregators[i] =
+                        FieldAggregator.createFieldAggregator(
+                                fieldType,
+                                strAggFunc,
+                                ignoreRetract,
+                                isPrimaryKey,
+                                options,
+                                fieldName);
             }
 
             return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);

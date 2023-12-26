@@ -18,11 +18,13 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.Projection;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -31,10 +33,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiFunction;
-import java.util.stream.Collectors;
-
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * Used to update a field which representing a nested table. The data type of nested table field is
@@ -44,25 +42,16 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
 
     public static final String NAME = "nested-update";
 
-    private final BiFunction<InternalArray, Integer, InternalRow> rowGetter;
-    private final List<InternalRow.FieldGetter> keyGetters;
+    private final int nestedFields;
 
-    public FieldNestedUpdateAgg(ArrayType dataType, List<String> nestedKeys) {
+    @Nullable private final Projection keyProjection;
+
+    public FieldNestedUpdateAgg(ArrayType dataType, List<String> nestedKey) {
         super(dataType);
-        RowType rowType = (RowType) dataType.getElementType();
-
-        InternalArray.ElementGetter objectGetter = InternalArray.createElementGetter(rowType);
-        this.rowGetter = (array, pos) -> (InternalRow) objectGetter.getElementOrNull(array, pos);
-
-        this.keyGetters = new ArrayList<>(nestedKeys.size());
-        List<DataField> dataFields = rowType.getFields();
-        for (int i = 0; i < dataFields.size(); i++) {
-            DataField dataField = dataFields.get(i);
-            if (nestedKeys.contains(dataField.name())) {
-                keyGetters.add(InternalRow.createFieldGetter(dataField.type(), i));
-            }
-        }
-        checkArgument(keyGetters.size() == nestedKeys.size(), "You have set wrong nested keys.");
+        RowType nestedType = (RowType) dataType.getElementType();
+        this.nestedFields = nestedType.getFieldCount();
+        this.keyProjection =
+                nestedKey.isEmpty() ? null : CodeGenUtils.newProjection(nestedType, nestedKey);
     }
 
     @Override
@@ -76,34 +65,27 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
             return accumulator == null ? inputField : accumulator;
         }
 
-        Map<List<Object>, InternalRow> unnestedAcc = unnest(accumulator);
-        InternalArray inputs = (InternalArray) inputField;
+        InternalArray acc = (InternalArray) accumulator;
+        InternalArray input = (InternalArray) inputField;
 
-        for (int i = 0; i < inputs.size(); i++) {
-            InternalRow row = rowGetter.apply(inputs, i);
-            List<Object> keys = getKeys(row);
-            // update by nested keys
-            unnestedAcc.put(keys, row);
+        List<InternalRow> rows = new ArrayList<>();
+        for (int i = 0; i < acc.size(); i++) {
+            rows.add(acc.getRow(i, nestedFields));
+        }
+        for (int i = 0; i < input.size(); i++) {
+            rows.add(input.getRow(i, nestedFields));
         }
 
-        return new GenericArray(unnestedAcc.values().toArray());
-    }
-
-    private Map<List<Object>, InternalRow> unnest(@Nullable Object accumulator) {
-        Map<List<Object>, InternalRow> unnested = new HashMap<>();
-        if (accumulator != null) {
-            InternalArray array = (InternalArray) accumulator;
-            for (int i = 0; i < array.size(); i++) {
-                InternalRow row = rowGetter.apply(array, i);
-                List<Object> keys = getKeys(row);
-                unnested.put(keys, row);
+        if (keyProjection != null) {
+            Map<BinaryRow, InternalRow> map = new HashMap<>();
+            for (InternalRow row : rows) {
+                BinaryRow key = keyProjection.apply(row).copy();
+                map.put(key, row);
             }
+
+            rows = new ArrayList<>(map.values());
         }
 
-        return unnested;
-    }
-
-    private List<Object> getKeys(InternalRow row) {
-        return keyGetters.stream().map(g -> g.getFieldOrNull(row)).collect(Collectors.toList());
+        return new GenericArray(rows.toArray());
     }
 }

@@ -314,6 +314,30 @@ public class FieldAggregatorTest {
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
     }
 
+    @Test
+    public void testFieldNestedAppendAgg() {
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v", DataTypes.STRING()))),
+                        Collections.emptyList());
+
+        InternalArray accumulator = null;
+
+        InternalRow current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+    }
+
     private List<InternalRow> unnest(InternalArray array) {
         return IntStream.range(0, array.size())
                 .mapToObj(i -> array.getRow(i, 3))

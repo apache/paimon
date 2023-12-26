@@ -64,7 +64,7 @@ public class CoreOptions implements Serializable {
 
     public static final String IGNORE_RETRACT = "ignore-retract";
 
-    public static final String NESTED_KEYS = "nested-keys";
+    public static final String NESTED_KEY = "nested-key";
 
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
@@ -1095,12 +1095,16 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
-    public List<String> fieldNestedUpdateAggNestedKeys(String fieldName) {
-        return options.get(
-                key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEYS)
-                        .stringType()
-                        .asList()
-                        .noDefaultValue());
+    public List<String> fieldNestedUpdateAggNestedKey(String fieldName) {
+        String keyString =
+                options.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY)
+                                .stringType()
+                                .noDefaultValue());
+        if (keyString == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.asList(keyString.split(","));
     }
 
     public String fileCompression() {

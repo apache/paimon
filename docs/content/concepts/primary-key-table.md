@@ -327,9 +327,9 @@ Current supported aggregate functions and data types are:
   It supports all data types.
 
 * `nested-update`:
-  The nested-update function collects multiple rows of a primary-key table into one single row 
-  (so-called 'nested table'). Use `fields.<field-name>.nested-keys=pk0;pk1;...` to specify the 
-  primary keys of the nested table. It supports ARRAY<ROW> data types.
+  The nested-update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
+
+  Use `fields.<field-name>.nested-key=pk0,pk1;...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
   An example:
   
@@ -364,7 +364,7 @@ Current supported aggregate functions and data types are:
   ) WITH (
     'merge-engine' = 'aggregation',
     'fields.sub_orders.aggregate-function' = 'nested-update',
-    'fields.sub_orders.nested-keys' = 'sub_order_id'
+    'fields.sub_orders.nested-key' = 'sub_order_id'
   );
   
   -- widen
