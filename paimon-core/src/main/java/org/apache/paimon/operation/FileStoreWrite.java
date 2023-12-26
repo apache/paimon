@@ -134,7 +134,14 @@ public interface FileStoreWrite<T> extends Restorable<List<FileStoreWrite.State<
      *
      * @throws Exception the thrown exception
      */
-    void closeWriters() throws Exception;
+    void closeWriter(BinaryRow partition, int bucket) throws Exception;
+
+    /**
+     * Alive writer in the store write.
+     *
+     * @return the number of open writers
+     */
+    int aliveWriters();
 
     /**
      * Close the writer.

@@ -55,6 +55,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 
 /** Tests for changelog table with primary keys. */
 public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
@@ -260,6 +261,62 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         "+I[5, D]");
 
         it.close();
+    }
+
+    @Test
+    public void testLotsPartitionBatchInsert() {
+        TableEnvironment bEnv = createBatchTableEnvironment();
+        bEnv.executeSql(createCatalogSql("testCatalog", path));
+        bEnv.executeSql("USE CATALOG testCatalog");
+
+
+        long maxMemory = Runtime.getRuntime().maxMemory();
+        long size = maxMemory / 2 / 1024 + 10;
+        bEnv.getConfig().set("parallelism.default", "1");
+        bEnv.executeSql("CREATE TABLE IF NOT EXISTS part_table (pt INT, pk STRING, data2 STRING, PRIMARY KEY (pt, pk) NOT ENFORCED) PARTITIONED BY (pt) WITH ('bucket' = '2', 'sink.parallelism' = '1')");
+        bEnv.executeSql(
+                "CREATE TEMPORARY TABLE Orders_in (\n"
+                        + "    f0        INT,\n"
+                        + "    f1        STRING,\n"
+                        + "    f2        STRING\n"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'fields.f0.min' = '0',\n"
+                        + "    'fields.f0.max' = '1000',\n"
+                        + "    'fields.f1.length' = '1024',\n"
+                        + "    'fields.f2.length' = '1024',\n"
+                        + "    'number-of-rows' = '"
+                        + size
+                        + "'\n"
+                        + ")");
+
+//        assertThatCode(
+//                () ->
+//                        bEnv.executeSql(
+//                                        "INSERT INTO part_table /*+ OPTIONS('write-batch-max-writers' = '200') */ SELECT * FROM Orders_in")
+//                                .await())
+//                .hasRootCauseInstanceOf(OutOfMemoryError.class);
+
+        assertThatCode(
+                () ->
+                        bEnv.executeSql(
+                                        "INSERT INTO part_table /*+ OPTIONS('write-batch-max-writers' = '50000') */ SELECT * FROM Orders_in")
+                                .await())
+                .doesNotThrowAnyException();
+
+//        assertThatCode(
+//                () ->
+//                        bEnv.executeSql(
+//                                        "INSERT OVERWRITE part_table /*+ OPTIONS('write-batch-max-writers' = '200') */ SELECT * FROM Orders_in")
+//                                .await())
+//                .hasRootCauseInstanceOf(OutOfMemoryError.class);
+
+//        assertThatCode(
+//                () ->
+//                        bEnv.executeSql(
+//                                        "INSERT OVERWRITE part_table /*+ OPTIONS('write-batch-max-writers' = '5') */ SELECT * FROM Orders_in")
+//                                .await())
+//                .doesNotThrowAnyException();
     }
 
     // ------------------------------------------------------------------------

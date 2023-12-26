@@ -242,18 +242,29 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void closeWriters() throws Exception {
+    public void closeWriter(BinaryRow partition, int bucket) throws Exception {
+        Map<Integer, WriterContainer<T>> pWriters = writers.get(partition);
+        if (pWriters != null && !pWriters.isEmpty()) {
+            WriterContainer<T> writerContainer = pWriters.get(bucket);
+            if (writerContainer != null) {
+                writerContainer.writer.close();
+            }
+        }
+    }
+
+    @Override
+    public int aliveWriters() {
+        return writers.size();
+    }
+
+    @Override
+    public void close() throws Exception {
         for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
             for (WriterContainer<T> writerContainer : bucketWriters.values()) {
                 writerContainer.writer.close();
             }
         }
         writers.clear();
-    }
-
-    @Override
-    public void close() throws Exception {
-        closeWriters();
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
         }

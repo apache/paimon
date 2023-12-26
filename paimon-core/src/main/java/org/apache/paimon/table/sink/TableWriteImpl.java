@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.FileStore;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
@@ -31,16 +30,9 @@ import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.FileStoreWrite.State;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.sort.BatchBucketSorter;
 import org.apache.paimon.table.BucketMode;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.NextIterator;
-import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Restorable;
 
-import javax.annotation.Nullable;
-
-import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
@@ -53,77 +45,55 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  */
 public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State<T>>> {
 
-    private final FileStoreWrite<T> write;
+    private final TableRecordSink<T> recordSink;
     private final KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor;
     private final RecordExtractor<T> recordExtractor;
-    private final TableSchema schema;
-
-    private @Nullable BatchBucketSorter batchBucketSorter;
 
     private boolean batchCommitted = false;
     private BucketMode bucketMode;
-    private boolean streamingMode = true;
-    private boolean ignorePreviousFiles = true;
 
     public TableWriteImpl(
-            FileStoreWrite<T> write,
+            FileStoreWrite<T> sink,
             KeyAndBucketExtractor<InternalRow> keyAndBucketExtractor,
             RecordExtractor<T> recordExtractor,
             TableSchema schema) {
-        this.write = write;
+        this.recordSink =
+                new TableRecordSink<>(sink, recordExtractor, keyAndBucketExtractor, schema);
         this.keyAndBucketExtractor = keyAndBucketExtractor;
         this.recordExtractor = recordExtractor;
-        this.schema = schema;
     }
 
     @Override
     public TableWriteImpl<T> withIgnorePreviousFiles(boolean ignorePreviousFiles) {
-        this.ignorePreviousFiles = ignorePreviousFiles;
-        write.withIgnorePreviousFiles(ignorePreviousFiles);
+        recordSink.withIgnorePreviousFiles(ignorePreviousFiles);
         return this;
     }
 
     @Override
     public TableWriteImpl<T> withExecutionMode(boolean isStreamingMode) {
-        this.streamingMode = isStreamingMode;
-        write.withExecutionMode(isStreamingMode);
+        recordSink.withExecutionMode(isStreamingMode);
         return this;
     }
 
     @Override
     public TableWriteImpl<T> withIOManager(IOManager ioManager) {
-        RowType rowType = schema.logicalRowType();
-        CoreOptions coreOptions = new CoreOptions(schema.options());
-        int[] partitionFields = schema.projection(schema.partitionKeys());
-        if (coreOptions.writeBatchSortBucket()
-                && batchBucketSorter == null
-                && partitionFields.length != 0) {
-            batchBucketSorter =
-                    BatchBucketSorter.create(
-                            ioManager,
-                            rowType,
-                            partitionFields,
-                            coreOptions.writeBufferSize(),
-                            coreOptions.pageSize(),
-                            coreOptions.localSortMaxNumFileHandles());
-        }
-        write.withIOManager(ioManager);
+        recordSink.withIOManager(ioManager);
         return this;
     }
 
     @Override
     public TableWriteImpl<T> withMemoryPool(MemorySegmentPool memoryPool) {
-        write.withMemoryPool(memoryPool);
+        recordSink.withMemoryPool(memoryPool);
         return this;
     }
 
     public TableWriteImpl<T> withMemoryPoolFactory(MemoryPoolFactory memoryPoolFactory) {
-        write.withMemoryPoolFactory(memoryPoolFactory);
+        recordSink.withMemoryPoolFactory(memoryPoolFactory);
         return this;
     }
 
     public TableWriteImpl<T> withCompactExecutor(ExecutorService compactExecutor) {
-        write.withCompactExecutor(compactExecutor);
+        recordSink.withCompactExecutor(compactExecutor);
         return this;
     }
 
@@ -167,11 +137,7 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
     }
 
     private void writeInternal(SinkRecord record) throws Exception {
-        if (batchBucketSorter != null && !streamingMode && !ignorePreviousFiles) {
-            batchBucketSorter.write(record.row(), record.bucket());
-        } else {
-            write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
-        }
+        recordSink.write(record);
     }
 
     @VisibleForTesting
@@ -211,27 +177,12 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
-        if (fullCompaction) {
-            // we need to write all the datas before triggering a full compaction, otherwise, the
-            // changelog producer of full-compaction will not be able to generate changelog in time.
-            if (batchBucketSorter != null && batchBucketSorter.size() != 0) {
-                NextIterator<Pair<InternalRow, Integer>> iterator =
-                        batchBucketSorter.sortedIterator();
-                Pair<InternalRow, Integer> sortedRow;
-                while ((sortedRow = iterator.nextOrNull()) != null) {
-                    SinkRecord record = toSinkRecord(sortedRow.getKey(), sortedRow.getValue());
-                    write.write(
-                            record.partition(), record.bucket(), recordExtractor.extract(record));
-                }
-                batchBucketSorter.clear();
-            }
-        }
-        write.compact(partition, bucket, fullCompaction);
+        recordSink.compact(partition, bucket, fullCompaction);
     }
 
     @Override
     public TableWriteImpl<T> withMetricRegistry(MetricRegistry metricRegistry) {
-        write.withMetricRegistry(metricRegistry);
+        recordSink.withMetricRegistry(metricRegistry);
         return this;
     }
 
@@ -243,34 +194,13 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
      */
     public void notifyNewFiles(
             long snapshotId, BinaryRow partition, int bucket, List<DataFileMeta> files) {
-        write.notifyNewFiles(snapshotId, partition, bucket, files);
+        recordSink.notifyNewFiles(snapshotId, partition, bucket, files);
     }
 
     @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
-        List<CommitMessage> commitMessages = new ArrayList<>();
-        if (batchBucketSorter != null && batchBucketSorter.size() != 0) {
-            // flush external row sort buffer.
-            NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
-            BinaryRow lastPartition = new BinaryRow(batchBucketSorter.fieldsSize());
-            Pair<InternalRow, Integer> sortedRow;
-            int lastBucket = -1;
-            while ((sortedRow = iterator.nextOrNull()) != null) {
-                SinkRecord record = toSinkRecord(sortedRow.getKey(), sortedRow.getValue());
-                if (!lastPartition.equals(record.partition())
-                        || lastBucket != sortedRow.getValue()) {
-                    commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
-                    write.closeWriters();
-                }
-                write.write(record.partition(), record.bucket(), recordExtractor.extract(record));
-                record.partition().copy(lastPartition);
-                lastBucket = sortedRow.getValue();
-            }
-            batchBucketSorter.clear();
-        }
-        commitMessages.addAll(write.prepareCommit(waitCompaction, commitIdentifier));
-        return commitMessages;
+        return recordSink.prepareCommit(waitCompaction, commitIdentifier);
     }
 
     @Override
@@ -282,22 +212,22 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
 
     @Override
     public void close() throws Exception {
-        write.close();
+        recordSink.close();
     }
 
     @Override
     public List<State<T>> checkpoint() {
-        return write.checkpoint();
+        return recordSink.checkpoint();
     }
 
     @Override
     public void restore(List<State<T>> state) {
-        write.restore(state);
+        recordSink.restore(state);
     }
 
     @VisibleForTesting
     public FileStoreWrite<T> getWrite() {
-        return write;
+        return recordSink;
     }
 
     /** Extractor to extract {@link T} from the {@link SinkRecord}. */

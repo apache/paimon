@@ -270,10 +270,10 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 mb"))
                     .withDescription("Amount of data to spill records to disk in spilled sort.");
 
-    public static final ConfigOption<Boolean> WRITE_BATCH_SORT_BUCKET =
-            key("write-batch-sort-bucket")
-                    .booleanType()
-                    .defaultValue(true)
+    public static final ConfigOption<Integer> WRITE_BATCH_MAX_WRITERS =
+            key("write-batch-max-writers")
+                    .intType()
+                    .defaultValue(5)
                     .withDescription(
                             "Batch inserting lots of data without partition specified among huge number of partition buckets, sort the records by partition buckets before inserting."
                                     + "Set this to true to avoid out-of-memory by opening two many writers in lots of partition buckets.");
@@ -1169,8 +1169,8 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
-    public boolean writeBatchSortBucket() {
-        return options.get(WRITE_BATCH_SORT_BUCKET);
+    public int maxWritersInBatch() {
+        return options.get(WRITE_BATCH_MAX_WRITERS);
     }
 
     public Duration continuousDiscoveryInterval() {

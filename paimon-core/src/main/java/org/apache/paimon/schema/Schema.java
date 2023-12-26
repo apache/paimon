@@ -223,6 +223,11 @@ public class Schema {
                 + '}';
     }
 
+    public TableSchema toTableSchema(int id) {
+        return new TableSchema(
+                id, fields, fields.size(), partitionKeys, primaryKeys, options, comment);
+    }
+
     /** Builder for configuring and creating instances of {@link Schema}. */
     public static Schema.Builder newBuilder() {
         return new Builder();

@@ -158,6 +158,10 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     public void testLotsPartitionBatchInsert() {
         long maxMemory = Runtime.getRuntime().maxMemory();
         long size = maxMemory / 2 / 102400 + 10;
+        System.out.println(
+                (Runtime.getRuntime().maxMemory() - Runtime.getRuntime().totalMemory())
+                        / 2
+                        / 102400);
         batchSql(
                 "CREATE TEMPORARY TABLE Orders_in (\n"
                         + "    f0        INT,\n"
@@ -177,12 +181,28 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         assertThatCode(
                         () ->
                                 tEnv.executeSql(
-                                                "INSERT INTO part_table2 /*+ OPTIONS('write-batch-sort-bucket' = 'false') */ SELECT * FROM Orders_in")
+                                                "INSERT INTO part_table2 /*+ OPTIONS('write-batch-max-writers' = '200') */ SELECT * FROM Orders_in")
                                         .await())
                 .hasRootCauseInstanceOf(OutOfMemoryError.class);
+
         assertThatCode(
                         () ->
-                                tEnv.executeSql("INSERT INTO part_table2 SELECT * FROM Orders_in")
+                                tEnv.executeSql(
+                                                "INSERT INTO part_table2 /*+ OPTIONS('write-batch-max-writers' = '5') */ SELECT * FROM Orders_in")
+                                        .await())
+                .doesNotThrowAnyException();
+
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT OVERWRITE part_table2 /*+ OPTIONS('write-batch-max-writers' = '200') */ SELECT * FROM Orders_in")
+                                        .await())
+                .hasRootCauseInstanceOf(OutOfMemoryError.class);
+
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT OVERWRITE part_table2 /*+ OPTIONS('write-batch-max-writers' = '5') */ SELECT * FROM Orders_in")
                                         .await())
                 .doesNotThrowAnyException();
         assertThat(batchSql("SELECT count(*) FROM part_table2").get(0).getField(0)).isEqualTo(size);
@@ -299,7 +319,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING)",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt)",
-                "CREATE TABLE IF NOT EXISTS part_table2 (pk INT, data STRING, data2 STRING) PARTITIONED BY (pk) WITH ('bucket' = '2')",
+                "CREATE TABLE IF NOT EXISTS part_table2 (pt INT, data STRING, data2 STRING) PARTITIONED BY (pt) WITH ('bucket' = '2', 'sink.parallelism' = '1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>)");
     }
 

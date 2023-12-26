@@ -16,9 +16,8 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.sort;
+package org.apache.paimon.table.sink;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -26,13 +25,11 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
-import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.NextIterator;
-import org.apache.paimon.utils.Pair;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -46,8 +43,8 @@ import java.util.List;
 import java.util.Random;
 import java.util.TreeSet;
 
-/** Tests for {@link BatchBucketSorter}. */
-public class BatchBucketSorterTest {
+/** Tests for {@link org.apache.paimon.table.sink.TableRecordSink}. */
+public class TableRecordSinkTest {
 
     private static final Random RANDOM = new Random();
 
@@ -57,28 +54,33 @@ public class BatchBucketSorterTest {
     public void testFunctionRandom() throws Exception {
         Schema schema =
                 Schema.newBuilder()
-                        .column("f0", DataTypes.BIGINT())
+                        .column("f0", DataTypes.INT())
                         .column("f1", DataTypes.STRING())
                         .column("f2", DataTypes.BIGINT())
+                        .partitionKeys("f2")
                         .build();
         IOManager ioManager = new IOManagerImpl(dir.toString());
-        CoreOptions coreOptions = new CoreOptions(new Options());
 
-        BatchBucketSorter batchBucketSorter =
-                BatchBucketSorter.create(
-                        ioManager,
-                        schema.rowType(),
-                        new int[] {2},
-                        MemorySize.parse("10 mb").getBytes(),
-                        coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+        TableSchema tableSchema = schema.toTableSchema(0);
+        RowKeyExtractor rowKeyExtractor =
+                new RowKeyExtractor(tableSchema) {
+                    @Override
+                    public int bucket() {
+                        return 0;
+                    }
+                };
+
+        TableRecordSink.BatchBucketSorter tableRecordSink =
+                new TableRecordSink.BatchBucketSorter(ioManager, rowKeyExtractor, tableSchema);
 
         List<BinaryRow> datas = data3(Math.abs(RANDOM.nextInt(100)) + 100);
         int i = 1;
         for (BinaryRow data : datas) {
-            batchBucketSorter.write(data, 0);
+            rowKeyExtractor.setRecord(data);
+            tableRecordSink.write(
+                    rowKeyExtractor.partition(), rowKeyExtractor.bucket(), rowKeyExtractor.record);
             if (i++ / 10 == 0) {
-                batchBucketSorter.flushMemory();
+                tableRecordSink.flushMemory();
             }
         }
 
@@ -87,11 +89,11 @@ public class BatchBucketSorterTest {
                         Comparator.comparingLong((BinaryRow o) -> o.getLong(2))
                                 .thenComparingLong(o -> o.getLong(0)));
         treeSet.addAll(datas);
-        NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
-        Pair<InternalRow, Integer> pair;
+        NextIterator<SinkRecord> iterator = tableRecordSink.sortedIterator();
+        SinkRecord sinkRecord;
         Iterator<BinaryRow> treeIterator = treeSet.iterator();
-        while ((pair = iterator.nextOrNull()) != null) {
-            InternalRow row = pair.getLeft();
+        while ((sinkRecord = iterator.nextOrNull()) != null) {
+            InternalRow row = sinkRecord.row();
             long f0 = row.getLong(0);
             BinaryString f1 = row.getString(1);
             long f2 = row.getLong(2);
@@ -113,58 +115,58 @@ public class BatchBucketSorterTest {
                 Schema.newBuilder()
                         .column("f0", DataTypes.INT())
                         .column("f1", DataTypes.INT())
+                        .partitionKeys("f0")
                         .build();
         IOManager ioManager = new IOManagerImpl(dir.toString());
-        CoreOptions coreOptions = new CoreOptions(new Options());
 
-        BatchBucketSorter batchBucketSorter =
-                BatchBucketSorter.create(
-                        ioManager,
-                        schema.rowType(),
-                        new int[] {0},
-                        MemorySize.parse("10 mb").getBytes(),
-                        coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+        TableSchema tableSchema = schema.toTableSchema(0);
+        RowKeyExtractor rowKeyExtractor =
+                new RowKeyExtractor(tableSchema) {
+                    @Override
+                    public int bucket() {
+                        return 0;
+                    }
+                };
 
-        BatchBucketSorter batchBucketSorter2 =
-                BatchBucketSorter.create(
-                        ioManager,
-                        schema.rowType(),
-                        new int[] {0},
-                        MemorySize.parse("10 mb").getBytes(),
-                        coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+        TableRecordSink.BatchBucketSorter sorter =
+                new TableRecordSink.BatchBucketSorter(ioManager, rowKeyExtractor, tableSchema);
+
+        TableRecordSink.BatchBucketSorter sorter2 =
+                new TableRecordSink.BatchBucketSorter(ioManager, rowKeyExtractor, tableSchema);
 
         List<InternalRow> rows = new ArrayList<>();
-        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 0, 0, 0));
-        rows.add(GenericRow.of(0, 1, 0, 0));
-        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 1, 1, 0));
-        rows.add(GenericRow.of(0, 0, 1, 0));
-        rows.add(GenericRow.of(0, 0, 1, 0));
-        rows.add(GenericRow.of(0, 1, 0, 0));
-        rows.add(GenericRow.of(0, 1, 0, 0));
-        rows.add(GenericRow.of(0, 0, 1, 0));
-        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 0, 1, 0));
-        rows.add(GenericRow.of(0, 1, 1, 0));
-        rows.add(GenericRow.of(0, 1, 1, 0));
-        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 1, 0, 0));
-        rows.add(GenericRow.of(0, 0, 0, 0));
-        rows.add(GenericRow.of(0, 1, 1, 0));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 0));
+        rows.add(GenericRow.of(1, 0));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 1, 1));
+        rows.add(GenericRow.of(0, 1));
+        rows.add(GenericRow.of(0, 1));
+        rows.add(GenericRow.of(1, 0));
+        rows.add(GenericRow.of(1, 0));
+        rows.add(GenericRow.of(0, 1));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 0, 1));
+        rows.add(GenericRow.of(1, 1));
+        rows.add(GenericRow.of(1, 1));
+        rows.add(GenericRow.ofKind(RowKind.DELETE, 1, 0));
+        rows.add(GenericRow.of(0, 0));
+        rows.add(GenericRow.of(1, 1));
 
         for (InternalRow row : rows) {
-            batchBucketSorter.write(row, 0);
-            batchBucketSorter.flushMemory();
-            batchBucketSorter2.write(row, 0);
+            rowKeyExtractor.setRecord(row);
+            sorter.write(
+                    rowKeyExtractor.partition(), rowKeyExtractor.bucket(), rowKeyExtractor.record);
+            sorter.flushMemory();
+            sorter2.write(
+                    rowKeyExtractor.partition(), rowKeyExtractor.bucket(), rowKeyExtractor.record);
         }
 
-        NextIterator<Pair<InternalRow, Integer>> i1 = batchBucketSorter.sortedIterator();
-        NextIterator<Pair<InternalRow, Integer>> i2 = batchBucketSorter2.sortedIterator();
+        NextIterator<SinkRecord> i1 = sorter.sortedIterator();
+        NextIterator<SinkRecord> i2 = sorter2.sortedIterator();
 
-        Pair<InternalRow, Integer> row;
-        while ((row = i1.nextOrNull()) != null) {
-            Pair<InternalRow, Integer> row2 = i2.nextOrNull();
-            Assertions.assertThat(row.getLeft().getRowKind())
-                    .isEqualTo(row2.getLeft().getRowKind());
+        SinkRecord sinkRecord;
+        while ((sinkRecord = i1.nextOrNull()) != null) {
+            SinkRecord sinkRecord2 = i2.nextOrNull();
+            Assertions.assertThat(sinkRecord.row().getRowKind())
+                    .isEqualTo(sinkRecord2.row().getRowKind());
         }
     }
 
@@ -176,25 +178,30 @@ public class BatchBucketSorterTest {
                         .column("f1", DataTypes.STRING())
                         .column("f2", DataTypes.BIGINT())
                         .column("f3", DataTypes.BIGINT())
+                        .partitionKeys("f2")
                         .build();
         IOManager ioManager = new IOManagerImpl(dir.toString());
-        CoreOptions coreOptions = new CoreOptions(new Options());
 
-        BatchBucketSorter batchBucketSorter =
-                BatchBucketSorter.create(
-                        ioManager,
-                        schema.rowType(),
-                        new int[] {2},
-                        MemorySize.parse("10 mb").getBytes(),
-                        coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+        TableSchema tableSchema = schema.toTableSchema(0);
+        RowKeyExtractor rowKeyExtractor =
+                new RowKeyExtractor(schema.toTableSchema(0)) {
+                    @Override
+                    public int bucket() {
+                        return (int) record.getLong(3);
+                    }
+                };
+
+        TableRecordSink.BatchBucketSorter tableRecordSink =
+                new TableRecordSink.BatchBucketSorter(ioManager, rowKeyExtractor, tableSchema);
 
         List<BinaryRow> datas = data4(Math.abs(RANDOM.nextInt(100)) + 100);
         int i = 1;
         for (BinaryRow data : datas) {
-            batchBucketSorter.write(data, (int) data.getLong(3));
+            rowKeyExtractor.setRecord(data);
+            tableRecordSink.write(
+                    rowKeyExtractor.partition(), rowKeyExtractor.bucket(), rowKeyExtractor.record);
             if (i++ / 10 == 0) {
-                batchBucketSorter.flushMemory();
+                tableRecordSink.flushMemory();
             }
         }
 
@@ -204,11 +211,11 @@ public class BatchBucketSorterTest {
                                 .thenComparingLong(o -> o.getLong(3))
                                 .thenComparingLong(o -> o.getLong(0)));
         treeSet.addAll(datas);
-        NextIterator<Pair<InternalRow, Integer>> iterator = batchBucketSorter.sortedIterator();
-        Pair<InternalRow, Integer> pair;
+        NextIterator<SinkRecord> iterator = tableRecordSink.sortedIterator();
+        SinkRecord sinkRecord;
         Iterator<BinaryRow> treeIterator = treeSet.iterator();
-        while ((pair = iterator.nextOrNull()) != null) {
-            InternalRow row = pair.getLeft();
+        while ((sinkRecord = iterator.nextOrNull()) != null) {
+            InternalRow row = sinkRecord.row();
             long f0 = row.getLong(0);
             BinaryString f1 = row.getString(1);
             long f2 = row.getLong(2);
