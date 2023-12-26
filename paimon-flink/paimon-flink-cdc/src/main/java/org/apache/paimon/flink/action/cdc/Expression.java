@@ -60,6 +60,10 @@ public interface Expression extends Serializable {
                 return day(fieldReference);
             case "hour":
                 return hour(fieldReference);
+            case "minute":
+                return minute(fieldReference);
+            case "second":
+                return second(fieldReference);
             case "date_format":
                 return dateFormat(fieldReference, literals);
             case "substring":
@@ -89,6 +93,14 @@ public interface Expression extends Serializable {
 
     static Expression hour(String fieldReference) {
         return new HourComputer(fieldReference);
+    }
+
+    static Expression minute(String fieldReference) {
+        return new MinuteComputer(fieldReference);
+    }
+
+    static Expression second(String fieldReference) {
+        return new SecondComputer(fieldReference);
     }
 
     static Expression dateFormat(String fieldReference, String... literals) {
@@ -248,6 +260,62 @@ public interface Expression extends Serializable {
         public String eval(String input) {
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return String.valueOf(localDateTime.getHour());
+        }
+    }
+
+    /** Compute minute from a time input. */
+    final class MinuteComputer implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+
+        private MinuteComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.INT();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return String.valueOf(localDateTime.getMinute());
+        }
+    }
+
+    /** Compute hour from a time input. */
+    final class SecondComputer implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldReference;
+
+        private SecondComputer(String fieldReference) {
+            this.fieldReference = fieldReference;
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.INT();
+        }
+
+        @Override
+        public String eval(String input) {
+            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
+            return String.valueOf(localDateTime.getSecond());
         }
     }
 
