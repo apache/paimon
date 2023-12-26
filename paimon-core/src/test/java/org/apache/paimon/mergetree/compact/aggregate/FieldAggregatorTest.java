@@ -146,11 +146,20 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldCountIntAgg() {
-        FieldCountAgg fieldAvgAgg = new FieldCountAgg(new IntType());
-        assertThat(fieldAvgAgg.agg(null, 10)).isEqualTo(1);
-        assertThat(fieldAvgAgg.agg(1, 5)).isEqualTo(2);
-        assertThat(fieldAvgAgg.agg(2, 15)).isEqualTo(3);
-        assertThat(fieldAvgAgg.agg(3, 25)).isEqualTo(4);
+        FieldCountAgg fieldCountAgg = new FieldCountAgg(new IntType());
+        assertThat(fieldCountAgg.agg(null, 10)).isEqualTo(1);
+        assertThat(fieldCountAgg.agg(1, 5)).isEqualTo(2);
+        assertThat(fieldCountAgg.agg(2, 15)).isEqualTo(3);
+        assertThat(fieldCountAgg.agg(3, 25)).isEqualTo(4);
+    }
+
+    @Test
+    public void testFieldProductIntAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new IntType());
+        assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
+        assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
+        assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
+        assertThat(fieldProductAgg.retract(null, 5)).isEqualTo(5);
     }
 
     @Test
@@ -160,6 +169,24 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 11);
         assertThat(fieldSumAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 5);
         assertThat(fieldSumAgg.retract(null, (byte) 5)).isEqualTo((byte) -5);
+    }
+
+    @Test
+    public void testFieldProductByteAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new TinyIntType());
+        assertThat(fieldProductAgg.agg(null, (byte) 10)).isEqualTo((byte) 10);
+        assertThat(fieldProductAgg.agg((byte) 1, (byte) 10)).isEqualTo((byte) 10);
+        assertThat(fieldProductAgg.retract((byte) 10, (byte) 5)).isEqualTo((byte) 2);
+        assertThat(fieldProductAgg.retract(null, (byte) 5)).isEqualTo((byte) 5);
+    }
+
+    @Test
+    public void testFieldProductShortAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new SmallIntType());
+        assertThat(fieldProductAgg.agg(null, (short) 10)).isEqualTo((short) 10);
+        assertThat(fieldProductAgg.agg((short) 1, (short) 10)).isEqualTo((short) 10);
+        assertThat(fieldProductAgg.retract((short) 10, (short) 5)).isEqualTo((short) 2);
+        assertThat(fieldProductAgg.retract(null, (short) 5)).isEqualTo((short) 5);
     }
 
     @Test
@@ -181,6 +208,24 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductLongAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new BigIntType());
+        assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
+        assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
+        assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);
+        assertThat(fieldProductAgg.retract(null, 5L)).isEqualTo(5L);
+    }
+
+    @Test
+    public void testFieldProductFloatAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new FloatType());
+        assertThat(fieldProductAgg.agg(null, (float) 10)).isEqualTo((float) 10);
+        assertThat(fieldProductAgg.agg((float) 1, (float) 10)).isEqualTo((float) 10);
+        assertThat(fieldProductAgg.retract((float) 10, (float) 5)).isEqualTo((float) 2);
+        assertThat(fieldProductAgg.retract(null, (float) 5)).isEqualTo((float) 5);
+    }
+
+    @Test
     public void testFieldSumFloatAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new FloatType());
         assertThat(fieldSumAgg.agg(null, (float) 10)).isEqualTo((float) 10);
@@ -190,12 +235,30 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldProductDoubleAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new DoubleType());
+        assertThat(fieldProductAgg.agg(null, (double) 10)).isEqualTo((double) 10);
+        assertThat(fieldProductAgg.agg((double) 1, (double) 10)).isEqualTo((double) 10);
+        assertThat(fieldProductAgg.retract((double) 10, (double) 5)).isEqualTo((double) 2);
+        assertThat(fieldProductAgg.retract(null, (double) 5)).isEqualTo((double) 5);
+    }
+
+    @Test
     public void testFieldSumDoubleAgg() {
         FieldSumAgg fieldSumAgg = new FieldSumAgg(new DoubleType());
         assertThat(fieldSumAgg.agg(null, (double) 10)).isEqualTo((double) 10);
         assertThat(fieldSumAgg.agg((double) 1, (double) 10)).isEqualTo((double) 11);
         assertThat(fieldSumAgg.retract((double) 10, (double) 5)).isEqualTo((double) 5);
         assertThat(fieldSumAgg.retract(null, (double) 5)).isEqualTo((double) -5);
+    }
+
+    @Test
+    public void testFieldProductDecimalAgg() {
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(new DecimalType());
+        assertThat(fieldProductAgg.agg(null, toDecimal(10))).isEqualTo(toDecimal(10));
+        assertThat(fieldProductAgg.agg(toDecimal(1), toDecimal(10))).isEqualTo(toDecimal(10));
+        assertThat(fieldProductAgg.retract(toDecimal(10), toDecimal(5))).isEqualTo(toDecimal(2));
+        assertThat(fieldProductAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(5));
     }
 
     @Test

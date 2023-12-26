@@ -286,6 +286,10 @@ Current supported aggregate functions and data types are:
    The sum function aggregates the values across multiple rows.
    It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
+* `product` function:
+  The product function can compute product values across multiple lines.
+  It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
+  
 * `count` function:
   The count function counts the values across multiple rows.
   It supports INTEGER, BIGINT data types.
@@ -326,7 +330,7 @@ Current supported aggregate functions and data types are:
   The first_not_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
-Only `sum` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+Only `sum` and `product` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
