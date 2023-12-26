@@ -49,8 +49,7 @@ public class FileStoreSourceReaderMetrics {
         return UNDEFINED;
     }
 
-    @VisibleForTesting
-    long getLatestFileCreationTime() {
+    public long getLatestFileCreationTime() {
         return latestFileCreationTime;
     }
 
