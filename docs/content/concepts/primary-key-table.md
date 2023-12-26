@@ -326,6 +326,75 @@ Current supported aggregate functions and data types are:
   The first_not_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
+* `nested-update`:
+  The nested-update function collects multiple rows of a primary-key table into one single row 
+  (so-called 'nested table'). Use `fields.<field-name>.nested-keys=pk0;pk1;...` to specify the 
+  primary keys of the nested table. It supports ARRAY<ROW> data types.
+
+  An example:
+  
+  {{< tabs "nested-update-example" >}}
+
+  {{< tab "Flink" >}}
+
+  ```sql
+  -- orders table
+  CREATE TABLE orders (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING
+  );
+  
+  -- sub orders that have the same order_id 
+  -- belongs to the same order
+  CREATE TABLE sub_orders (
+    order_id BIGINT,
+    sub_order_id INT,
+    product_name STRING,
+    price BIGINT,
+    PRIMARY KEY (order_id, sub_order_id) NOT ENFORCED
+  );
+  
+  -- wide table
+  CREATE TABLE order_wide (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING,
+    sub_orders ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>
+  ) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.sub_orders.aggregate-function' = 'nested-update',
+    'fields.sub_orders.nested-keys' = 'sub_order_id'
+  );
+  
+  -- widen
+  INSERT INTO order_wide
+  
+  SELECT 
+    order_id, 
+    user_name,
+    address, 
+    CAST (NULL AS ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>) 
+  FROM orders
+  
+  UNION ALL 
+    
+  SELECT 
+    order_id, 
+    CAST (NULL AS STRING), 
+    CAST (NULL AS STRING), 
+    ARRAY[ROW(sub_order_id, product_name, price)] 
+  FROM sub_orders;
+  
+  -- query using UNNEST
+  SELECT order_id, user_name, address, sub_order_id, product_name, price 
+  FROM order_wide, UNNEST(sub_orders) AS so(sub_order_id, product_name, price)
+  ```
+  
+  {{< /tab >}}
+
+  {{< /tabs >}}
+
 Only `sum` and `product` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
