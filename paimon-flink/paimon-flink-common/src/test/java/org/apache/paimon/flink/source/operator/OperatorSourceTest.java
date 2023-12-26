@@ -72,10 +72,8 @@ public class OperatorSourceTest {
 
     @BeforeEach
     public void before()
-            throws Catalog.TableAlreadyExistException,
-                    Catalog.DatabaseNotExistException,
-                    Catalog.TableNotExistException,
-                    Catalog.DatabaseAlreadyExistException {
+            throws Catalog.TableAlreadyExistException, Catalog.DatabaseNotExistException,
+                    Catalog.TableNotExistException, Catalog.DatabaseAlreadyExistException {
         Catalog catalog =
                 CatalogFactory.createCatalog(
                         CatalogContext.create(new org.apache.paimon.fs.Path(tempDir.toUri())));
