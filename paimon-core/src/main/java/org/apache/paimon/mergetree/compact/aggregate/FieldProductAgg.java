@@ -25,6 +25,7 @@ import java.math.BigDecimal;
 
 import static org.apache.paimon.data.Decimal.fromBigDecimal;
 
+/** product value aggregate a field of a row. */
 public class FieldProductAgg extends FieldAggregator {
 
     public static final String NAME = "product";
