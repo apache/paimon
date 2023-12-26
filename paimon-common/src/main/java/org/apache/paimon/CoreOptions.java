@@ -986,9 +986,10 @@ public class CoreOptions implements Serializable {
             key("snapshot.expire.ignore-clean-directories")
                     .booleanType()
                     .defaultValue(true)
-                    .withDescription("Whether to try to clean empty directories when expiring snapshots. " +
-                            "Note that trying to clean directories might throw exceptions in filesystem, " +
-                            "but in most cases it won't cause problems.");
+                    .withDescription(
+                            "Whether to try to clean empty directories when expiring snapshots. "
+                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
+                                    + "but in most cases it won't cause problems.");
 
     private final Options options;
 

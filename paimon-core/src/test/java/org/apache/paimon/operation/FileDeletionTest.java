@@ -158,8 +158,6 @@ public class FileDeletionTest {
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
-
-
     /**
      * This test checks FileStoreExpire can ignore clean data directories in snapshot expire
      * situation. The partition keys are (dt, hr). Test process:
@@ -172,8 +170,8 @@ public class FileDeletionTest {
      *       dt=0402/hr=8 will be exist after expiring).
      *   <li>4. Generate snapshot 4 by deleting all data of partition dt=0402/hr=12/bucket-0 (thus
      *       directory dt=0402/hr=12/bucket-0 will be exist after expiring).
-     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=20/bucket-1 survives) and set ignore  clean data directories,
-     *   then check.
+     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=20/bucket-1 survives) and set ignore clean data
+     *       directories, then check.
      * </ul>
      */
     @Test

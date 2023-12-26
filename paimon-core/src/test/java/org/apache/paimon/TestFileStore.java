@@ -132,7 +132,10 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public FileStoreExpireImpl newExpire(
-            int numRetainedMin, int numRetainedMax, long millisRetained, boolean snapshotExpireIgnoreCleanDirectories) {
+            int numRetainedMin,
+            int numRetainedMax,
+            long millisRetained,
+            boolean snapshotExpireIgnoreCleanDirectories) {
         return new FileStoreExpireImpl(
                 numRetainedMin,
                 numRetainedMax,
