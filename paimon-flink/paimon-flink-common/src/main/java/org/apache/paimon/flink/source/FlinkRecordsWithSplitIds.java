@@ -107,12 +107,10 @@ public class FlinkRecordsWithSplitIds implements RecordsWithSplitIds<RecordItera
             RecordIterator<RowData> element,
             SourceOutput<RowData> output,
             FileStoreSourceSplitState state,
-            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
+            FileStoreSourceReaderMetrics metrics) {
         long timestamp = TimestampAssigner.NO_TIMESTAMP;
-        if (sourceReaderMetrics != null
-                && sourceReaderMetrics.getLatestFileCreationTime()
-                        != FileStoreSourceReaderMetrics.UNDEFINED) {
-            timestamp = sourceReaderMetrics.getLatestFileCreationTime();
+        if (metrics.getLatestFileCreationTime() != FileStoreSourceReaderMetrics.UNDEFINED) {
+            timestamp = metrics.getLatestFileCreationTime();
         }
 
         RecordAndPosition<RowData> record;

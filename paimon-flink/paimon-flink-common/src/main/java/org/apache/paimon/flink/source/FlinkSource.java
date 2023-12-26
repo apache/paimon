@@ -56,7 +56,7 @@ public abstract class FlinkSource
         FileStoreSourceReaderMetrics sourceReaderMetrics =
                 new FileStoreSourceReaderMetrics(context.metricGroup());
         return new FileStoreSourceReader(
-                context, readBuilder.newRead(), ioManager, limit, sourceReaderMetrics);
+                context, readBuilder.newRead(), sourceReaderMetrics, ioManager, limit);
     }
 
     @Override

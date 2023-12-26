@@ -20,6 +20,8 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.flink.source.FileStoreSourceReaderTest.DummyMetricGroup;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -97,7 +99,9 @@ public class FileStoreSourceSplitReaderTest {
 
     private FileStoreSourceSplitReader createReader(TableRead tableRead, @Nullable Long limit) {
         return new FileStoreSourceSplitReader(
-                tableRead, limit == null ? null : new RecordLimiter(limit), null);
+                tableRead,
+                limit == null ? null : new RecordLimiter(limit),
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
     }
 
     private void innerTestOnce(int skip) throws Exception {

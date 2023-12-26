@@ -41,23 +41,23 @@ public class FileStoreSourceReader
         extends SingleThreadMultiplexSourceReaderBase<
                 RecordIterator<RowData>, RowData, FileStoreSourceSplit, FileStoreSourceSplitState> {
 
-    @Nullable private final IOManager ioManager;
+    private final IOManager ioManager;
+
     private long lastConsumeSnapshotId = Long.MIN_VALUE;
 
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
             TableRead tableRead,
-            @Nullable IOManager ioManager,
-            @Nullable Long limit,
-            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
+            FileStoreSourceReaderMetrics metrics,
+            IOManager ioManager,
+            @Nullable Long limit) {
         // limiter is created in SourceReader, it can be shared in all split readers
         super(
                 () ->
                         new FileStoreSourceSplitReader(
-                                tableRead, RecordLimiter.create(limit), sourceReaderMetrics),
+                                tableRead, RecordLimiter.create(limit), metrics),
                 (element, output, state) ->
-                        FlinkRecordsWithSplitIds.emitRecord(
-                                element, output, state, sourceReaderMetrics),
+                        FlinkRecordsWithSplitIds.emitRecord(element, output, state, metrics),
                 readerContext.getConfiguration(),
                 readerContext);
         this.ioManager = ioManager;
@@ -66,19 +66,18 @@ public class FileStoreSourceReader
     public FileStoreSourceReader(
             SourceReaderContext readerContext,
             TableRead tableRead,
-            @Nullable IOManager ioManager,
+            FileStoreSourceReaderMetrics metrics,
+            IOManager ioManager,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<RecordIterator<RowData>>>
-                    elementsQueue,
-            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
+                    elementsQueue) {
         super(
                 elementsQueue,
                 () ->
                         new FileStoreSourceSplitReader(
-                                tableRead, RecordLimiter.create(limit), sourceReaderMetrics),
+                                tableRead, RecordLimiter.create(limit), metrics),
                 (element, output, state) ->
-                        FlinkRecordsWithSplitIds.emitRecord(
-                                element, output, state, sourceReaderMetrics),
+                        FlinkRecordsWithSplitIds.emitRecord(element, output, state, metrics),
                 readerContext.getConfiguration(),
                 readerContext);
         this.ioManager = ioManager;
@@ -130,8 +129,6 @@ public class FileStoreSourceReader
     @Override
     public void close() throws Exception {
         super.close();
-        if (ioManager != null) {
-            ioManager.close();
-        }
+        ioManager.close();
     }
 }
