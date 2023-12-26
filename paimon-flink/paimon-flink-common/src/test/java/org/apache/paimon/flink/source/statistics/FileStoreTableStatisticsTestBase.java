@@ -37,7 +37,6 @@ import org.apache.flink.configuration.Configuration;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.plan.stats.TableStats;
 import org.assertj.core.api.Assertions;
-import org.junit.Ignore;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -148,7 +147,6 @@ public abstract class FileStoreTableStatisticsTestBase {
     }
 
     @Test
-    @Ignore
     public void testTableFilterValueDisableStatistics() throws Exception {
         FileStoreTable table = writeData();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());

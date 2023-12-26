@@ -42,6 +42,7 @@ import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableConfig;
@@ -60,6 +61,7 @@ import javax.annotation.Nullable;
 import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -136,12 +138,17 @@ public class DataTableSource extends FlinkTableSource {
         this.tableIdentifier = tableIdentifier;
         this.streaming = streaming;
         this.context = context;
+        Map<String, String> mapConf;
+        ReadableConfig config = context.getConfiguration();
+        if (config instanceof Configuration) { // It can't be cast to TableConfig for flink 1.14
+            mapConf = ((Configuration) config).toMap();
+        } else if (config instanceof TableConfig) {
+            mapConf = ((TableConfig) config).getConfiguration().toMap();
+        } else {
+            throw new IllegalArgumentException("Unexpected config: " + config.getClass());
+        }
         this.valueStatisticsDisable =
-                Options.fromMap(
-                                ((TableConfig) context.getConfiguration())
-                                        .getConfiguration()
-                                        .toMap())
-                        .get(SOURCE_VALUE_FILTER_STATISTICS_DISABLE);
+                Options.fromMap(mapConf).get(SOURCE_VALUE_FILTER_STATISTICS_DISABLE);
         this.logStoreTableFactory = logStoreTableFactory;
         this.predicate = predicate;
         this.projectFields = projectFields;
@@ -175,7 +182,8 @@ public class DataTableSource extends FlinkTableSource {
                 return ChangelogMode.all();
             }
 
-            // optimization: transaction consistency and all changelog mode avoid the generation of
+            // optimization: transaction consistency andls - all changelog mode avoid the generation
+            // of
             // normalized nodes. See FlinkTableSink.getChangelogMode validation.
             return options.get(LOG_CONSISTENCY) == LogConsistency.TRANSACTIONAL
                             && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
@@ -326,11 +334,11 @@ public class DataTableSource extends FlinkTableSource {
             return TableStats.UNKNOWN;
         }
 
-//        if (valueStatisticsDisable
-//                && checkAllValuePredication(
-//                        table.partitionKeys(), table.primaryKeys(), predicate)) {
-//            return TableStats.UNKNOWN;
-//        }
+        if (valueStatisticsDisable
+                && checkAllValuePredication(
+                        table.partitionKeys(), table.primaryKeys(), predicate)) {
+            return TableStats.UNKNOWN;
+        }
 
         scanSplitsForInference();
         return new TableStats(splitStatistics.totalRowCount());
