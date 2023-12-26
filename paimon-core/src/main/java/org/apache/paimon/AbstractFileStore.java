@@ -178,7 +178,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 newSnapshotDeletion(),
                 newTagManager(),
                 options.snapshotExpireLimit(),
-                options.snapshotExpireIgnoreCleanDirectories());
+                options.snapshotExpireCleanEmptyDirectories());
     }
 
     @Override

@@ -148,7 +148,7 @@ public class FileDeletionTest {
         cleanBucket(store, partition, 0);
 
         // step 5: expire and check file paths
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
         // whole dt=0401 is deleted
         assertPathNotExists(fileIO, new Path(root, "dt=0401"));
         // whole dt=0402/hr=8 is deleted
@@ -259,7 +259,7 @@ public class FileDeletionTest {
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
 
         // check after expiring
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
         assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
@@ -343,7 +343,7 @@ public class FileDeletionTest {
         }
 
         // check expiring results
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // expiring snapshot 1 will delete file A
         assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
@@ -405,7 +405,7 @@ public class FileDeletionTest {
         cleanBucket(store, gen.getPartition(gen.next()), 0);
 
         tagManager.createTag(snapshotManager.snapshot(1), "tag1");
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check data file and manifests
         FileStorePathFactory pathFactory = store.pathFactory();
@@ -464,7 +464,7 @@ public class FileDeletionTest {
         tagManager.createTag(snapshot1, "tag1");
 
         // expire snapshot 1, 2
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check before deleting tag1
         FileStorePathFactory pathFactory = store.pathFactory();
@@ -540,7 +540,7 @@ public class FileDeletionTest {
         tagManager.createTag(snapshotManager.snapshot(4), "tag3");
 
         // expire snapshot 1, 2, 3, 4
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check before deleting tag2
         FileStorePathFactory pathFactory = store.pathFactory();
@@ -678,7 +678,7 @@ public class FileDeletionTest {
                 pathFactory.toManifestListPath(newManifestListName),
                 pathFactory.toManifestListPath(deltaManifestList));
 
-        store.newExpire(1, 1, Long.MAX_VALUE, true).expire();
+        store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check data file
         assertPathExists(fileIO, dataFileA);

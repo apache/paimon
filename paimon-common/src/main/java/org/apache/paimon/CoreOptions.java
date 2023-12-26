@@ -211,6 +211,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
+    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES =
+            key("snapshot.expire.clean-empty-directories")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to try to clean empty directories when expiring snapshots. "
+                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
+                                    + "but in most cases it won't cause problems.");
+
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
                     .durationType()
@@ -982,15 +991,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
-    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_IGNORE_CLEAN_DIRECTORIES =
-            key("snapshot.expire.ignore-clean-directories")
-                    .booleanType()
-                    .defaultValue(true)
-                    .withDescription(
-                            "Whether to try to clean empty directories when expiring snapshots. "
-                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
-                                    + "but in most cases it won't cause problems.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1115,6 +1115,10 @@ public class CoreOptions implements Serializable {
 
     public int snapshotExpireLimit() {
         return options.get(SNAPSHOT_EXPIRE_LIMIT);
+    }
+
+    public boolean snapshotExpireCleanEmptyDirectories() {
+        return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
     }
 
     public int manifestMergeMinCount() {
@@ -1420,10 +1424,6 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
-    }
-
-    public boolean snapshotExpireIgnoreCleanDirectories() {
-        return options.get(SNAPSHOT_EXPIRE_IGNORE_CLEAN_DIRECTORIES);
     }
 
     public Map<String, String> getFieldDefaultValues() {
