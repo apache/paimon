@@ -280,6 +280,24 @@ public class FieldAggregatorTest {
         assertThat(fieldSumAgg.retract(null, toDecimal(5))).isEqualTo(toDecimal(-5));
     }
 
+    @Test
+    public void testFieldAvgAgg() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAgg(new IntType());
+        assertThat(fieldAvgAgg.agg(null, 10)).isEqualTo(10);
+        assertThat(fieldAvgAgg.agg(10, 2)).isEqualTo(6);
+        assertThat(fieldAvgAgg.agg(6, 3)).isEqualTo(5);
+        assertThat(fieldAvgAgg.agg(5, 1)).isEqualTo(4);
+    }
+
+    @Test
+    public void test() {
+        FieldAvgAgg fieldAvgAgg = new FieldAvgAgg(new SmallIntType());
+        assertThat(fieldAvgAgg.agg(null, (short) 10)).isEqualTo((short) 10);
+        assertThat(fieldAvgAgg.agg((short)10, (short) 2)).isEqualTo((short) 6);
+//        assertThat(fieldAvgAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
+//        assertThat(fieldAvgAgg.retract(null, (short) 5)).isEqualTo((short) -5);
+    }
+
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);

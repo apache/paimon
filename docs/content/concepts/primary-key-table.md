@@ -329,6 +329,9 @@ Current supported aggregate functions and data types are:
 * `nested-update`:
   The nested-update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
 
+* `avg`:
+  The avg function calculates the average by aggregating the values across multiple rows. It supports INTEGER data types.
+
   Use `fields.<field-name>.nested-key=pk0,pk1;...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
   An example:
