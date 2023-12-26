@@ -18,11 +18,16 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
@@ -97,6 +102,21 @@ public abstract class FieldAggregator implements Serializable {
         }
 
         return fieldAggregator;
+    }
+
+    public static boolean isNestedUpdateAgg(@Nullable String strAggFunc) {
+        return FieldNestedUpdateAgg.NAME.equals(strAggFunc);
+    }
+
+    public static FieldAggregator createFieldNestedUpdateAgg(
+            DataType fieldType, List<String> nestedKeys, boolean ignoreRetract) {
+        String typeErrorMsg = "Data type of nested table column must be 'Array<Row>' but was '%s'.";
+        checkArgument(fieldType instanceof ArrayType, typeErrorMsg, fieldType);
+        ArrayType arrayType = (ArrayType) fieldType;
+        checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
+
+        FieldNestedUpdateAgg agg = new FieldNestedUpdateAgg(arrayType, nestedKeys);
+        return ignoreRetract ? new FieldIgnoreRetractAgg(agg) : agg;
     }
 
     abstract String name();
