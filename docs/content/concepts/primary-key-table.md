@@ -75,10 +75,6 @@ Performance:
 
 #### Cross Partitions Upsert Dynamic Bucket Mode
 
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
-
 When you need cross partition upsert (primary keys not contain all partition fields), Dynamic Bucket mode directly
 maintains the mapping of keys to partition and bucket, uses local disks, and initializes indexes by reading all 
 existing keys in the table when starting stream write job. Different merge engines have different behaviors:
@@ -299,10 +295,6 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 {{< /hint >}}
 
 ### First Row
-
-{{< hint info >}}
-This is an experimental feature.
-{{< /hint >}}
 
 By specifying `'merge-engine' = 'first-row'`, users can keep the first row of the same primary key. It differs from the
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog. 
