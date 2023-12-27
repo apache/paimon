@@ -141,16 +141,16 @@ under the License.
             <td>Whether to ignore delete records in deduplicate mode.</td>
         </tr>
         <tr>
-            <td><h5>dynamic-bucket.initial-buckets</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
-        </tr>
-        <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.initial-buckets</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
@@ -625,7 +625,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>write-buffer-for-append</h5></td>
-            <td style="word-wrap: break-word;">false</td>
+            <td style="word-wrap: break-word;">(none)</td>
             <td>Boolean</td>
             <td>This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.</td>
         </tr>
