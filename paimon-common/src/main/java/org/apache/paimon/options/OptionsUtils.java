@@ -78,18 +78,6 @@ public class OptionsUtils {
     }
 
     @SuppressWarnings("unchecked")
-    static <T> T convertToList(Object rawValue, Class<?> atomicClass) {
-        if (rawValue instanceof List) {
-            return (T) rawValue;
-        } else {
-            return (T)
-                    StructuredOptionsSplitter.splitEscaped(rawValue.toString(), ';').stream()
-                            .map(s -> convertValue(s, atomicClass))
-                            .collect(Collectors.toList());
-        }
-    }
-
-    @SuppressWarnings("unchecked")
     static Map<String, String> convertToProperties(Object o) {
         if (o instanceof Map) {
             return (Map<String, String>) o;
@@ -273,7 +261,7 @@ public class OptionsUtils {
      * </pre>
      */
     public static boolean canBePrefixMap(ConfigOption<?> configOption) {
-        return configOption.getClazz() == Map.class && !configOption.isList();
+        return configOption.getClazz() == Map.class;
     }
 
     /** Filter condition for prefix map keys. */
