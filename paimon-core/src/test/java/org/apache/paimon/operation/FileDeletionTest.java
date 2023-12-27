@@ -45,6 +45,8 @@ import org.apache.paimon.utils.TagManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -97,11 +99,12 @@ public class FileDeletionTest {
      *       dt=0402/hr=8 will be deleted after expiring).
      *   <li>4. Generate snapshot 4 by deleting all data of partition dt=0402/hr=12/bucket-0 (thus
      *       directory dt=0402/hr=12/bucket-0 will be deleted after expiring).
-     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=20/bucket-1 survives) and check.
+     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=12/bucket-1 survives) and check.
      * </ul>
      */
-    @Test
-    public void testMultiPartitions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMultiPartitions(boolean cleanEmptyDirs) throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
@@ -150,90 +153,30 @@ public class FileDeletionTest {
         cleanBucket(store, partition, 0);
 
         // step 5: expire and check file paths
-        store.newExpire(1, 1, Long.MAX_VALUE).expire();
-        // whole dt=0401 is deleted
-        assertPathNotExists(fileIO, new Path(root, "dt=0401"));
-        // whole dt=0402/hr=8 is deleted
-        assertPathNotExists(fileIO, new Path(root, "dt=0402/hr=8"));
-        // for dt=0402/hr=12, bucket-0 is delete but bucket-1 survives
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
-    }
+        store.newExpire(1, 1, Long.MAX_VALUE, cleanEmptyDirs).expire();
 
-    /**
-     * This test checks FileStoreExpire can ignore clean data directories in snapshot expire
-     * situation. The partition keys are (dt, hr). Test process:
-     *
-     * <ul>
-     *   <li>1. Generate snapshot 1 with (0401, 8/12), (0402, 8/12). Each partition has two buckets.
-     *   <li>2. Generate snapshot 2 by deleting all data of partition dt=0401 (thus directory
-     *       dt=0401 will be exist after expiring).
-     *   <li>3. Generate snapshot 3 by deleting all data of partition dt=0402/hr=8 (thus directory
-     *       dt=0402/hr=8 will be exist after expiring).
-     *   <li>4. Generate snapshot 4 by deleting all data of partition dt=0402/hr=12/bucket-0 (thus
-     *       directory dt=0402/hr=12/bucket-0 will be exist after expiring).
-     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=20/bucket-1 survives) and set ignore clean data
-     *       directories, then check.
-     * </ul>
-     */
-    @Test
-    public void testCleanDirectories() throws Exception {
-        TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
-        TestKeyValueGenerator gen =
-                new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
-        FileStorePathFactory pathFactory = store.pathFactory();
-
-        // step 1: generate snapshot 1 by writing 5 randomly generated records to each bucket
-        // writers for each bucket
-        Map<BinaryRow, Map<Integer, RecordWriter<KeyValue>>> writers = new HashMap<>();
-
-        List<BinaryRow> partitions = new ArrayList<>();
-        for (String dt : Arrays.asList("0401", "0402")) {
-            for (int hr : Arrays.asList(8, 12)) {
-                for (int bucket : Arrays.asList(0, 1)) {
-                    List<KeyValue> kvs = partitionedData(5, gen, dt, hr);
-                    BinaryRow partition = gen.getPartition(kvs.get(0));
-                    partitions.add(partition);
-                    writeData(store, kvs, partition, bucket, writers);
+        // check dt=0401
+        if (cleanEmptyDirs) {
+            assertPathNotExists(fileIO, new Path(root, "dt=0401"));
+        } else {
+            for (String hr : new String[] {"hr=8", "hr=12"}) {
+                for (String bucket : new String[] {"bucket-0", "bucket-1"}) {
+                    Path path = new Path(root, String.format("dt=0401/%s/%s", hr, bucket));
+                    assertThat(fileIO.listStatus(path).length).isEqualTo(0);
                 }
             }
         }
 
-        commitData(store, commitIdentifier++, writers);
-        // check all paths exist
-        for (BinaryRow partition : partitions) {
-            for (int bucket : Arrays.asList(0, 1)) {
-                assertPathExists(fileIO, pathFactory.bucketPath(partition, bucket));
-            }
+        // check dt=0402
+        assertPathExists(fileIO, new Path(root, "dt=0402/hr=12/bucket-1"));
+        if (cleanEmptyDirs) {
+            assertPathNotExists(fileIO, new Path(root, "dt=0402/hr=12/bucket-0"));
+            assertPathNotExists(fileIO, new Path(root, "dt=0402/hr-8"));
+        } else {
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=8/bucket-0")).length).isEqualTo(0);
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=8/bucket-1")).length).isEqualTo(0);
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=12/bucket-0")).length).isEqualTo(0);
         }
-
-        // step 2: generate snapshot 2 by cleaning partition dt=0401 (through overwriting with an
-        // empty ManifestCommittable)
-        FileStoreCommitImpl commit = store.newCommit();
-        Map<String, String> partitionSpec = new HashMap<>();
-        partitionSpec.put("dt", "0401");
-        commit.overwrite(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
-
-        // step 3: generate snapshot 3 by cleaning partition dt=0402/hr=8
-        partitionSpec.put("dt", "0402");
-        partitionSpec.put("hr", "8");
-        commit.overwrite(
-                partitionSpec, new ManifestCommittable(commitIdentifier++), Collections.emptyMap());
-
-        // step 4: generate snapshot 4 by cleaning dt=0402/hr=12/bucket-0
-        BinaryRow partition = partitions.get(7);
-        cleanBucket(store, partition, 0);
-
-        // step 5: expire and check file paths
-        store.newExpire(1, 1, Long.MAX_VALUE, false).expire();
-        // whole dt=0401 is exist
-        assertPathExists(fileIO, new Path(root, "dt=0401"));
-        // whole dt=0402/hr=8 is exist
-        assertPathExists(fileIO, new Path(root, "dt=0402/hr=8"));
-        // for dt=0402/hr=12, bucket-0 is exist and bucket-1 survives
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }
 
     // only exists bucket directories
