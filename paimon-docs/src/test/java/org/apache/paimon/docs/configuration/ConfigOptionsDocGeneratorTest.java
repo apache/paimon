@@ -94,13 +94,6 @@ class ConfigOptionsDocGeneratorTest {
                         .defaultValue(TestEnum.VALUE_1)
                         .withDescription("Description");
 
-        public static ConfigOption<List<TestEnum>> enumListOption =
-                ConfigOptions.key("option.enum.list")
-                        .enumType(TestEnum.class)
-                        .asList()
-                        .defaultValues(TestEnum.VALUE_1, TestEnum.VALUE_2)
-                        .withDescription("Description");
-
         public static ConfigOption<DescribedTestEnum> describedEnum =
                 ConfigOptions.key("option.enum.described")
                         .enumType(DescribedTestEnum.class)
@@ -117,15 +110,6 @@ class ConfigOptionsDocGeneratorTest {
                 ConfigOptions.key("option.map")
                         .mapType()
                         .defaultValue(Collections.singletonMap("key1", "value1"))
-                        .withDescription("Description");
-
-        public static ConfigOption<List<Map<String, String>>> mapListOption =
-                ConfigOptions.key("option.map.list")
-                        .mapType()
-                        .asList()
-                        .defaultValues(
-                                Collections.singletonMap("key1", "value1"),
-                                Collections.singletonMap("key2", "value2"))
                         .withDescription("Description");
 
         public static ConfigOption<Duration> durationOption =
@@ -167,21 +151,9 @@ class ConfigOptionsDocGeneratorTest {
                         + "            <td>Description<br /><br />Possible values:<ul><li>\"A\": First letter of the alphabet</li><li>\"B\": Second letter of the alphabet</li></ul></td>\n"
                         + "        </tr>\n"
                         + "        <tr>\n"
-                        + "            <td><h5>option.enum.list</h5></td>\n"
-                        + "            <td style=\"word-wrap: break-word;\">VALUE_1;<wbr>VALUE_2</td>\n"
-                        + "            <td><p>List&lt;Enum&gt;</p></td>\n"
-                        + "            <td>Description<br /><br />Possible values:<ul><li>\"VALUE_1\"</li><li>\"VALUE_2\"</li><li>\"VALUE_3\"</li></ul></td>\n"
-                        + "        </tr>\n"
-                        + "        <tr>\n"
                         + "            <td><h5>option.map</h5></td>\n"
                         + "            <td style=\"word-wrap: break-word;\">key1:value1</td>\n"
                         + "            <td>Map</td>\n"
-                        + "            <td>Description</td>\n"
-                        + "        </tr>\n"
-                        + "        <tr>\n"
-                        + "            <td><h5>option.map.list</h5></td>\n"
-                        + "            <td style=\"word-wrap: break-word;\">key1:value1;<wbr>key2:value2</td>\n"
-                        + "            <td>List&lt;Map&gt;</td>\n"
                         + "            <td>Description</td>\n"
                         + "        </tr>\n"
                         + "        <tr>\n"
