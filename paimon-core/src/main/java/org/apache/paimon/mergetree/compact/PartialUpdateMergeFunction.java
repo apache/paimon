@@ -376,7 +376,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     fieldAggregators.put(
                             i,
                             FieldAggregator.createFieldAggregator(
-                                    fieldType, strAggFunc, ignoreRetract, isPrimaryKey));
+                                    fieldType,
+                                    strAggFunc,
+                                    ignoreRetract,
+                                    isPrimaryKey,
+                                    options,
+                                    fieldName));
                 }
             }
             return fieldAggregators;

@@ -30,9 +30,11 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_PARTITION_DISCOVERY_INTERVAL_MS;
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC;
+import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.TOPIC_PATTERN;
 import static org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils.VALUE_FORMAT;
 
 /** IT cases for {@link PulsarSyncTableAction}. */
@@ -55,7 +57,11 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
-        pulsarConfig.put(TOPIC.key(), topic);
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            pulsarConfig.put(TOPIC.key(), topic);
+        } else {
+            pulsarConfig.put(TOPIC_PATTERN.key(), "schema_.*");
+        }
         pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
 
         PulsarSyncTableAction action =

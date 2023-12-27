@@ -20,8 +20,13 @@ package org.apache.paimon.mergetree.compact.aggregate;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
@@ -33,6 +38,11 @@ import org.apache.paimon.types.VarCharType;
 import org.junit.jupiter.api.Test;
 
 import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -273,5 +283,72 @@ public class FieldAggregatorTest {
     private static Decimal toDecimal(int i) {
         return Decimal.fromBigDecimal(
                 new BigDecimal(i), DecimalType.DEFAULT_PRECISION, DecimalType.DEFAULT_SCALE);
+    }
+
+    @Test
+    public void testFieldNestedUpdateAgg() {
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v", DataTypes.STRING()))),
+                        Arrays.asList("k0", "k1"));
+
+        InternalArray accumulator;
+
+        InternalRow current = row(0, 0, "A");
+        accumulator = (InternalArray) agg.agg(null, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
+
+        current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "B")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
+    }
+
+    @Test
+    public void testFieldNestedAppendAgg() {
+        FieldNestedUpdateAgg agg =
+                new FieldNestedUpdateAgg(
+                        DataTypes.ARRAY(
+                                DataTypes.ROW(
+                                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                                        DataTypes.FIELD(2, "v", DataTypes.STRING()))),
+                        Collections.emptyList());
+
+        InternalArray accumulator = null;
+
+        InternalRow current = row(0, 1, "B");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator))
+                .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+    }
+
+    private List<InternalRow> unnest(InternalArray array) {
+        return IntStream.range(0, array.size())
+                .mapToObj(i -> array.getRow(i, 3))
+                .collect(Collectors.toList());
+    }
+
+    private GenericArray singletonArray(InternalRow row) {
+        return new GenericArray(new InternalRow[] {row});
+    }
+
+    private InternalRow row(int k0, int k1, String v) {
+        return GenericRow.of(k0, k1, BinaryString.fromString(v));
     }
 }

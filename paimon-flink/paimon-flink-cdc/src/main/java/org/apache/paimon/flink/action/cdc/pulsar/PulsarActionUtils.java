@@ -31,6 +31,7 @@ import org.apache.flink.connector.pulsar.source.PulsarSourceBuilder;
 import org.apache.flink.connector.pulsar.source.config.SourceConfiguration;
 import org.apache.flink.connector.pulsar.source.enumerator.cursor.StartCursor;
 import org.apache.flink.connector.pulsar.source.enumerator.cursor.StopCursor;
+import org.apache.flink.connector.pulsar.source.enumerator.subscriber.impl.TopicPatternSubscriber;
 import org.apache.flink.connector.pulsar.source.enumerator.topic.TopicPartition;
 import org.apache.flink.connector.pulsar.source.reader.PulsarPartitionSplitReader;
 import org.apache.pulsar.client.api.Consumer;
@@ -41,12 +42,20 @@ import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
+import org.apache.pulsar.client.impl.LookupService;
+import org.apache.pulsar.client.impl.PulsarClientImpl;
 import org.apache.pulsar.client.internal.DefaultImplementation;
+import org.apache.pulsar.common.api.proto.CommandGetTopicsOfNamespace;
+import org.apache.pulsar.common.lookup.GetTopicsResult;
+import org.apache.pulsar.common.naming.NamespaceName;
+import org.apache.pulsar.common.naming.TopicName;
 
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.regex.Pattern;
 
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAMS;
@@ -296,7 +305,10 @@ public class PulsarActionUtils {
             // The default position is Latest
             consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
 
-            String topic = pulsarConfig.get(PulsarActionUtils.TOPIC).get(0);
+            String topic =
+                    pulsarConfig.contains(TOPIC)
+                            ? pulsarConfig.get(TOPIC).get(0)
+                            : findOneTopic(pulsarClient, pulsarConfig.get(TOPIC_PATTERN));
             TopicPartition topicPartition = new TopicPartition(topic);
             consumerBuilder.topic(topicPartition.getFullTopicName());
 
@@ -317,6 +329,44 @@ public class PulsarActionUtils {
 
             return new PulsarConsumerWrapper(consumer, topic);
         } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Referenced to {@link TopicPatternSubscriber}. */
+    private static String findOneTopic(PulsarClient pulsarClient, String topicPattern) {
+        TopicName destination = TopicName.get(topicPattern);
+        String pattern = destination.toString();
+
+        Pattern shortenedPattern = Pattern.compile(pattern.split("://")[1]);
+        String namespace = destination.getNamespaceObject().toString();
+
+        LookupService lookupService = ((PulsarClientImpl) pulsarClient).getLookup();
+        NamespaceName namespaceName = NamespaceName.get(namespace);
+        try {
+            // Pulsar 2.11.0 can filter regular expression on broker, but it has a bug which
+            // can only be used for wildcard filtering.
+            String queryPattern = shortenedPattern.toString();
+            if (!queryPattern.endsWith(".*")) {
+                queryPattern = null;
+            }
+
+            GetTopicsResult topicsResult =
+                    lookupService
+                            .getTopicsUnderNamespace(
+                                    namespaceName,
+                                    CommandGetTopicsOfNamespace.Mode.ALL,
+                                    queryPattern,
+                                    null)
+                            .get();
+            List<String> topics = topicsResult.getTopics();
+
+            if (topics == null || topics.isEmpty()) {
+                throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
+            }
+
+            return topics.get(0);
+        } catch (ExecutionException | InterruptedException e) {
             throw new RuntimeException(e);
         }
     }

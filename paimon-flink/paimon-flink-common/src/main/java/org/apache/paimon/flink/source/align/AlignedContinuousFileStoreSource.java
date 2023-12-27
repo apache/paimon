@@ -68,12 +68,12 @@ public class AlignedContinuousFileStoreSource extends ContinuousFileStoreSource 
         return new AlignedSourceReader(
                 context,
                 readBuilder.newRead(),
+                sourceReaderMetrics,
                 ioManager,
                 limit,
                 new FutureCompletingBlockingQueue<>(
                         context.getConfiguration()
-                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)),
-                sourceReaderMetrics);
+                                .getInteger(SourceReaderOptions.ELEMENT_QUEUE_CAPACITY)));
     }
 
     @Override

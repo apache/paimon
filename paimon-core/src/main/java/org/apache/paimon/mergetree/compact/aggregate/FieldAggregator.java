@@ -18,11 +18,18 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
@@ -36,7 +43,9 @@ public abstract class FieldAggregator implements Serializable {
             DataType fieldType,
             @Nullable String strAgg,
             boolean ignoreRetract,
-            boolean isPrimaryKey) {
+            boolean isPrimaryKey,
+            CoreOptions options,
+            String field) {
         FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
@@ -83,6 +92,13 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldProductAgg.NAME:
                         fieldAggregator = new FieldProductAgg(fieldType);
                         break;
+                    case FieldNestedUpdateAgg.NAME:
+                        fieldAggregator =
+                                createFieldNestedUpdateAgg(
+                                        fieldType,
+                                        options.fieldNestedUpdateAggNestedKey(field),
+                                        ignoreRetract);
+                        break;
                     default:
                         throw new RuntimeException(
                                 String.format(
@@ -97,6 +113,21 @@ public abstract class FieldAggregator implements Serializable {
         }
 
         return fieldAggregator;
+    }
+
+    public static FieldAggregator createFieldNestedUpdateAgg(
+            DataType fieldType, List<String> nestedKey, boolean ignoreRetract) {
+        if (nestedKey == null) {
+            nestedKey = Collections.emptyList();
+        }
+
+        String typeErrorMsg = "Data type of nested table column must be 'Array<Row>' but was '%s'.";
+        checkArgument(fieldType instanceof ArrayType, typeErrorMsg, fieldType);
+        ArrayType arrayType = (ArrayType) fieldType;
+        checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
+
+        FieldNestedUpdateAgg agg = new FieldNestedUpdateAgg(arrayType, nestedKey);
+        return ignoreRetract ? new FieldIgnoreRetractAgg(agg) : agg;
     }
 
     abstract String name();
