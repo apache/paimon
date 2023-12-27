@@ -111,6 +111,12 @@ under the License.
             <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
         </tr>
         <tr>
+            <td><h5>consumer.ignore-progress</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore consumer progress for the newly started job.</td>
+        </tr>
+        <tr>
             <td><h5>consumer.mode</h5></td>
             <td style="word-wrap: break-word;">exactly-once</td>
             <td><p>Enum</p></td>
@@ -141,16 +147,16 @@ under the License.
             <td>Whether to ignore delete records in deduplicate mode.</td>
         </tr>
         <tr>
-            <td><h5>dynamic-bucket.initial-buckets</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
-        </tr>
-        <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.initial-buckets</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>

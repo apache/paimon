@@ -767,6 +767,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(ConsumerMode.EXACTLY_ONCE)
                     .withDescription("Specify the consumer consistency mode for table.");
 
+    public static final ConfigOption<Boolean> CONSUMER_IGNORE_PROGRESS =
+            key("consumer.ignore-progress")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore consumer progress for the newly started job.");
+
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
                     .longType()
@@ -1420,8 +1427,8 @@ public class CoreOptions implements Serializable {
         return options.get(CONSUMER_EXPIRATION_TIME);
     }
 
-    public ConsumerMode consumerWithLegacyMode() {
-        return options.get(CONSUMER_CONSISTENCY_MODE);
+    public boolean consumerIgnoreProgress() {
+        return options.get(CONSUMER_IGNORE_PROGRESS);
     }
 
     public boolean partitionedTableInMetastore() {

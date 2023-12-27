@@ -346,7 +346,8 @@ SELECT * FROM t /*+ OPTIONS('consumer-id' = 'myid') */;
 When stream read Paimon tables, the next snapshot id to be recorded into the file system. This has several advantages:
 
 1. When previous job is stopped, the newly started job can continue to consume from the previous progress without
-   resuming from the state. The newly reading will start reading from next snapshot id found in consumer files.
+   resuming from the state. The newly reading will start reading from next snapshot id found in consumer files. 
+   If you don't want this behavior, you can set `'consumer.ignore-progress'` to true.
 2. When deciding whether a snapshot has expired, Paimon looks at all the consumers of the table in the file system,
    and if there are consumers that still depend on this snapshot, then this snapshot will not be deleted by expiration.
 3. When there is no watermark definition, the Paimon table will pass the watermark in the snapshot to the downstream
