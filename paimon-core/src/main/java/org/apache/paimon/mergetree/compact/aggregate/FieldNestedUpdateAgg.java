@@ -40,7 +40,7 @@ import java.util.Map;
  */
 public class FieldNestedUpdateAgg extends FieldAggregator {
 
-    public static final String NAME = "nested-update";
+    public static final String NAME = "nested_update";
 
     private final int nestedFields;
 
