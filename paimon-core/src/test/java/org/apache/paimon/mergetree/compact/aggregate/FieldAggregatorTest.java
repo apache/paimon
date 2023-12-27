@@ -293,9 +293,9 @@ public class FieldAggregatorTest {
     public void test() {
         FieldAvgAgg fieldAvgAgg = new FieldAvgAgg(new SmallIntType());
         assertThat(fieldAvgAgg.agg(null, (short) 10)).isEqualTo((short) 10);
-        assertThat(fieldAvgAgg.agg((short)10, (short) 2)).isEqualTo((short) 6);
-//        assertThat(fieldAvgAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
-//        assertThat(fieldAvgAgg.retract(null, (short) 5)).isEqualTo((short) -5);
+        assertThat(fieldAvgAgg.agg((short) 10, (short) 2)).isEqualTo((short) 6);
+        //        assertThat(fieldAvgAgg.retract((short) 10, (short) 5)).isEqualTo((short) 5);
+        //        assertThat(fieldAvgAgg.retract(null, (short) 5)).isEqualTo((short) -5);
     }
 
     private static Decimal toDecimal(int i) {
