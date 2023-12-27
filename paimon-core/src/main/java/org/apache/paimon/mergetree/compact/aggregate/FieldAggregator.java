@@ -95,9 +95,7 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldNestedUpdateAgg.NAME:
                         fieldAggregator =
                                 createFieldNestedUpdateAgg(
-                                        fieldType,
-                                        options.fieldNestedUpdateAggNestedKey(field),
-                                        ignoreRetract);
+                                        fieldType, options.fieldNestedUpdateAggNestedKey(field));
                         break;
                     default:
                         throw new RuntimeException(
@@ -116,7 +114,7 @@ public abstract class FieldAggregator implements Serializable {
     }
 
     public static FieldAggregator createFieldNestedUpdateAgg(
-            DataType fieldType, List<String> nestedKey, boolean ignoreRetract) {
+            DataType fieldType, List<String> nestedKey) {
         if (nestedKey == null) {
             nestedKey = Collections.emptyList();
         }
@@ -126,8 +124,7 @@ public abstract class FieldAggregator implements Serializable {
         ArrayType arrayType = (ArrayType) fieldType;
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
-        FieldNestedUpdateAgg agg = new FieldNestedUpdateAgg(arrayType, nestedKey);
-        return ignoreRetract ? new FieldIgnoreRetractAgg(agg) : agg;
+        return new FieldNestedUpdateAgg(arrayType, nestedKey);
     }
 
     abstract String name();
