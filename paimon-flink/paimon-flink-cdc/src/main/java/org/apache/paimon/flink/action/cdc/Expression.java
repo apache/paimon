@@ -38,7 +38,16 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public interface Expression extends Serializable {
 
     List<String> SUPPORTED_EXPRESSION =
-            Arrays.asList("year", "month", "day", "hour", "minute", "second", "date_format", "substring", "truncate");
+            Arrays.asList(
+                    "year",
+                    "month",
+                    "day",
+                    "hour",
+                    "minute",
+                    "second",
+                    "date_format",
+                    "substring",
+                    "truncate");
 
     /** Return name of referenced field. */
     String fieldReference();
