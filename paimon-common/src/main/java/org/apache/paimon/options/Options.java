@@ -98,11 +98,7 @@ public class Options implements Serializable {
         Class<?> clazz = option.getClazz();
 
         try {
-            if (option.isList()) {
-                return rawValue.map(v -> OptionsUtils.convertToList(v, clazz));
-            } else {
-                return rawValue.map(v -> OptionsUtils.convertValue(v, clazz));
-            }
+            return rawValue.map(v -> OptionsUtils.convertValue(v, clazz));
         } catch (Exception e) {
             throw new IllegalArgumentException(
                     String.format(

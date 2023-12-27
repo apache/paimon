@@ -179,8 +179,7 @@ public class ConfigOptions {
         @Deprecated
         public <T> ConfigOption<T> defaultValue(T value) {
             checkNotNull(value);
-            return new ConfigOption<>(
-                    key, value.getClass(), ConfigOption.EMPTY_DESCRIPTION, value, false);
+            return new ConfigOption<>(key, value.getClass(), ConfigOption.EMPTY_DESCRIPTION, value);
         }
 
         /**
@@ -193,8 +192,7 @@ public class ConfigOptions {
          */
         @Deprecated
         public ConfigOption<String> noDefaultValue() {
-            return new ConfigOption<>(
-                    key, String.class, ConfigOption.EMPTY_DESCRIPTION, null, false);
+            return new ConfigOption<>(key, String.class, ConfigOption.EMPTY_DESCRIPTION, null);
         }
     }
 
@@ -219,7 +217,7 @@ public class ConfigOptions {
          * @return The config option with the default value.
          */
         public ConfigOption<T> defaultValue(T value) {
-            return new ConfigOption<>(key, clazz, ConfigOption.EMPTY_DESCRIPTION, value, false);
+            return new ConfigOption<>(key, clazz, ConfigOption.EMPTY_DESCRIPTION, value);
         }
 
         /**
@@ -228,8 +226,7 @@ public class ConfigOptions {
          * @return The config option without a default value.
          */
         public ConfigOption<T> noDefaultValue() {
-            return new ConfigOption<>(
-                    key, clazz, Description.builder().text("").build(), null, false);
+            return new ConfigOption<>(key, clazz, Description.builder().text("").build(), null);
         }
     }
 
