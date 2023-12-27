@@ -32,6 +32,7 @@ import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
@@ -235,6 +236,18 @@ public class DataTableSource extends FlinkTableSource {
                 parallelism = options.get(CoreOptions.BUCKET);
             } else {
                 scanSplitsForInference();
+
+                if (!table.partitionKeys().isEmpty()) {
+                    int limitPartitionRequest = options.get(CoreOptions.LIMIT_PARTITION_REQUEST);
+                    if (limitPartitionRequest != -1
+                            && splitStatistics.partitionCount() > limitPartitionRequest) {
+                        throw new RuntimeException(
+                                String.format(
+                                        "The number of partitions to query exceeds the limit (%s)",
+                                        limitPartitionRequest));
+                    }
+                }
+
                 parallelism = splitStatistics.splitNumber();
                 if (null != limit && limit > 0) {
                     int limitCount =
@@ -346,11 +359,13 @@ public class DataTableSource extends FlinkTableSource {
     protected static class SplitStatistics {
 
         private final int splitNumber;
+        private final long partitionCount;
         private final long totalRowCount;
 
         private SplitStatistics(List<Split> splits) {
             this.splitNumber = splits.size();
             this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
+            this.partitionCount = splits.stream().map(m -> ((DataSplit) m).partition()).count();
         }
 
         public int splitNumber() {
@@ -359,6 +374,10 @@ public class DataTableSource extends FlinkTableSource {
 
         public long totalRowCount() {
             return totalRowCount;
+        }
+
+        public long partitionCount() {
+            return partitionCount;
         }
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.RowType;
 
@@ -86,5 +87,12 @@ public class FileStoreTestUtils {
         Table table = catalog.getTable(tableIdentifier);
         catalog.close();
         return table;
+    }
+
+    public static void changeTable(Options conf, SchemaChange schemaChange) throws Exception {
+        CatalogContext catalogContext = CatalogContext.create(conf);
+        Catalog catalog = CatalogFactory.createCatalog(catalogContext);
+        Identifier tableIdentifier = Identifier.create(DATABASE_NAME, TABLE_NAME);
+        catalog.alterTable(tableIdentifier, schemaChange, true);
     }
 }

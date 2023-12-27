@@ -866,6 +866,14 @@ public class CoreOptions implements Serializable {
                             "Read incremental changes between start timestamp (exclusive) and end timestamp, "
                                     + "for example, 't1,t2' means changes between timestamp t1 and timestamp t2.");
 
+    public static final ConfigOption<Integer> LIMIT_PARTITION_REQUEST =
+            key("limit-partition-request")
+                    .intType()
+                    .defaultValue(-1)
+                    .withDescription(
+                            "This limits the number of partitions that can be requested from the given table. A query will not be executed if it attempts to fetch more "
+                                    + "partitions per table than the limit configured. A value of -1 means unlimited. The limit is only effective for batch mode and partitioned table.");
+
     public static final String STATS_MODE_SUFFIX = "stats-mode";
 
     public static final ConfigOption<String> METADATA_STATS_MODE =
@@ -1656,6 +1664,10 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public int limitPartitionRequest() {
+        return options.get(LIMIT_PARTITION_REQUEST);
     }
 
     /** Specifies the merge engine for table with primary key. */

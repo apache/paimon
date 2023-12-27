@@ -731,5 +731,11 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Integer</td>
             <td>The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.</td>
         </tr>
+        <tr>
+            <td><h5>limit-partition-request</h5></td>
+            <td style="word-wrap: break-word;">-1</td>
+            <td>Integer</td>
+            <td>This limits the number of partitions that can be requested from the given table. A query will not be executed if it attempts to fetch more partitions per table than the limit configured. A value of -1 means unlimited. The limit is only effective for batch mode and partitioned table.</td>
+        </tr>
     </tbody>
 </table>

@@ -669,4 +669,53 @@ public class SparkReadITCase extends SparkReadTestBase {
                                 "a INT",
                                 "b STRUCT<b1: STRUCT<b11: INT, b12: INT>, b2: BIGINT>"));
     }
+
+    @Test
+    public void testLimitPartitionRequest() {
+        spark.sql(
+                "CREATE TABLE MyTablePartition (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) TBLPROPERTIES (\n"
+                        + "    'primary-key' = 'dt,hh,user_id'\n"
+                        + ")");
+
+        spark.sql("INSERT INTO MyTablePartition SELECT 1,1,'a','2020-01-01','10'");
+        spark.sql("INSERT INTO MyTablePartition SELECT 2,2,'b','2020-01-02','11'");
+
+        List<Row> result = spark.sql("SELECT * FROM MyTablePartition").collectAsList();
+
+        assertThat(result.toString()).isEqualTo("[[1,1,a,2020-01-01,10], [2,2,b,2020-01-02,11]]");
+
+        spark.sql(
+                "ALTER TABLE MyTablePartition SET TBLPROPERTIES ('limit-partition-request'='1') ");
+
+        assertThatThrownBy(() -> spark.sql("SELECT * FROM MyTablePartition").collectAsList())
+                .isInstanceOf(RuntimeException.class)
+                .hasMessageContaining("The number of partitions to query exceeds the limit (1)");
+
+        result =
+                spark.sql("SELECT * FROM MyTablePartition WHERE dt = '2020-01-01'").collectAsList();
+        assertThat(result.toString()).isEqualTo("[[1,1,a,2020-01-01,10]]");
+
+        spark.sql(
+                "CREATE TABLE MyTableNoPartition (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING\n"
+                        + ") PARTITIONED BY (dt, hh) TBLPROPERTIES (\n"
+                        + "    'primary-key' = 'dt,hh,user_id'\n"
+                        + ")");
+
+        spark.sql("INSERT INTO MyTableNoPartition SELECT 1,1,'a','2020-01-01','10'");
+        spark.sql("INSERT INTO MyTableNoPartition SELECT 2,2,'b','2020-01-02','11'");
+
+        result = spark.sql("SELECT * FROM MyTableNoPartition").collectAsList();
+        assertThat(result.toString()).isEqualTo("[[1,1,a,2020-01-01,10], [2,2,b,2020-01-02,11]]");
+    }
 }

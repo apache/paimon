@@ -31,6 +31,7 @@ import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -68,9 +69,11 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.CoreOptions.LIMIT_PARTITION_REQUEST;
 import static org.apache.paimon.hive.FileStoreTestUtils.DATABASE_NAME;
 import static org.apache.paimon.hive.FileStoreTestUtils.TABLE_NAME;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonInputFormat}. */
 @RunWith(PaimonEmbeddedHiveRunner.class)
@@ -962,6 +965,99 @@ public class PaimonStorageHandlerITCase {
                                         + "`"))
                 .containsExactly(
                         "Date 1971-01-11\tTest timestamp(3)\tTest timestamp(5)\t一点二\tHive\tPaimon");
+    }
+
+    @Test
+    public void testLimitPartitionRequestPartitionTable() throws Exception {
+        List<InternalRow> data =
+                Arrays.asList(
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi")),
+                        GenericRow.of(2, 20, 200L, BinaryString.fromString("Hello")),
+                        GenericRow.of(3, 30, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(4, 40, 400L, BinaryString.fromString("Hi Again")));
+
+        Options conf = getBasicConf();
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
+                        Collections.singletonList("pt"),
+                        Arrays.asList("pt", "a"),
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY pt, a");
+
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi",
+                        "2\t20\t200\tHello",
+                        "3\t30\t300\tWorld",
+                        "4\t40\t400\tHi Again");
+        assertThat(actual).isEqualTo(expected);
+
+        SchemaChange schemaChange = SchemaChange.setOption("limit-partition-request", "2");
+        FileStoreTestUtils.changeTable(conf, schemaChange);
+
+        assertThatThrownBy(
+                        () ->
+                                hiveShell.executeQuery(
+                                        "SELECT * FROM " + externalTable + " ORDER BY pt, a"))
+                .hasMessageContaining("The number of partitions to query exceeds the limit (2)");
+
+        actual = hiveShell.executeQuery("SELECT * FROM " + externalTable + " WHERE pt = 1 ");
+        assertThat(actual.toString()).isEqualTo("[1\t10\t100\tHi]");
+    }
+
+    @Test
+    public void testLimitPartitionRequestNoPartitionTable() throws Exception {
+        List<InternalRow> data =
+                Arrays.asList(
+                        GenericRow.of(1, 10, 100L, BinaryString.fromString("Hi")),
+                        GenericRow.of(2, 20, 200L, BinaryString.fromString("Hello")),
+                        GenericRow.of(3, 30, 300L, BinaryString.fromString("World")),
+                        GenericRow.of(4, 40, 400L, BinaryString.fromString("Hi Again")));
+
+        Options conf = getBasicConf();
+        conf.set(LIMIT_PARTITION_REQUEST, 2);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT(), DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        Table table =
+                FileStoreTestUtils.createFileStoreTable(
+                        conf,
+                        rowType,
+                        Collections.emptyList(),
+                        Arrays.asList("pt", "a"),
+                        identifier);
+
+        createExternalTable();
+        writeData(table, data);
+
+        List<String> actual =
+                hiveShell.executeQuery("SELECT * FROM " + externalTable + " ORDER BY pt, a");
+
+        List<String> expected =
+                Arrays.asList(
+                        "1\t10\t100\tHi",
+                        "2\t20\t200\tHello",
+                        "3\t30\t300\tWorld",
+                        "4\t40\t400\tHi Again");
+        assertThat(actual).isEqualTo(expected);
     }
 
     private Options getBasicConf() {

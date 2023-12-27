@@ -18,12 +18,14 @@
 
 package org.apache.paimon.hive.utils;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 
@@ -40,6 +42,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonMap;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
@@ -93,13 +96,25 @@ public class HiveSplitGenerator {
                     scan.withFilter(PredicateBuilder.and(predicatePerPartition));
                 }
             }
-            scan.plan()
-                    .splits()
-                    .forEach(
-                            split ->
-                                    splits.add(
-                                            new PaimonInputSplit(
-                                                    location, (DataSplit) split, table)));
+
+            List<Split> dataSplits = scan.plan().splits();
+            List<BinaryRow> partitions =
+                    dataSplits.stream()
+                            .map(m -> ((DataSplit) m).partition())
+                            .collect(Collectors.toList());
+
+            if (!table.partitionKeys().isEmpty()) {
+                int limitPartitionRequest = table.coreOptions().limitPartitionRequest();
+                if (limitPartitionRequest != -1 && partitions.size() > limitPartitionRequest) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "The number of partitions to query exceeds the limit (%s)",
+                                    limitPartitionRequest));
+                }
+            }
+
+            dataSplits.forEach(
+                    split -> splits.add(new PaimonInputSplit(location, (DataSplit) split, table)));
         }
         return splits.toArray(new InputSplit[0]);
     }

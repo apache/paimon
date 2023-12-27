@@ -19,10 +19,13 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.{stats, CoreOptions}
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
+import org.apache.paimon.table.source.{DataSplit, ReadBuilder, Split}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
 import org.apache.paimon.types.RowType
 
@@ -74,7 +77,28 @@ abstract class PaimonBaseScan(
   }
 
   def getOriginSplits: Array[Split] = {
-    readBuilder.newScan().plan().splits().asScala.toArray
+    val splits: java.util.List[Split] = readBuilder.newScan().plan().splits()
+    checkLimitPartitionRequest(splits)
+    splits.asScala.toArray
+  }
+
+  private def checkLimitPartitionRequest(splits: java.util.List[Split]): Unit = {
+
+    val isDataSplit = splits.stream().allMatch((m: Split) => m.isInstanceOf[DataSplit])
+    if (!isDataSplit) {
+      return
+    }
+
+    val options = Options.fromMap(this.table.options)
+    val partitionCount =
+      splits.stream().map[BinaryRow]((m: Split) => m.asInstanceOf[DataSplit].partition).count
+    val limitPartitionRequest = options.get(CoreOptions.LIMIT_PARTITION_REQUEST)
+    if (limitPartitionRequest != -1 && partitionCount > limitPartitionRequest) {
+      throw new RuntimeException(
+        String.format(
+          "The number of partitions to query exceeds the limit (%s)",
+          limitPartitionRequest))
+    }
   }
 
   def getSplits: Array[Split] = {

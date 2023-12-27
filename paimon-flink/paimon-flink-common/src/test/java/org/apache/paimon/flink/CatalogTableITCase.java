@@ -807,4 +807,53 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         result = sql("SELECT k, v FROM T$ro ORDER BY k");
         assertThat(result).containsExactly(Row.of(1, 11), Row.of(2, 21), Row.of(3, 31));
     }
+
+    @Test
+    public void testLimitPartitionRequest() {
+        sql(
+                "CREATE TABLE MyTablePartition (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") PARTITIONED BY (dt, hh)");
+
+        sql("INSERT INTO MyTablePartition SELECT 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO MyTablePartition SELECT 2,2,'b','2020-01-02','11'");
+
+        List<Row> result = sql("SELECT * FROM MyTablePartition");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1L, 1L, "a", "2020-01-01", "10"),
+                        Row.of(2L, 2L, "b", "2020-01-02", "11"));
+
+        sql("ALTER TABLE MyTablePartition SET ('limit-partition-request'='1') ");
+
+        assertThatThrownBy(() -> sql("SELECT * FROM MyTablePartition"))
+                .hasMessageContaining("The number of partitions to query exceeds the limit (1)");
+
+        result = sql("SELECT * FROM MyTablePartition WHERE dt = '2020-01-01'");
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1L, 1L, "a", "2020-01-01", "10"));
+
+        sql(
+                "CREATE TABLE MyTableNoPartition (\n"
+                        + "    user_id BIGINT,\n"
+                        + "    item_id BIGINT,\n"
+                        + "    behavior STRING,\n"
+                        + "    dt STRING,\n"
+                        + "    hh STRING,\n"
+                        + "    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED\n"
+                        + ") WITH ('limit-partition-request'='1')");
+
+        sql("INSERT INTO MyTableNoPartition SELECT 1,1,'a','2020-01-01','10'");
+        sql("INSERT INTO MyTableNoPartition SELECT 2,2,'b','2020-01-02','11'");
+
+        result = sql("SELECT * FROM MyTableNoPartition");
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1L, 1L, "a", "2020-01-01", "10"),
+                        Row.of(2L, 2L, "b", "2020-01-02", "11"));
+    }
 }
