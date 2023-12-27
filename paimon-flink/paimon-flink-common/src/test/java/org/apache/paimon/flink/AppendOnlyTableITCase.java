@@ -18,13 +18,12 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
-import org.apache.paimon.utils.BlockingIterator;
-
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.utils.BlockingIterator;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -34,6 +33,7 @@ import java.util.Collections;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test case for append-only managed table. */
@@ -154,6 +154,55 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testLotsPartitionBatchInsert() {
+        long maxMemory = Runtime.getRuntime().maxMemory();
+        long size = maxMemory / 2 / 102400 + 10;
+        batchSql(
+                "CREATE TEMPORARY TABLE Orders_in (\n"
+                        + "    f0        INT,\n"
+                        + "    f1        STRING,\n"
+                        + "    f2        STRING\n"
+                        + ") WITH (\n"
+                        + "    'connector' = 'datagen',\n"
+                        + "    'fields.f0.min' = '0',\n"
+                        + "    'fields.f0.max' = '100',\n"
+                        + "    'fields.f1.length' = '102400',\n"
+                        + "    'fields.f2.length' = '102400',\n"
+                        + "    'number-of-rows' = '"
+                        + size
+                        + "'\n"
+                        + ")");
+
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO part_table2 /*+ OPTIONS('write-buffer-for-append' = 'false') */ SELECT * FROM Orders_in")
+                                        .await())
+                .hasRootCauseInstanceOf(OutOfMemoryError.class);
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT INTO part_table2 SELECT * FROM Orders_in")
+                                        .await())
+                .doesNotThrowAnyException();
+
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT OVERWRITE part_table2 /*+ OPTIONS('write-buffer-for-append' = 'false') */ SELECT * FROM Orders_in")
+                                        .await())
+                .hasRootCauseInstanceOf(OutOfMemoryError.class);
+
+        assertThatCode(
+                        () ->
+                                tEnv.executeSql(
+                                                "INSERT OVERWRITE part_table2 SELECT * FROM Orders_in")
+                                        .await())
+                .doesNotThrowAnyException();
+        assertThat(batchSql("SELECT count(*) FROM part_table2").get(0).getField(0)).isEqualTo(size);
+    }
+
+    @Test
     public void testAutoCompaction() {
         batchSql("ALTER TABLE append_table SET ('compaction.min.file-num' = '2')");
         batchSql("ALTER TABLE append_table SET ('compaction.early-max.file-num' = '4')");
@@ -264,6 +313,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
         return Arrays.asList(
                 "CREATE TABLE IF NOT EXISTS append_table (id INT, data STRING)",
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt)",
+                "CREATE TABLE IF NOT EXISTS part_table2 (pt INT, data STRING, data2 STRING) PARTITIONED BY (pt) WITH ('bucket' = '2', 'sink.parallelism' = '1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>)");
     }
 

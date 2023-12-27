@@ -310,7 +310,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Boolean> WRITE_BUFFER_FOR_APPEND =
             key("write-buffer-for-append")
                     .booleanType()
-                    .defaultValue(false)
+                    .noDefaultValue()
                     .withDescription(
                             "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
 
@@ -1160,8 +1160,8 @@ public class CoreOptions implements Serializable {
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
     }
 
-    public boolean useWriteBufferForAppend() {
-        return options.get(WRITE_BUFFER_FOR_APPEND);
+    public boolean useWriteBufferForAppend(boolean isStreaming) {
+        return options.getOptional(WRITE_BUFFER_FOR_APPEND).orElse(!isStreaming);
     }
 
     public long sortSpillBufferSize() {
