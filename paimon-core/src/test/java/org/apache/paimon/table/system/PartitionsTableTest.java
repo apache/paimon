@@ -100,7 +100,6 @@ public class PartitionsTableTest extends TableTestBase {
         expectedRow.add(GenericRow.of(BinaryString.fromString("[1]"), 4L, 3L));
         expectedRow.add(GenericRow.of(BinaryString.fromString("[2]"), 2L, 2L));
 
-        // Only read partition and record count, record size may not stable.
         List<InternalRow> result = read(partitionsTable, new int[][] {{0}, {1}, {3}});
         assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
     }
