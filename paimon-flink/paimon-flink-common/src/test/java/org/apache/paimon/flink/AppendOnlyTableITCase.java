@@ -18,12 +18,13 @@
 
 package org.apache.paimon.flink;
 
-import org.apache.flink.table.planner.factories.TestValuesTableFactory;
-import org.apache.flink.types.Row;
-import org.apache.flink.types.RowKind;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.utils.BlockingIterator;
+
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
+import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -181,8 +182,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
                 .hasRootCauseInstanceOf(OutOfMemoryError.class);
         assertThatCode(
                         () ->
-                                tEnv.executeSql(
-                                                "INSERT INTO part_table2 SELECT * FROM Orders_in")
+                                tEnv.executeSql("INSERT INTO part_table2 SELECT * FROM Orders_in")
                                         .await())
                 .doesNotThrowAnyException();
 
