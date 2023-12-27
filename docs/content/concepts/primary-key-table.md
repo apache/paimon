@@ -278,19 +278,19 @@ Field `price` will be aggregated by the `max` function, and field `sales` will b
 
 Current supported aggregate functions and data types are:
 
-* `sum` function:
+* `sum`:
    The sum function aggregates the values across multiple rows.
    It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
 
-* `product` function:
+* `product`:
   The product function can compute product values across multiple lines.
   It supports DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, and DOUBLE data types.
   
-* `count` function:
+* `count`:
   The count function counts the values across multiple rows.
   It supports INTEGER, BIGINT data types.
 
-* `max`function:
+* `max`:
    The max function identifies and retains the maximum value.
    It supports CHAR, VARCHAR, DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ data types.
 
@@ -325,6 +325,75 @@ Current supported aggregate functions and data types are:
 * `first_not_null_value`:
   The first_not_null_value function selects the first non-null value in a data set.
   It supports all data types.
+
+* `nested-update`:
+  The nested-update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
+
+  Use `fields.<field-name>.nested-key=pk0,pk1;...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
+
+  An example:
+  
+  {{< tabs "nested-update-example" >}}
+
+  {{< tab "Flink" >}}
+
+  ```sql
+  -- orders table
+  CREATE TABLE orders (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING
+  );
+  
+  -- sub orders that have the same order_id 
+  -- belongs to the same order
+  CREATE TABLE sub_orders (
+    order_id BIGINT,
+    sub_order_id INT,
+    product_name STRING,
+    price BIGINT,
+    PRIMARY KEY (order_id, sub_order_id) NOT ENFORCED
+  );
+  
+  -- wide table
+  CREATE TABLE order_wide (
+    order_id BIGINT PRIMARY KEY NOT ENFORCED,
+    user_name STRING,
+    address STRING,
+    sub_orders ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>
+  ) WITH (
+    'merge-engine' = 'aggregation',
+    'fields.sub_orders.aggregate-function' = 'nested-update',
+    'fields.sub_orders.nested-key' = 'sub_order_id'
+  );
+  
+  -- widen
+  INSERT INTO order_wide
+  
+  SELECT 
+    order_id, 
+    user_name,
+    address, 
+    CAST (NULL AS ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>) 
+  FROM orders
+  
+  UNION ALL 
+    
+  SELECT 
+    order_id, 
+    CAST (NULL AS STRING), 
+    CAST (NULL AS STRING), 
+    ARRAY[ROW(sub_order_id, product_name, price)] 
+  FROM sub_orders;
+  
+  -- query using UNNEST
+  SELECT order_id, user_name, address, sub_order_id, product_name, price 
+  FROM order_wide, UNNEST(sub_orders) AS so(sub_order_id, product_name, price)
+  ```
+  
+  {{< /tab >}}
+
+  {{< /tabs >}}
 
 Only `sum` and `product` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:

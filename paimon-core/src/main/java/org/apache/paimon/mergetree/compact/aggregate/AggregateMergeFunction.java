@@ -139,10 +139,14 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc = options.fieldAggFunc(fieldName);
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
-
                 fieldAggregators[i] =
                         FieldAggregator.createFieldAggregator(
-                                fieldType, strAggFunc, ignoreRetract, isPrimaryKey);
+                                fieldType,
+                                strAggFunc,
+                                ignoreRetract,
+                                isPrimaryKey,
+                                options,
+                                fieldName);
             }
 
             return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);

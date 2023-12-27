@@ -65,19 +65,19 @@ public class FileStoreSourceSplitReader
     private RecordIterator<InternalRow> currentFirstBatch;
 
     private boolean paused;
-    private final FileStoreSourceReaderMetrics sourceReaderMetrics;
+    private final FileStoreSourceReaderMetrics metrics;
 
     public FileStoreSourceSplitReader(
             TableRead tableRead,
             @Nullable RecordLimiter limiter,
-            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
+            FileStoreSourceReaderMetrics metrics) {
         this.tableRead = tableRead;
         this.limiter = limiter;
         this.splits = new LinkedList<>();
         this.pool = new Pool<>(1);
         this.pool.add(new FileStoreRecordIterator());
         this.paused = false;
-        this.sourceReaderMetrics = sourceReaderMetrics;
+        this.metrics = metrics;
     }
 
     @Override
@@ -178,12 +178,12 @@ public class FileStoreSourceSplitReader
         }
 
         // update metric when split changes
-        if (sourceReaderMetrics != null && nextSplit.split() instanceof DataSplit) {
+        if (nextSplit.split() instanceof DataSplit) {
             long eventTime =
                     ((DataSplit) nextSplit.split())
                             .getLatestFileCreationEpochMillis()
                             .orElse(FileStoreSourceReaderMetrics.UNDEFINED);
-            sourceReaderMetrics.recordSnapshotUpdate(eventTime);
+            metrics.recordSnapshotUpdate(eventTime);
         }
 
         currentSplitId = nextSplit.splitId();
