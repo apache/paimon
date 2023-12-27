@@ -22,8 +22,6 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.options.description.Description;
 
 import java.time.Duration;
-import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -214,11 +212,6 @@ public class ConfigOptions {
             this.clazz = clazz;
         }
 
-        /** Defines that the option's type should be a list of previously defined atomic type. */
-        public ListConfigOptionBuilder<T> asList() {
-            return new ListConfigOptionBuilder<>(key, clazz);
-        }
-
         /**
          * Creates a ConfigOption with the given default value.
          *
@@ -237,42 +230,6 @@ public class ConfigOptions {
         public ConfigOption<T> noDefaultValue() {
             return new ConfigOption<>(
                     key, clazz, Description.builder().text("").build(), null, false);
-        }
-    }
-
-    /**
-     * Builder for {@link ConfigOption} of list of type {@link E}.
-     *
-     * @param <E> list element type of the option
-     */
-    public static class ListConfigOptionBuilder<E> {
-        private final String key;
-        private final Class<E> clazz;
-
-        ListConfigOptionBuilder(String key, Class<E> clazz) {
-            this.key = key;
-            this.clazz = clazz;
-        }
-
-        /**
-         * Creates a ConfigOption with the given default value.
-         *
-         * @param values The list of default values for the config option
-         * @return The config option with the default value.
-         */
-        @SafeVarargs
-        public final ConfigOption<List<E>> defaultValues(E... values) {
-            return new ConfigOption<>(
-                    key, clazz, ConfigOption.EMPTY_DESCRIPTION, Arrays.asList(values), true);
-        }
-
-        /**
-         * Creates a ConfigOption without a default value.
-         *
-         * @return The config option without a default value.
-         */
-        public ConfigOption<List<E>> noDefaultValue() {
-            return new ConfigOption<>(key, clazz, ConfigOption.EMPTY_DESCRIPTION, null, true);
         }
     }
 
