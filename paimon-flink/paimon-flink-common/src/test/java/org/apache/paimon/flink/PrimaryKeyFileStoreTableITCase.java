@@ -88,6 +88,10 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         sEnv.getConfig()
                 .getConfiguration()
                 .set(CHECKPOINTING_INTERVAL, Duration.ofMillis(checkpointIntervalMs));
+        sEnv.getConfig()
+                .set(
+                        ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
+                        ExecutionConfigOptions.UpsertMaterialize.NONE);
         return sEnv;
     }
 
