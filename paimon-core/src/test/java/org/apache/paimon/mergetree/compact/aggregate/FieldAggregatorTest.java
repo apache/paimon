@@ -26,6 +26,7 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -287,6 +288,11 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldNestedUpdateAgg() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
         FieldNestedUpdateAgg agg =
                 new FieldNestedUpdateAgg(
                         DataTypes.ARRAY(
@@ -297,50 +303,53 @@ public class FieldAggregatorTest {
                         Arrays.asList("k0", "k1"));
 
         InternalArray accumulator;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
 
         InternalRow current = row(0, 0, "A");
         accumulator = (InternalArray) agg.agg(null, singletonArray(current));
-        assertThat(unnest(accumulator))
+        assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Collections.singletonList(current));
 
         current = row(0, 1, "B");
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
-        assertThat(unnest(accumulator))
+        assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "B")));
 
         current = row(0, 1, "b");
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
-        assertThat(unnest(accumulator))
+        assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
     }
 
     @Test
     public void testFieldNestedAppendAgg() {
+        DataType elementRowType =
+                DataTypes.ROW(
+                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
+                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
+                        DataTypes.FIELD(2, "v", DataTypes.STRING()));
         FieldNestedUpdateAgg agg =
-                new FieldNestedUpdateAgg(
-                        DataTypes.ARRAY(
-                                DataTypes.ROW(
-                                        DataTypes.FIELD(0, "k0", DataTypes.INT()),
-                                        DataTypes.FIELD(1, "k1", DataTypes.INT()),
-                                        DataTypes.FIELD(2, "v", DataTypes.STRING()))),
-                        Collections.emptyList());
+                new FieldNestedUpdateAgg(DataTypes.ARRAY(elementRowType), Collections.emptyList());
 
         InternalArray accumulator = null;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(elementRowType);
 
         InternalRow current = row(0, 1, "B");
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
-        assertThat(unnest(accumulator))
+        assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
 
         current = row(0, 1, "b");
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
-        assertThat(unnest(accumulator))
+        assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
     }
 
-    private List<InternalRow> unnest(InternalArray array) {
+    private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {
         return IntStream.range(0, array.size())
-                .mapToObj(i -> array.getRow(i, 3))
+                .mapToObj(i -> elementGetter.getElementOrNull(array, i))
                 .collect(Collectors.toList());
     }
 
@@ -350,5 +359,47 @@ public class FieldAggregatorTest {
 
     private InternalRow row(int k0, int k1, String v) {
         return GenericRow.of(k0, k1, BinaryString.fromString(v));
+    }
+
+    @Test
+    public void testFieldCollectAggWithDistinct() {
+        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+
+        InternalArray result;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.INT());
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        result = (InternalArray) agg.agg(null, new GenericArray(new int[] {1, 1, 2}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2);
+
+        result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new int[] {1, 1, 2}),
+                                new GenericArray(new int[] {2, 3}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2, 3);
+    }
+
+    @Test
+    public void testFieldCollectAggWithoutDistinct() {
+        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), false);
+
+        InternalArray result;
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(DataTypes.INT());
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        result = (InternalArray) agg.agg(null, new GenericArray(new int[] {1, 1, 2}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 1, 2);
+
+        result =
+                (InternalArray)
+                        agg.agg(
+                                new GenericArray(new int[] {1, 1, 2}),
+                                new GenericArray(new int[] {2, 3}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 1, 2, 2, 3);
     }
 }
