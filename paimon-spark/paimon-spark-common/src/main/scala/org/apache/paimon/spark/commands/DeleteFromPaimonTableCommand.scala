@@ -19,7 +19,10 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.CoreOptions
+import org.apache.paimon.options.Options
 import org.apache.paimon.partition.PartitionPredicate
+import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor
+import org.apache.paimon.spark.{InsertInto, SparkTable}
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -74,7 +77,12 @@ case class DeleteFromPaimonTableCommand(
           ignoreFailure = true)
       }
 
-      if (otherCondition.isEmpty && partitionPredicate.nonEmpty) {
+      if (
+        otherCondition.isEmpty && partitionPredicate.nonEmpty && !table
+          .store()
+          .options()
+          .deleteForceProduceChangelog()
+      ) {
         val matchedPartitions =
           table.newSnapshotReader().withPartitionFilter(partitionPredicate.get).partitions().asScala
         val rowDataPartitionComputer = new RowDataPartitionComputer(
