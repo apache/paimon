@@ -1256,7 +1256,8 @@ public class PreAggregationITCase {
                             + "  f0 ARRAY<STRING>"
                             + ") WITH ("
                             + "  'merge-engine' = 'aggregation',"
-                            + "  'fields.f0.aggregate-function' = 'collect'"
+                            + "  'fields.f0.aggregate-function' = 'collect',"
+                            + "  'fields.f0.distinct' = 'true'"
                             + ")");
 
             sql(
@@ -1290,8 +1291,7 @@ public class PreAggregationITCase {
                             + "  f0 ARRAY<STRING>"
                             + ") WITH ("
                             + "  'merge-engine' = 'aggregation',"
-                            + "  'fields.f0.aggregate-function' = 'collect',"
-                            + "  'fields.f0.distinct' = 'false'"
+                            + "  'fields.f0.aggregate-function' = 'collect'"
                             + ")");
 
             sql(

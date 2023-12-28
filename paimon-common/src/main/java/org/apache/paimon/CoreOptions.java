@@ -1129,7 +1129,7 @@ public class CoreOptions implements Serializable {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
                         .booleanType()
-                        .defaultValue(true));
+                        .defaultValue(false));
     }
 
     public String fileCompression() {

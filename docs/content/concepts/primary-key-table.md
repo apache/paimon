@@ -396,8 +396,7 @@ Current supported aggregate functions and data types are:
   {{< /tabs >}}
 
 * `collect`: 
-  The collect function collects elements into an Array. By default, it will deduplicate elements. You can set
-  `fields.<field-name>.distinct=false` to allow collect duplicate elements.
+  The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
 
 Only `sum` and `product` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
