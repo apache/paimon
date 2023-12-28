@@ -53,7 +53,7 @@ public class TableUtils {
         long hit = 0;
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
                 BatchTableWrite write = writeBuilder.newWrite();
-                // we create temp io manager to for writer
+                // we create temp io manager for writer
                 IOManager ioManager = new IOManagerImpl(TEMP_DIR);
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             write.withIOManager(ioManager);
