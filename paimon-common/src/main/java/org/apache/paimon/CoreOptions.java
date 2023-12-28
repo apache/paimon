@@ -66,6 +66,8 @@ public class CoreOptions implements Serializable {
 
     public static final String NESTED_KEY = "nested-key";
 
+    public static final String DISTINCT = "distinct";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -1121,6 +1123,13 @@ public class CoreOptions implements Serializable {
             return Collections.emptyList();
         }
         return Arrays.asList(keyString.split(","));
+    }
+
+    public boolean fieldCollectAggDistinct(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
+                        .booleanType()
+                        .defaultValue(true));
     }
 
     public String fileCompression() {
