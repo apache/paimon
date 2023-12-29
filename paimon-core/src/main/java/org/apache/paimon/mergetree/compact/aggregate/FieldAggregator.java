@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -102,6 +103,13 @@ public abstract class FieldAggregator implements Serializable {
                         fieldAggregator =
                                 createFieldCollectAgg(
                                         fieldType, options.fieldCollectAggDistinct(field));
+                        break;
+                    case FieldMergeMapAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof MapType,
+                                "Data type of merge map column must be 'MAP' but was '%s'",
+                                fieldType);
+                        fieldAggregator = new FieldMergeMapAgg((MapType) fieldType);
                         break;
                     default:
                         throw new RuntimeException(
