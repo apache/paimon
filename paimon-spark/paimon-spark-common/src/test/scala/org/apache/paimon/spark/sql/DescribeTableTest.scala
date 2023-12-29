@@ -69,14 +69,13 @@ class DescribeTableTest extends PaimonSparkTestBase {
 
   def checkTableCommentEqual(tableName: String, comment: String): Unit = {
     // check describe table
-    if (comment != null) {
-      checkAnswer(
-        spark
-          .sql(s"DESCRIBE TABLE EXTENDED $tableName")
-          .filter("col_name = 'Comment'")
-          .select("col_name", "data_type"),
-        Row("Comment", comment) :: Nil)
-    }
+    checkAnswer(
+      spark
+        .sql(s"DESCRIBE TABLE EXTENDED $tableName")
+        .filter("col_name = 'Comment'")
+        .select("col_name", "data_type"),
+      if (comment == null) Nil else Row("Comment", comment) :: Nil
+    )
 
     // check comment in schema
     Assertions.assertTrue(Objects.equals(comment, loadTable(tableName).schema().comment()))

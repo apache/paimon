@@ -46,6 +46,7 @@ public class SchemaChangeSerializationTest {
         runTest(SchemaChange.updateColumnNullability(new String[] {"col1", "col2"}, true));
         runTest(SchemaChange.updateColumnComment(new String[] {"col1", "col2"}, "comment"));
         runTest(SchemaChange.updateColumnPosition(SchemaChange.Move.after("col", "ref")));
+        runTest(SchemaChange.updateComment("comment"));
     }
 
     private void runTest(SchemaChange schemaChange) throws Exception {
