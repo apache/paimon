@@ -141,6 +141,22 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testCreateDatabaseImpl() throws Exception {
+        // Create database creates a new database when it does not exist
+        catalog.createDatabaseImpl("new_db");
+        boolean exists = catalog.databaseExists("new_db");
+        assertThat(exists).isTrue();
+
+        catalog.createDatabaseImpl("existing_db");
+
+        // Create database throws DatabaseAlreadyExistException when database already exists and
+        // ignoreIfExists is false
+        assertThatExceptionOfType(Catalog.DatabaseAlreadyExistException.class)
+                .isThrownBy(() -> catalog.createDatabaseImpl("existing_db"))
+                .withMessage("Database existing_db already exists.");
+    }
+
+    @Test
     public void testDropDatabase() throws Exception {
         // Drop database deletes the database when it exists and there are no tables
         catalog.createDatabase("db_to_drop", false);
@@ -171,6 +187,28 @@ public abstract class CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotEmptyException.class)
                 .isThrownBy(() -> catalog.dropDatabase("db_with_tables", false, false))
                 .withMessage("Database db_with_tables is not empty.");
+    }
+
+    @Test
+    public void testDropDatabaseImpl() throws Exception {
+        // Drop database deletes the database when it exists and there are no tables
+        catalog.createDatabase("db_to_drop", false);
+        catalog.dropDatabase("db_to_drop", false, false);
+        boolean exists = catalog.databaseExists("db_to_drop");
+        assertThat(exists).isFalse();
+
+        // Drop database does not throw exception when database does not exist
+        assertThatCode(() -> catalog.dropDatabaseImpl("non_existing_db"))
+                .doesNotThrowAnyException();
+
+        // Drop database deletes all tables in the database when cascade is true
+        catalog.createDatabase("db_to_drop", false);
+        catalog.createTable(Identifier.create("db_to_drop", "table1"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.createTable(Identifier.create("db_to_drop", "table2"), DEFAULT_TABLE_SCHEMA, false);
+
+        catalog.dropDatabaseImpl("db_to_drop");
+        exists = catalog.databaseExists("db_to_drop");
+        assertThat(exists).isFalse();
     }
 
     @Test

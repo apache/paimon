@@ -216,7 +216,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) {
+    public void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
         try {
             Database database = getDatabase(name);
             if (database == null) {
@@ -227,6 +227,8 @@ public class HiveCatalog extends AbstractCatalog {
                 database.setName(name);
                 locationHelper.specifyDatabaseLocation(databasePath, database);
                 client.createDatabase(database);
+            } else {
+                throw new DatabaseAlreadyExistException(name);
             }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
@@ -234,7 +236,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropDatabaseImpl(String name) {
+    public void dropDatabaseImpl(String name) {
         try {
             Database database = getDatabase(name);
             if (database != null) {
