@@ -243,7 +243,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         // write update data
         sEnv.executeSql(
                         "INSERT INTO `default_catalog`.`default_database`.`S` "
-                                + "VALUES (1, 'A'), (1, 'B'), (1, 'C'), (1, 'D')")
+                                + "VALUES (1, 'D'), (1, 'C'), (1, 'B'), (1, 'A')")
                 .await();
 
         // read update data
