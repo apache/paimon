@@ -293,7 +293,7 @@ public class SparkCatalog extends SparkBaseCatalog {
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             catalog.createTable(
-                    toIdentifier(ident), toUpdateSchema(schema, partitions, properties), false);
+                    toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -318,11 +318,19 @@ public class SparkCatalog extends SparkBaseCatalog {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
             validateAlterProperty(set.property());
-            return SchemaChange.setOption(set.property(), set.value());
+            if (set.property().equals(TableCatalog.PROP_COMMENT)) {
+                return SchemaChange.updateComment(set.value());
+            } else {
+                return SchemaChange.setOption(set.property(), set.value());
+            }
         } else if (change instanceof TableChange.RemoveProperty) {
             TableChange.RemoveProperty remove = (TableChange.RemoveProperty) change;
             validateAlterProperty(remove.property());
-            return SchemaChange.removeOption(remove.property());
+            if (remove.property().equals(TableCatalog.PROP_COMMENT)) {
+                return SchemaChange.updateComment(null);
+            } else {
+                return SchemaChange.removeOption(remove.property());
+            }
         } else if (change instanceof TableChange.AddColumn) {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             validateAlterNestedField(add.fieldNames());
@@ -375,7 +383,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         return move;
     }
 
-    private Schema toUpdateSchema(
+    private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Preconditions.checkArgument(
                 Arrays.stream(partitions)
@@ -387,6 +395,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                                 }));
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
+        normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
         List<String> primaryKeys =
                 pkAsString == null
@@ -402,7 +411,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                                 Arrays.stream(partitions)
                                         .map(partition -> partition.references()[0].describe())
                                         .collect(Collectors.toList()))
-                        .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
+                        .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, null));
 
         for (StructField field : schema.fields()) {
             schemaBuilder.column(
