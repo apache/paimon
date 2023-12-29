@@ -205,39 +205,33 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
 
     @Test
     public void testContinuousLatest() throws Exception {
-
-        // there is only one snapshot before streaming read
         batchSql("INSERT INTO T1 VALUES ('1', '2', '3'), ('4', '5', '6')");
+
         BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest') */"));
+                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('log.scan'='latest') */"));
 
         batchSql("INSERT INTO T1 VALUES ('7', '8', '9'), ('10', '11', '12')");
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of("7", "8", "9"), Row.of("10", "11", "12"));
         iterator.close();
+    }
 
-        // there is no snapshot before streaming read
-        sEnv.executeSql("CREATE TABLE T11 (id INT , name STRING)");
-        iterator =
+    @Test
+    public void testContinuousLatestStartingFromEmpty() throws Exception {
+        BlockingIterator<Row, Row> iterator =
                 BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T11 /*+ OPTIONS('scan.mode'='latest') */"));
+                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest') */"));
 
-        batchSql("INSERT INTO T11 VALUES (1, 'AAA')");
-        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, "AAA"));
-        iterator.close();
+        sql("INSERT INTO T1 VALUES ('1', 'Hello', 'World')");
+        sql("INSERT INTO T1 VALUES ('2', 'Apache', 'Paimon')");
+        sql("INSERT INTO T1 VALUES ('3', 'C', 'c')");
 
-        // there are more than one snapshot before streaming read
-        sEnv.executeSql("CREATE TABLE T111 (id INT , name STRING)");
-        batchSql("INSERT INTO T111 VALUES (1, 'AAA')");
-        batchSql("INSERT INTO T111 VALUES (2, 'BBB')");
-        iterator =
-                BlockingIterator.of(
-                        streamSqlIter("SELECT * FROM T111 /*+ OPTIONS('scan.mode'='latest') */"));
-
-        batchSql("INSERT INTO T111 VALUES (3, 'CCC')");
-        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "CCC"));
-        iterator.close();
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "Hello", "World"),
+                        Row.of("2", "Apache", "Paimon"),
+                        Row.of("3", "C", "c"));
     }
 
     @Test
