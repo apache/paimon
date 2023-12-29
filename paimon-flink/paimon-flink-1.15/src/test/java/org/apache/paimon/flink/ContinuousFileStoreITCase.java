@@ -26,7 +26,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
 import org.apache.flink.types.Row;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;

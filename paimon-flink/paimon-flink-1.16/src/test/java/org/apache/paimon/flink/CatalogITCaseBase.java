@@ -35,7 +35,7 @@ import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
 import org.apache.flink.test.util.AbstractTestBase;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
-import org.junit.Before;
+import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
 import java.time.Duration;
@@ -51,7 +51,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
     protected TableEnvironment sEnv;
     protected String path;
 
-    @Before
+    @BeforeEach
     public void before() throws IOException {
         tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
         String catalog = "PAIMON";

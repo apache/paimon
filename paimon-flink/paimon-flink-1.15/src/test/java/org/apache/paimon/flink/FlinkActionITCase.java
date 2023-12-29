@@ -22,7 +22,7 @@ import org.apache.paimon.flink.action.DeleteAction;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
 import java.util.List;
