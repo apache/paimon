@@ -37,6 +37,7 @@ import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.fail;
 
 /** ITCase for partial update. */
 public class PartialUpdateITCase extends CatalogITCaseBase {
@@ -326,5 +327,24 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sql("INSERT INTO AGG VALUES (1, 0, 0)");
 
         assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 0, 2));
+    }
+
+    @Test
+    public void testNoSinkMaterializer() {
+        sEnv.getConfig()
+                .set(
+                        ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
+                        ExecutionConfigOptions.UpsertMaterialize.FORCE);
+        try (CloseableIterator<Row> ignored =
+                streamSqlIter(
+                        "INSERT INTO dwd_orders "
+                                + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
+                                + "UNION ALL "
+                                + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;")) {
+            fail("Expecting exception");
+        } catch (Exception e) {
+            assertThat(e)
+                    .hasMessageContaining("Sink materializer must not be used with Paimon sink.");
+        }
     }
 }
