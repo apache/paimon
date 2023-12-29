@@ -217,6 +217,23 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testContinuousLatestStartingFromEmpty() throws Exception {
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter("SELECT * FROM T1 /*+ OPTIONS('scan.mode'='latest') */"));
+
+        sql("INSERT INTO T1 VALUES ('1', 'Hello', 'World')");
+        sql("INSERT INTO T1 VALUES ('2', 'Apache', 'Paimon')");
+        sql("INSERT INTO T1 VALUES ('3', 'C', 'c')");
+
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "Hello", "World"),
+                        Row.of("2", "Apache", "Paimon"),
+                        Row.of("3", "C", "c"));
+    }
+
+    @Test
     public void testContinuousFromTimestamp() throws Exception {
         String sql =
                 "SELECT * FROM T1 /*+ OPTIONS('log.scan'='from-timestamp', 'log.scan.timestamp-millis'='%s') */";
