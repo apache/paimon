@@ -149,8 +149,7 @@ public abstract class CatalogTestBase {
 
         catalog.createDatabaseImpl("existing_db");
 
-        // Create database throws DatabaseAlreadyExistException when database already exists and
-        // ignoreIfExists is false
+        // Create database throws DatabaseAlreadyExistException when database already exists
         assertThatExceptionOfType(Catalog.DatabaseAlreadyExistException.class)
                 .isThrownBy(() -> catalog.createDatabaseImpl("existing_db"))
                 .withMessage("Database existing_db already exists.");
@@ -201,7 +200,7 @@ public abstract class CatalogTestBase {
         assertThatCode(() -> catalog.dropDatabaseImpl("non_existing_db"))
                 .doesNotThrowAnyException();
 
-        // Drop database deletes all tables in the database when cascade is true
+        // Drop database deletes all tables in the database
         catalog.createDatabase("db_to_drop", false);
         catalog.createTable(Identifier.create("db_to_drop", "table1"), DEFAULT_TABLE_SCHEMA, false);
         catalog.createTable(Identifier.create("db_to_drop", "table2"), DEFAULT_TABLE_SCHEMA, false);
