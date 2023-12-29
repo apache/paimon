@@ -803,7 +803,7 @@ public abstract class CatalogTestBase {
     }
 
     @Test
-    public void testAlterTableUpdateColumn() throws Exception {
+    public void testAlterTableUpdateComment() throws Exception {
         catalog.createDatabase("test_db", false);
 
         Identifier identifier = Identifier.create("test_db", "test_table");
