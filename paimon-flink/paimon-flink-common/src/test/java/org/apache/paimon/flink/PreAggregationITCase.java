@@ -884,6 +884,8 @@ public class PreAggregationITCase {
 
         @Test
         public void testMergeInMemory() {
+            batchSql("ALTER TABLE T1 MODIFY b DECIMAL(5, 3)");
+
             batchSql(
                     "INSERT INTO T1 VALUES "
                             + "(1, 2, CAST(NULL AS INT), 1.01, CAST(1 AS TINYINT), CAST(-1 AS SMALLINT), "
@@ -899,7 +901,7 @@ public class PreAggregationITCase {
                                     1,
                                     2,
                                     6,
-                                    new BigDecimal("11.10"),
+                                    new BigDecimal("11.110"),
                                     (byte) 2,
                                     (short) -2,
                                     1000000000000000L,
