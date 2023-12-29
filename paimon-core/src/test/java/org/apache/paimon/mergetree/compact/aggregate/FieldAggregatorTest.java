@@ -21,8 +21,10 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
@@ -41,7 +43,9 @@ import org.junit.jupiter.api.Test;
 import java.math.BigDecimal;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -401,5 +405,43 @@ public class FieldAggregatorTest {
                                 new GenericArray(new int[] {1, 1, 2}),
                                 new GenericArray(new int[] {2, 3}));
         assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 1, 2, 2, 3);
+    }
+
+    @Test
+    public void testFieldMergeMapAgg() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAgg(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()));
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        Object accumulator = agg.agg(null, new GenericMap(toMap(1, "A")));
+        assertThat(toJavaMap(accumulator)).containsExactlyInAnyOrderEntriesOf(toMap(1, "A"));
+
+        accumulator = agg.agg(accumulator, new GenericMap(toMap(1, "A", 2, "B")));
+        assertThat(toJavaMap(accumulator))
+                .containsExactlyInAnyOrderEntriesOf(toMap(1, "A", 2, "B"));
+
+        accumulator = agg.agg(accumulator, new GenericMap(toMap(1, "a", 3, "c")));
+        assertThat(toJavaMap(accumulator))
+                .containsExactlyInAnyOrderEntriesOf(toMap(1, "a", 2, "B", 3, "c"));
+    }
+
+    private Map<Object, Object> toMap(Object... kvs) {
+        Map<Object, Object> result = new HashMap<>();
+        for (int i = 0; i < kvs.length; i += 2) {
+            result.put(kvs[i], BinaryString.fromString((String) kvs[i + 1]));
+        }
+        return result;
+    }
+
+    private Map<Object, Object> toJavaMap(Object data) {
+        InternalMap mapData = (InternalMap) data;
+        InternalArray keyArray = mapData.keyArray();
+        InternalArray valueArray = mapData.valueArray();
+        Map<Object, Object> result = new HashMap<>();
+        for (int i = 0; i < keyArray.size(); i++) {
+            result.put(keyArray.getInt(i), valueArray.getString(i));
+        }
+        return result;
     }
 }
