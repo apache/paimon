@@ -133,6 +133,7 @@ public class BranchManager {
                     String.format("Failed to determine if path '%s' exists.", path), e);
         }
     }
+
     /** Check if a tag exists. */
     public boolean tagExists(String tagName) {
         Path tagPath = tagPath(tagName);
