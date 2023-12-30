@@ -38,7 +38,7 @@ import java.util.List;
 import java.util.function.Predicate;
 
 /** A {@link LookupTable} for table without primary key. */
-public class NoPrimaryKeyLookupTable implements LookupTable {
+public class NoPrimaryKeyLookupTable implements FullCacheLookupTable {
 
     private final RocksDBListState<InternalRow, InternalRow> state;
 

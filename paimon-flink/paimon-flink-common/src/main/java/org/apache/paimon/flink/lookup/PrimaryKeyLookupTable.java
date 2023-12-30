@@ -35,7 +35,7 @@ import java.util.List;
 import java.util.function.Predicate;
 
 /** A {@link LookupTable} for primary key table. */
-public class PrimaryKeyLookupTable implements LookupTable {
+public class PrimaryKeyLookupTable implements FullCacheLookupTable {
 
     protected final RocksDBValueState<InternalRow, InternalRow> tableState;
 

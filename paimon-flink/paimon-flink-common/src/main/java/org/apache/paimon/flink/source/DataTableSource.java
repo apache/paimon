@@ -29,6 +29,7 @@ import org.apache.paimon.flink.log.LogSourceProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
+import org.apache.paimon.flink.lookup.LookupTable;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
@@ -54,8 +55,10 @@ import org.apache.flink.table.plan.stats.TableStats;
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
@@ -302,6 +305,11 @@ public class DataTableSource extends FlinkTableSource {
         Options options = new Options(table.options());
         boolean enableAsync = options.get(LOOKUP_ASYNC);
         int asyncThreadNumber = options.get(LOOKUP_ASYNC_THREAD_NUMBER);
+        LookupTable.validatePartialCacheMode(
+                table,
+                Arrays.stream(joinKey)
+                        .mapToObj(i -> table.rowType().getFieldNames().get(projection[i]))
+                        .collect(Collectors.toList()));
         return LookupRuntimeProviderFactory.create(
                 new FileStoreLookupFunction(table, projection, joinKey, predicate),
                 enableAsync,

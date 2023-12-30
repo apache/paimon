@@ -23,9 +23,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
+import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBState;
@@ -99,6 +101,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private final boolean sequenceFieldEnabled;
 
+    private transient TableFileMonitor fileMonitor;
+
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
         TableScanUtils.streamingReadingValidate(table);
@@ -137,6 +141,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     // we tag this method friendly for testing
     void open(String tmpDirectory) throws Exception {
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
+        if (!path.mkdirs()) {
+            throw new RuntimeException("Failed to create dir: " + path);
+        }
         open();
     }
 
@@ -145,32 +152,47 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.refreshInterval =
                 options.getOptional(LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL)
                         .orElse(options.get(CONTINUOUS_DISCOVERY_INTERVAL));
-        this.stateFactory = new RocksDBStateFactory(path.toString(), options, null);
+        LookupCacheMode cacheMode = options.get(FlinkConnectorOptions.LOOKUP_CACHE_MODE);
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
         RowType rowType = TypeUtils.project(table.rowType(), projection);
 
         PredicateFilter recordFilter = createRecordFilter(projection);
-        this.lookupTable =
-                LookupTable.create(
-                        stateFactory,
-                        sequenceFieldEnabled
-                                ? rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT())
-                                : rowType,
-                        table.primaryKeys(),
-                        joinKeys,
-                        recordFilter,
-                        options.get(LOOKUP_CACHE_ROWS));
+
+        switch (cacheMode) {
+            case FULL:
+                this.stateFactory = new RocksDBStateFactory(path.toString(), options, null);
+                this.lookupTable =
+                        LookupTable.create(
+                                stateFactory,
+                                sequenceFieldEnabled
+                                        ? rowType.appendDataField(
+                                                SEQUENCE_NUMBER, DataTypes.BIGINT())
+                                        : rowType,
+                                table.primaryKeys(),
+                                joinKeys,
+                                recordFilter,
+                                options.get(LOOKUP_CACHE_ROWS));
+                this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
+                bulkLoad(options);
+                break;
+            case PARTIAL:
+                this.lookupTable = LookupTable.create(table, projection, joinKeys, path);
+                this.fileMonitor = new TableFileMonitor(table, this.predicate);
+                ((PartialCacheLookupTable) lookupTable).refresh(fileMonitor.readChanges());
+                break;
+            default:
+                throw new IllegalArgumentException("Unsupported lookup cache mode: " + cacheMode);
+        }
         this.nextLoadTime = -1;
-        this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
-        bulkLoad(options);
     }
 
     private void bulkLoad(Options options) throws Exception {
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(path.toString()), new CoreOptions(options));
+        FullCacheLookupTable lookupTable = (FullCacheLookupTable) this.lookupTable;
         try (RecordReaderIterator<InternalRow> batch =
                 new RecordReaderIterator<>(streamingReader.nextBatch(true, sequenceFieldEnabled))) {
             while (batch.hasNext()) {
@@ -263,15 +285,19 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void refresh() throws Exception {
-        while (true) {
-            try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(
-                            streamingReader.nextBatch(false, sequenceFieldEnabled))) {
-                if (!batch.hasNext()) {
-                    return;
+        if (lookupTable instanceof FullCacheLookupTable) {
+            while (true) {
+                try (RecordReaderIterator<InternalRow> batch =
+                        new RecordReaderIterator<>(
+                                streamingReader.nextBatch(false, sequenceFieldEnabled))) {
+                    if (!batch.hasNext()) {
+                        return;
+                    }
+                    ((FullCacheLookupTable) this.lookupTable).refresh(batch, sequenceFieldEnabled);
                 }
-                this.lookupTable.refresh(batch, sequenceFieldEnabled);
             }
+        } else {
+            ((PartialCacheLookupTable) lookupTable).refresh(fileMonitor.readChanges());
         }
     }
 
