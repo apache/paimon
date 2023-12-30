@@ -97,6 +97,7 @@ public class BranchManager {
         Snapshot snapshot = taggedSnapshot(tagName);
 
         try {
+            // Copy the corresponding tag, snapshot and schema files into the branch directory
             fileIO.copyFileUtf8(tagPath(tagName), branchTagPath(branchName, tagName));
             fileIO.copyFileUtf8(
                     snapshotPath(snapshot.id()), branchSnapshotPath(branchName, snapshot.id()));
@@ -104,13 +105,18 @@ public class BranchManager {
                     schemaPath(snapshot.schemaId()),
                     branchSchemaPath(branchName, snapshot.schemaId()));
         } catch (IOException e) {
-            e.printStackTrace();
+            throw new RuntimeException(
+                    String.format(
+                            "Exception occurs when create branch '%s' (directory in %s).",
+                            branchName, getBranchPath(branchName)),
+                    e);
         }
     }
 
     public void deleteBranch(String branchName) {
         checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
         try {
+            // Delete branch directory
             fileIO.delete(branchPath(branchName), true);
         } catch (IOException e) {
             LOG.info(
