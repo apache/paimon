@@ -18,13 +18,25 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
-import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
@@ -55,7 +67,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LookupTable}. */
-public class LookupTableTest {
+public class LookupTableTest extends TableTestBase {
 
     @TempDir Path tempDir;
 
@@ -63,10 +75,13 @@ public class LookupTableTest {
 
     private RowType rowType;
 
+    private IOManager ioManager;
+
     @BeforeEach
     public void before() throws IOException {
         this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Options(), null);
         this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
+        this.ioManager = new IOManagerImpl(tempDir.toString());
     }
 
     @AfterEach
@@ -78,7 +93,7 @@ public class LookupTableTest {
 
     @Test
     public void testPkTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -132,7 +147,7 @@ public class LookupTableTest {
 
     @Test
     public void testPkTableWithSequenceField() throws Exception {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
@@ -174,7 +189,7 @@ public class LookupTableTest {
 
     @Test
     public void testPkTablePkFilter() throws IOException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -203,7 +218,7 @@ public class LookupTableTest {
 
     @Test
     public void testPkTableNonPkFilter() throws IOException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -224,7 +239,7 @@ public class LookupTableTest {
 
     @Test
     public void testSecKeyTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -264,7 +279,7 @@ public class LookupTableTest {
 
     @Test
     public void testSecKeyTableWithSequenceField() throws Exception {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
@@ -316,7 +331,7 @@ public class LookupTableTest {
 
     @Test
     public void testSecKeyTablePkFilter() throws IOException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -354,7 +369,7 @@ public class LookupTableTest {
 
     @Test
     public void testNoPrimaryKeyTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -394,7 +409,7 @@ public class LookupTableTest {
 
     @Test
     public void testNoPrimaryKeyTableFilter() throws IOException {
-        LookupTable table =
+        FullCacheLookupTable table =
                 LookupTable.create(
                         stateFactory,
                         rowType,
@@ -417,6 +432,83 @@ public class LookupTableTest {
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 11, 111);
         assertRow(result.get(1), 1, 11, 111);
+    }
+
+    @Test
+    public void testPartialLookupTable() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PartialCacheLookupTable table =
+                LookupTable.create(
+                        dimTable,
+                        new int[] {0, 1, 2},
+                        Collections.singletonList("pk"),
+                        tempDir.toFile());
+        TableFileMonitor monitor = new TableFileMonitor(dimTable, null);
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh(monitor.readChanges());
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 11);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, -2, 22);
+
+        write(dimTable, ioManager, GenericRow.ofKind(RowKind.DELETE, 1, -1, 11));
+        table.refresh(monitor.readChanges());
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+    }
+
+    @Test
+    public void testPartialLookupTableWithProjection() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PartialCacheLookupTable table =
+                LookupTable.create(
+                        dimTable,
+                        new int[] {2, 1},
+                        Collections.singletonList("pk"),
+                        tempDir.toFile());
+        TableFileMonitor monitor = new TableFileMonitor(dimTable, null);
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh(monitor.readChanges());
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 11, -1);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 22, -2);
+    }
+
+    private FileStoreTable createDimTable() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        org.apache.paimon.fs.Path tablePath =
+                new org.apache.paimon.fs.Path(
+                        String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk", DataTypes.INT())
+                        .column("col1", DataTypes.INT())
+                        .column("col2", DataTypes.INT())
+                        .primaryKey("pk", "col1")
+                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup")
+                        .option(CoreOptions.BUCKET.key(), "2")
+                        .option(CoreOptions.BUCKET_KEY.key(), "col1")
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     private static InternalRow row(Object... values) {
