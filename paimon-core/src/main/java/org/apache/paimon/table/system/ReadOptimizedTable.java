@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -134,6 +135,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public TagManager tagManager() {
         return dataTable.tagManager();
+    }
+
+    @Override
+    public BranchManager branchManager() {
+        return dataTable.branchManager();
     }
 
     @Override
