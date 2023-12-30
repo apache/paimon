@@ -71,7 +71,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 @ThreadSafe
 public class SchemaManager implements Serializable {
 
-    private static final String SCHEMA_PREFIX = "schema-";
+    public static final String SCHEMA_PREFIX = "schema-";
 
     private final FileIO fileIO;
     private final Path tableRoot;
@@ -457,6 +457,14 @@ public class SchemaManager implements Serializable {
     public TableSchema schema(long id) {
         try {
             return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(path), TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

@@ -244,6 +244,17 @@ public interface FileIO extends Serializable {
         }
     }
 
+    /**
+     * Read file to UTF_8 decoding, then write content to one file atomically, initially writes to
+     * temp hidden file and only renames to the target file once temp file is closed.
+     *
+     * @return false if targetPath file exists
+     */
+    default boolean copyFileUtf8(Path sourcePath, Path targetPath) throws IOException {
+        String content = readFileUtf8(sourcePath);
+        return writeFileUtf8(targetPath, content);
+    }
+
     /** Read file from {@link #overwriteFileUtf8} file. */
     default Optional<String> readOverwrittenFileUtf8(Path path) throws IOException {
         int retryNumber = 0;
