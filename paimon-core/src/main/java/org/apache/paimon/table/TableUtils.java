@@ -19,6 +19,8 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
@@ -35,6 +37,8 @@ import java.util.List;
 /** Utils for Table. TODO we can introduce LocalAction maybe? */
 public class TableUtils {
 
+    private static final String TEMP_DIR = System.getProperty("java.io.tmpdir");
+
     /**
      * Delete according to filters.
      *
@@ -49,7 +53,10 @@ public class TableUtils {
         long hit = 0;
         try (RecordReader<InternalRow> reader = readBuilder.newRead().createReader(splits);
                 BatchTableWrite write = writeBuilder.newWrite();
+                // we create temp io manager for writer
+                IOManager ioManager = new IOManagerImpl(TEMP_DIR);
                 BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
             CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
             PredicateFilter filter = new PredicateFilter(table.rowType(), filters);
             while (iterator.hasNext()) {

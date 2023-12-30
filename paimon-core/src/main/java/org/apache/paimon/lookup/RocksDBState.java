@@ -18,9 +18,14 @@
 
 package org.apache.paimon.lookup;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.serializer.Serializer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
@@ -37,6 +42,8 @@ import java.util.Arrays;
 
 /** Rocksdb state for key value. */
 public abstract class RocksDBState<K, V, CacheV> {
+
+    protected final RocksDBStateFactory stateFactory;
 
     protected final RocksDB db;
 
@@ -57,12 +64,13 @@ public abstract class RocksDBState<K, V, CacheV> {
     protected final Cache<ByteArray, CacheV> cache;
 
     public RocksDBState(
-            RocksDB db,
+            RocksDBStateFactory stateFactory,
             ColumnFamilyHandle columnFamily,
             Serializer<K> keySerializer,
             Serializer<V> valueSerializer,
             long lruCacheSize) {
-        this.db = db;
+        this.stateFactory = stateFactory;
+        this.db = stateFactory.db();
         this.columnFamily = columnFamily;
         this.keySerializer = keySerializer;
         this.valueSerializer = valueSerializer;
@@ -89,6 +97,21 @@ public abstract class RocksDBState<K, V, CacheV> {
 
     protected Reference ref(byte[] bytes) {
         return new Reference(bytes);
+    }
+
+    public BulkLoader createBulkLoader() {
+        return new BulkLoader(db, stateFactory.options(), columnFamily, stateFactory.path());
+    }
+
+    public static BinaryExternalSortBuffer createBulkLoadSorter(
+            IOManager ioManager, CoreOptions options) {
+        return BinaryExternalSortBuffer.create(
+                ioManager,
+                RowType.of(DataTypes.BYTES()),
+                RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
+                options.writeBufferSize() / 2,
+                options.pageSize(),
+                options.localSortMaxNumFileHandles());
     }
 
     /** A class wraps byte[] to implement equals and hashCode. */

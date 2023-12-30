@@ -18,11 +18,20 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
+import java.util.Collections;
+import java.util.List;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
@@ -36,7 +45,9 @@ public abstract class FieldAggregator implements Serializable {
             DataType fieldType,
             @Nullable String strAgg,
             boolean ignoreRetract,
-            boolean isPrimaryKey) {
+            boolean isPrimaryKey,
+            CoreOptions options,
+            String field) {
         FieldAggregator fieldAggregator;
         if (isPrimaryKey) {
             fieldAggregator = new FieldPrimaryKeyAgg(fieldType);
@@ -77,6 +88,29 @@ public abstract class FieldAggregator implements Serializable {
                     case FieldFirstNotNullValueAgg.NAME:
                         fieldAggregator = new FieldFirstNotNullValueAgg(fieldType);
                         break;
+                    case FieldCountAgg.NAME:
+                        fieldAggregator = new FieldCountAgg(fieldType);
+                        break;
+                    case FieldProductAgg.NAME:
+                        fieldAggregator = new FieldProductAgg(fieldType);
+                        break;
+                    case FieldNestedUpdateAgg.NAME:
+                        fieldAggregator =
+                                createFieldNestedUpdateAgg(
+                                        fieldType, options.fieldNestedUpdateAggNestedKey(field));
+                        break;
+                    case FieldCollectAgg.NAME:
+                        fieldAggregator =
+                                createFieldCollectAgg(
+                                        fieldType, options.fieldCollectAggDistinct(field));
+                        break;
+                    case FieldMergeMapAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof MapType,
+                                "Data type of merge map column must be 'MAP' but was '%s'",
+                                fieldType);
+                        fieldAggregator = new FieldMergeMapAgg((MapType) fieldType);
+                        break;
                     default:
                         throw new RuntimeException(
                                 String.format(
@@ -91,6 +125,37 @@ public abstract class FieldAggregator implements Serializable {
         }
 
         return fieldAggregator;
+    }
+
+    private static FieldAggregator createFieldNestedUpdateAgg(
+            DataType fieldType, List<String> nestedKey) {
+        if (nestedKey == null) {
+            nestedKey = Collections.emptyList();
+        }
+
+        String typeErrorMsg = "Data type of nested table column must be 'Array<Row>' but was '%s'.";
+        checkArgument(fieldType instanceof ArrayType, typeErrorMsg, fieldType);
+        ArrayType arrayType = (ArrayType) fieldType;
+        checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
+
+        return new FieldNestedUpdateAgg(arrayType, nestedKey);
+    }
+
+    private static FieldAggregator createFieldCollectAgg(DataType fieldType, boolean distinct) {
+        checkArgument(
+                fieldType instanceof ArrayType,
+                "Data type for collect column must be 'Array' but was '%s'.",
+                fieldType);
+        ArrayType arrayType = (ArrayType) fieldType;
+        checkArgument(
+                !arrayType
+                        .getElementType()
+                        .getTypeRoot()
+                        .getFamilies()
+                        .contains(DataTypeFamily.CONSTRUCTED),
+                "Element type of collect column cannot be ARRAY, MULTISET, MAP and ROW.");
+
+        return new FieldCollectAgg(arrayType, distinct);
     }
 
     abstract String name();

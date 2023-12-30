@@ -35,9 +35,6 @@ public class Consumer {
 
     private static final String FIELD_NEXT_SNAPSHOT = "nextSnapshot";
 
-    private static final int READ_CONSUMER_RETRY_NUM = 3;
-    private static final int READ_CONSUMER_RETRY_INTERVAL = 100;
-
     private final long nextSnapshot;
 
     @JsonCreator

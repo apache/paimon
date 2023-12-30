@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
@@ -225,6 +226,14 @@ public abstract class CatalogTestBase {
                         .partitionKeys("pk1", "pk2")
                         .primaryKey("pk1", "pk2", "pk3")
                         .build();
+
+        // Create table throws Exception when auto-create = true.
+        schema.options().put(CoreOptions.AUTO_CREATE.key(), Boolean.TRUE.toString());
+        assertThatExceptionOfType(IllegalArgumentException.class)
+                .isThrownBy(() -> catalog.createTable(identifier, schema, false))
+                .withMessage("The value of auto-create property should be false.");
+        schema.options().remove(CoreOptions.AUTO_CREATE.key());
+
         catalog.createTable(identifier, schema, false);
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isTrue();

@@ -71,6 +71,10 @@ public interface Table extends Serializable {
     @Experimental
     void createTag(String tagName, long fromSnapshotId);
 
+    /** Create a tag from latest snapshot. */
+    @Experimental
+    void createTag(String tagName);
+
     /** Delete a tag by name. */
     @Experimental
     void deleteTag(String tagName);

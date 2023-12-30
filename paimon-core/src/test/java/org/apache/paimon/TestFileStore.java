@@ -136,6 +136,14 @@ public class TestFileStore extends KeyValueFileStore {
 
     public FileStoreExpireImpl newExpire(
             int numRetainedMin, int numRetainedMax, long millisRetained) {
+        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true);
+    }
+
+    public FileStoreExpireImpl newExpire(
+            int numRetainedMin,
+            int numRetainedMax,
+            long millisRetained,
+            boolean snapshotExpireCleanEmptyDirectories) {
         return new FileStoreExpireImpl(
                 numRetainedMin,
                 numRetainedMax,
@@ -143,7 +151,8 @@ public class TestFileStore extends KeyValueFileStore {
                 snapshotManager(),
                 newSnapshotDeletion(),
                 new TagManager(fileIO, options.path()),
-                Integer.MAX_VALUE);
+                Integer.MAX_VALUE,
+                snapshotExpireCleanEmptyDirectories);
     }
 
     public List<Snapshot> commitData(

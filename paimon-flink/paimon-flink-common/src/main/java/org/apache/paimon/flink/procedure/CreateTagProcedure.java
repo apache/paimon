@@ -24,6 +24,8 @@ import org.apache.paimon.table.Table;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
+import javax.annotation.Nullable;
+
 /**
  * Create tag procedure. Usage:
  *
@@ -38,9 +40,22 @@ public class CreateTagProcedure extends ProcedureBase {
     public String[] call(
             ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
             throws Catalog.TableNotExistException {
-        Table table = catalog.getTable(Identifier.fromString(tableId));
-        table.createTag(tagName, snapshotId);
+        return innerCall(tableId, tagName, snapshotId);
+    }
 
+    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, null);
+    }
+
+    private String[] innerCall(String tableId, String tagName, @Nullable Long snapshotId)
+            throws Catalog.TableNotExistException {
+        Table table = catalog.getTable(Identifier.fromString(tableId));
+        if (snapshotId == null) {
+            table.createTag(tagName);
+        } else {
+            table.createTag(tagName, snapshotId);
+        }
         return new String[] {"Success"};
     }
 

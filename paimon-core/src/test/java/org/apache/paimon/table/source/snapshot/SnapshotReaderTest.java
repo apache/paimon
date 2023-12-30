@@ -100,18 +100,7 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(dataSplit.convertToRawFiles())
-                    .hasValue(
-                            Collections.singletonList(
-                                    new RawFile(
-                                            String.format(
-                                                    "%s/pt=%s/bucket-0/%s",
-                                                    tablePath, partition, meta.fileName()),
-                                            0,
-                                            meta.fileSize(),
-                                            "avro",
-                                            meta.schemaId(),
-                                            meta.rowCount())));
+            assertThat(dataSplit.convertToRawFiles()).isNotPresent();
         }
 
         // write another file on level 0

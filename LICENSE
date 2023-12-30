@@ -233,6 +233,8 @@ paimon-common/src/main/java/org/apache/paimon/data/InternalRow.java
 paimon-common/src/main/java/org/apache/paimon/memory/MemorySegment.java
 paimon-common/src/main/java/org/apache/paimon/types/DataType.java
 paimon-common/src/main/java/org/apache/paimon/options/ConfigOption.java
+paimon-service/paimon-service-client/src/main/java/org/apache/paimon/service/network/NetworkClient.java
+paimon-service/paimon-service-client/src/main/java/org/apache/paimon/service/network/NetworkServer.java
 from http://flink.apache.org/ version 1.17.0
 
 paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java

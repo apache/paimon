@@ -22,6 +22,7 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBListState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowKind;
@@ -30,6 +31,8 @@ import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
 import java.util.function.Predicate;
@@ -83,5 +86,60 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
                                 row.getRowKind()));
             }
         }
+    }
+
+    @Override
+    public Predicate<InternalRow> recordFilter() {
+        return recordFilter;
+    }
+
+    @Override
+    public byte[] toKeyBytes(InternalRow row) throws IOException {
+        joinKeyRow.replaceRow(row);
+        return state.serializeKey(joinKeyRow);
+    }
+
+    @Override
+    public byte[] toValueBytes(InternalRow row) throws IOException {
+        return state.serializeValue(row);
+    }
+
+    @Override
+    public TableBulkLoader createBulkLoader() {
+        BulkLoader bulkLoader = state.createBulkLoader();
+        return new TableBulkLoader() {
+
+            private final List<byte[]> values = new ArrayList<>();
+
+            private byte[] currentKey;
+
+            @Override
+            public void write(byte[] key, byte[] value) throws IOException {
+                if (currentKey != null && !Arrays.equals(key, currentKey)) {
+                    flush();
+                }
+                currentKey = key;
+                values.add(value);
+            }
+
+            @Override
+            public void finish() throws IOException {
+                flush();
+                bulkLoader.finish();
+            }
+
+            private void flush() throws IOException {
+                if (currentKey != null && values.size() > 0) {
+                    try {
+                        bulkLoader.write(currentKey, state.serializeList(values));
+                    } catch (BulkLoader.WriteException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+
+                currentKey = null;
+                values.clear();
+            }
+        };
     }
 }

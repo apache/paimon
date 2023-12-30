@@ -53,12 +53,12 @@ public class AlignedSourceReader extends FileStoreSourceReader
     public AlignedSourceReader(
             SourceReaderContext readerContext,
             TableRead tableRead,
-            @Nullable IOManager ioManager,
+            FileStoreSourceReaderMetrics metrics,
+            IOManager ioManager,
             @Nullable Long limit,
             FutureCompletingBlockingQueue<RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>>>
-                    elementsQueue,
-            @Nullable FileStoreSourceReaderMetrics sourceReaderMetrics) {
-        super(readerContext, tableRead, ioManager, limit, elementsQueue, sourceReaderMetrics);
+                    elementsQueue) {
+        super(readerContext, tableRead, metrics, ioManager, limit, elementsQueue);
         this.elementsQueue = elementsQueue;
         this.nextCheckpointId = null;
     }

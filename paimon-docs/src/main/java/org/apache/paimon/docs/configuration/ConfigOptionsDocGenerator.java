@@ -449,49 +449,22 @@ public class ConfigOptionsDocGenerator {
         }
     }
 
-    private static boolean isList(ConfigOption<?> option) {
-        try {
-            Method getClazzMethod = ConfigOption.class.getDeclaredMethod("isList");
-            getClazzMethod.setAccessible(true);
-            boolean isList = (boolean) getClazzMethod.invoke(option);
-            getClazzMethod.setAccessible(false);
-            return isList;
-        } catch (Exception e) {
-            throw new RuntimeException(e);
-        }
-    }
-
     @VisibleForTesting
     static String typeToHtml(OptionWithMetaInfo optionWithMetaInfo) {
         ConfigOption<?> option = optionWithMetaInfo.option;
         Class<?> clazz = getClazz(option);
-        boolean isList = isList(option);
         if (clazz.isEnum()) {
-            return enumTypeToHtml(isList);
+            return enumTypeToHtml();
         }
-        return atomicTypeToHtml(clazz, isList);
+        return atomicTypeToHtml(clazz);
     }
 
-    private static String atomicTypeToHtml(Class<?> clazz, boolean isList) {
-        String typeName = clazz.getSimpleName();
-
-        final String type;
-        if (isList) {
-            type = String.format("List<%s>", typeName);
-        } else {
-            type = typeName;
-        }
-        return escapeCharacters(type);
+    private static String atomicTypeToHtml(Class<?> clazz) {
+        return escapeCharacters(clazz.getSimpleName());
     }
 
-    private static String enumTypeToHtml(boolean isList) {
-        final String type;
-        if (isList) {
-            type = "List<Enum>";
-        } else {
-            type = "Enum";
-        }
-        return String.format("<p>%s</p>", escapeCharacters(type));
+    private static String enumTypeToHtml() {
+        return String.format("<p>%s</p>", escapeCharacters("Enum"));
     }
 
     @VisibleForTesting
