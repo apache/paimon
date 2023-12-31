@@ -22,6 +22,7 @@ import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -30,10 +31,8 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.avro.file.DataFileStream;
 import org.apache.avro.generic.GenericDatumReader;
 
-import java.io.FileInputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Paths;
 import java.util.stream.IntStream;
 
 /** {@link TableStatsExtractor} for avro files. */
@@ -59,8 +58,7 @@ public class AvroTableStatsExtractor implements TableStatsExtractor {
     public Pair<FieldStats[], FileInfo> extractWithFileInfo(FileIO fileIO, Path path)
             throws IOException {
 
-        java.nio.file.Path filePath = Paths.get(path.toUri());
-        FileInputStream fileInputStream = new FileInputStream(String.valueOf(filePath));
+        SeekableInputStream fileInputStream = fileIO.newInputStream(path);
         long rowCount = getRowCount(fileInputStream);
 
         return Pair.of(
