@@ -201,30 +201,31 @@ public class AllTableOptionsTable implements ReadonlyTable {
             }
             return new IteratorRecordReader<>(rows);
         }
-
-        private Iterator<InternalRow> toRow(Map<String, Map<String, Map<String, String>>> option) {
-            List<InternalRow> rows = new ArrayList<>();
-            for (Map.Entry<String, Map<String, Map<String, String>>> entry0 : option.entrySet()) {
-                String database = entry0.getKey();
-                for (Map.Entry<String, Map<String, String>> entry1 : entry0.getValue().entrySet()) {
-                    String tableName = entry1.getKey();
-                    for (Map.Entry<String, String> entry2 : entry1.getValue().entrySet()) {
-                        String key = entry2.getKey();
-                        String value = entry2.getValue();
-                        rows.add(
-                                GenericRow.of(
-                                        BinaryString.fromString(database),
-                                        BinaryString.fromString(tableName),
-                                        BinaryString.fromString(key),
-                                        BinaryString.fromString(value)));
-                    }
-                }
-            }
-            return rows.iterator();
-        }
     }
 
-    private static Map<String, Map<String, Map<String, String>>> options(
+    protected static Iterator<InternalRow> toRow(
+            Map<String, Map<String, Map<String, String>>> option) {
+        List<InternalRow> rows = new ArrayList<>();
+        for (Map.Entry<String, Map<String, Map<String, String>>> entry0 : option.entrySet()) {
+            String database = entry0.getKey();
+            for (Map.Entry<String, Map<String, String>> entry1 : entry0.getValue().entrySet()) {
+                String tableName = entry1.getKey();
+                for (Map.Entry<String, String> entry2 : entry1.getValue().entrySet()) {
+                    String key = entry2.getKey();
+                    String value = entry2.getValue();
+                    rows.add(
+                            GenericRow.of(
+                                    BinaryString.fromString(database),
+                                    BinaryString.fromString(tableName),
+                                    BinaryString.fromString(key),
+                                    BinaryString.fromString(value)));
+                }
+            }
+        }
+        return rows.iterator();
+    }
+
+    protected static Map<String, Map<String, Map<String, String>>> options(
             FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
         Map<String, Map<String, Map<String, String>>> allOptions = new HashMap<>();
         for (Map.Entry<String, Map<String, Path>> entry0 : allTablePaths.entrySet()) {
