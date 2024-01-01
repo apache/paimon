@@ -172,7 +172,8 @@ case class WriteIntoPaimonTable(
             withBucketCol.mapPartitions(commonBucketProcessor.processPartition)(
               withBucketDataEncoder))
         case _ =>
-          throw new UnsupportedOperationException(s"Unsupported bucket mode $bucketMode")
+          throw new UnsupportedOperationException(
+            s"Write with bucket mode $bucketMode is not supported")
       }
 
     val commitMessages = df
@@ -208,7 +209,7 @@ case class WriteIntoPaimonTable(
     } catch {
       case e: Throwable => throw new RuntimeException(e);
     } finally {
-      tableCommit.close();
+      tableCommit.close()
     }
 
     Seq.empty

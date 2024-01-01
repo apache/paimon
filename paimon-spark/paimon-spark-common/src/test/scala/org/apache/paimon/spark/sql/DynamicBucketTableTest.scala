@@ -84,4 +84,23 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
       spark.sql("SELECT DISTINCT bucket FROM `T$FILES`"),
       Row(0) :: Row(1) :: Row(2) :: Nil)
   }
+
+  test(s"Paimon dynamic bucket table: write with global dynamic bucket") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |  pk STRING,
+                 |  v STRING,
+                 |  pt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'pk',
+                 |  'bucket' = '-1'
+                 |)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    val error = intercept[UnsupportedOperationException] {
+      spark.sql("INSERT INTO T VALUES ('1', 'a', 'p')")
+    }.getMessage
+    assert(error.contains("Write with bucket mode GLOBAL_DYNAMIC is not supported"))
+  }
 }
