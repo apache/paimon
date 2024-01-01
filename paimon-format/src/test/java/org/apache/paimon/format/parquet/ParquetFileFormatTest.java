@@ -23,10 +23,12 @@ import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.commons.lang3.RandomStringUtils;
 import org.apache.parquet.format.CompressionCodec;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.junit.jupiter.api.Test;
@@ -37,6 +39,7 @@ import java.util.List;
 import static org.apache.paimon.format.parquet.ParquetFileFormat.getParquetConfiguration;
 import static org.apache.paimon.format.parquet.ParquetFileFormatFactory.IDENTIFIER;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link ParquetFileFormatFactory}. */
 public class ParquetFileFormatTest {
@@ -68,6 +71,30 @@ public class ParquetFileFormatTest {
                 new RowDataParquetBuilder(
                         new RowType(new ArrayList<>()), getParquetConfiguration(conf));
         assertThat(builder.getCompression(null)).isEqualTo(CompressionCodec.SNAPPY.name());
+    }
+
+    @Test
+    public void testDefaultEncryption() {
+        Options conf = new Options();
+        RowDataParquetBuilder builder =
+                new RowDataParquetBuilder(
+                        new RowType(new ArrayList<>()), getParquetConfiguration(conf));
+        assertThat(builder.getFileEncryptionProperties(null, null)).isEqualTo(null);
+    }
+
+    @Test
+    public void testIllegalEncryption() {
+        Options conf = new Options();
+        String aadPrefix = RandomStringUtils.randomAlphanumeric(16);
+        conf.setString("parquet.encryption.prefix", aadPrefix);
+        RowDataParquetBuilder builder =
+                new RowDataParquetBuilder(
+                        new RowType(new ArrayList<>()), getParquetConfiguration(conf));
+        assertThatThrownBy(() -> builder.getFileEncryptionProperties(null, aadPrefix))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                String.format("AAD prefix set with null encryption key")));
     }
 
     @Test

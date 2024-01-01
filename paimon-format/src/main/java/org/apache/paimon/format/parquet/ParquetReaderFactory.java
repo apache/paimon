@@ -40,6 +40,7 @@ import org.apache.paimon.utils.Pool;
 import org.apache.parquet.ParquetReadOptions;
 import org.apache.parquet.column.ColumnDescriptor;
 import org.apache.parquet.column.page.PageReadStore;
+import org.apache.parquet.crypto.FileDecryptionProperties;
 import org.apache.parquet.hadoop.ParquetFileReader;
 import org.apache.parquet.hadoop.ParquetInputFormat;
 import org.apache.parquet.schema.GroupType;
@@ -52,6 +53,7 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HashSet;
 import java.util.List;
@@ -59,6 +61,7 @@ import java.util.Set;
 
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createColumnReader;
 import static org.apache.paimon.format.parquet.reader.ParquetSplitReaderUtil.createWritableColumnVector;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.parquet.hadoop.UnmaterializableRecordCounter.BAD_RECORD_THRESHOLD_CONF_KEY;
 
 /**
@@ -114,6 +117,25 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         throw new UnsupportedOperationException();
     }
 
+    public FileDecryptionProperties getFileDecryptionProperties(
+            @Nullable String fileEncryptionKey, @Nullable String fileAADPrefix) {
+        FileDecryptionProperties fileDecryptionProperties = null;
+
+        if (fileEncryptionKey != null) {
+            byte[] encryptionKeyArray = fileEncryptionKey.getBytes(StandardCharsets.UTF_8);
+            byte[] aadPrefixArray = fileAADPrefix.getBytes(StandardCharsets.UTF_8);
+
+            fileDecryptionProperties =
+                    FileDecryptionProperties.builder()
+                            .withFooterKey(encryptionKeyArray)
+                            .withAADPrefix(aadPrefixArray)
+                            .build();
+        } else {
+            checkArgument(fileAADPrefix == null, "AAD prefix set with null encryption key");
+        }
+        return fileDecryptionProperties;
+    }
+
     private void setReadOptions(ParquetReadOptions.Builder builder) {
         builder.useSignedStringMinMax(
                 conf.getBoolean("parquet.strings.signed-min-max.enabled", false));
@@ -131,6 +153,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         if (badRecordThresh != null) {
             builder.set(BAD_RECORD_THRESHOLD_CONF_KEY, badRecordThresh);
         }
+        builder.withDecryption(
+                getFileDecryptionProperties(
+                        conf.getString("parquet.encryption.key", null),
+                        conf.getString("parquet.encryption.prefix", null)));
     }
 
     /** Clips `parquetSchema` according to `fieldNames`. */

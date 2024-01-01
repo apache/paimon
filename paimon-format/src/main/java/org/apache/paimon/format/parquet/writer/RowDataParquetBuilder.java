@@ -23,6 +23,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.RowType;
 
 import org.apache.parquet.column.ParquetProperties;
+import org.apache.parquet.crypto.FileEncryptionProperties;
 import org.apache.parquet.hadoop.ParquetOutputFormat;
 import org.apache.parquet.hadoop.ParquetWriter;
 import org.apache.parquet.hadoop.metadata.CompressionCodecName;
@@ -31,6 +32,9 @@ import org.apache.parquet.io.OutputFile;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** A {@link ParquetBuilder} for {@link InternalRow}. */
 public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
@@ -73,6 +77,10 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                                 conf.getString(
                                         ParquetOutputFormat.WRITER_VERSION,
                                         ParquetProperties.DEFAULT_WRITER_VERSION.toString())))
+                .withEncryption(
+                        getFileEncryptionProperties(
+                                conf.getString("parquet.encryption.key", null),
+                                conf.getString("parquet.encryption.prefix", null)))
                 .build();
     }
 
@@ -86,5 +94,28 @@ public class RowDataParquetBuilder implements ParquetBuilder<InternalRow> {
                             ParquetOutputFormat.COMPRESSION, CompressionCodecName.SNAPPY.name());
         }
         return compressName;
+    }
+
+    // The fileEncryptionKey encrypts the parquet footer, and the fileAADPrefix ensures the
+    // integrity of the file and helps verify the validity of the file.
+    // After implementing kmsClient, FileEncryptionKeys and fileAADPrefix are automatically
+    // generated for encryption when parquet is written. The fileEncryptionKey and fileAADPrefix are
+    // obtained from kmsClient for decryption when parquet is read.
+    // todo Implement kmsClient for automatic encryption and decryption
+    public FileEncryptionProperties getFileEncryptionProperties(
+            @Nullable String fileEncryptionKey, @Nullable String fileAADPrefix) {
+        FileEncryptionProperties fileEncryptionProperties = null;
+        if (fileEncryptionKey != null) {
+            byte[] encryptionKeyArray = fileEncryptionKey.getBytes(StandardCharsets.UTF_8);
+            byte[] aadPrefixArray = fileAADPrefix.getBytes(StandardCharsets.UTF_8);
+
+            fileEncryptionProperties =
+                    FileEncryptionProperties.builder(encryptionKeyArray)
+                            .withAADPrefix(aadPrefixArray)
+                            .build();
+        } else {
+            checkArgument(fileAADPrefix == null, "AAD prefix set with null encryption key");
+        }
+        return fileEncryptionProperties;
     }
 }

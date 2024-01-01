@@ -48,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.apache.commons.lang3.RandomStringUtils;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -119,6 +120,10 @@ public class ParquetReadWriteTest {
                                     .fields(new VarCharType(VarCharType.MAX_LENGTH), new IntType())
                                     .build())
                     .build();
+
+    // The parquet encryption key requires 16 or 24 or 32 bits, test with 16 bits
+    private final String encryptionKey = RandomStringUtils.randomAlphanumeric(16);
+    private final String addPrefix = RandomStringUtils.randomAlphanumeric(16);
 
     @TempDir public File folder;
 
@@ -222,9 +227,14 @@ public class ParquetReadWriteTest {
         Path testPath = createTempParquetFile(folder, records, rowGroupSize);
         // test reader
         DataType[] fieldTypes = new DataType[] {new DoubleType(), new TinyIntType(), new IntType()};
+
+        Options conf = new Options();
+        conf.setString("parquet.encryption.key", encryptionKey);
+        conf.setString("parquet.encryption.prefix", addPrefix);
+
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
-                        new Options(),
+                        conf,
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4"})
                                 .build(),
@@ -259,9 +269,15 @@ public class ParquetReadWriteTest {
                 new DataType[] {
                     new DoubleType(), new TinyIntType(), new IntType(), new VarCharType()
                 };
+
+        Options conf = new Options();
+        conf.setInteger("parquet.block.size", rowGroupSize);
+        conf.setString("parquet.encryption.key", encryptionKey);
+        conf.setString("parquet.encryption.prefix", addPrefix);
+
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
-                        new Options(),
+                        conf,
                         // f99 not exist in parquet file.
                         RowType.builder()
                                 .fields(fieldTypes, new String[] {"f7", "f2", "f4", "f99"})
@@ -293,8 +309,12 @@ public class ParquetReadWriteTest {
             throws IOException {
         // write data
         Path path = new Path(folder.getPath(), UUID.randomUUID().toString());
+
         Options conf = new Options();
         conf.setInteger("parquet.block.size", rowGroupSize);
+        conf.setString("parquet.encryption.key", encryptionKey);
+        conf.setString("parquet.encryption.prefix", addPrefix);
+
         ParquetWriterFactory factory =
                 new ParquetWriterFactory(new RowDataParquetBuilder(ROW_TYPE, conf));
         String[] candidates = new String[] {"snappy", "zstd", "gzip"};
@@ -311,7 +331,10 @@ public class ParquetReadWriteTest {
     }
 
     private int testReadingFile(List<Integer> expected, Path path) throws IOException {
-        ParquetReaderFactory format = new ParquetReaderFactory(new Options(), ROW_TYPE, 500);
+        Options conf = new Options();
+        conf.setString("parquet.encryption.key", encryptionKey);
+        conf.setString("parquet.encryption.prefix", addPrefix);
+        ParquetReaderFactory format = new ParquetReaderFactory(conf, ROW_TYPE, 500);
 
         // validate java serialization
         try {
