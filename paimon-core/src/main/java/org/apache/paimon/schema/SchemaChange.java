@@ -19,6 +19,7 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.types.DataFieldStats;
 import org.apache.paimon.types.DataType;
 
 import javax.annotation.Nullable;
@@ -89,6 +90,10 @@ public interface SchemaChange extends Serializable {
 
     static SchemaChange updateColumnPosition(Move move) {
         return new UpdateColumnPosition(move);
+    }
+
+    static SchemaChange updateColumnStats(String fieldName, DataFieldStats newStats) {
+        return new UpdateColumnStats(fieldName, newStats);
     }
 
     /** A SchemaChange to set a table option. */
@@ -547,6 +552,46 @@ public interface SchemaChange extends Serializable {
             int result = Objects.hash(newDescription);
             result = 31 * result + Arrays.hashCode(fieldNames);
             return result;
+        }
+    }
+
+    /** A SchemaChange to update field stats. */
+    final class UpdateColumnStats implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String fieldName;
+        private final DataFieldStats newStats;
+
+        public UpdateColumnStats(String fieldName, DataFieldStats newStats) {
+            this.fieldName = fieldName;
+            this.newStats = newStats;
+        }
+
+        public String fieldName() {
+            return fieldName;
+        }
+
+        public DataFieldStats newStats() {
+            return newStats;
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (o == null || getClass() != o.getClass()) {
+                return false;
+            }
+            UpdateColumnStats that = (UpdateColumnStats) o;
+            return Objects.equals(fieldName, that.fieldName)
+                    && Objects.equals(newStats, that.newStats);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(fieldName, newStats);
         }
     }
 }

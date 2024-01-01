@@ -34,6 +34,7 @@ import org.apache.paimon.schema.SchemaChange.SetOption;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnComment;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnNullability;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnPosition;
+import org.apache.paimon.schema.SchemaChange.UpdateColumnStats;
 import org.apache.paimon.schema.SchemaChange.UpdateColumnType;
 import org.apache.paimon.schema.SchemaChange.UpdateComment;
 import org.apache.paimon.types.DataField;
@@ -226,12 +227,7 @@ public class SchemaManager implements Serializable {
                             newFields,
                             new String[] {rename.fieldName()},
                             0,
-                            (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            rename.newName(),
-                                            field.type(),
-                                            field.description()));
+                            (field) -> field.newName(rename.newName()));
                 } else if (change instanceof DropColumn) {
                     DropColumn drop = (DropColumn) change;
                     validateNotPrimaryAndPartitionKey(schema, drop.fieldName());
@@ -271,11 +267,7 @@ public class SchemaManager implements Serializable {
                                                     "Update column to nested row type '%s' is not supported.",
                                                     update.newDataType()));
                                 }
-                                return new DataField(
-                                        field.id(),
-                                        field.name(),
-                                        update.newDataType(),
-                                        field.description());
+                                return field.newRowType(update.newDataType());
                             });
                 } else if (change instanceof UpdateColumnNullability) {
                     UpdateColumnNullability update = (UpdateColumnNullability) change;
@@ -290,23 +282,14 @@ public class SchemaManager implements Serializable {
                             update.fieldNames(),
                             0,
                             (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            field.name(),
-                                            field.type().copy(update.newNullability()),
-                                            field.description()));
+                                    field.newRowType(field.type().copy(update.newNullability())));
                 } else if (change instanceof UpdateColumnComment) {
                     UpdateColumnComment update = (UpdateColumnComment) change;
                     updateNestedColumn(
                             newFields,
                             update.fieldNames(),
                             0,
-                            (field) ->
-                                    new DataField(
-                                            field.id(),
-                                            field.name(),
-                                            field.type(),
-                                            update.newDescription()));
+                            (field) -> field.newDescription(update.newDescription()));
                 } else if (change instanceof UpdateColumnPosition) {
                     UpdateColumnPosition update = (UpdateColumnPosition) change;
                     SchemaChange.Move move = update.move();
@@ -332,6 +315,12 @@ public class SchemaManager implements Serializable {
                         }
                     }
 
+                } else if (change instanceof UpdateColumnStats) {
+                    UpdateColumnStats update = (UpdateColumnStats) change;
+                    updateColumn(
+                            newFields,
+                            update.fieldName(),
+                            (field) -> field.newStats(update.newStats()));
                 } else {
                     throw new UnsupportedOperationException(
                             "Unsupported change: " + change.getClass());
@@ -418,12 +407,9 @@ public class SchemaManager implements Serializable {
                     updateNestedColumn(nestedFields, updateFieldNames, index + 1, updateFunc);
                     newFields.set(
                             i,
-                            new DataField(
-                                    field.id(),
-                                    field.name(),
+                            field.newRowType(
                                     new org.apache.paimon.types.RowType(
-                                            field.type().isNullable(), nestedFields),
-                                    field.description()));
+                                            field.type().isNullable(), nestedFields)));
                 }
             }
         }

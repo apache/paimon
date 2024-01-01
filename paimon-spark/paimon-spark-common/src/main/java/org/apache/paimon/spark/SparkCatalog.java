@@ -435,7 +435,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         }
     }
 
-    private boolean isValidateNamespace(String[] namespace) {
+    private static boolean isValidateNamespace(String[] namespace) {
         return namespace.length == 1;
     }
 
@@ -453,7 +453,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     // --------------------- tools ------------------------------------------
 
-    protected org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
+    public static org.apache.paimon.catalog.Identifier toIdentifier(Identifier ident)
             throws NoSuchTableException {
         if (!isValidateNamespace(ident.namespace())) {
             throw new NoSuchTableException(ident);

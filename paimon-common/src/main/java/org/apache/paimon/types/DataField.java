@@ -39,7 +39,7 @@ import static org.apache.paimon.utils.EncodingUtils.escapeSingleQuotes;
 @Public
 public final class DataField implements Serializable {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public static final String FIELD_FORMAT_WITH_DESCRIPTION = "%s %s '%s'";
 
@@ -53,15 +53,27 @@ public final class DataField implements Serializable {
 
     private final @Nullable String description;
 
+    private final @Nullable DataFieldStats stats;
+
     public DataField(int id, String name, DataType dataType) {
         this(id, name, dataType, null);
     }
 
     public DataField(int id, String name, DataType type, @Nullable String description) {
+        this(id, name, type, description, null);
+    }
+
+    public DataField(
+            int id,
+            String name,
+            DataType type,
+            @Nullable String description,
+            @Nullable DataFieldStats stats) {
         this.id = id;
         this.name = name;
         this.type = type;
         this.description = description;
+        this.stats = stats;
     }
 
     public int id() {
@@ -76,25 +88,39 @@ public final class DataField implements Serializable {
         return type;
     }
 
-    public DataField newId(int newid) {
-        return new DataField(newid, name, type, description);
-    }
-
-    public DataField newName(String newName) {
-        return new DataField(id, newName, type, description);
-    }
-
-    public DataField newDescription(String newDescription) {
-        return new DataField(id, name, type, newDescription);
-    }
-
     @Nullable
     public String description() {
         return description;
     }
 
+    @Nullable
+    public DataFieldStats stats() {
+        return stats;
+    }
+
+    public DataField newId(int newId) {
+        return new DataField(newId, name, type, description, stats);
+    }
+
+    public DataField newName(String newName) {
+        return new DataField(id, newName, type, description, stats);
+    }
+
+    public DataField newRowType(DataType newType) {
+        return new DataField(id, name, newType, description, stats);
+    }
+
+    public DataField newDescription(String newDescription) {
+        return new DataField(id, name, type, newDescription, stats);
+    }
+
+    public DataField newStats(DataFieldStats newStats) {
+        return new DataField(id, name, type, description, newStats);
+    }
+
     public DataField copy() {
-        return new DataField(id, name, type.copy(), description);
+        return new DataField(
+                id, name, type.copy(), description, stats == null ? null : stats.copy());
     }
 
     public String asSQLString() {
@@ -122,6 +148,10 @@ public final class DataField implements Serializable {
         if (description() != null) {
             generator.writeStringField("description", description());
         }
+        if (stats() != null) {
+            generator.writeFieldName("stats");
+            stats().serializeJson(generator);
+        }
         generator.writeEndObject();
     }
 
@@ -137,12 +167,13 @@ public final class DataField implements Serializable {
         return Objects.equals(id, field.id)
                 && Objects.equals(name, field.name)
                 && Objects.equals(type, field.type)
-                && Objects.equals(description, field.description);
+                && Objects.equals(description, field.description)
+                && Objects.equals(stats, field.stats);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(id, name, type, description);
+        return Objects.hash(id, name, type, description, stats);
     }
 
     @Override

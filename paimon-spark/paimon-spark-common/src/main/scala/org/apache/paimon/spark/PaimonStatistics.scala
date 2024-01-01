@@ -17,19 +17,75 @@
  */
 package org.apache.paimon.spark
 
+import org.apache.paimon.types.{DataFieldStats, DataType}
+import org.apache.paimon.utils.OptionalUtils
+
+import org.apache.spark.internal.Logging
+import org.apache.spark.sql.Utils
+import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
+import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
 
-import java.util.OptionalLong
+import java.util.{Optional, OptionalLong}
 
-case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
+import scala.collection.JavaConverters._
 
-  private lazy val rowCount: Long = scan.getSplits.map(_.rowCount).sum
+case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics with Logging {
 
-  private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
+  private lazy val rowCount: Long = {
+    // todo: add a config to control, e.g, read.use_analyze_stats
+    if (scan.options.containsKey("rowCount")) {
+      scan.options.get("rowCount").toLong
+    } else {
+      scan.getSplits.map(_.rowCount).sum
+    }
+  }
+
+  private lazy val scannedTotalSize: Long = {
+    // todo: add a config to control, e.g, read.use_analyze_stats
+    if (scan.options.containsKey("totalSize")) {
+      scan.options.get("totalSize").toLong
+    } else {
+      rowCount * scan.readSchema().defaultSize
+    }
+  }
 
   override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
 
   override def numRows(): OptionalLong = OptionalLong.of(rowCount)
 
-  // TODO: extend columnStats for CBO
+  override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
+    // todo: add a config to control, e.g, read.use_analyze_stats
+    val requiredFields = scan.readSchema().fieldNames.toList.asJava
+    val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
+    scan.tableRowType.getFields
+      .stream()
+      .filter(field => requiredFields.contains(field.name) && field.stats() != null)
+      .forEach(
+        f =>
+          resultMap.put(Utils.fieldReference(f.name()), PaimonColumnStats(f.`type`(), f.stats())))
+    resultMap
+  }
+}
+
+case class PaimonColumnStats(
+    override val nullCount: OptionalLong,
+    override val min: Optional[Object],
+    override val max: Optional[Object],
+    override val distinctCount: OptionalLong,
+    override val avgLen: OptionalLong,
+    override val maxLen: OptionalLong)
+  extends ColumnStatistics
+
+object PaimonColumnStats {
+  def apply(dateType: DataType, stats: DataFieldStats): PaimonColumnStats = {
+    PaimonColumnStats(
+      OptionalUtils.of(stats.nullCount),
+      Optional.ofNullable(SparkInternalRow.fromPaimon(stats.min(), dateType)),
+      Optional.ofNullable(SparkInternalRow.fromPaimon(stats.max(), dateType)),
+      OptionalUtils.of(stats.distinctCount),
+      OptionalUtils.of(stats.avgLen),
+      OptionalUtils.of(stats.maxLen)
+    )
+  }
 }

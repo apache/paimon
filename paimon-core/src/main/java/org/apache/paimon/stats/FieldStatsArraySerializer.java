@@ -53,7 +53,9 @@ public class FieldStatsArraySerializer {
     }
 
     public FieldStatsArraySerializer(
-            RowType type, int[] indexMapping, CastExecutor<Object, Object>[] converterMapping) {
+            RowType type,
+            @Nullable int[] indexMapping,
+            @Nullable CastExecutor<Object, Object>[] converterMapping) {
         RowType safeType = toAllFieldsNullableRowType(type);
         this.serializer = new InternalRowSerializer(safeType);
         this.fieldGetters =

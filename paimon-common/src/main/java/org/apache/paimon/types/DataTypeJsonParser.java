@@ -40,11 +40,16 @@ public final class DataTypeJsonParser {
         String name = json.get("name").asText();
         DataType type = parseDataType(json.get("type"));
         JsonNode descriptionNode = json.get("description");
+        JsonNode statsNode = json.get("stats");
         String description = null;
         if (descriptionNode != null) {
             description = descriptionNode.asText();
         }
-        return new DataField(id, name, type, description);
+        DataFieldStats fieldStats = null;
+        if (statsNode != null) {
+            fieldStats = DataFieldStats.deserializeJson(statsNode, type);
+        }
+        return new DataField(id, name, type, description, fieldStats);
     }
 
     public static DataType parseDataType(JsonNode json) {

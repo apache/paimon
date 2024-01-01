@@ -51,7 +51,7 @@ import java.util.Optional;
  * <ul>
  *   <li>Version 1: Initial version for paimon <= 0.2. There is no "version" field in json file.
  *   <li>Version 2: Introduced in paimon 0.3. Add "version" field and "changelogManifestList" field.
- *   <li>Version 3: Introduced in paimon 0.4. Add "baseRecordCount" field, "deltaRecordCount" field
+ *   <li>Version 3: Introduced in paimon 0.4. Add "totalRecordCount" field, "deltaRecordCount" field
  *       and "changelogRecordCount" field.
  * </ul>
  *

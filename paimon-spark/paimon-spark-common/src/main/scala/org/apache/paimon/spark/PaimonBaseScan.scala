@@ -22,6 +22,7 @@ import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
@@ -40,7 +41,7 @@ abstract class PaimonBaseScan(
   with SupportsReportStatistics
   with ScanHelper {
 
-  private val tableRowType = table.rowType
+  val tableRowType: RowType = table.rowType
 
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
@@ -49,6 +50,8 @@ abstract class PaimonBaseScan(
   protected var splits: Array[Split] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+
+  val options: java.util.Map[String, String] = table.options()
 
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
@@ -105,6 +108,8 @@ abstract class PaimonBaseScan(
     }
     super.supportedCustomMetrics() ++ paimonMetrics
   }
+
+  override def toString: String = description()
 
   override def description(): String = {
     val pushedFiltersStr = if (filters.nonEmpty) {
