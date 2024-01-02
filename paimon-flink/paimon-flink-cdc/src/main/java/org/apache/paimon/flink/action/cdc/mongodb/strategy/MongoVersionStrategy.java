@@ -98,7 +98,9 @@ public interface MongoVersionStrategy {
         }
         JsonNode document =
                 mongodbConfig.getBoolean(DEFAULT_ID_GENERATION)
-                        ? objectNode.set(ID_FIELD, idNode.get(OID_FIELD))
+                        ? objectNode.set(
+                                ID_FIELD,
+                                idNode.get(OID_FIELD) == null ? idNode : idNode.get(OID_FIELD))
                         : objectNode;
         Map<String, String> row;
         switch (mode) {
