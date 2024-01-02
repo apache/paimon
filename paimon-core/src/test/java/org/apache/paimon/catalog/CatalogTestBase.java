@@ -801,4 +801,35 @@ public abstract class CatalogTestBase {
                                 UnsupportedOperationException.class,
                                 "Cannot change nullability of primary key"));
     }
+
+    @Test
+    public void testAlterTableUpdateComment() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        "comment"),
+                false);
+
+        catalog.alterTable(
+                identifier, Lists.newArrayList(SchemaChange.updateComment("new comment")), false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent() && table.comment().get().equals("new comment"))
+                .isTrue();
+
+        // drop comment
+        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.updateComment(null)), false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent()).isFalse();
+    }
 }
