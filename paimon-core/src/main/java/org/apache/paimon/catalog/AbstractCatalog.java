@@ -307,7 +307,7 @@ public abstract class AbstractCatalog implements Catalog {
         return newDatabasePath(warehouse(), database);
     }
 
-    Map<String, Map<String, Path>> allTablePaths() {
+    public Map<String, Map<String, Path>> allTablePaths() {
         try {
             Map<String, Map<String, Path>> allPaths = new HashMap<>();
             for (String database : listDatabases()) {
