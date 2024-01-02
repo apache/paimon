@@ -481,6 +481,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .hasMessage(
                         "Partition CatalogPartitionSpec{{dt=2020-10-10}} of table default.PartitionTable in catalog PAIMON does not exist.");
 
+        assertThat(
+                        sql("ALTER TABLE PartitionTable DROP IF EXISTS PARTITION (`dt` = '2020-10-10')")
+                                .toString())
+                .isEqualTo("[+I[OK]]");
+
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
         assertThat(result.toString())
                 .isEqualTo(
