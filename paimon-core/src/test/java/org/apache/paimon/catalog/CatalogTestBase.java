@@ -54,7 +54,7 @@ public abstract class CatalogTestBase {
     @TempDir java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;
-    protected Catalog catalog;
+    protected AbstractCatalog catalog;
     protected static final Schema DEFAULT_TABLE_SCHEMA =
             new Schema(
                     Lists.newArrayList(
@@ -196,9 +196,10 @@ public abstract class CatalogTestBase {
         boolean exists = catalog.databaseExists("db_to_drop");
         assertThat(exists).isFalse();
 
-        // Drop database does not throw exception when database does not exist
-        assertThatCode(() -> catalog.dropDatabaseImpl("non_existing_db"))
-                .doesNotThrowAnyException();
+        // Drop database does throw exception when database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.dropDatabaseImpl("non_existing_db"))
+                .withMessage("Database non_existing_db does not exist.");
 
         // Drop database deletes all tables in the database
         catalog.createDatabase("db_to_drop", false);

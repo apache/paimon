@@ -216,7 +216,7 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
+    protected void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
         try {
             Database database = getDatabase(name);
             if (database == null) {
@@ -236,13 +236,15 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void dropDatabaseImpl(String name) {
+    protected void dropDatabaseImpl(String name) throws DatabaseNotExistException {
         try {
             Database database = getDatabase(name);
             if (database != null) {
                 String location = locationHelper.getDatabaseLocation(database);
                 locationHelper.dropPathIfRequired(new Path(location), fileIO);
                 client.dropDatabase(name, true, false, true);
+            } else {
+                throw new DatabaseNotExistException(name);
             }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);

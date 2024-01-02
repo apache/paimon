@@ -84,15 +84,6 @@ public interface Catalog extends AutoCloseable {
     void createDatabase(String name, boolean ignoreIfExists) throws DatabaseAlreadyExistException;
 
     /**
-     * Create a database.
-     *
-     * @param name Name of the database to be created
-     * @throws DatabaseAlreadyExistException if the given database already exists and ignoreIfExists
-     *     is false
-     */
-    void createDatabaseImpl(String name) throws DatabaseAlreadyExistException;
-
-    /**
      * Drop a database.
      *
      * @param name Name of the database to be dropped.
@@ -105,13 +96,6 @@ public interface Catalog extends AutoCloseable {
      */
     void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
             throws DatabaseNotExistException, DatabaseNotEmptyException;
-
-    /**
-     * Drop a database.
-     *
-     * @param name Name of the database to be dropped.
-     */
-    void dropDatabaseImpl(String name);
 
     /**
      * Return a {@link Table} identified by the given {@link Identifier}.

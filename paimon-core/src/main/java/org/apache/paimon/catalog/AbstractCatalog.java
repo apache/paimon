@@ -119,7 +119,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
-    public abstract void createDatabaseImpl(String name) throws DatabaseAlreadyExistException;
+    protected abstract void createDatabaseImpl(String name) throws DatabaseAlreadyExistException;
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
@@ -141,7 +141,7 @@ public abstract class AbstractCatalog implements Catalog {
         dropDatabaseImpl(name);
     }
 
-    public abstract void dropDatabaseImpl(String name);
+    protected abstract void dropDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
