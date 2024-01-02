@@ -94,6 +94,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         levels.addDropFileCallback(this);
     }
 
+    public Levels getLevels() {
+        return levels;
+    }
+
     @VisibleForTesting
     Cache<String, LookupFile> lookupFiles() {
         return lookupFiles;
