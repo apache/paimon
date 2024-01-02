@@ -319,7 +319,7 @@ public class Schema {
         }
 
         /** Declares table comment. */
-        public Builder comment(String comment) {
+        public Builder comment(@Nullable String comment) {
             this.comment = comment;
             return this;
         }
