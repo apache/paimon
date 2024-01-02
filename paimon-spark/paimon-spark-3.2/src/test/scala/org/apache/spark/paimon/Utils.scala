@@ -15,6 +15,17 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.sql
+package org.apache.spark.paimon
 
-class DDLTest extends DDLTestBase {}
+import org.apache.spark.util.{Utils => SparkUtils}
+
+import java.io.File
+
+/**
+ * A wrapper that some Objects or Classes is limited to access beyond [[org.apache.spark]] package.
+ */
+object Utils {
+
+  def createTempDir: File = SparkUtils.createTempDir()
+
+}
