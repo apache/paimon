@@ -915,7 +915,9 @@ public class FlinkCatalog extends AbstractCatalog {
             throws PartitionNotExistException, CatalogException {
 
         if (!partitionExists(tablePath, partitionSpec)) {
-            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            if (!ignoreIfNotExists) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
         }
 
         try {
