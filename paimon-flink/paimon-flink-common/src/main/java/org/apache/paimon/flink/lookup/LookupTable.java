@@ -50,7 +50,8 @@ public interface LookupTable {
             List<String> primaryKey,
             List<String> joinKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
+            long lruCacheSize,
+            boolean sequenceFieldEnabled)
             throws IOException {
         if (primaryKey.isEmpty()) {
             return new NoPrimaryKeyLookupTable(
@@ -58,10 +59,21 @@ public interface LookupTable {
         } else {
             if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
                 return new PrimaryKeyLookupTable(
-                        stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
+                        stateFactory,
+                        rowType,
+                        joinKey,
+                        recordFilter,
+                        lruCacheSize,
+                        sequenceFieldEnabled);
             } else {
                 return new SecondaryIndexLookupTable(
-                        stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
+                        stateFactory,
+                        rowType,
+                        primaryKey,
+                        joinKey,
+                        recordFilter,
+                        lruCacheSize,
+                        sequenceFieldEnabled);
             }
         }
     }
