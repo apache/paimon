@@ -43,9 +43,9 @@ public class FloatSerializerTest extends SerializerTestBase<Float> {
         float rndFloat = rnd.nextFloat() * Float.MAX_VALUE;
 
         return new Float[] {
-            (float) 0,
+            0F,
             1F,
-            (float) -1,
+            -1F,
             Float.MAX_VALUE,
             Float.MIN_VALUE,
             rndFloat,
@@ -59,9 +59,9 @@ public class FloatSerializerTest extends SerializerTestBase<Float> {
     @Override
     protected List<Pair<Float, String>> getSerializableToStringTestData() {
         return Arrays.asList(
-                Pair.of((float) 0, "0.0"),
+                Pair.of(0F, "0.0"),
                 Pair.of(1F, "1.0"),
-                Pair.of((float) -1, "-1.0"),
+                Pair.of(-1F, "-1.0"),
                 Pair.of(Float.MAX_VALUE, "3.4028235E38"),
                 Pair.of(Float.MIN_VALUE, "1.4E-45"),
                 Pair.of(Float.NaN, "NaN"),
