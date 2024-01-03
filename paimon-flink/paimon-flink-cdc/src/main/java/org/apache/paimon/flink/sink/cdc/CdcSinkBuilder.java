@@ -135,9 +135,7 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
-        DataStream<CdcRecord> partitioned =
-                partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
         return new CdcUnawareBucketWriteSink((AppendOnlyFileStoreTable) dataTable, parallelism)
-                .sinkFrom(partitioned);
+                .sinkFrom(parsed);
     }
 }

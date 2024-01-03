@@ -172,10 +172,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        DataStream<CdcRecord> partitioned =
-                partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
         new CdcUnawareBucketWriteSink((AppendOnlyFileStoreTable) table, parallelism)
-                .sinkFrom(partitioned);
+                .sinkFrom(parsed);
     }
 
     private void buildDividedCdcSink() {
