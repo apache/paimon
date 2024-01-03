@@ -71,10 +71,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
-    private final SinkWriter sinkWriter;
+    private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
+    private MemorySegmentPool memorySegmentPool;
     private WriterMetrics writerMetrics;
 
     public AppendOnlyWriter(
@@ -210,6 +211,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         sinkWriter.close();
     }
 
+    public void toBufferedWriter() throws Exception {
+        flush(false, false);
+
+        sinkWriter.close();
+        sinkWriter = new BufferedSinkWriter(true);
+        sinkWriter.setMemoryPool(memorySegmentPool);
+    }
+
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
                 fileIO,
@@ -252,6 +261,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void setMemoryPool(MemorySegmentPool memoryPool) {
+        this.memorySegmentPool = memoryPool;
         sinkWriter.setMemoryPool(memoryPool);
     }
 

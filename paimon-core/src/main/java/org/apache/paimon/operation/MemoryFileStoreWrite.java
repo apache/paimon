@@ -65,7 +65,14 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             String tableName,
             FileStorePathFactory pathFactory) {
-        super(commitUser, snapshotManager, scan, indexFactory, tableName, pathFactory);
+        super(
+                commitUser,
+                snapshotManager,
+                scan,
+                indexFactory,
+                tableName,
+                pathFactory,
+                options.writeNumberMax());
         this.options = options;
         this.cacheManager =
                 new CacheManager(
