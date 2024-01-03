@@ -16,42 +16,43 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
+import org.apache.paimon.flink.sink.Committable;
+import org.apache.paimon.flink.sink.LogSinkFunction;
+import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.flink.sink.UnawareBucketWriteSink;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
+import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 import java.util.Map;
 
-/**
- * Build topology for unaware bucket table sink.
- *
- * <p>Note: in unaware-bucket mode, we don't shuffle by bucket in inserting. We can assign
- * compaction to the inserting jobs aside.
- */
-public class UnawareBucketWriteSink extends FileStoreSink {
+/** Sink for unaware bucket table. */
+public class CdcUnawareBucketWriteSink extends UnawareBucketWriteSink {
 
-    protected final boolean enableCompaction;
-    protected final AppendOnlyFileStoreTable table;
-    protected final Integer parallelism;
-    protected final boolean boundedInput;
+    public CdcUnawareBucketWriteSink(AppendOnlyFileStoreTable table, Integer parallelism) {
+        super(table, null, null, parallelism, true);
+    }
 
-    public UnawareBucketWriteSink(
+    public CdcUnawareBucketWriteSink(
             AppendOnlyFileStoreTable table,
+            Integer parallelism,
             Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
-            Integer parallelism,
             boolean boundedInput) {
-        super(table, overwritePartitions, logSinkFunction);
-        this.table = table;
-        this.enableCompaction = !table.coreOptions().writeOnly();
-        this.parallelism = parallelism;
-        this.boundedInput = boundedInput;
+        super(table, overwritePartitions, logSinkFunction, parallelism, boundedInput);
+    }
+
+    @Override
+    protected OneInputStreamOperator createWriteOperator(
+            StoreSinkWrite.Provider writeProvider, String commitUser) {
+        return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
     }
 
     @Override
@@ -64,6 +65,7 @@ public class UnawareBucketWriteSink extends FileStoreSink {
                                 .getConfiguration()
                                 .get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
+
         // if enable compaction, we need to add compaction topology to this job
         if (enableCompaction && isStreamingMode && !boundedInput) {
             // if streaming mode with bounded input, we disable compaction topology

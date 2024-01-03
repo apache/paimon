@@ -70,16 +70,23 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1);
+        innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1, false);
     }
 
     @Test
     @Timeout(180)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(() -> -1);
+        innerTestRandomCdcEvents(() -> -1, false);
     }
 
-    private void innerTestRandomCdcEvents(Supplier<Integer> bucket) throws Exception {
+    @Test
+    @Timeout(180)
+    public void testRandomCdcEventsUnawareBucket() throws Exception {
+        innerTestRandomCdcEvents(() -> -1, true);
+    }
+
+    private void innerTestRandomCdcEvents(Supplier<Integer> bucket, boolean isAppendTable)
+            throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numTables = random.nextInt(3) + 1;
@@ -102,7 +109,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             random.nextInt(maxEvents) + 1,
                             random.nextInt(maxSchemaChanges) + 1,
                             random.nextInt(maxPartitions) + 1,
-                            random.nextInt(maxKeys) + 1);
+                            random.nextInt(maxKeys) + 1,
+                            isAppendTable);
             testTables.add(testTable);
 
             Path tablePath;
@@ -135,7 +143,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             testTable.initialRowType(),
                             Collections.singletonList("pt"),
                             Arrays.asList("pt", "k"),
-                            bucket.get());
+                            bucket.get(),
+                            isAppendTable);
             fileStoreTables.add(fileStoreTable);
         }
 
@@ -195,7 +204,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
             RowType rowType,
             List<String> partitions,
             List<String> primaryKeys,
-            int numBucket)
+            int numBucket,
+            boolean isAppendTable)
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, numBucket);
@@ -206,7 +216,12 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(fileIO, tablePath),
-                        new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
+                        new Schema(
+                                rowType.getFields(),
+                                partitions,
+                                isAppendTable ? Collections.emptyList() : primaryKeys,
+                                conf.toMap(),
+                                ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }
 

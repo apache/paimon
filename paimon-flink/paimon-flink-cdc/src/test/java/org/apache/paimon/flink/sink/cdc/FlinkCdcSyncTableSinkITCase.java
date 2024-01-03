@@ -68,23 +68,30 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false);
+        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, false);
+        innerTestRandomCdcEvents(-1, false, false);
     }
 
     @Disabled
     @Test
     @Timeout(120)
     public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, true);
+        innerTestRandomCdcEvents(-1, true, false);
     }
 
-    private void innerTestRandomCdcEvents(int numBucket, boolean globalIndex) throws Exception {
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsUnawareBucket() throws Exception {
+        innerTestRandomCdcEvents(-1, false, true);
+    }
+
+    private void innerTestRandomCdcEvents(int numBucket, boolean globalIndex, boolean isAppendTable)
+            throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
@@ -94,7 +101,13 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         boolean enableFailure = random.nextBoolean();
 
         TestTable testTable =
-                new TestTable(TABLE_NAME, numEvents, numSchemaChanges, numPartitions, numKeys);
+                new TestTable(
+                        TABLE_NAME,
+                        numEvents,
+                        numSchemaChanges,
+                        numPartitions,
+                        numKeys,
+                        isAppendTable);
 
         Path tablePath;
         FileIO fileIO;
@@ -127,7 +140,8 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
                         testTable.initialRowType(),
                         Collections.singletonList("pt"),
                         globalIndex ? Collections.singletonList("k") : Arrays.asList("pt", "k"),
-                        numBucket);
+                        numBucket,
+                        isAppendTable);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
         env.getCheckpointConfig().setCheckpointInterval(100);
@@ -179,7 +193,8 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
             RowType rowType,
             List<String> partitions,
             List<String> primaryKeys,
-            int numBucket)
+            int numBucket,
+            boolean isAppendTable)
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, numBucket);
@@ -190,7 +205,12 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(fileIO, tablePath),
-                        new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
+                        new Schema(
+                                rowType.getFields(),
+                                partitions,
+                                isAppendTable ? Collections.emptyList() : primaryKeys,
+                                conf.toMap(),
+                                ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }
 }
