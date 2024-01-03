@@ -170,7 +170,7 @@ public class ParallelExecutionTest {
                         break;
                     }
 
-                    result.add(Pair.of(record, batch.extraMesage()));
+                    result.add(Pair.of(record, batch.extraMessage()));
                 }
             } catch (InterruptedException | IOException e) {
                 Thread.currentThread().interrupt();
