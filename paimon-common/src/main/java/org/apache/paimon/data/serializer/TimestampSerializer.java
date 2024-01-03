@@ -21,9 +21,9 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import java.io.IOException;
-import java.time.LocalDateTime;
 
 /**
  * Serializer for {@link Timestamp}.
@@ -76,12 +76,12 @@ public class TimestampSerializer implements Serializer<Timestamp> {
 
     @Override
     public String serializeToString(Timestamp record) {
-        return record.toLocalDateTime().toString();
+        return DateTimeUtils.formatTimestamp(record, precision);
     }
 
     @Override
     public Timestamp deserializeFromString(String s) {
-        return Timestamp.fromLocalDateTime(LocalDateTime.parse(s));
+        return DateTimeUtils.parseTimestampData(s, precision);
     }
 
     @Override
