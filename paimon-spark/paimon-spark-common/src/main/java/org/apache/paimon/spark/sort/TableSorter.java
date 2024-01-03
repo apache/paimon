@@ -69,8 +69,7 @@ public abstract class TableSorter {
             case ZORDER:
                 return new ZorderSorter(table, orderColumns);
             case HILBERT:
-                // todo support hilbert curve
-                throw new IllegalArgumentException("Not supported yet.");
+                return new HilbertSorter(table, orderColumns);
             case NONE:
                 return new TableSorter(table, orderColumns) {
                     @Override

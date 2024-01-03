@@ -18,19 +18,28 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
+import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
 import org.apache.paimon.flink.utils.TableScanUtils;
+import org.apache.paimon.lookup.BulkLoader;
+import org.apache.paimon.lookup.RocksDBState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -145,9 +154,41 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         options.get(LOOKUP_CACHE_ROWS));
         this.nextLoadTime = -1;
         this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
+        bulkLoad(options);
+    }
 
-        // do first load
-        refresh();
+    private void bulkLoad(Options options) throws Exception {
+        BinaryExternalSortBuffer bulkLoadSorter =
+                RocksDBState.createBulkLoadSorter(
+                        IOManager.create(path.toString()), new CoreOptions(options));
+        try (RecordReaderIterator<InternalRow> batch =
+                new RecordReaderIterator<>(streamingReader.nextBatch(true))) {
+            while (batch.hasNext()) {
+                InternalRow row = batch.next();
+                if (lookupTable.recordFilter().test(row)) {
+                    bulkLoadSorter.write(
+                            GenericRow.of(
+                                    lookupTable.toKeyBytes(row), lookupTable.toValueBytes(row)));
+                }
+            }
+        }
+
+        MutableObjectIterator<BinaryRow> keyIterator = bulkLoadSorter.sortedIterator();
+        BinaryRow row = new BinaryRow(2);
+        TableBulkLoader bulkLoader = lookupTable.createBulkLoader();
+        try {
+            while ((row = keyIterator.next(row)) != null) {
+                bulkLoader.write(row.getBinary(0), row.getBinary(1));
+            }
+        } catch (BulkLoader.WriteException e) {
+            throw new RuntimeException(
+                    "Exception in bulkLoad, the most suspicious reason is that "
+                            + "your data contains duplicates, please check your lookup table. ",
+                    e.getCause());
+        }
+
+        bulkLoader.finish();
+        bulkLoadSorter.clear();
     }
 
     private PredicateFilter createRecordFilter(int[] projection) {
@@ -211,7 +252,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void refresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(streamingReader.nextBatch())) {
+                    new RecordReaderIterator<>(streamingReader.nextBatch(false))) {
                 if (!batch.hasNext()) {
                     return;
                 }

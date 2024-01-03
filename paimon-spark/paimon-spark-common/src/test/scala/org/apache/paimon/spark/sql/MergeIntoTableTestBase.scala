@@ -21,7 +21,7 @@ import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
 
-class MergeIntoTableTest extends PaimonSparkTestBase {
+abstract class MergeIntoTableTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
@@ -251,8 +251,8 @@ class MergeIntoTableTest extends PaimonSparkTestBase {
                    |ON target.a = source.a
                    |WHEN MATCHED THEN
                    |UPDATE SET *
-                   |WHEN NOT MATCHED
-                   |THEN INSERT *
+                   |WHEN NOT MATCHED THEN
+                   |INSERT *
                    |""".stripMargin)
 
       checkAnswer(

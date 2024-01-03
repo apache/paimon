@@ -34,7 +34,6 @@ import org.rocksdb.InfoLogLevel;
 import org.rocksdb.PlainTableConfig;
 import org.rocksdb.TableFormatConfig;
 
-import java.io.File;
 import java.time.Duration;
 
 import static org.apache.paimon.options.ConfigOptions.key;
@@ -241,10 +240,8 @@ public class RocksDBOptions {
     public static final ConfigOption<MemorySize> BLOCK_CACHE_SIZE =
             key("rocksdb.block.cache-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("8mb"))
-                    .withDescription(
-                            "The amount of the cache for data blocks in RocksDB. "
-                                    + "The default block-cache size is '8MB'.");
+                    .defaultValue(MemorySize.parse("128mb"))
+                    .withDescription("The amount of the cache for data blocks in RocksDB.");
 
     public static final ConfigOption<Boolean> USE_BLOOM_FILTER =
             key("rocksdb.use-bloom-filter")
@@ -283,17 +280,6 @@ public class RocksDBOptions {
         currentOptions.setMaxLogFileSize(options.get(LOG_MAX_FILE_SIZE).getBytes());
         currentOptions.setKeepLogFileNum(options.get(LOG_FILE_NUM));
         return currentOptions;
-    }
-
-    /**
-     * Verify log file location.
-     *
-     * @param logFilePath Path to log file
-     * @return File or null if not a valid log file
-     */
-    private static File resolveFileLocation(String logFilePath) {
-        File logFile = new File(logFilePath);
-        return (logFile.exists() && logFile.canRead()) ? logFile : null;
     }
 
     public static ColumnFamilyOptions createColumnOptions(

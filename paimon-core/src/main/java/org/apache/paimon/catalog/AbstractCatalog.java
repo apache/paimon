@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.factories.FactoryUtil;
 import org.apache.paimon.fs.FileIO;
@@ -118,7 +119,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
-    protected abstract void createDatabaseImpl(String name);
+    protected abstract void createDatabaseImpl(String name) throws DatabaseAlreadyExistException;
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
@@ -133,14 +134,14 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(name);
         }
 
-        if (!cascade && listTables(name).size() > 0) {
+        if (!cascade && !listTables(name).isEmpty()) {
             throw new DatabaseNotEmptyException(name);
         }
 
         dropDatabaseImpl(name);
     }
 
-    protected abstract void dropDatabaseImpl(String name);
+    protected abstract void dropDatabaseImpl(String name) throws DatabaseNotExistException;
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
@@ -178,6 +179,7 @@ public abstract class AbstractCatalog implements Catalog {
         checkNotSystemTable(identifier, "createTable");
         validateIdentifierNameCaseInsensitive(identifier);
         validateFieldNameCaseInsensitive(schema.rowType().getFieldNames());
+        validateAutoCreateClose(schema.options());
 
         if (!databaseExists(identifier.getDatabaseName())) {
             throw new DatabaseNotExistException(identifier.getDatabaseName());
@@ -294,12 +296,18 @@ public abstract class AbstractCatalog implements Catalog {
                         lineageMetaFactory));
     }
 
-    @VisibleForTesting
+    /**
+     * Get warehouse path for specified database. If a catalog would like to provide individual path
+     * for each database, this method can be `Override` in that catalog.
+     *
+     * @param database The given database name
+     * @return The warehouse path for the database
+     */
     public Path newDatabasePath(String database) {
         return newDatabasePath(warehouse(), database);
     }
 
-    Map<String, Map<String, Path>> allTablePaths() {
+    public Map<String, Map<String, Path>> allTablePaths() {
         try {
             Map<String, Map<String, Path>> allPaths = new HashMap<>();
             for (String database : listDatabases()) {
@@ -315,6 +323,11 @@ public abstract class AbstractCatalog implements Catalog {
         }
     }
 
+    /**
+     * Get the warehouse path for the catalog if exists.
+     *
+     * @return The catalog warehouse path.
+     */
     public abstract String warehouse();
 
     public Map<String, String> options() {
@@ -326,7 +339,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     @VisibleForTesting
     public Path getDataTableLocation(Identifier identifier) {
-        return newTableLocation(warehouse(), identifier);
+        return new Path(newDatabasePath(identifier.getDatabaseName()), identifier.getObjectName());
     }
 
     private static boolean isSpecifiedSystemTable(Identifier identifier) {
@@ -428,5 +441,16 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void validateFieldNameCaseInsensitive(List<String> fieldNames) {
         validateCaseInsensitive(caseSensitive(), "Field", fieldNames);
+    }
+
+    private void validateAutoCreateClose(Map<String, String> options) {
+        checkArgument(
+                !Boolean.valueOf(
+                        options.getOrDefault(
+                                CoreOptions.AUTO_CREATE.key(),
+                                CoreOptions.AUTO_CREATE.defaultValue().toString())),
+                String.format(
+                        "The value of %s property should be %s.",
+                        CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
     }
 }

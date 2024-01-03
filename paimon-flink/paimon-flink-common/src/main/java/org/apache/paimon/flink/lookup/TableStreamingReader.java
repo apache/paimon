@@ -20,7 +20,9 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
@@ -44,16 +46,21 @@ import java.util.List;
 import java.util.function.IntUnaryOperator;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_BOOTSTRAP_PARALLELISM;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
 /** A streaming reader to read table. */
 public class TableStreamingReader {
 
+    private final Table table;
+    private final int[] projection;
     private final ReadBuilder readBuilder;
     @Nullable private final PredicateFilter recordFilter;
     private final StreamTableScan scan;
 
     public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+        this.table = table;
+        this.projection = projection;
         if (CoreOptions.fromMap(table.options()).startupMode()
                 != CoreOptions.StartupMode.COMPACTED_FULL) {
             table =
@@ -92,23 +99,36 @@ public class TableStreamingReader {
         }
     }
 
-    public RecordReader<InternalRow> nextBatch() throws Exception {
+    public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
         try {
-            return read(scan.plan());
+            return read(scan.plan(), useParallelism);
         } catch (EndOfScanException e) {
             throw new IllegalArgumentException(
                     "TableStreamingReader does not support finished enumerator.", e);
         }
     }
 
-    private RecordReader<InternalRow> read(TableScan.Plan plan) throws IOException {
-        TableRead read = readBuilder.newRead();
-
-        List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-        for (Split split : plan.splits()) {
-            readers.add(() -> read.createReader(split));
+    private RecordReader<InternalRow> read(TableScan.Plan plan, boolean useParallelism)
+            throws IOException {
+        RecordReader<InternalRow> reader;
+        if (useParallelism) {
+            CoreOptions options = CoreOptions.fromMap(table.options());
+            reader =
+                    SplitsParallelReadUtil.parallelExecute(
+                            TypeUtils.project(table.rowType(), projection),
+                            readBuilder,
+                            plan.splits(),
+                            options.pageSize(),
+                            new Options(table.options()).get(LOOKUP_BOOTSTRAP_PARALLELISM));
+        } else {
+            TableRead read = readBuilder.newRead();
+            List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
+            for (Split split : plan.splits()) {
+                readers.add(() -> read.createReader(split));
+            }
+            reader = ConcatRecordReader.create(readers);
         }
-        RecordReader<InternalRow> reader = ConcatRecordReader.create(readers);
+
         if (recordFilter != null) {
             reader = reader.filter(recordFilter::test);
         }
