@@ -23,6 +23,8 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -44,24 +46,39 @@ public class PrimaryKeyLookupTable implements LookupTable {
     protected int[] primaryKeyMapping;
 
     protected final KeyProjectedRow primaryKey;
+    protected final boolean sequenceFieldEnabled;
+
+    protected final int sequenceIndex;
 
     public PrimaryKeyLookupTable(
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
+            long lruCacheSize,
+            boolean sequenceFieldEnabled)
             throws IOException {
         List<String> fieldNames = rowType.getFieldNames();
         this.primaryKeyMapping = primaryKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKey = new KeyProjectedRow(primaryKeyMapping);
+        this.sequenceFieldEnabled = sequenceFieldEnabled;
+        // append sequence number at last column when sequence field is attached.
+        RowType adjustedRowType = appendSequenceNumber(rowType);
+        this.sequenceIndex = adjustedRowType.getFieldCount() - 1;
+
         this.tableState =
                 stateFactory.valueState(
                         "table",
                         InternalSerializers.create(TypeUtils.project(rowType, primaryKeyMapping)),
-                        InternalSerializers.create(rowType),
+                        InternalSerializers.create(adjustedRowType),
                         lruCacheSize);
         this.recordFilter = recordFilter;
+    }
+
+    public static RowType appendSequenceNumber(RowType rowType) {
+        List<DataType> types = rowType.getFieldTypes();
+        types.add(DataTypes.BIGINT());
+        return RowType.of(types.toArray(new DataType[0]));
     }
 
     @Override
@@ -75,6 +92,15 @@ public class PrimaryKeyLookupTable implements LookupTable {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
+            if (sequenceFieldEnabled) {
+                InternalRow previous = tableState.get(primaryKey);
+                // only update the kv when the new value's sequence number is higher.
+                if (previous != null
+                        && previous.getLong(sequenceIndex) > row.getLong(sequenceIndex)) {
+                    continue;
+                }
+            }
+
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
                 if (recordFilter.test(row)) {
                     tableState.put(primaryKey, row);
