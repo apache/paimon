@@ -274,6 +274,13 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription("Whether to enable async lookup join.");
 
+    public static final ConfigOption<Integer> LOOKUP_BOOTSTRAP_PARALLELISM =
+            ConfigOptions.key("lookup.bootstrap-parallelism")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "The parallelism for bootstrap in a single task for lookup join.");
+
     public static final ConfigOption<Integer> LOOKUP_ASYNC_THREAD_NUMBER =
             ConfigOptions.key("lookup.async-thread-number")
                     .intType()
