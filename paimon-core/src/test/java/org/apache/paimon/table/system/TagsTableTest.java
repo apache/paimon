@@ -46,12 +46,13 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Unit tests for {@link TagsTable}. */
 public class TagsTableTest extends TableTestBase {
 
+    private static final String tableName = "MyTable";
     private TagsTable tagsTable;
     private TagManager tagManager;
 
     @BeforeEach
     public void before() throws Exception {
-        Identifier identifier = identifier("T");
+        Identifier identifier = identifier(tableName);
         Schema schema =
                 Schema.newBuilder()
                         .column("product_id", DataTypes.INT())
@@ -75,12 +76,12 @@ public class TagsTableTest extends TableTestBase {
                         1,
                         Timestamp.fromLocalDateTime(LocalDateTime.parse("2023-07-19T12:00:01"))
                                 .getMillisecond()));
-        tagsTable = (TagsTable) catalog.getTable(identifier("T$tags"));
+        tagsTable = (TagsTable) catalog.getTable(identifier(tableName + "$tags"));
         tagManager = table.store().newTagManager();
     }
 
     @Test
-    public void testSchemasTable() throws Exception {
+    public void testTagsTable() throws Exception {
         List<InternalRow> expectRow = getExceptedResult();
         List<InternalRow> result = read(tagsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
