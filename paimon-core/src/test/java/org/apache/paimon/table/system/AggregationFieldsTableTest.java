@@ -31,6 +31,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Multimap;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -38,7 +40,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.table.system.AggregationFieldsTable.extractFieldMap;
+import static org.apache.paimon.table.system.AggregationFieldsTable.extractFieldMultimap;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link AggregationFieldsTable}. */
@@ -60,6 +62,7 @@ public class AggregationFieldsTableTest extends TableTestBase {
                         .option("merge-engine", "aggregation")
                         .option("fields.price.aggregate-function", "max")
                         .option("fields.sales.aggregate-function", "sum")
+                        .option("fields.sales.ignore-retract", "true")
                         .build();
         catalog.createTable(identifier, schema, true);
         aggregationFieldsTable =
@@ -72,7 +75,7 @@ public class AggregationFieldsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testSchemasTable() throws Exception {
+    public void testAggregationFieldsRecord() throws Exception {
         List<InternalRow> expectRow = getExceptedResult();
         List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
@@ -80,8 +83,10 @@ public class AggregationFieldsTableTest extends TableTestBase {
 
     private List<InternalRow> getExceptedResult() {
         TableSchema schema = schemaManager.latest().get();
-        Map<String, String> function = extractFieldMap(schema.options(), Map.Entry::getValue);
-        Map<String, String> functionOptions = extractFieldMap(schema.options(), Map.Entry::getKey);
+        Multimap<String, String> function =
+                extractFieldMultimap(schema.options(), Map.Entry::getValue);
+        Multimap<String, String> functionOptions =
+                extractFieldMultimap(schema.options(), Map.Entry::getKey);
 
         GenericRow genericRow;
         List<InternalRow> expectedRow = new ArrayList<>();
@@ -91,8 +96,8 @@ public class AggregationFieldsTableTest extends TableTestBase {
                     GenericRow.of(
                             BinaryString.fromString(fieldName),
                             BinaryString.fromString(schema.fields().get(i).type().toString()),
-                            BinaryString.fromString(function.get(fieldName)),
-                            BinaryString.fromString(functionOptions.get(fieldName)),
+                            BinaryString.fromString(function.get(fieldName).toString()),
+                            BinaryString.fromString(functionOptions.get(fieldName).toString()),
                             BinaryString.fromString(schema.fields().get(i).description()));
             expectedRow.add(genericRow);
         }

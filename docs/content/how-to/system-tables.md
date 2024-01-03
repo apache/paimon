@@ -264,13 +264,13 @@ You can query the historical aggregation of the table through aggregation fields
 SELECT * FROM MyTable$aggregation_fields;
 
 /*
-+------------+-----------------+-------------+-----------------------+---------+
-| field_name |      field_type |    function | function_options      | comment |
-+------------+-----------------+-------------+-----------------------+---------+
-| product_id | BIGINT NOT NULL |      <NULL> |  <NULL>               |  <NULL> |
-|      price |             INT |       count |  fields.price.count   |  <NULL> |
-|      sales |          BIGINT |       sum   |  fields.sales.sum     |  <NULL> |
-+------------+-----------------+-------------+-----------------------+---------+
++------------+-----------------+--------------+--------------------------------+---------+
+| field_name |      field_type |    function  |               function_options | comment |
++------------+-----------------+--------------+--------------------------------+---------+
+| product_id | BIGINT NOT NULL |           [] |                             [] |  <NULL> |
+|      price |             INT | [true,count] | [fields.price.ignore-retrac... |  <NULL> |
+|      sales |          BIGINT |        [sum] | [fields.sales.aggregate-fun... |  <NULL> |
++------------+-----------------+--------------+--------------------------------+---------+
 3 rows in set
 */
 ```
