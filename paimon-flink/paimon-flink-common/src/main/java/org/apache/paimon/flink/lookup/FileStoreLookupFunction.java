@@ -94,6 +94,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private transient long nextLoadTime;
     private transient TableStreamingReader streamingReader;
 
+    private final boolean sequenceFieldEnabled;
+
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
         TableScanUtils.streamingReadingValidate(table);
@@ -119,6 +121,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         this.predicate = predicate;
+        this.sequenceFieldEnabled =
+                table.primaryKeys().size() > 0
+                        && new CoreOptions(table.options()).sequenceField().isPresent();
     }
 
     public void open(FunctionContext context) throws Exception {
@@ -151,7 +156,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         table.primaryKeys(),
                         joinKeys,
                         recordFilter,
-                        options.get(LOOKUP_CACHE_ROWS));
+                        options.get(LOOKUP_CACHE_ROWS),
+                        sequenceFieldEnabled);
         this.nextLoadTime = -1;
         this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
         bulkLoad(options);

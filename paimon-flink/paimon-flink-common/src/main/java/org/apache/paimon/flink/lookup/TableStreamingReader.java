@@ -19,7 +19,9 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
@@ -28,11 +30,14 @@ import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FunctionWithException;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -58,17 +63,21 @@ public class TableStreamingReader {
     @Nullable private final PredicateFilter recordFilter;
     private final StreamTableScan scan;
 
+    private final boolean sequenceFieldEnabled;
+
     public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
         this.table = table;
         this.projection = projection;
-        if (CoreOptions.fromMap(table.options()).startupMode()
-                != CoreOptions.StartupMode.COMPACTED_FULL) {
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        if (options.startupMode() != CoreOptions.StartupMode.COMPACTED_FULL) {
             table =
                     table.copy(
                             Collections.singletonMap(
                                     CoreOptions.SCAN_MODE.key(),
                                     CoreOptions.StartupMode.LATEST_FULL.toString()));
         }
+        this.sequenceFieldEnabled =
+                table.primaryKeys().size() > 0 && options.sequenceField().isPresent();
 
         this.readBuilder = table.newReadBuilder().withProjection(projection).withFilter(predicate);
         scan = readBuilder.newStreamScan();
@@ -110,21 +119,27 @@ public class TableStreamingReader {
 
     private RecordReader<InternalRow> read(TableScan.Plan plan, boolean useParallelism)
             throws IOException {
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        FunctionWithException<Split, RecordReader<InternalRow>, IOException> readerSupplier =
+                sequenceFieldEnabled ? createKvReaderSupplier() : createReaderSupplier();
+
+        RowType rowType = TypeUtils.project(table.rowType(), projection);
+        // append sequence number at the last column.
+        rowType = PrimaryKeyLookupTable.appendSequenceNumber(rowType);
+
         RecordReader<InternalRow> reader;
         if (useParallelism) {
-            CoreOptions options = CoreOptions.fromMap(table.options());
             reader =
                     SplitsParallelReadUtil.parallelExecute(
-                            TypeUtils.project(table.rowType(), projection),
-                            readBuilder,
+                            rowType,
+                            readerSupplier,
                             plan.splits(),
                             options.pageSize(),
                             new Options(table.options()).get(LOOKUP_BOOTSTRAP_PARALLELISM));
         } else {
-            TableRead read = readBuilder.newRead();
             List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
             for (Split split : plan.splits()) {
-                readers.add(() -> read.createReader(split));
+                readers.add(() -> readerSupplier.apply(split));
             }
             reader = ConcatRecordReader.create(readers);
         }
@@ -133,5 +148,36 @@ public class TableStreamingReader {
             reader = reader.filter(recordFilter::test);
         }
         return reader;
+    }
+
+    private FunctionWithException<Split, RecordReader<InternalRow>, IOException>
+            createKvReaderSupplier() {
+        KeyValueTableRead read = (KeyValueTableRead) readBuilder.newRead();
+        return split -> {
+            JoinedRow reused = new JoinedRow();
+            return read.kvReader(split)
+                    .transform(
+                            kv -> {
+                                reused.replace(kv.value(), GenericRow.of(kv.sequenceNumber()));
+                                reused.setRowKind(kv.valueKind());
+                                return reused;
+                            });
+        };
+    }
+
+    private FunctionWithException<Split, RecordReader<InternalRow>, IOException>
+            createReaderSupplier() {
+        TableRead read = readBuilder.newRead();
+
+        return split -> {
+            JoinedRow reused = new JoinedRow();
+            return read.createReader(split)
+                    .transform(
+                            row -> {
+                                reused.replace(row, GenericRow.of(-1L));
+                                reused.setRowKind(row.getRowKind());
+                                return reused;
+                            });
+        };
     }
 }

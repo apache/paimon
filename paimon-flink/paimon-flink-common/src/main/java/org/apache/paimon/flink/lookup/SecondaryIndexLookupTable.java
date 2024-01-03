@@ -46,9 +46,16 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
             List<String> primaryKey,
             List<String> secKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
+            long lruCacheSize,
+            boolean sequenceFieldEnabled)
             throws IOException {
-        super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2);
+        super(
+                stateFactory,
+                rowType,
+                primaryKey,
+                recordFilter,
+                lruCacheSize / 2,
+                sequenceFieldEnabled);
         List<String> fieldNames = rowType.getFieldNames();
         int[] secKeyMapping = secKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);
@@ -65,9 +72,9 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
         List<InternalRow> pks = indexState.get(key);
         List<InternalRow> values = new ArrayList<>(pks.size());
         for (InternalRow pk : pks) {
-            InternalRow value = tableState.get(pk);
-            if (value != null) {
-                values.add(value);
+            InternalRow row = tableState.get(pk);
+            if (row != null) {
+                values.add(row);
             }
         }
         return values;
@@ -78,8 +85,23 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
+
+            boolean previousFetched = false;
+            InternalRow previous = null;
+            if (sequenceFieldEnabled) {
+                previous = tableState.get(primaryKey);
+                previousFetched = true;
+                // only update the kv when the new value's sequence number is higher.
+                if (previous != null
+                        && previous.getLong(sequenceIndex) > row.getLong(sequenceIndex)) {
+                    continue;
+                }
+            }
+
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                InternalRow previous = tableState.get(primaryKey);
+                if (!previousFetched) {
+                    previous = tableState.get(primaryKey);
+                }
                 if (previous != null) {
                     indexState.retract(secKeyRow.replaceRow(previous), primaryKey);
                 }
