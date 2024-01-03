@@ -27,6 +27,7 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -240,7 +241,7 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     }
 
     private Map<String, String> extractRow(JsonNode recordRow) {
-        if (recordRow == null) {
+        if (JsonSerdeUtil.isNull(recordRow)) {
             return new HashMap<>();
         }
 
