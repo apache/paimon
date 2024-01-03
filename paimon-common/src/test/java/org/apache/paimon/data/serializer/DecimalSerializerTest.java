@@ -19,6 +19,10 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 
 /** Test for {@link DecimalSerializer}. */
 public class DecimalSerializerTest extends SerializerTestBase<Decimal> {
@@ -41,5 +45,14 @@ public class DecimalSerializerTest extends SerializerTestBase<Decimal> {
             Decimal.fromUnscaledLong(3, 5, 2),
             Decimal.fromUnscaledLong(4, 5, 2)
         };
+    }
+
+    @Override
+    protected List<Pair<Decimal, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(Decimal.fromUnscaledLong(1, 5, 2), "0.01"),
+                Pair.of(Decimal.fromUnscaledLong(2, 5, 2), "0.02"),
+                Pair.of(Decimal.fromUnscaledLong(3, 5, 2), "0.03"),
+                Pair.of(Decimal.fromUnscaledLong(4, 5, 2), "0.04"));
     }
 }

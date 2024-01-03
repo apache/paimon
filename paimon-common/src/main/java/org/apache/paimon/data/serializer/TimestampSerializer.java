@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 
 /**
  * Serializer for {@link Timestamp}.
@@ -71,6 +72,16 @@ public class TimestampSerializer implements Serializer<Timestamp> {
             int intVal = source.readInt();
             return Timestamp.fromEpochMillis(longVal, intVal);
         }
+    }
+
+    @Override
+    public String serializeToString(Timestamp record) {
+        return record.toLocalDateTime().toString();
+    }
+
+    @Override
+    public Timestamp deserializeFromString(String s) {
+        return Timestamp.fromLocalDateTime(LocalDateTime.parse(s));
     }
 
     @Override

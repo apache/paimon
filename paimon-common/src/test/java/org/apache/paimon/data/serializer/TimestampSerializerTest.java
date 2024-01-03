@@ -19,6 +19,10 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 
 /** Test for {@link TimestampSerializer}. */
 public abstract class TimestampSerializerTest extends SerializerTestBase<Timestamp> {
@@ -41,6 +45,15 @@ public abstract class TimestampSerializerTest extends SerializerTestBase<Timesta
             Timestamp.fromEpochMillis(3),
             Timestamp.fromEpochMillis(4)
         };
+    }
+
+    @Override
+    protected List<Pair<Timestamp, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(Timestamp.fromEpochMillis(1), "1970-01-01T00:00:00.001"),
+                Pair.of(Timestamp.fromEpochMillis(2), "1970-01-01T00:00:00.002"),
+                Pair.of(Timestamp.fromEpochMillis(3), "1970-01-01T00:00:00.003"),
+                Pair.of(Timestamp.fromEpochMillis(4, 1), "1970-01-01T00:00:00.004000001"));
     }
 
     protected abstract int getPrecision();
