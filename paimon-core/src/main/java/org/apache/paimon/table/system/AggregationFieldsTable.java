@@ -51,31 +51,31 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.function.Function;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing Aggregation of table. */
-public class AggregationTable implements ReadonlyTable {
+public class AggregationFieldsTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String AGGREGATION = "aggregation";
+    public static final String AGGREGATION = "aggregation_fields";
 
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
                             new DataField(0, "field_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "type", SerializationUtils.newStringType(false)),
+                            new DataField(1, "field_type", SerializationUtils.newStringType(false)),
+                            new DataField(2, "function", SerializationUtils.newStringType(true)),
                             new DataField(
-                                    2,
-                                    "AggregationFunction",
-                                    SerializationUtils.newStringType(true)),
-                            new DataField(3, "comment", SerializationUtils.newStringType(true))));
+                                    3, "function_options", SerializationUtils.newStringType(true)),
+                            new DataField(4, "comment", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
 
-    public AggregationTable(FileIO fileIO, Path location) {
+    public AggregationFieldsTable(FileIO fileIO, Path location) {
         this.fileIO = fileIO;
         this.location = location;
     }
@@ -107,7 +107,7 @@ public class AggregationTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new AggregationTable(fileIO, location);
+        return new AggregationFieldsTable(fileIO, location);
     }
 
     private class SchemasScan extends ReadOnceTableScan {
@@ -123,7 +123,7 @@ public class AggregationTable implements ReadonlyTable {
         }
     }
 
-    /** {@link Split} implementation for {@link AggregationTable}. */
+    /** {@link Split} implementation for {@link AggregationFieldsTable}. */
     private static class AggregationSplit implements Split {
 
         private static final long serialVersionUID = 1L;
@@ -159,7 +159,7 @@ public class AggregationTable implements ReadonlyTable {
         }
     }
 
-    /** {@link TableRead} implementation for {@link AggregationTable}. */
+    /** {@link TableRead} implementation for {@link AggregationFieldsTable}. */
     private static class SchemasRead implements InnerTableRead {
 
         private final FileIO fileIO;
@@ -202,7 +202,9 @@ public class AggregationTable implements ReadonlyTable {
         }
 
         private Iterator<InternalRow> createInternalRowIterator(TableSchema schema) {
-            Map<String, String> fieldMap = extractFieldMap(schema.options());
+            Map<String, String> function = extractFieldMap(schema.options(), Map.Entry::getValue);
+            Map<String, String> functionOptions =
+                    extractFieldMap(schema.options(), Map.Entry::getKey);
             List<InternalRow> internalRows = new ArrayList<>();
 
             GenericRow genericRow;
@@ -212,7 +214,8 @@ public class AggregationTable implements ReadonlyTable {
                         GenericRow.of(
                                 BinaryString.fromString(fieldName),
                                 BinaryString.fromString(schema.fields().get(i).type().toString()),
-                                BinaryString.fromString(fieldMap.get(fieldName)),
+                                BinaryString.fromString(function.get(fieldName)),
+                                BinaryString.fromString(functionOptions.get(fieldName)),
                                 BinaryString.fromString(schema.fields().get(i).description()));
                 internalRows.add(genericRow);
             }
@@ -220,15 +223,17 @@ public class AggregationTable implements ReadonlyTable {
         }
     }
 
-    protected static Map<String, String> extractFieldMap(Map<String, String> inputMap) {
+    protected static Map<String, String> extractFieldMap(
+            Map<String, String> inputMap,
+            Function<Map.Entry<String, String>, String> contentSelector) {
         Map<String, String> fieldMap = new HashMap<>();
 
         for (Map.Entry<String, String> entry : inputMap.entrySet()) {
             String[] keys = entry.getKey().split("\\.");
             if (keys.length > 2 && keys[0].equals("fields")) {
                 String fieldKey = keys[1];
-                String value = entry.getValue();
-                fieldMap.put(fieldKey, value);
+                String content = contentSelector.apply(entry);
+                fieldMap.put(fieldKey, content);
             }
         }
         return fieldMap;

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -39,18 +38,19 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.table.system.AggregationTable.extractFieldMap;
+import static org.apache.paimon.table.system.AggregationFieldsTable.extractFieldMap;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Unit tests for {@link AggregationTable}. */
-public class AggregationTableTest extends TableTestBase {
+/** Unit tests for {@link AggregationFieldsTable}. */
+public class AggregationFieldsTableTest extends TableTestBase {
 
-    private AggregationTable aggregationTable;
+    private static final String tableName = "MyTable";
+    private AggregationFieldsTable aggregationFieldsTable;
     private SchemaManager schemaManager;
 
     @BeforeEach
     public void before() throws Exception {
-        Identifier identifier = identifier("T");
+        Identifier identifier = identifier(tableName);
         Schema schema =
                 Schema.newBuilder()
                         .column("product_id", DataTypes.INT())
@@ -60,26 +60,28 @@ public class AggregationTableTest extends TableTestBase {
                         .option("merge-engine", "aggregation")
                         .option("fields.price.aggregate-function", "max")
                         .option("fields.sales.aggregate-function", "sum")
-                        .option(CoreOptions.AGG_FUNCTION, "input")
                         .build();
         catalog.createTable(identifier, schema, true);
-        aggregationTable = (AggregationTable) catalog.getTable(identifier("T$aggregation"));
+        aggregationFieldsTable =
+                (AggregationFieldsTable)
+                        catalog.getTable(identifier(tableName + "$aggregation_fields"));
 
         FileIO fileIO = LocalFileIO.create();
-        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
         schemaManager = new SchemaManager(fileIO, tablePath);
     }
 
     @Test
     public void testSchemasTable() throws Exception {
         List<InternalRow> expectRow = getExceptedResult();
-        List<InternalRow> result = read(aggregationTable);
+        List<InternalRow> result = read(aggregationFieldsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
     private List<InternalRow> getExceptedResult() {
         TableSchema schema = schemaManager.latest().get();
-        Map<String, String> fieldMap = extractFieldMap(schema.options());
+        Map<String, String> function = extractFieldMap(schema.options(), Map.Entry::getValue);
+        Map<String, String> functionOptions = extractFieldMap(schema.options(), Map.Entry::getKey);
 
         GenericRow genericRow;
         List<InternalRow> expectedRow = new ArrayList<>();
@@ -89,7 +91,8 @@ public class AggregationTableTest extends TableTestBase {
                     GenericRow.of(
                             BinaryString.fromString(fieldName),
                             BinaryString.fromString(schema.fields().get(i).type().toString()),
-                            BinaryString.fromString(fieldMap.get(fieldName)),
+                            BinaryString.fromString(function.get(fieldName)),
+                            BinaryString.fromString(functionOptions.get(fieldName)),
                             BinaryString.fromString(schema.fields().get(i).description()));
             expectedRow.add(genericRow);
         }

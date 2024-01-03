@@ -256,21 +256,21 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 */
 ```
 
-### Aggregation Table
+### Aggregation fields Table
 
-You can query the historical aggregation of the table through aggregation table.
+You can query the historical aggregation of the table through aggregation fields table.
 
 ```sql
-SELECT * FROM MyTable$aggregation;
+SELECT * FROM MyTable$aggregation_fields;
 
 /*
-+------------+-----------------+---------------------+---------+
-| field_name |            type | AggregationFunction | comment |
-+------------+-----------------+---------------------+---------+
-| product_id | BIGINT NOT NULL |              <NULL> |  <NULL> |
-|      price |             INT |               count |  <NULL> |
-|      sales |          BIGINT |                 sum |  <NULL> |
-+------------+-----------------+---------------------+---------+
++------------+-----------------+-------------+-----------------------+---------+
+| field_name |      field_type |    function | function_options      | comment |
++------------+-----------------+-------------+-----------------------+---------+
+| product_id | BIGINT NOT NULL |      <NULL> |  <NULL>               |  <NULL> |
+|      price |             INT |       count |  fields.price.count   |  <NULL> |
+|      sales |          BIGINT |       sum   |  fields.sales.sum     |  <NULL> |
++------------+-----------------+-------------+-----------------------+---------+
 3 rows in set
 */
 ```
