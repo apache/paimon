@@ -170,7 +170,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                         .withContinuousMode(false)
                         .withPartitions(getSpecifiedPartitions())
                         .build();
-        Integer sinkParalellism = new Random().nextInt(100);
+        Integer sinkParalellism = new Random().nextInt(100) + 1;
         new CompactorSinkBuilder(
                         table.copy(
                                 new HashMap<String, String>() {
