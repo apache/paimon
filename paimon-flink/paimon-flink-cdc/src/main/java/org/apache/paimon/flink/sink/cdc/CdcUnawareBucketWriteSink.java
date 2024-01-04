@@ -18,23 +18,17 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
-import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.LogSinkFunction;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.UnawareBucketWriteSink;
+import org.apache.paimon.flink.sink.UnawareBucketSink;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
-import org.apache.flink.configuration.ExecutionOptions;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 import java.util.Map;
 
-/** Sink for unaware bucket table. */
-public class CdcUnawareBucketWriteSink extends UnawareBucketWriteSink {
+/** CDC Sink for unaware bucket table. */
+public class CdcUnawareBucketWriteSink extends UnawareBucketSink {
 
     public CdcUnawareBucketWriteSink(AppendOnlyFileStoreTable table, Integer parallelism) {
         super(table, null, null, parallelism, true);
@@ -53,30 +47,5 @@ public class CdcUnawareBucketWriteSink extends UnawareBucketWriteSink {
     protected OneInputStreamOperator createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
-    }
-
-    @Override
-    public DataStreamSink<?> sinkFrom(DataStream input, String initialCommitUser) {
-        // do the actually writing action, no snapshot generated in this stage
-        DataStream<Committable> written = doWrite(input, initialCommitUser, parallelism);
-
-        boolean isStreamingMode =
-                input.getExecutionEnvironment()
-                                .getConfiguration()
-                                .get(ExecutionOptions.RUNTIME_MODE)
-                        == RuntimeExecutionMode.STREAMING;
-
-        // if enable compaction, we need to add compaction topology to this job
-        if (enableCompaction && isStreamingMode && !boundedInput) {
-            // if streaming mode with bounded input, we disable compaction topology
-            UnawareBucketCompactionTopoBuilder builder =
-                    new UnawareBucketCompactionTopoBuilder(
-                            input.getExecutionEnvironment(), table.name(), table);
-            builder.withContinuousMode(true);
-            written = written.union(builder.fetchUncommitted(initialCommitUser));
-        }
-
-        // commit the committable to generate a new snapshot
-        return doCommit(written, initialCommitUser);
     }
 }
