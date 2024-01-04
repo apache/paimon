@@ -146,8 +146,8 @@ so it is possible that the values of different keys come from different snapshot
 
 {{< /hint >}}
 
-For append-only tables, as all files can be read without merging,
-`ro` system table acts like the normal append-only table.
+For append tables, as all files can be read without merging,
+`ro` system table acts like the normal append table.
 
 ```sql
 SELECT * FROM MyTable$ro;
