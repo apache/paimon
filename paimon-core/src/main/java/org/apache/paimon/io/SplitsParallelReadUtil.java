@@ -23,7 +23,7 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FunctionWithException;
+import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParallelExecution;
 import org.apache.paimon.utils.ParallelExecution.ParallelBatch;
@@ -45,7 +45,7 @@ public class SplitsParallelReadUtil {
 
     public static RecordReader<InternalRow> parallelExecute(
             RowType projectedType,
-            FunctionWithException<Split, RecordReader<InternalRow>, IOException> readBuilder,
+            FunctionWithIOException<Split, RecordReader<InternalRow>> readBuilder,
             List<Split> splits,
             int pageSize,
             int parallelism) {
@@ -61,7 +61,7 @@ public class SplitsParallelReadUtil {
 
     public static <EXTRA> RecordReader<InternalRow> parallelExecute(
             RowType projectedType,
-            FunctionWithException<Split, RecordReader<InternalRow>, IOException> readBuilder,
+            FunctionWithIOException<Split, RecordReader<InternalRow>> readBuilder,
             List<Split> splits,
             int pageSize,
             int parallelism,

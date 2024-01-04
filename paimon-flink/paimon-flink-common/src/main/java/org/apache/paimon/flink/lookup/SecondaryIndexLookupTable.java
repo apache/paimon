@@ -46,16 +46,9 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
             List<String> primaryKey,
             List<String> secKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize,
-            boolean sequenceFieldEnabled)
+            long lruCacheSize)
             throws IOException {
-        super(
-                stateFactory,
-                rowType,
-                primaryKey,
-                recordFilter,
-                lruCacheSize / 2,
-                sequenceFieldEnabled);
+        super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2);
         List<String> fieldNames = rowType.getFieldNames();
         int[] secKeyMapping = secKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);
@@ -81,19 +74,19 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
+            throws IOException {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
 
             boolean previousFetched = false;
             InternalRow previous = null;
-            if (sequenceFieldEnabled) {
+            if (orderByLastField) {
                 previous = tableState.get(primaryKey);
                 previousFetched = true;
-                // only update the kv when the new value's sequence number is higher.
-                if (previous != null
-                        && previous.getLong(sequenceIndex) > row.getLong(sequenceIndex)) {
+                int orderIndex = rowType.getFieldCount() - 1;
+                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
                     continue;
                 }
             }
