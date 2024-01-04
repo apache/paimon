@@ -16,35 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.cdc;
+package org.apache.paimon.service.exceptions;
 
-import org.apache.paimon.flink.sink.MultiTableCommittable;
-import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.service.network.BadRequestException;
 
-import java.util.Objects;
-
-/** {@link ChannelComputer} for {@link MultiTableCommittable}. */
-public class MultiTableCommittableChannelComputer
-        implements ChannelComputer<MultiTableCommittable> {
+/** Thrown if the server does not hold the given partition and bucket. */
+public class UnknownPartitionBucketException extends BadRequestException {
 
     private static final long serialVersionUID = 1L;
 
-    private transient int numChannels;
-
-    @Override
-    public void setup(int numChannels) {
-        this.numChannels = numChannels;
-    }
-
-    @Override
-    public int channel(MultiTableCommittable multiTableCommittable) {
-        return Math.floorMod(
-                Objects.hash(multiTableCommittable.getDatabase(), multiTableCommittable.getTable()),
-                numChannels);
-    }
-
-    @Override
-    public String toString() {
-        return "shuffle by table";
+    public UnknownPartitionBucketException(String serverName) {
+        super(serverName, "The server does not hold the given partition and bucket.");
     }
 }

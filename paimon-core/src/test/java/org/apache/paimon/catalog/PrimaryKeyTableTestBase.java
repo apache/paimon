@@ -40,7 +40,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Base class to test catalog primary key table. */
 public abstract class PrimaryKeyTableTestBase {
 
-    @TempDir java.nio.file.Path tempPath;
+    @TempDir protected java.nio.file.Path tempPath;
 
     protected AbstractFileStoreTable table;
     protected String commitUser;
