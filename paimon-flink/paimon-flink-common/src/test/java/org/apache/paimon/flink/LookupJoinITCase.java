@@ -605,12 +605,12 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     @Test
     public void testWithSequenceFieldTable() throws Exception {
         sql(
-                "CREATE TABLE DIM_2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
-        sql("INSERT INTO DIM_2 VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_2 for system_time as of T.proctime AS D ON T.i = D.i";
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (1), (2), (3)");
@@ -621,7 +621,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222, 2222),
                         Row.of(3, null, null, null));
 
-        sql("INSERT INTO DIM_2 VALUES (2, 11, 444, 4444), (3, 33, 333, 3333)");
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (2, 11, 444, 4444), (3, 33, 333, 3333)");
         Thread.sleep(2000); // wait refresh
         sql("INSERT INTO T VALUES (1), (2), (3), (4)");
         result = iterator.collect(4);
@@ -631,6 +631,61 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(2, 22, 222, 2222), // not change
                         Row.of(3, 33, 333, 3333),
                         Row.of(4, null, null, null));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testAsyncRetryLookupWithSequenceField() throws Exception {
+        sql(
+                "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String query =
+                "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.i";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (3)");
+        sql("INSERT INTO T VALUES (2)");
+        sql("INSERT INTO T VALUES (1)");
+        Thread.sleep(2000); // wait
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111), Row.of(2, 22, 222, 2222));
+
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (3, 33, 333, 3333)");
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, 33, 333, 3333));
+
+        iterator.close();
+    }
+
+    @Test
+    public void testAsyncRetryLookupSecKeyWithSequenceField() throws Exception {
+        sql(
+                "CREATE TABLE DIM_WITH_SEQUENCE (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms', 'sequence.field' = 'j')");
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (1, 1, 111, 1111), (2, 2, 111, 2222)");
+
+        String query =
+                "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " T.i, D.i, D.j, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.k1";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T VALUES (111)");
+        sql("INSERT INTO T VALUES (333)");
+        Thread.sleep(2000); // wait
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of(111, 1, 1, 1111), Row.of(111, 2, 2, 2222));
+
+        sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (2, 1, 111, 3333), (3, 3, 333, 3333)");
+        Thread.sleep(2000); // wait
+        sql("INSERT INTO T VALUES (111)");
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of(111, 1, 1, 1111), Row.of(111, 2, 2, 2222), Row.of(333, 3, 3, 3333));
 
         iterator.close();
     }
