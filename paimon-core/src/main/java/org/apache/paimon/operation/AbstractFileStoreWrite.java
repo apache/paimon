@@ -156,19 +156,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void close() throws Exception {
-        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
-            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
-                writerContainer.writer.close();
-            }
-        }
-        writers.clear();
-        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
-            lazyCompactExecutor.shutdownNow();
-        }
-    }
-
-    @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         long latestCommittedIdentifier;
@@ -258,6 +245,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
+    public void close() throws Exception {
+        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
+            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
+                writerContainer.writer.close();
+            }
+        }
+        writers.clear();
+        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
+            lazyCompactExecutor.shutdownNow();
+        }
+    }
+
+    @Override
     public List<State<T>> checkpoint() {
         List<State<T>> result = new ArrayList<>();
 
@@ -330,7 +330,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 bucket, k -> createWriterContainer(partition.copy(), bucket, ignorePreviousFiles));
     }
 
-    private long writeSize() {
+    private long writerNumber() {
         return writers.values().stream().mapToLong(e -> e.values().size()).sum();
     }
 
@@ -341,7 +341,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
 
-        if (!isStreamingMode && writeSize() >= writerNumberMax) {
+        if (!isStreamingMode && writerNumber() >= writerNumberMax) {
             try {
                 forceBufferSpill();
             } catch (Exception e) {
