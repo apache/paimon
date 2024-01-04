@@ -18,501 +18,57 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
-import javax.annotation.Nullable;
-
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.UUID;
-import java.util.concurrent.ThreadLocalRandom;
-
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
-
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
-public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaActionITCaseBase {
+public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
+    private static final String DEBEZIUM = "debezium";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        final String topic1 = "schema_evolution_0";
-        final String topic2 = "schema_evolution_1";
-        boolean writeOne = false;
-        int fileCount = 2;
-        List<String> topics = Arrays.asList(topic1, topic2);
-        topics.forEach(topic -> createTestTopic(topic, 1, 1));
-
-        // ---------- Write the debezium json into Kafka -------------------
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(i),
-                        readLines(
-                                "kafka/debezium/database/schemaevolution/topic"
-                                        + i
-                                        + "/debezium-data-1.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
-        KafkaSyncDatabaseAction action =
-                syncDatabaseActionBuilder(kafkaConfig)
-                        .withTableConfig(getBasicTableConfig())
-                        .build();
-        runActionWithDefaultEnv(action);
-
-        testSchemaEvolutionImpl(topics, writeOne, fileCount);
+        testSchemaEvolutionMultiTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        final String topic = "schema_evolution";
-        boolean writeOne = true;
-        int fileCount = 2;
-        List<String> topics = Collections.singletonList(topic);
-        topics.forEach(t -> createTestTopic(t, 1, 1));
-
-        // ---------- Write the debezium json into Kafka -------------------
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(0),
-                        readLines(
-                                "kafka/debezium/database/schemaevolution/topic"
-                                        + i
-                                        + "/debezium-data-1.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
-        KafkaSyncDatabaseAction action =
-                syncDatabaseActionBuilder(kafkaConfig)
-                        .withTableConfig(getBasicTableConfig())
-                        .build();
-        runActionWithDefaultEnv(action);
-
-        testSchemaEvolutionImpl(topics, writeOne, fileCount);
-    }
-
-    private void testSchemaEvolutionImpl(List<String> topics, boolean writeOne, int fileCount)
-            throws Exception {
-        waitingTables("t1", "t2");
-
-        FileStoreTable table1 = getFileStoreTable("t1");
-        FileStoreTable table2 = getFileStoreTable("t2");
-
-        RowType rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"});
-
-        List<String> primaryKeys = Collections.emptyList();
-
-        List<String> expected =
-                Arrays.asList(
-                        "+I[101, scooter, Small 2-wheel scooter, 3.14]",
-                        "+I[102, car battery, 12V car battery, 8.1]");
-        waitForResult(expected, table1, rowType1, primaryKeys);
-
-        RowType rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"});
-
-        List<String> expected2 =
-                Arrays.asList(
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
-        waitForResult(expected2, table2, rowType2, primaryKeys);
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                "kafka/debezium/database/schemaevolution/topic"
-                                        + i
-                                        + "/debezium-data-2.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight", "age"});
-        expected =
-                Arrays.asList(
-                        "+I[101, scooter, Small 2-wheel scooter, 3.14, NULL]",
-                        "+I[102, car battery, 12V car battery, 8.1, NULL]",
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, 18]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, 24]");
-        waitForResult(expected, table1, rowType1, primaryKeys);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight", "address"});
-        expected =
-                Arrays.asList(
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, NULL]",
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, Beijing]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, NULL]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, Shanghai]");
-        waitForResult(expected, table2, rowType2, primaryKeys);
+        testSchemaEvolutionOneTopic(DEBEZIUM);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-
-        KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
-
-        assertThatThrownBy(action::run)
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "kafka_conf must and can only set one of the following options: topic,topic-pattern."));
+        testTopicIsEmpty(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        // create table t1
-        createFileStoreTable(
-                "test_prefix_t1_test_suffix",
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"}),
-                Collections.emptyList(),
-                Collections.singletonList("id"),
-                Collections.emptyMap());
-
-        // create table t2
-        createFileStoreTable(
-                "test_prefix_t2_test_suffix",
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"}),
-                Collections.emptyList(),
-                Collections.singletonList("id"),
-                Collections.emptyMap());
-
-        final String topic1 = "prefix_suffix_0";
-        final String topic2 = "prefix_suffix_1";
-        boolean writeOne = false;
-        int fileCount = 2;
-        List<String> topics = Arrays.asList(topic1, topic2);
-        topics.forEach(topic -> createTestTopic(topic, 1, 1));
-
-        // ---------- Write the debezium json into Kafka -------------------
-
-        for (int i = 0; i < topics.size(); i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(i),
-                        readLines(
-                                "kafka/debezium/database/prefixsuffix/topic"
-                                        + i
-                                        + "/debezium-data-1.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-
-        // try synchronization
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
-        KafkaSyncDatabaseAction action =
-                syncDatabaseActionBuilder(kafkaConfig)
-                        .withTablePrefix("test_prefix_")
-                        .withTableSuffix("_test_suffix")
-                        .withTableConfig(getBasicTableConfig())
-                        // test including check with affix
-                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
-                        .build();
-        runActionWithDefaultEnv(action);
-
-        testTableAffixImpl(topics, writeOne, fileCount);
+        testTableAffixMultiTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        // create table t1
-        createFileStoreTable(
-                "test_prefix_t1_test_suffix",
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"}),
-                Collections.emptyList(),
-                Collections.singletonList("id"),
-                Collections.emptyMap());
-
-        // create table t2
-        createFileStoreTable(
-                "test_prefix_t2_test_suffix",
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"}),
-                Collections.emptyList(),
-                Collections.singletonList("id"),
-                Collections.emptyMap());
-
-        final String topic1 = "prefix_suffix";
-        List<String> topics = Collections.singletonList(topic1);
-        boolean writeOne = true;
-        int fileCount = 2;
-        topics.forEach(topic -> createTestTopic(topic, 1, 1));
-
-        // ---------- Write the debezium json into Kafka -------------------
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        topics.get(0),
-                        readLines(
-                                "kafka/debezium/database/prefixsuffix/topic"
-                                        + i
-                                        + "/debezium-data-1.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-
-        // try synchronization
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
-        KafkaSyncDatabaseAction action =
-                syncDatabaseActionBuilder(kafkaConfig)
-                        .withTablePrefix("test_prefix_")
-                        .withTableSuffix("_test_suffix")
-                        .withTableConfig(getBasicTableConfig())
-                        // test including check with affix
-                        .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
-                        .build();
-        runActionWithDefaultEnv(action);
-
-        testTableAffixImpl(topics, writeOne, fileCount);
-    }
-
-    private void testTableAffixImpl(List<String> topics, boolean writeOne, int fileCount)
-            throws Exception {
-        waitingTables("test_prefix_t1_test_suffix", "test_prefix_t2_test_suffix");
-
-        FileStoreTable table1 = getFileStoreTable("test_prefix_t1_test_suffix");
-        FileStoreTable table2 = getFileStoreTable("test_prefix_t2_test_suffix");
-
-        RowType rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING().notNull(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"});
-
-        List<String> primaryKeys = Collections.singletonList("id");
-
-        List<String> expected =
-                Arrays.asList(
-                        "+I[101, scooter, Small 2-wheel scooter, 3.14]",
-                        "+I[102, car battery, 12V car battery, 8.1]");
-        waitForResult(expected, table1, rowType1, primaryKeys);
-
-        RowType rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING().notNull(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight"});
-
-        expected =
-                Arrays.asList(
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
-        waitForResult(expected, table2, rowType2, primaryKeys);
-
-        for (int i = 0; i < fileCount; i++) {
-            try {
-                writeRecordsToKafka(
-                        writeOne ? topics.get(0) : topics.get(i),
-                        readLines(
-                                "kafka/debezium/database/prefixsuffix/topic"
-                                        + i
-                                        + "/debezium-data-2.txt"));
-            } catch (Exception e) {
-                throw new Exception("Failed to write debezium data to Kafka.", e);
-            }
-        }
-        rowType1 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING().notNull(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight", "address"});
-        expected =
-                Arrays.asList(
-                        "+I[101, scooter, Small 2-wheel scooter, 3.14, Beijing]",
-                        "+I[102, car battery, 12V car battery, 8.1, Shanghai]");
-        waitForResult(expected, table1, rowType1, primaryKeys);
-
-        rowType2 =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.STRING().notNull(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"id", "name", "description", "weight", "age"});
-        expected =
-                Arrays.asList(
-                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8, 19]",
-                        "+I[104, hammer, 12oz carpenter's hammer, 0.75, 25]");
-        waitForResult(expected, table2, rowType2, primaryKeys);
+        testTableAffixOneTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        includingAndExcludingTablesImpl(
-                "flink|paimon.+",
-                null,
-                Arrays.asList("flink", "paimon_1", "paimon_2"),
-                Collections.singletonList("ignore"));
+        testIncludingTables(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        includingAndExcludingTablesImpl(
-                null,
-                "flink|paimon.+",
-                Collections.singletonList("ignore"),
-                Arrays.asList("flink", "paimon_1", "paimon_2"));
+        testExcludingTables(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        includingAndExcludingTablesImpl(
-                "flink|paimon.+",
-                "paimon_1",
-                Arrays.asList("flink", "paimon_2"),
-                Arrays.asList("paimon_1", "ignore"));
-    }
-
-    private void includingAndExcludingTablesImpl(
-            @Nullable String includingTables,
-            @Nullable String excludingTables,
-            List<String> existedTables,
-            List<String> notExistedTables)
-            throws Exception {
-        final String topic1 = "include_exclude" + UUID.randomUUID();
-        List<String> topics = Collections.singletonList(topic1);
-        topics.forEach(topic -> createTestTopic(topic, 1, 1));
-
-        // ---------- Write the debezium json into Kafka -------------------
-
-        try {
-            writeRecordsToKafka(
-                    topics.get(0),
-                    readLines("kafka/debezium/database/include/topic0/debezium-data-1.txt"));
-        } catch (Exception e) {
-            throw new Exception("Failed to write debezium data to Kafka.", e);
-        }
-        // try synchronization
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
-        kafkaConfig.put(TOPIC.key(), String.join(";", topics));
-        KafkaSyncDatabaseAction action =
-                syncDatabaseActionBuilder(kafkaConfig)
-                        .includingTables(includingTables)
-                        .excludingTables(excludingTables)
-                        .withTableConfig(getBasicTableConfig())
-                        .build();
-        runActionWithDefaultEnv(action);
-
-        // check paimon tables
-        waitingTables(existedTables);
-        assertTableNotExists(notExistedTables);
+        testIncludingAndExcludingTables(DEBEZIUM);
     }
 }
