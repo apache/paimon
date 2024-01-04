@@ -181,7 +181,7 @@ public abstract class FlinkSink<T> implements Serializable {
     }
 
     public SingleOutputStreamOperator<Committable> doWrite(
-            DataStream<T> input, String commitUser, Integer parallelism) {
+            DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming =
                 StreamExecutionEnvironmentUtils.getConfiguration(env)

@@ -231,7 +231,7 @@ public class FlinkSinkTest {
         DataStreamSource<InternalRow> source =
                 streamExecutionEnvironment.fromCollection(
                         Collections.singletonList(GenericRow.of(1, 1)));
-        FlinkSink<InternalRow> flinkSink = new FileStoreSink(fileStoreTable, null, null);
+        FlinkSink<InternalRow> flinkSink = new FixedBucketSink(fileStoreTable, null, null);
         SingleOutputStreamOperator<Committable> written = flinkSink.doWrite(source, "123", 1);
         RowDataStoreWriteOperator operator =
                 ((RowDataStoreWriteOperator)

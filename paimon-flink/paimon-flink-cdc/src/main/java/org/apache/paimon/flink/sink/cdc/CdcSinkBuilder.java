@@ -128,6 +128,6 @@ public class CdcSinkBuilder<T> {
         FileStoreTable dataTable = (FileStoreTable) table;
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
-        return new FlinkCdcSink(dataTable).sinkFrom(partitioned);
+        return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
     }
 }

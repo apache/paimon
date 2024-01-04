@@ -16,30 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink.cdc;
+package org.apache.paimon.flink.sink;
 
-import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.FlinkSink;
-import org.apache.paimon.flink.sink.FlinkWriteSink;
-import org.apache.paimon.flink.sink.StoreSinkWrite;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
-/**
- * A {@link FlinkSink} which accepts {@link CdcRecord} and waits for a schema change if necessary.
- */
-public class FlinkCdcSink extends FlinkWriteSink<CdcRecord> {
+import javax.annotation.Nullable;
+
+import java.util.Map;
+
+/** {@link FlinkSink} for writing records into fixed bucket Paimon table. */
+public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
 
     private static final long serialVersionUID = 1L;
 
-    public FlinkCdcSink(FileStoreTable table) {
-        super(table, null);
+    @Nullable private final LogSinkFunction logSinkFunction;
+
+    public FixedBucketSink(
+            FileStoreTable table,
+            @Nullable Map<String, String> overwritePartition,
+            @Nullable LogSinkFunction logSinkFunction) {
+        super(table, overwritePartition);
+        this.logSinkFunction = logSinkFunction;
     }
 
     @Override
-    protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
+    protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcRecordStoreWriteOperator(table, writeProvider, commitUser);
+        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
     }
 }
