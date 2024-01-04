@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
@@ -28,6 +30,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -35,7 +38,11 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
+import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
+import static org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.createExtractor;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -123,9 +130,20 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     private DataStreamSource<String> buildDataStreamSource(Object source) {
         if (source instanceof Source) {
+            WatermarkStrategy<String> watermarkStrategy;
+            if (!(source instanceof KafkaSource)
+                    && tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
+                    && Objects.equals(
+                            tableConfig.get(CoreOptions.TAG_AUTOMATIC_CREATION.key()),
+                            WATERMARK.toString())) {
+                watermarkStrategy = new CdcWatermarkStrategy(createExtractor(source));
+            } else {
+                watermarkStrategy = WatermarkStrategy.noWatermarks();
+            }
+            env.getConfig().setAutoWatermarkInterval(5000);
             return env.fromSource(
                     (Source<String, ?, ?>) source,
-                    WatermarkStrategy.noWatermarks(),
+                    watermarkStrategy,
                     syncJobHandler.provideSourceName());
         }
         if (source instanceof SourceFunction) {
