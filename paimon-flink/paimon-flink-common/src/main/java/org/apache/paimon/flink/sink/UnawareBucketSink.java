@@ -18,47 +18,51 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.DataStreamSink;
+
+import javax.annotation.Nullable;
 
 import java.util.Map;
 
 /**
- * Build topology for unaware bucket table sink.
+ * Sink for unaware-bucket table.
  *
  * <p>Note: in unaware-bucket mode, we don't shuffle by bucket in inserting. We can assign
  * compaction to the inserting jobs aside.
  */
-public class UnawareBucketWriteSink extends FileStoreSink {
+public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
 
-    protected final boolean enableCompaction;
     protected final AppendOnlyFileStoreTable table;
-    protected final Integer parallelism;
-    protected final boolean boundedInput;
+    protected final LogSinkFunction logSinkFunction;
 
-    public UnawareBucketWriteSink(
+    @Nullable private final Integer parallelism;
+    private final boolean boundedInput;
+
+    public UnawareBucketSink(
             AppendOnlyFileStoreTable table,
-            Map<String, String> overwritePartitions,
+            @Nullable Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
-            Integer parallelism,
+            @Nullable Integer parallelism,
             boolean boundedInput) {
-        super(table, overwritePartitions, logSinkFunction);
+        super(table, overwritePartitions);
         this.table = table;
-        this.enableCompaction = !table.coreOptions().writeOnly();
+        this.logSinkFunction = logSinkFunction;
         this.parallelism = parallelism;
         this.boundedInput = boundedInput;
     }
 
     @Override
-    public DataStreamSink<?> sinkFrom(DataStream input, String initialCommitUser) {
-        // do the actually writing action, no snapshot generated in this stage
-        DataStream<Committable> written = doWrite(input, initialCommitUser, parallelism);
+    public DataStream<Committable> doWrite(
+            DataStream<T> input, String initialCommitUser, @Nullable Integer parallelism) {
+        DataStream<Committable> written = super.doWrite(input, initialCommitUser, this.parallelism);
 
+        boolean enableCompaction = !table.coreOptions().writeOnly();
         boolean isStreamingMode =
                 input.getExecutionEnvironment()
                                 .getConfiguration()
@@ -74,7 +78,6 @@ public class UnawareBucketWriteSink extends FileStoreSink {
             written = written.union(builder.fetchUncommitted(initialCommitUser));
         }
 
-        // commit the committable to generate a new snapshot
-        return doCommit(written, initialCommitUser);
+        return written;
     }
 }

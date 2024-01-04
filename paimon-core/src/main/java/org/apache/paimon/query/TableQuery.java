@@ -16,12 +16,17 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.lookup;
+package org.apache.paimon.query;
 
 import org.apache.paimon.data.BinaryRow;
 
-/** An interface to provide lookup function. */
-public interface QueryLookup {
+import java.io.IOException;
 
-    BinaryRow[] lookup(BinaryRow partition, int bucket, BinaryRow[] keys);
+/**
+ * Query for a table, provides lookup method to lookup value by key. It does not download files on
+ * its own, maintaining its role requires refreshing its file list.
+ */
+public interface TableQuery {
+
+    BinaryRow[] lookup(BinaryRow partition, int bucket, BinaryRow[] keys) throws IOException;
 }

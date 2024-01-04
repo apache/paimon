@@ -19,7 +19,8 @@
 package org.apache.paimon.service.server;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.lookup.QueryLookup;
+import org.apache.paimon.query.TableQuery;
+import org.apache.paimon.service.exceptions.UnknownPartitionBucketException;
 import org.apache.paimon.service.messages.KvRequest;
 import org.apache.paimon.service.messages.KvResponse;
 import org.apache.paimon.service.network.AbstractServerHandler;
@@ -32,6 +33,8 @@ import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
 
 import java.util.concurrent.CompletableFuture;
 
+import static org.apache.paimon.table.sink.ChannelComputer.select;
+
 /**
  * This handler dispatches asynchronous tasks, which query values and write the result to the
  * channel.
@@ -43,7 +46,9 @@ import java.util.concurrent.CompletableFuture;
 @ChannelHandler.Sharable
 public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse> {
 
-    private final QueryLookup lookup;
+    private final int serverId;
+    private final int numServers;
+    private final TableQuery lookup;
 
     /**
      * Create the handler used by the {@link KvQueryServer}.
@@ -56,10 +61,14 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
      */
     public KvServerHandler(
             final KvQueryServer server,
-            final QueryLookup lookup,
+            final int serverId,
+            final int numServers,
+            final TableQuery lookup,
             final MessageSerializer<KvRequest, KvResponse> serializer,
             final ServiceRequestStats stats) {
         super(server, serializer, stats);
+        this.serverId = serverId;
+        this.numServers = numServers;
         this.lookup = Preconditions.checkNotNull(lookup);
     }
 
@@ -67,6 +76,13 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
     public CompletableFuture<KvResponse> handleRequest(
             final long requestId, final KvRequest request) {
         final CompletableFuture<KvResponse> responseFuture = new CompletableFuture<>();
+
+        int selectServerId = select(request.partition(), request.bucket(), numServers);
+        if (selectServerId != serverId) {
+            responseFuture.completeExceptionally(
+                    new UnknownPartitionBucketException(getServerName()));
+            return responseFuture;
+        }
 
         try {
             BinaryRow[] values =

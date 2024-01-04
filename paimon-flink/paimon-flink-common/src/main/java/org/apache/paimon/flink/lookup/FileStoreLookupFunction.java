@@ -162,7 +162,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(path.toString()), new CoreOptions(options));
         try (RecordReaderIterator<InternalRow> batch =
-                new RecordReaderIterator<>(streamingReader.nextBatch())) {
+                new RecordReaderIterator<>(streamingReader.nextBatch(true))) {
             while (batch.hasNext()) {
                 InternalRow row = batch.next();
                 if (lookupTable.recordFilter().test(row)) {
@@ -252,7 +252,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void refresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(streamingReader.nextBatch())) {
+                    new RecordReaderIterator<>(streamingReader.nextBatch(false))) {
                 if (!batch.hasNext()) {
                     return;
                 }

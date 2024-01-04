@@ -23,7 +23,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
-import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
@@ -35,26 +34,22 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.ParallelExecution;
-import org.apache.paimon.utils.ParallelExecution.ParallelBatch;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
 import java.io.Serializable;
-import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StartupMode.LATEST;
+import static org.apache.paimon.io.SplitsParallelReadUtil.parallelExecute;
 
 /** Bootstrap key index from Paimon table. */
 public class IndexBootstrap implements Serializable {
@@ -71,6 +66,10 @@ public class IndexBootstrap implements Serializable {
 
     public void bootstrap(int numAssigners, int assignId, Consumer<InternalRow> collector)
             throws IOException {
+        bootstrap(numAssigners, assignId).forEachRemaining(collector);
+    }
+
+    public RecordReader<InternalRow> bootstrap(int numAssigners, int assignId) throws IOException {
         RowType rowType = table.rowType();
         List<String> fieldNames = rowType.getFieldNames();
         int[] keyProjection =
@@ -103,58 +102,25 @@ public class IndexBootstrap implements Serializable {
                             .collect(Collectors.toList());
         }
 
-        List<Supplier<Pair<RecordReader<InternalRow>, GenericRow>>> suppliers = new ArrayList<>();
         RowDataToObjectArrayConverter partBucketConverter =
                 new RowDataToObjectArrayConverter(
                         TypeUtils.concat(
                                 TypeUtils.project(rowType, table.partitionKeys()),
                                 RowType.of(DataTypes.INT())));
-        for (Split split : splits) {
-            suppliers.add(
-                    () -> {
-                        try {
-                            RecordReader<InternalRow> reader =
-                                    readBuilder.newRead().createReader(split);
-                            DataSplit dataSplit = ((DataSplit) split);
-                            int bucket = dataSplit.bucket();
-                            GenericRow partAndBucket =
-                                    partBucketConverter.toGenericRow(
-                                            new JoinedRow(
-                                                    dataSplit.partition(), GenericRow.of(bucket)));
-                            return Pair.of(reader, partAndBucket);
-                        } catch (IOException e) {
-                            throw new UncheckedIOException(e);
-                        }
-                    });
-        }
-        ParallelExecution<InternalRow, GenericRow> execution =
-                new ParallelExecution<>(
-                        InternalSerializers.create(TypeUtils.project(rowType, keyProjection)),
-                        options.pageSize(),
-                        options.crossPartitionUpsertBootstrapParallelism(),
-                        suppliers);
-        JoinedRow joinedRow = new JoinedRow();
-        while (true) {
-            try {
-                ParallelBatch<InternalRow, GenericRow> batch = execution.take();
-                if (batch == null) {
-                    break;
-                }
 
-                while (true) {
-                    InternalRow row = batch.next();
-                    if (row == null) {
-                        batch.releaseBatch();
-                        break;
-                    }
-
-                    collector.accept(joinedRow.replace(row, batch.extraMesage()));
-                }
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-                throw new RuntimeException(e);
-            }
-        }
+        return parallelExecute(
+                TypeUtils.project(rowType, keyProjection),
+                readBuilder,
+                splits,
+                options.pageSize(),
+                options.crossPartitionUpsertBootstrapParallelism(),
+                split -> {
+                    DataSplit dataSplit = ((DataSplit) split);
+                    int bucket = dataSplit.bucket();
+                    return partBucketConverter.toGenericRow(
+                            new JoinedRow(dataSplit.partition(), GenericRow.of(bucket)));
+                },
+                (row, extra) -> new JoinedRow().replace(row, extra));
     }
 
     @VisibleForTesting

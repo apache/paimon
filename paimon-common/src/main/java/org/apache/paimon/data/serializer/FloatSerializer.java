@@ -45,4 +45,14 @@ public final class FloatSerializer extends SerializerSingleton<Float> {
     public Float deserialize(DataInputView source) throws IOException {
         return source.readFloat();
     }
+
+    @Override
+    public String serializeToString(Float record) {
+        return record.toString();
+    }
+
+    @Override
+    public Float deserializeFromString(String s) {
+        return Float.valueOf(s);
+    }
 }

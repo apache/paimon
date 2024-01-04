@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -44,8 +45,8 @@ import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
- * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each
- * database table will be written into a separate Paimon table.
+ * Builder for CDC {@link FlinkWriteSink} when syncing the whole database into one Paimon database.
+ * Each database table will be written into a separate Paimon table.
  *
  * <p>This builder will create a separate sink for each Paimon sink table. Thus this implementation
  * is not very efficient in resource saving.
@@ -168,7 +169,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
-        new FlinkCdcSink(table).sinkFrom(partitioned);
+        new CdcFixedBucketSink(table).sinkFrom(partitioned);
     }
 
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {

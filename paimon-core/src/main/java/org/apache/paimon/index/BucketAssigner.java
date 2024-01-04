@@ -27,9 +27,13 @@ public interface BucketAssigner {
 
     void prepareCommit(long commitIdentifier);
 
-    static int computeAssigner(int partitionHash, int keyHash, int numChannels, int numAssigners) {
+    static int computeHashKey(int partitionHash, int keyHash, int numChannels, int numAssigners) {
         int start = Math.abs(partitionHash % numChannels);
         int id = Math.abs(keyHash % numAssigners);
-        return (start + id) % numChannels;
+        return start + id;
+    }
+
+    static int computeAssigner(int partitionHash, int keyHash, int numChannels, int numAssigners) {
+        return computeHashKey(partitionHash, keyHash, numChannels, numAssigners) % numChannels;
     }
 }

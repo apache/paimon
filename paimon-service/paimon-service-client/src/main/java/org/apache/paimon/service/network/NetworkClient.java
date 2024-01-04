@@ -108,7 +108,7 @@ public class NetworkClient<REQ extends MessageBody, RESP extends MessageBody> {
         final ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
-                        .setNameFormat("Flink " + clientName + " Event Loop Thread %d")
+                        .setNameFormat("Paimon " + clientName + " Event Loop Thread %d")
                         .build();
 
         final EventLoopGroup nioGroup = new NioEventLoopGroup(numEventLoopThreads, threadFactory);

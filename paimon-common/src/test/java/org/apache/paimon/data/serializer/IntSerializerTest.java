@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link IntSerializer}. */
@@ -39,5 +43,17 @@ public class IntSerializerTest extends SerializerTestBase<Integer> {
         int rndInt = rnd.nextInt();
 
         return new Integer[] {0, 1, -1, Integer.MAX_VALUE, Integer.MIN_VALUE, rndInt, -rndInt};
+    }
+
+    @Override
+    protected List<Pair<Integer, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(0, "0"),
+                Pair.of(1, "1"),
+                Pair.of(-1, "-1"),
+                Pair.of(Integer.MAX_VALUE, "2147483647"),
+                Pair.of(Integer.MIN_VALUE, "-2147483648"),
+                Pair.of(123456789, "123456789"),
+                Pair.of(-123456789, "-123456789"));
     }
 }

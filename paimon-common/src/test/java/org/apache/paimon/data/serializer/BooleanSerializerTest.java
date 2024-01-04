@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link BooleanSerializer}. */
@@ -40,5 +44,10 @@ public class BooleanSerializerTest extends SerializerTestBase<Boolean> {
         return new Boolean[] {
             Boolean.TRUE, Boolean.FALSE, rnd.nextBoolean(), rnd.nextBoolean(), rnd.nextBoolean()
         };
+    }
+
+    @Override
+    protected List<Pair<Boolean, String>> getSerializableToStringTestData() {
+        return Arrays.asList(Pair.of(Boolean.TRUE, "true"), Pair.of(Boolean.FALSE, "false"));
     }
 }
