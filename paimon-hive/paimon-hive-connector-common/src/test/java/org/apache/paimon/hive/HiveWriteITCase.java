@@ -28,7 +28,6 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
 import org.apache.paimon.hive.objectinspector.PaimonObjectInspectorFactory;
-import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.Table;
@@ -44,20 +43,14 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.StringUtils;
 
-import com.klarna.hiverunner.HiveShell;
-import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.hadoop.hive.common.type.HiveDecimal;
 import org.apache.hadoop.hive.serde2.objectinspector.ListObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.MapObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.objectinspector.primitive.AbstractPrimitiveJavaObjectInspector;
-import org.junit.After;
 import org.junit.Before;
 import org.junit.BeforeClass;
-import org.junit.ClassRule;
 import org.junit.Test;
-import org.junit.rules.TemporaryFolder;
-import org.junit.runner.RunWith;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -74,17 +67,10 @@ import static org.apache.paimon.hive.RandomGenericRowDataGenerator.randomBigDeci
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link PaimonStorageHandler} and {@link PaimonOutputFormat}. */
-@RunWith(PaimonEmbeddedHiveRunner.class)
-public class HiveWriteITCase {
-
-    @ClassRule public static TemporaryFolder folder = new TemporaryFolder();
-
-    @HiveSQL(files = {})
-    private static HiveShell hiveShell;
+public class HiveWriteITCase extends HiveTestBase {
 
     private static String engine;
 
-    private String commitUser;
     private long commitIdentifier;
 
     @BeforeClass
@@ -95,18 +81,8 @@ public class HiveWriteITCase {
 
     @Before
     public void before() {
-        hiveShell.execute("SET hive.execution.engine=mr");
-
-        hiveShell.execute("CREATE DATABASE IF NOT EXISTS test_db");
-        hiveShell.execute("USE test_db");
-
-        commitUser = UUID.randomUUID().toString();
+        hiveShell.execute("SET hive.execution.engine=" + engine);
         commitIdentifier = 0;
-    }
-
-    @After
-    public void after() {
-        hiveShell.execute("DROP DATABASE IF EXISTS test_db CASCADE");
     }
 
     private String createChangelogExternalTable(
