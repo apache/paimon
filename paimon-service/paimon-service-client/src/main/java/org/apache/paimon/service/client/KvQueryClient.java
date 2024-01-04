@@ -36,7 +36,7 @@ import java.net.InetSocketAddress;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-/** /** A class for the Client to get values from Servers. */
+/** A class for the Client to get values from Servers. */
 public class KvQueryClient {
 
     private static final Logger LOG = LoggerFactory.getLogger(KvQueryClient.class);
@@ -53,7 +53,7 @@ public class KvQueryClient {
 
         this.networkClient =
                 new NetworkClient<>(
-                        "Paimon KeyValue Query Client",
+                        "Kv Query Client",
                         numEventLoopThreads,
                         messageSerializer,
                         new DisabledServiceRequestStats());
@@ -113,7 +113,7 @@ public class KvQueryClient {
             networkClient.shutdown().get(10L, TimeUnit.SECONDS);
             LOG.info("{} was shutdown successfully.", networkClient.getClientName());
         } catch (Exception e) {
-            LOG.warn("{} shutdown failed: {}", networkClient.getClientName(), e);
+            LOG.warn(String.format("%s shutdown failed.", networkClient.getClientName()), e);
         }
     }
 }
