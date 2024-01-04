@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.system.BucketsTable;
 
 import org.apache.flink.table.data.RowData;

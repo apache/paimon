@@ -33,7 +33,7 @@ import java.util.OptionalLong;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link ConsumerManager}. */
-public class ConsumerManagerTest {
+public class ServiceManagerTest {
 
     @TempDir Path tempDir;
 
