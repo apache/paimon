@@ -45,4 +45,14 @@ public final class IntSerializer extends SerializerSingleton<Integer> {
     public Integer deserialize(DataInputView source) throws IOException {
         return source.readInt();
     }
+
+    @Override
+    public String serializeToString(Integer record) {
+        return record.toString();
+    }
+
+    @Override
+    public Integer deserializeFromString(String s) {
+        return Integer.valueOf(s);
+    }
 }

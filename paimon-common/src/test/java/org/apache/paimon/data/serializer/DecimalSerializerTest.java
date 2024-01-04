@@ -19,13 +19,18 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.Decimal;
+import org.apache.paimon.utils.Pair;
+
+import java.math.BigDecimal;
+import java.util.Arrays;
+import java.util.List;
 
 /** Test for {@link DecimalSerializer}. */
-public class DecimalSerializerTest extends SerializerTestBase<Decimal> {
+public abstract class DecimalSerializerTest extends SerializerTestBase<Decimal> {
 
     @Override
     protected DecimalSerializer createSerializer() {
-        return new DecimalSerializer(5, 2);
+        return new DecimalSerializer(getPrecision(), getScale());
     }
 
     @Override
@@ -33,13 +38,80 @@ public class DecimalSerializerTest extends SerializerTestBase<Decimal> {
         return t1.equals(t2);
     }
 
+    protected abstract int getPrecision();
+
+    protected abstract int getScale();
+
     @Override
     protected Decimal[] getTestData() {
         return new Decimal[] {
-            Decimal.fromUnscaledLong(1, 5, 2),
-            Decimal.fromUnscaledLong(2, 5, 2),
-            Decimal.fromUnscaledLong(3, 5, 2),
-            Decimal.fromUnscaledLong(4, 5, 2)
+            Decimal.fromUnscaledLong(1, getPrecision(), getScale()),
+            Decimal.fromUnscaledLong(2, getPrecision(), getScale()),
+            Decimal.fromUnscaledLong(3, getPrecision(), getScale()),
+            Decimal.fromUnscaledLong(4, getPrecision(), getScale())
         };
+    }
+
+    static final class DecimalSerializer2Test extends DecimalSerializerTest {
+        @Override
+        protected int getPrecision() {
+            return 5;
+        }
+
+        @Override
+        protected int getScale() {
+            return 2;
+        }
+    }
+
+    @Override
+    protected List<Pair<Decimal, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(
+                        Decimal.fromBigDecimal(new BigDecimal("0.01"), getPrecision(), getScale()),
+                        "0.01"),
+                Pair.of(
+                        Decimal.fromBigDecimal(new BigDecimal("22.02"), getPrecision(), getScale()),
+                        "22.02"),
+                Pair.of(
+                        Decimal.fromBigDecimal(new BigDecimal("33.30"), getPrecision(), getScale()),
+                        "33.30"),
+                Pair.of(
+                        Decimal.fromBigDecimal(
+                                new BigDecimal("444.40"), getPrecision(), getScale()),
+                        "444.40"));
+    }
+
+    static final class DecimalSerializer3Test extends DecimalSerializerTest {
+        @Override
+        protected int getPrecision() {
+            return 6;
+        }
+
+        @Override
+        protected int getScale() {
+            return 3;
+        }
+
+        @Override
+        protected List<Pair<Decimal, String>> getSerializableToStringTestData() {
+            return Arrays.asList(
+                    Pair.of(
+                            Decimal.fromBigDecimal(
+                                    new BigDecimal("0.001"), getPrecision(), getScale()),
+                            "0.001"),
+                    Pair.of(
+                            Decimal.fromBigDecimal(
+                                    new BigDecimal("22.002"), getPrecision(), getScale()),
+                            "22.002"),
+                    Pair.of(
+                            Decimal.fromBigDecimal(
+                                    new BigDecimal("33.030"), getPrecision(), getScale()),
+                            "33.030"),
+                    Pair.of(
+                            Decimal.fromBigDecimal(
+                                    new BigDecimal("444.400"), getPrecision(), getScale()),
+                            "444.400"));
+        }
     }
 }
