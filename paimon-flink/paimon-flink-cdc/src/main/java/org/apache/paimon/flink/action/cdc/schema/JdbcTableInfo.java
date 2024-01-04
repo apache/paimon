@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc.schema;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -24,7 +24,7 @@ import org.apache.paimon.schema.Schema;
 import java.util.List;
 
 /** Describe a MySQL table. */
-public interface MySqlTableInfo {
+public interface JdbcTableInfo {
 
     /** To indicate where is the table from. */
     String location();

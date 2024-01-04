@@ -36,6 +36,7 @@ under the License.
     <properties>
         <flink.version>1.17.2</flink.version>
         <flink.mysql.cdc.version>2.3.0</flink.mysql.cdc.version>
+        <flink.postgres.cdc.version>2.4.2</flink.postgres.cdc.version>
         <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
         <avro.version>1.11.1</avro.version>
         <geometry.version>2.2.0</geometry.version>
@@ -93,6 +94,13 @@ under the License.
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mysql-cdc</artifactId>
             <version>${flink.mysql.cdc.version}</version>
+            <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>com.ververica</groupId>
+            <artifactId>flink-connector-postgres-cdc</artifactId>
+            <version>${flink.postgres.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -279,6 +287,13 @@ under the License.
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mysql</artifactId>
+            <version>${testcontainers.version}</version>
+            <scope>test</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.testcontainers</groupId>
+            <artifactId>postgresql</artifactId>
             <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>

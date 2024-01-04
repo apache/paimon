@@ -218,7 +218,8 @@ public class SyncJobHandler {
         MYSQL("MySQL Source", "MySQL-Paimon %s Sync: %s"),
         KAFKA("Kafka Source", "Kafka-Paimon %s Sync: %s"),
         MONGODB("MongoDB Source", "MongoDB-Paimon %s Sync: %s"),
-        PULSAR("Pulsar Source", "Pulsar-Paimon %s Sync: %s");
+        PULSAR("Pulsar Source", "Pulsar-Paimon %s Sync: %s"),
+        POSTGRES("Postgres Source", "Postgres-Paimon %s Sync: %s");
 
         private final String sourceName;
         private final String defaultJobNameFormat;

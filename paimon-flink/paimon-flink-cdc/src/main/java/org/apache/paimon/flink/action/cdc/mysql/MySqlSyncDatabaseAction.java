@@ -27,8 +27,8 @@ import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlTableInfo;
+import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
+import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -125,7 +125,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
-        MySqlSchemasInfo mySqlSchemasInfo =
+        JdbcSchemasInfo mySqlSchemasInfo =
                 MySqlActionUtils.getMySqlTableInfos(
                         cdcSourceConfig,
                         tableName ->
@@ -134,17 +134,17 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                         typeMapping);
 
         logNonPkTables(mySqlSchemasInfo.nonPkTables());
-        List<MySqlTableInfo> mySqlTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
+        List<JdbcTableInfo> jdbcTableInfos = mySqlSchemasInfo.toMySqlTableInfos(mergeShards);
 
         checkArgument(
-                !mySqlTableInfos.isEmpty(),
+                !jdbcTableInfos.isEmpty(),
                 "No tables found in MySQL database "
                         + cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME)
                         + ", or MySQL database does not exist.");
 
         TableNameConverter tableNameConverter =
                 new TableNameConverter(caseSensitive, mergeShards, tablePrefix, tableSuffix);
-        for (MySqlTableInfo tableInfo : mySqlTableInfos) {
+        for (JdbcTableInfo tableInfo : jdbcTableInfos) {
             Identifier identifier =
                     Identifier.create(
                             database, tableNameConverter.convert(tableInfo.toPaimonTableName()));
@@ -237,7 +237,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     }
 
     private Supplier<String> incompatibleMessage(
-            TableSchema paimonSchema, MySqlTableInfo mySqlTableInfo, Identifier identifier) {
+            TableSchema paimonSchema, JdbcTableInfo jdbcTableInfo, Identifier identifier) {
         return () ->
                 String.format(
                         "Incompatible schema found.\n"
@@ -245,8 +245,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                                 + "MySQL table is: %s, fields are: %s.\n",
                         identifier.getFullName(),
                         paimonSchema.fields(),
-                        mySqlTableInfo.location(),
-                        mySqlTableInfo.schema().fields());
+                        jdbcTableInfo.location(),
+                        jdbcTableInfo.schema().fields());
     }
 
     @VisibleForTesting

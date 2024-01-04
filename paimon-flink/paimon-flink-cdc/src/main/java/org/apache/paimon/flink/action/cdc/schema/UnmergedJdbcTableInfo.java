@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc.schema;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -25,12 +25,12 @@ import java.util.Collections;
 import java.util.List;
 
 /** Describe a table that is not merged. */
-public class UnmergedMySqlTableInfo implements MySqlTableInfo {
+public class UnmergedJdbcTableInfo implements JdbcTableInfo {
 
     private final Identifier identifier;
     private final Schema schema;
 
-    public UnmergedMySqlTableInfo(Identifier identifier, Schema schema) {
+    public UnmergedJdbcTableInfo(Identifier identifier, Schema schema) {
         this.identifier = identifier;
         this.schema = schema;
     }
