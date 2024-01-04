@@ -256,6 +256,25 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 */
 ```
 
+### Aggregation fields Table
+
+You can query the historical aggregation of the table through aggregation fields table.
+
+```sql
+SELECT * FROM MyTable$aggregation_fields;
+
+/*
++------------+-----------------+--------------+--------------------------------+---------+
+| field_name |      field_type |    function  |               function_options | comment |
++------------+-----------------+--------------+--------------------------------+---------+
+| product_id | BIGINT NOT NULL |           [] |                             [] |  <NULL> |
+|      price |             INT | [true,count] | [fields.price.ignore-retrac... |  <NULL> |
+|      sales |          BIGINT |        [sum] | [fields.sales.aggregate-fun... |  <NULL> |
++------------+-----------------+--------------+--------------------------------+---------+
+3 rows in set
+*/
+```
+
 ## Partitions Table
 
 You can query the partition files of the table.
