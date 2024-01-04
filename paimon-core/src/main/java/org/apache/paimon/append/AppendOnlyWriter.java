@@ -276,7 +276,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     @VisibleForTesting
-    RowBuffer getWriteBuffer() {
+    public RowBuffer getWriteBuffer() {
         if (sinkWriter instanceof BufferedSinkWriter) {
             return ((BufferedSinkWriter) sinkWriter).writeBuffer;
         } else {

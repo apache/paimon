@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -425,6 +426,14 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                     .forEachRemaining(r -> result.add(r.getInt(1)));
             assertThat(result).containsExactlyElementsOf(expected);
         }
+    }
+
+    @Test
+    public void testWriteInBatch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        AppendOnlyFileStoreWrite write = ((AppendOnlyFileStoreTable) table).store().newWrite("");
+        write.withExecutionMode(false);
     }
 
     private void writeData() throws Exception {

@@ -156,6 +156,19 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
+    public void close() throws Exception {
+        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
+            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
+                writerContainer.writer.close();
+            }
+        }
+        writers.clear();
+        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
+            lazyCompactExecutor.shutdownNow();
+        }
+    }
+
+    @Override
     public List<CommitMessage> prepareCommit(boolean waitCompaction, long commitIdentifier)
             throws Exception {
         long latestCommittedIdentifier;
@@ -245,19 +258,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     }
 
     @Override
-    public void close() throws Exception {
-        for (Map<Integer, WriterContainer<T>> bucketWriters : writers.values()) {
-            for (WriterContainer<T> writerContainer : bucketWriters.values()) {
-                writerContainer.writer.close();
-            }
-        }
-        writers.clear();
-        if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
-            lazyCompactExecutor.shutdownNow();
-        }
-    }
-
-    @Override
     public List<State<T>> checkpoint() {
         List<State<T>> result = new ArrayList<>();
 
@@ -341,7 +341,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
         }
 
-        if (!isStreamingMode && writeSize() > writerNumberMax) {
+        if (!isStreamingMode && writeSize() >= writerNumberMax) {
             try {
                 forceBufferSpill();
             } catch (Exception e) {
@@ -461,5 +461,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
         }
+    }
+
+    @VisibleForTesting
+    Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
+        return writers;
     }
 }
