@@ -26,6 +26,8 @@ import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
+import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
@@ -47,12 +49,15 @@ public class PrimaryKeyLookupTable implements LookupTable {
 
     protected final KeyProjectedRow primaryKey;
 
+    protected final Projection valueProjection;
+
     public PrimaryKeyLookupTable(
             RocksDBStateFactory stateFactory,
             RowType rowType,
             List<String> primaryKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
+            long lruCacheSize,
+            Projection valueProjection)
             throws IOException {
         this.rowType = rowType;
         List<String> fieldNames = rowType.getFieldNames();
@@ -66,12 +71,15 @@ public class PrimaryKeyLookupTable implements LookupTable {
                         InternalSerializers.create(rowType),
                         lruCacheSize);
         this.recordFilter = recordFilter;
+        this.valueProjection = valueProjection;
     }
 
     @Override
     public List<InternalRow> get(InternalRow key) throws IOException {
         InternalRow value = tableState.get(key);
-        return value == null ? Collections.emptyList() : Collections.singletonList(value);
+        return value == null
+                ? Collections.emptyList()
+                : Collections.singletonList(ProjectedRow.from(valueProjection).replaceRow(value));
     }
 
     @Override
