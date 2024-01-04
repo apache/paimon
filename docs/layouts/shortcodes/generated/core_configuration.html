@@ -660,6 +660,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Cache size for reading manifest files for write initialization.</td>
         </tr>
         <tr>
+            <td><h5>write-max-writers-to-spill</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. </td>
+        </tr>
+        <tr>
             <td><h5>write-only</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
