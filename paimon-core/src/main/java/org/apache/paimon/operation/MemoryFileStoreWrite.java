@@ -72,7 +72,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 indexFactory,
                 tableName,
                 pathFactory,
-                options.writeNumberMaxForceBuffer());
+                options.writeMaxWritersToSpill());
         this.options = options;
         this.cacheManager =
                 new CacheManager(

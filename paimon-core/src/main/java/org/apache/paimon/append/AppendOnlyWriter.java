@@ -212,11 +212,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     public void toBufferedWriter() throws Exception {
-        flush(false, false);
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter()) {
+            flush(false, false);
+            trySyncLatestCompaction(true);
 
-        sinkWriter.close();
-        sinkWriter = new BufferedSinkWriter(true);
-        sinkWriter.setMemoryPool(memorySegmentPool);
+            sinkWriter.close();
+            sinkWriter = new BufferedSinkWriter(true);
+            sinkWriter.setMemoryPool(memorySegmentPool);
+        }
     }
 
     private RowDataRollingFileWriter createRollingRowWriter() {
@@ -301,6 +304,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         void close();
 
         void setMemoryPool(MemorySegmentPool memoryPool);
+
+        boolean bufferSpillableWriter();
     }
 
     /**
@@ -347,6 +352,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         @Override
         public void setMemoryPool(MemorySegmentPool memoryPool) {
             // do nothing
+        }
+
+        @Override
+        public boolean bufferSpillableWriter() {
+            return false;
         }
     }
 
@@ -410,6 +420,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                             memoryPool,
                             new InternalRowSerializer(writeSchema),
                             spillable);
+        }
+
+        @Override
+        public boolean bufferSpillableWriter() {
+            return spillable;
         }
     }
 }
