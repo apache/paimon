@@ -332,7 +332,7 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .defaultValue(5)
                     .withDescription(
-                            "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
+                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
