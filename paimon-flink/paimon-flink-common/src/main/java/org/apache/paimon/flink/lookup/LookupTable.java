@@ -34,7 +34,7 @@ public interface LookupTable {
 
     List<InternalRow> get(InternalRow key) throws IOException;
 
-    void refresh(Iterator<InternalRow> input) throws IOException;
+    void refresh(Iterator<InternalRow> input, boolean orderByLastField) throws IOException;
 
     Predicate<InternalRow> recordFilter();
 
@@ -50,8 +50,7 @@ public interface LookupTable {
             List<String> primaryKey,
             List<String> joinKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize,
-            boolean sequenceFieldEnabled)
+            long lruCacheSize)
             throws IOException {
         if (primaryKey.isEmpty()) {
             return new NoPrimaryKeyLookupTable(
@@ -59,21 +58,10 @@ public interface LookupTable {
         } else {
             if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
                 return new PrimaryKeyLookupTable(
-                        stateFactory,
-                        rowType,
-                        joinKey,
-                        recordFilter,
-                        lruCacheSize,
-                        sequenceFieldEnabled);
+                        stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
             } else {
                 return new SecondaryIndexLookupTable(
-                        stateFactory,
-                        rowType,
-                        primaryKey,
-                        joinKey,
-                        recordFilter,
-                        lruCacheSize,
-                        sequenceFieldEnabled);
+                        stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
             }
         }
     }

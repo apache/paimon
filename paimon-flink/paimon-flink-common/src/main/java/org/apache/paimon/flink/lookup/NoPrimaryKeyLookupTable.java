@@ -71,7 +71,13 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
+            throws IOException {
+        if (orderByLastField) {
+            throw new IllegalArgumentException(
+                    "Append table does not support order by last field.");
+        }
+
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             joinKeyRow.replaceRow(row);

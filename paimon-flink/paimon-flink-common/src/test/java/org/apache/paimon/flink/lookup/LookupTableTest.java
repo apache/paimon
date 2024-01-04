@@ -25,6 +25,7 @@ import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -49,6 +50,7 @@ import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -83,8 +85,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load error
         {
@@ -114,16 +115,18 @@ public class LookupTableTest {
         }
 
         // test refresh to update
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // test refresh to delete
-        table.refresh(singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator());
+        table.refresh(
+                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), false);
         assertThat(table.get(row(1))).hasSize(0);
 
-        table.refresh(singletonList(sequence(row(RowKind.DELETE, 3, 33, 333), -1L)).iterator());
+        table.refresh(
+                singletonList(sequence(row(RowKind.DELETE, 3, 33, 333), -1L)).iterator(), false);
         assertThat(table.get(row(3))).hasSize(0);
     }
 
@@ -132,12 +135,11 @@ public class LookupTableTest {
         LookupTable table =
                 LookupTable.create(
                         stateFactory,
-                        rowType,
+                        rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        true);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
@@ -152,19 +154,20 @@ public class LookupTableTest {
         bulkLoader.finish();
 
         // test refresh to update
-        table.refresh(singletonList(sequence(row(1, 22, 222), 1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), 1L)).iterator(), true);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // refresh with old sequence
-        table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator());
+        table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator(), true);
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // test refresh delete data with old sequence
-        table.refresh(singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator());
+        table.refresh(
+                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), true);
         assertThat(table.get(row(1))).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
     }
@@ -178,23 +181,23 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator());
+        table.refresh(
+                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), false);
         assertThat(table.get(row(1))).hasSize(0);
 
-        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator(), false);
         assertThat(table.get(row(3))).hasSize(0);
     }
 
@@ -207,15 +210,14 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> r.getInt(1) < 22,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
         result = table.get(row(1));
         assertThat(result).hasSize(0);
     }
@@ -229,8 +231,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -256,7 +257,7 @@ public class LookupTableTest {
         }
 
         // add new sec key to pk
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
@@ -266,12 +267,11 @@ public class LookupTableTest {
         LookupTable table =
                 LookupTable.create(
                         stateFactory,
-                        rowType,
+                        rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        true);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         Random rnd = new Random();
@@ -299,14 +299,16 @@ public class LookupTableTest {
         // add new sec key to pk
         table.refresh(
                 singletonList((InternalRow) joined.replace(row(1, 22, 222), GenericRow.of(1L)))
-                        .iterator());
+                        .iterator(),
+                true);
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
 
         // refresh with old value
         table.refresh(
                 singletonList((InternalRow) joined.replace(row(1, 22, 333), GenericRow.of(0L)))
-                        .iterator());
+                        .iterator(),
+                true);
         result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(2))).doesNotContain(333);
     }
@@ -320,32 +322,32 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
         assertThat(table.get(row(11))).hasSize(0);
         result = table.get(row(22));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(singletonList(sequence(row(2, 22, 222), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(2, 22, 222), -1L)).iterator(), false);
         result = table.get(row(22));
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 22, 222);
         assertRow(result.get(1), 2, 22, 222);
 
-        table.refresh(singletonList(sequence(row(RowKind.DELETE, 2, 22, 222), -1L)).iterator());
+        table.refresh(
+                singletonList(sequence(row(RowKind.DELETE, 2, 22, 222), -1L)).iterator(), false);
         result = table.get(row(22));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator());
+        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator(), false);
         assertThat(table.get(row(33))).hasSize(0);
     }
 
@@ -358,8 +360,7 @@ public class LookupTableTest {
                         Collections.emptyList(),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -385,7 +386,7 @@ public class LookupTableTest {
         }
 
         // add new join key value
-        table.refresh(singletonList(row(1, 22, 333)).iterator());
+        table.refresh(singletonList(row(1, 22, 333)).iterator(), false);
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
@@ -399,19 +400,18 @@ public class LookupTableTest {
                         Collections.emptyList(),
                         singletonList("f1"),
                         r -> r.getInt(2) < 222,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        false);
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
-        table.refresh(singletonList(row(1, 11, 333)).iterator());
+        table.refresh(singletonList(row(1, 11, 333)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(0);
 
-        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        table.refresh(singletonList(row(1, 11, 111)).iterator(), false);
         result = table.get(row(11));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(row(1, 11, 111)).iterator());
+        table.refresh(singletonList(row(1, 11, 111)).iterator(), false);
         result = table.get(row(11));
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 11, 111);
