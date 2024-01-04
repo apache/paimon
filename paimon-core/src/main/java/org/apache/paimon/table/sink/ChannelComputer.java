@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.sink;
+package org.apache.paimon.table.sink;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.utils.SerializableFunction;
