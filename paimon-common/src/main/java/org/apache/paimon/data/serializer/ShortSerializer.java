@@ -45,4 +45,14 @@ public final class ShortSerializer extends SerializerSingleton<Short> {
     public Short deserialize(DataInputView source) throws IOException {
         return source.readShort();
     }
+
+    @Override
+    public String serializeToString(Short record) {
+        return record.toString();
+    }
+
+    @Override
+    public Short deserializeFromString(String s) {
+        return Short.valueOf(s);
+    }
 }

@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link DoubleSerializer}. */
@@ -50,5 +54,18 @@ public class DoubleSerializerTest extends SerializerTestBase<Double> {
             Double.NEGATIVE_INFINITY,
             Double.POSITIVE_INFINITY
         };
+    }
+
+    @Override
+    protected List<Pair<Double, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(0.0, "0.0"),
+                Pair.of(1.0, "1.0"),
+                Pair.of(-1.0, "-1.0"),
+                Pair.of(Double.MAX_VALUE, "1.7976931348623157E308"),
+                Pair.of(Double.MIN_VALUE, "4.9E-324"),
+                Pair.of(Double.NaN, "NaN"),
+                Pair.of(Double.NEGATIVE_INFINITY, "-Infinity"),
+                Pair.of(Double.POSITIVE_INFINITY, "Infinity"));
     }
 }
