@@ -24,7 +24,6 @@ import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
 import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 
 import javax.annotation.Nullable;
 
@@ -58,10 +57,9 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
     }
 
     @Override
-    public SingleOutputStreamOperator<Committable> doWrite(
+    public DataStream<Committable> doWrite(
             DataStream<T> input, String initialCommitUser, @Nullable Integer parallelism) {
-        SingleOutputStreamOperator<Committable> written =
-                super.doWrite(input, initialCommitUser, this.parallelism);
+        DataStream<Committable> written = super.doWrite(input, initialCommitUser, this.parallelism);
 
         boolean enableCompaction = !table.coreOptions().writeOnly();
         boolean isStreamingMode =
@@ -76,9 +74,7 @@ public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
                     new UnawareBucketCompactionTopoBuilder(
                             input.getExecutionEnvironment(), table.name(), table);
             builder.withContinuousMode(true);
-            written =
-                    (SingleOutputStreamOperator<Committable>)
-                            written.union(builder.fetchUncommitted(initialCommitUser));
+            written = written.union(builder.fetchUncommitted(initialCommitUser));
         }
 
         return written;

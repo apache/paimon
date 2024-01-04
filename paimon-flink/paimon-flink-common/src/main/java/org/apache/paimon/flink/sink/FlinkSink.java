@@ -149,8 +149,7 @@ public abstract class FlinkSink<T> implements Serializable {
         assertNoSinkMaterializer(input);
 
         // do the actually writing action, no snapshot generated in this stage
-        SingleOutputStreamOperator<Committable> written =
-                doWrite(input, initialCommitUser, input.getParallelism());
+        DataStream<Committable> written = doWrite(input, initialCommitUser, input.getParallelism());
 
         // commit the committable to generate a new snapshot
         return doCommit(written, initialCommitUser);
@@ -180,7 +179,7 @@ public abstract class FlinkSink<T> implements Serializable {
         }
     }
 
-    public SingleOutputStreamOperator<Committable> doWrite(
+    public DataStream<Committable> doWrite(
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming =
