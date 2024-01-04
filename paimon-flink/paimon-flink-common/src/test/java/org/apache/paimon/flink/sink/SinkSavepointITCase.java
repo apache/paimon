@@ -53,7 +53,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** IT cases for {@link FileStoreSink} when writing file store and with savepoints. */
+/** IT cases for {@link FlinkSink} when writing file store and with savepoints. */
 public class SinkSavepointITCase extends AbstractTestBase {
 
     private String path;
