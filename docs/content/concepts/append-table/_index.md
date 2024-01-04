@@ -1,9 +1,7 @@
 ---
-title: "Roadmap"
-weight: 1
-type: docs
-aliases:
-- /project/roadmap.html
+title: "Append Table"
+bookCollapseSection: true
+weight: 7
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,26 +21,3 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-
-# Roadmap
-
-Paimon's long-term goal is to become the better data lake platform for building the Streaming Lakehouse. Paimon will
-invest in real-time, ecology, and data warehouse integrity for a long time.
-
-If you have other requirements, please contact us.
-
-## What’s Next?
-
-### Core
-
-- Foreign Key Join Partial-Update
-- Append table supports batch / streaming z-order sort
-- Supports cross partition update
-
-### Compute Engines
-
-- More management via Flink/Spark `CALL` procedures
-- Flink Sink supports at-least-once / unaligned checkpoint
-- Flink Whole database compaction Job
-- Public Spark Schema Evolution Pipeline
-- Spark supports Dynamic Partition overwrite
