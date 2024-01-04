@@ -41,6 +41,7 @@ import org.apache.spark.sql.connector.catalog.TableChange;
 import org.apache.spark.sql.connector.expressions.FieldReference;
 import org.apache.spark.sql.connector.expressions.NamedReference;
 import org.apache.spark.sql.connector.expressions.Transform;
+import org.apache.spark.sql.internal.SQLConf;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
 import org.apache.spark.sql.util.CaseInsensitiveStringMap;
@@ -65,10 +66,16 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     private String name = null;
     protected Catalog catalog = null;
+    private String defaultNamespace = null;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.name = name;
+        defaultNamespace =
+                SQLConf.get()
+                        .getConfString(
+                                String.format("spark.sql.catalog.%s.defaultDatabase", name),
+                                Catalog.DEFAULT_DATABASE);
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options),
@@ -94,7 +101,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     @Override
     public String[] defaultNamespace() {
-        return new String[] {Catalog.DEFAULT_DATABASE};
+        return new String[] {defaultNamespace};
     }
 
     @Override

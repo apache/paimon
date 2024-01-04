@@ -74,7 +74,8 @@ public class SparkGenericCatalog<T extends TableCatalog & SupportsNamespaces>
 
     private static final Logger LOG = LoggerFactory.getLogger(SparkGenericCatalog.class);
 
-    private static final String[] DEFAULT_NAMESPACE = new String[] {"default"};
+    private static final String[] DEFAULT_NAMESPACE =
+            new String[] {SQLConf.get().defaultDatabase()};
 
     private String catalogName = null;
     private SparkCatalog sparkCatalog = null;
