@@ -39,9 +39,7 @@ Partitioning is an optional way of dividing a table into related parts based on 
 By partitioning, users can efficiently operate on a slice of records in the table. See [file layouts]({{< ref "concepts/file-layouts" >}}) for how files are divided into multiple partitions.
 
 {{< hint info >}}
-
-Partition keys must be a subset of primary keys if primary keys are defined. If you need cross partition upsert (primary keys not contain all partition fields), you should use [Dynamic Bucket]({{< ref "concepts/primary-key-table#dynamic-bucket">}}) mode.
-
+If you need cross partition upsert (primary keys not contain all partition fields), see [Cross partition Upsert]({{< ref "concepts/primary-key-table/data-distribution#cross-partitions-upsert-dynamic-bucket-mode">}}) mode.
 {{< /hint >}}
 
 ## Bucket
