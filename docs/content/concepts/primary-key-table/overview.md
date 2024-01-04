@@ -3,7 +3,7 @@ title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /concepts/overview.html
+- /concepts/primary-key-table/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

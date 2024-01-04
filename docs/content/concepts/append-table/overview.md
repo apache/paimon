@@ -1,9 +1,9 @@
 ---
-title: "Roadmap"
+title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /project/roadmap.html
+- /concepts/append-table/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,25 +24,13 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Roadmap
+# Overview
 
-Paimon's long-term goal is to become the better data lake platform for building the Streaming Lakehouse. Paimon will
-invest in real-time, ecology, and data warehouse integrity for a long time.
+If a table does not have a primary key defined, it is an append table by default.
 
-If you have other requirements, please contact us.
+You can only insert a complete record into the table in streaming. This type of table is suitable for use cases that
+do not require streaming updates (such as log data synchronization).
 
-## What’s Next?
-
-### Core
-
-- Foreign Key Join Partial-Update
-- Append table supports batch / streaming z-order sort
-- Supports cross partition update
-
-### Compute Engines
-
-- More management via Flink/Spark `CALL` procedures
-- Flink Sink supports at-least-once / unaligned checkpoint
-- Flink Whole database compaction Job
-- Public Spark Schema Evolution Pipeline
-- Spark supports Dynamic Partition overwrite
+{{< hint info >}}
+We highly recommend using [Append Scalable Table]({{< ref "concepts/append-table/append-scalable-table" >}}). (bucket = -1).
+{{< /hint >}}
