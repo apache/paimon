@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Projection;
 
 import java.io.IOException;
 import java.util.HashSet;
@@ -50,7 +51,8 @@ public interface LookupTable {
             List<String> primaryKey,
             List<String> joinKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
+            long lruCacheSize,
+            Projection valueProjection)
             throws IOException {
         if (primaryKey.isEmpty()) {
             return new NoPrimaryKeyLookupTable(
@@ -58,10 +60,21 @@ public interface LookupTable {
         } else {
             if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
                 return new PrimaryKeyLookupTable(
-                        stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
+                        stateFactory,
+                        rowType,
+                        joinKey,
+                        recordFilter,
+                        lruCacheSize,
+                        valueProjection);
             } else {
                 return new SecondaryIndexLookupTable(
-                        stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
+                        stateFactory,
+                        rowType,
+                        primaryKey,
+                        joinKey,
+                        recordFilter,
+                        lruCacheSize,
+                        valueProjection);
             }
         }
     }
