@@ -660,16 +660,16 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Cache size for reading manifest files for write initialization.</td>
         </tr>
         <tr>
-            <td><h5>write-number-max</h5></td>
-            <td style="word-wrap: break-word;">5</td>
-            <td>Integer</td>
-            <td>This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.</td>
-        </tr>
-        <tr>
             <td><h5>write-only</h5></td>
             <td style="word-wrap: break-word;">false</td>
             <td>Boolean</td>
             <td>If set to true, compactions and snapshot expiration will be skipped. This option is used along with dedicated compact jobs.</td>
+        </tr>
+        <tr>
+            <td><h5>writer-number-max-force-buffer</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. </td>
         </tr>
         <tr>
             <td><h5>zorder.var-length-contribution</h5></td>

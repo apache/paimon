@@ -327,8 +327,8 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
 
-    public static final ConfigOption<Integer> WRITE_NUMBER_MAX =
-            key("write-number-max")
+    public static final ConfigOption<Integer> WRITER_NUMBER_MAX_FORCE_BUFFER =
+            key("writer-number-max-force-buffer")
                     .intType()
                     .defaultValue(5)
                     .withDescription(
@@ -1214,8 +1214,8 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
-    public int writeNumberMax() {
-        return options.get(WRITE_NUMBER_MAX);
+    public int writeNumberMaxForceBuffer() {
+        return options.get(WRITER_NUMBER_MAX_FORCE_BUFFER);
     }
 
     public long sortSpillBufferSize() {
