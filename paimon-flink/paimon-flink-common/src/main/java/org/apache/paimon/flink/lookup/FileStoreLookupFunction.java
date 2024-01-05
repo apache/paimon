@@ -41,7 +41,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
-import org.apache.paimon.utils.Projection;
+import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -161,8 +161,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                         table.primaryKeys(),
                         joinKeys,
                         recordFilter,
-                        options.get(LOOKUP_CACHE_ROWS),
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        options.get(LOOKUP_CACHE_ROWS));
         this.nextLoadTime = -1;
         this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
         bulkLoad(options);
@@ -224,6 +223,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
             List<RowData> rows = new ArrayList<>(results.size());
             for (InternalRow matchedRow : results) {
+                if (sequenceFieldEnabled) {
+                    matchedRow = new PartialRow(matchedRow.getFieldCount() - 1, matchedRow);
+                }
                 rows.add(new FlinkRowData(matchedRow));
             }
             return rows;

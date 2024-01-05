@@ -30,7 +30,6 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.SortUtil;
 
 import org.junit.jupiter.api.AfterEach;
@@ -49,7 +48,6 @@ import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.IntStream;
 
 import static java.util.Collections.singletonList;
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
@@ -87,8 +85,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load error
         {
@@ -142,8 +139,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
@@ -161,19 +157,19 @@ public class LookupTableTest {
         table.refresh(singletonList(sequence(row(1, 22, 222), 1L)).iterator(), true);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222);
+        assertRow(result.get(0), 1, 22, 222, 1);
 
         // refresh with old sequence
         table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator(), true);
         result = table.get(row(1));
         assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222);
+        assertRow(result.get(0), 1, 22, 222, 1);
 
         // test refresh delete data with old sequence
         table.refresh(
                 singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), true);
         assertThat(table.get(row(1))).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222);
+        assertRow(result.get(0), 1, 22, 222, 1);
     }
 
     @Test
@@ -185,8 +181,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
@@ -215,8 +210,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f0"),
                         r -> r.getInt(1) < 22,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
@@ -237,8 +231,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -278,8 +271,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         Random rnd = new Random();
@@ -311,7 +303,7 @@ public class LookupTableTest {
                 true);
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
-        assertThat(result.stream().map(InternalRow::getFieldCount)).allMatch(n -> n == 3);
+        assertThat(result.stream().map(InternalRow::getFieldCount)).allMatch(n -> n == 4);
 
         // refresh with old value
         table.refresh(
@@ -331,8 +323,7 @@ public class LookupTableTest {
                         singletonList("f0"),
                         singletonList("f1"),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
@@ -370,8 +361,7 @@ public class LookupTableTest {
                         Collections.emptyList(),
                         singletonList("f1"),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -411,8 +401,7 @@ public class LookupTableTest {
                         Collections.emptyList(),
                         singletonList("f1"),
                         r -> r.getInt(2) < 222,
-                        ThreadLocalRandom.current().nextInt(2) * 10,
-                        Projection.of(IntStream.range(0, rowType.getFieldCount()).toArray()));
+                        ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 333)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
