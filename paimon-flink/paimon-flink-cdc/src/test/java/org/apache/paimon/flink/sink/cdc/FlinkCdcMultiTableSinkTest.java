@@ -60,7 +60,7 @@ public class FlinkCdcMultiTableSinkTest {
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
                         null);
-        DataStreamSink<?> dataStreamSink = sink.sinkFrom(input, Collections.emptyMap());
+        DataStreamSink<?> dataStreamSink = sink.sinkFrom(input);
 
         // check the transformation graph
         LegacySinkTransformation<?> end =

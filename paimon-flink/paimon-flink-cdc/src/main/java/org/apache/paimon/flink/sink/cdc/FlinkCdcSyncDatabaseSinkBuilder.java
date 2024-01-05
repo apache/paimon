@@ -157,12 +157,12 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         DataStream<CdcMultiplexRecord> partitioned =
                 partition(
                         newlyAddedTableStream,
-                        new CdcMultiplexRecordChannelComputer(catalogLoader, dynamicOptions),
+                        new CdcMultiplexRecordChannelComputer(catalogLoader),
                         parallelism);
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(catalogLoader, committerCpu, committerMemory);
-        sink.sinkFrom(partitioned, dynamicOptions);
+        sink.sinkFrom(partitioned);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
