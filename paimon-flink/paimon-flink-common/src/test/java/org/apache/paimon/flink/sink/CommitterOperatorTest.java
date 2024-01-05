@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
+import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.ThrowingConsumer;
 
@@ -57,6 +59,8 @@ import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -513,6 +517,39 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(1);
         assertThat(table.tagManager().tagCount()).isEqualTo(1);
+    }
+
+    @Test
+    public void testEmptyCommitWithWatermarkTimeTag() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            options.set(
+                                    CoreOptions.TAG_AUTOMATIC_CREATION,
+                                    CoreOptions.TagCreationMode.WATERMARK);
+                            options.set(
+                                    CoreOptions.TAG_CREATION_PERIOD,
+                                    CoreOptions.TagCreationPeriod.DAILY);
+                            options.set(
+                                    CoreOptions.SNAPSHOT_WATERMARK_IDLE_TIMEOUT,
+                                    Duration.ofMillis(10000));
+                        });
+        TableCommitImpl commit =
+                table.newCommit(UUID.randomUUID().toString()).ignoreEmptyCommit(false);
+
+        commit.commit(
+                new ManifestCommittable(
+                        0,
+                        Timestamp.fromLocalDateTime(LocalDateTime.parse("2023-01-05T20:12:00"))
+                                .getMillisecond()));
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+        assertThat(snapshot.id()).isEqualTo(2);
     }
 
     // ------------------------------------------------------------------------
