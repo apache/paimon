@@ -31,7 +31,11 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.function.BiFunction;
 
-import static org.apache.paimon.options.OptionsUtils.*;
+import static org.apache.paimon.options.OptionsUtils.canBePrefixMap;
+import static org.apache.paimon.options.OptionsUtils.containsPrefixMap;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixed;
+import static org.apache.paimon.options.OptionsUtils.removePrefixMap;
 
 /**
  * Options which stores key/value pairs.
