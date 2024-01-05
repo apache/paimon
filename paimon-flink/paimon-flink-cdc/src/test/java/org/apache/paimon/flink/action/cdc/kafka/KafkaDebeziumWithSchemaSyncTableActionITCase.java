@@ -159,7 +159,7 @@ public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITC
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
+            throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
