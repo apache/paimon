@@ -31,10 +31,7 @@ import java.util.Properties;
 import java.util.Set;
 import java.util.function.BiFunction;
 
-import static org.apache.paimon.options.OptionsUtils.canBePrefixMap;
-import static org.apache.paimon.options.OptionsUtils.containsPrefixMap;
-import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixed;
-import static org.apache.paimon.options.OptionsUtils.removePrefixMap;
+import static org.apache.paimon.options.OptionsUtils.*;
 
 /**
  * Options which stores key/value pairs.
@@ -138,14 +135,7 @@ public class Options implements Serializable {
     }
 
     public synchronized Options removePrefix(String prefix) {
-        Map<String, String> newData = new HashMap<>();
-        data.forEach(
-                (k, v) -> {
-                    if (k.startsWith(prefix)) {
-                        newData.put(k.substring(prefix.length()), v);
-                    }
-                });
-        return new Options(newData);
+        return new Options(convertToPropertiesPrefixKey(data, prefix));
     }
 
     public synchronized void remove(String key) {
@@ -156,7 +146,7 @@ public class Options implements Serializable {
         return data.containsKey(key);
     }
 
-    /** Adds all entries in this options to the given {@link Properties}. */
+    /** Adds all entries in these options to the given {@link Properties}. */
     public synchronized void addAllToProperties(Properties props) {
         props.putAll(this.data);
     }

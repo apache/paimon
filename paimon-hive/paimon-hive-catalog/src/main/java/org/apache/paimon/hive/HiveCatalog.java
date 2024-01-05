@@ -85,6 +85,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -106,7 +107,6 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String STORAGE_HANDLER_CLASS_NAME =
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
-    private static final int HIVE_PREFIX_LENGTH = HIVE_PREFIX.length();
     public static final String HIVE_SITE_FILE = "hive-site.xml";
 
     private final HiveConf hiveConf;
@@ -353,14 +353,7 @@ public class HiveCatalog extends AbstractCatalog {
         Table table =
                 newHmsTable(
                         identifier,
-                        tableSchema.options().entrySet().stream()
-                                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
-                                .collect(
-                                        Collectors.toMap(
-                                                entry ->
-                                                        entry.getKey()
-                                                                .substring(HIVE_PREFIX_LENGTH),
-                                                Map.Entry::getValue)));
+                        convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
