@@ -47,7 +47,6 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import javax.annotation.Nullable;
 
 import java.io.Serializable;
-import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.sink.FlinkSink.assertStreamingConfiguration;
@@ -91,8 +90,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         metricGroup);
     }
 
-    public DataStreamSink<?> sinkFrom(
-            DataStream<CdcMultiplexRecord> input) {
+    public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
         // This commitUser is valid only for new jobs.
         // After the job starts, this commitUser will be recorded into the states of write and
         // commit operators.
@@ -143,8 +141,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
     }
 
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
-            StoreSinkWrite.WithWriteBufferProvider writeProvider,
-            String commitUser) {
+            StoreSinkWrite.WithWriteBufferProvider writeProvider, String commitUser) {
         return new CdcRecordStoreMultiWriteOperator(
                 catalogLoader, writeProvider, commitUser, new Options());
     }

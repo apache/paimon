@@ -44,8 +44,7 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
     private Map<Identifier, CdcRecordChannelComputer> channelComputers;
     private Catalog catalog;
 
-    public CdcMultiplexRecordChannelComputer(
-            Catalog.Loader catalogLoader) {
+    public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
     }
 
