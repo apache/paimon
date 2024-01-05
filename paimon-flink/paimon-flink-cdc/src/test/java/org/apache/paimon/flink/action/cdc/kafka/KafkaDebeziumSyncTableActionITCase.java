@@ -18,6 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
@@ -52,6 +57,12 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
     @Test
     @Timeout(60)
+    public void testComputedColumn() throws Exception {
+        String topic = "computed_column";
+        createTestTopic(topic, 1, 1);
+
+    @Test
+    @Timeout(60)
     public void testStarUpOptionLatest() throws Exception {
         testStarUpOptionLatest(DEBEZIUM);
     }
@@ -70,9 +81,16 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
     @Test
     @Timeout(60)
-    public void testStarUpOptionGroup() throws Exception {
-        testStarUpOptionGroup(DEBEZIUM);
-    }
+    public void testRecordWithNestedDataType() throws Exception {
+        String topic = "nested_type";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/debezium/table/nestedtype/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write canal data to Kafka.", e);
+        }
 
     @Test
     @Timeout(60)
