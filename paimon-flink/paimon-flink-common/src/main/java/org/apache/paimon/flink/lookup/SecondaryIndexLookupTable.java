@@ -25,8 +25,6 @@ import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
-import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
@@ -48,10 +46,9 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
             List<String> primaryKey,
             List<String> secKey,
             Predicate<InternalRow> recordFilter,
-            long lruCacheSize,
-            Projection projection)
+            long lruCacheSize)
             throws IOException {
-        super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2, projection);
+        super(stateFactory, rowType, primaryKey, recordFilter, lruCacheSize / 2);
         List<String> fieldNames = rowType.getFieldNames();
         int[] secKeyMapping = secKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);
@@ -70,7 +67,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
         for (InternalRow pk : pks) {
             InternalRow row = tableState.get(pk);
             if (row != null) {
-                values.add(ProjectedRow.from(valueProjection).replaceRow(row));
+                values.add(row);
             }
         }
         return values;
