@@ -283,16 +283,11 @@ public class ManifestFileMeta {
                 Predicate predicate = predicateOpt.get();
                 FieldStatsArraySerializer fieldStatsArraySerializer =
                         new FieldStatsArraySerializer(partitionType);
-                for (; j < base.size(); j++) {
-                    // TODO: optimize this to binary search.
-                    ManifestFileMeta file = base.get(j);
-                    if (predicate.test(
-                            file.numAddedFiles + file.numDeletedFiles,
-                            file.partitionStats.fields(fieldStatsArraySerializer))) {
-                        break;
-                    } else {
-                        result.add(file);
-                    }
+                int searchResult =
+                        binarySearchWithFilter(
+                                base, 0, base.size() - 1, predicate, fieldStatsArraySerializer);
+                if (searchResult != -1) {
+                    result.addAll(base.subList(0, searchResult));
                 }
             } else {
                 // There is no DELETE Entry in Delta, Base don't need compaction
@@ -347,6 +342,29 @@ public class ManifestFileMeta {
         }
 
         return Optional.of(result);
+    }
+
+    private static int binarySearchWithFilter(
+            List<ManifestFileMeta> base,
+            int low,
+            int high,
+            Predicate predicate,
+            FieldStatsArraySerializer fieldStatsArraySerializer) {
+        while (low <= high) {
+            int mid = (low + high) / 2;
+            ManifestFileMeta file = base.get(mid);
+
+            if (predicate.test(
+                    file.numAddedFiles + file.numDeletedFiles,
+                    file.partitionStats.fields(fieldStatsArraySerializer))) {
+                return mid;
+            } else if (mid == 0) {
+                return -1;
+            } else {
+                high = mid - 1;
+            }
+        }
+        return -1;
     }
 
     private static Set<BinaryRow> computeDeletePartitions(
