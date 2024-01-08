@@ -185,5 +185,6 @@ public class TableQueryImpl implements TableQuery {
                 bucket.getValue().close();
             }
         }
+        tableView.clear();
     }
 }
