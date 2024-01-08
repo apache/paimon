@@ -78,6 +78,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -356,8 +358,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testStreamingInputChangelog() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
@@ -403,9 +404,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(
-                                    CoreOptions.CHANGELOG_PRODUCER,
-                                    ChangelogProducer.FULL_COMPACTION);
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.FULL_COMPACTION);
                             configure.accept(conf);
                         });
         StreamTableWrite write =
@@ -498,7 +497,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 "compatibility/table-changelog-0.2.zip", tablePath.toUri().getPath());
         FileStoreTable table =
                 createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
+                        conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
                         COMPATIBILITY_ROW_TYPE);
 
         List<List<List<String>>> expected =
@@ -790,7 +789,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
                             conf.set(
                                     String.format(
                                             "%s.%s.%s",
@@ -838,8 +837,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testAuditLog() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -1155,12 +1153,19 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testTableQuery() throws Exception {
+    public void testTableQueryForLookup() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        options ->
-                                options.set(
-                                        CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.LOOKUP));
+                createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
+        innerTestTableQuery(table);
+    }
+
+    @Test
+    public void testTableQueryForNormal() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        innerTestTableQuery(table);
+    }
+
+    private void innerTestTableQuery(FileStoreTable table) throws Exception {
         IOManager ioManager = IOManager.create(tablePath.toString());
         StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser);
