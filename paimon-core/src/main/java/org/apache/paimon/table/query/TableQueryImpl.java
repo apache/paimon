@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
 /** Implementation for {@link TableQuery}. */
 public class TableQueryImpl implements TableQuery {
@@ -60,6 +61,8 @@ public class TableQueryImpl implements TableQuery {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
 
     private final HashLookupStoreFactory hashLookupStoreFactory;
+
+    private final int startLevel;
 
     private IOManager ioManager;
 
@@ -81,9 +84,23 @@ public class TableQueryImpl implements TableQuery {
                                 options.pageSize(),
                                 options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE)),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR));
-        Preconditions.checkArgument(
-                options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP,
-                "Only lookup compaction table supported.");
+
+        if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP) {
+            startLevel = 1;
+        } else {
+            if (options.sequenceField().isPresent()) {
+                throw new UnsupportedOperationException(
+                        "Not support sequence field definition, but is: "
+                                + options.sequenceField().get());
+            }
+
+            if (options.mergeEngine() != DEDUPLICATE) {
+                throw new UnsupportedOperationException(
+                        "Only support deduplicate merge engine, but is: " + options.mergeEngine());
+            }
+
+            startLevel = 0;
+        }
     }
 
     @Override
@@ -141,8 +158,7 @@ public class TableQueryImpl implements TableQuery {
             return null;
         }
 
-        // lookup start from level 1.
-        KeyValue kv = lookupLevels.lookup(key, 1);
+        KeyValue kv = lookupLevels.lookup(key, startLevel);
         if (kv == null || kv.valueKind().isRetract()) {
             return null;
         } else {
