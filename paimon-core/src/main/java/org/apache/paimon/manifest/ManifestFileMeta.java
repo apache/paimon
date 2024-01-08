@@ -285,7 +285,7 @@ public class ManifestFileMeta {
                         new FieldStatsArraySerializer(partitionType);
                 int searchResult =
                         binarySearchWithFilter(
-                                base, 0, base.size() - 1, predicate, fieldStatsArraySerializer);
+                                base, j, base.size() - 1, predicate, fieldStatsArraySerializer);
                 if (searchResult != -1) {
                     result.addAll(base.subList(0, searchResult));
                 }
