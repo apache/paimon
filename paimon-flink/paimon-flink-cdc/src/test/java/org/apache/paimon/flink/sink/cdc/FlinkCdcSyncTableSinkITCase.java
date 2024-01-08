@@ -56,6 +56,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
 /** IT cases for {@link CdcSinkBuilder}. */
 public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
@@ -170,7 +171,16 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 10, 10000);
 
-        env.execute();
+        if (!isAppendTable) {
+            env.execute();
+        } else {
+            // When the unaware bucket table is synchronized, it creates a topology and compacts, so
+            // the task does not terminate.In the test task, we are given enough time to execute the
+            // job.
+            env.executeAsync();
+            long waitResultTime = TimeUnit.SECONDS.toMillis(30);
+            Thread.sleep(waitResultTime);
+        }
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);

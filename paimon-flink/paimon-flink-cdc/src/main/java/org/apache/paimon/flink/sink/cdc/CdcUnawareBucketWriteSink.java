@@ -31,7 +31,7 @@ import java.util.Map;
 public class CdcUnawareBucketWriteSink extends UnawareBucketSink {
 
     public CdcUnawareBucketWriteSink(AppendOnlyFileStoreTable table, Integer parallelism) {
-        super(table, null, null, parallelism, true);
+        super(table, null, null, parallelism, false);
     }
 
     public CdcUnawareBucketWriteSink(
