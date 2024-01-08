@@ -75,7 +75,7 @@ public class HiveUtils {
             if (readColumnNames == null) {
                 readColumnNames = new HashSet<>(tableSchema.fieldNames());
             }
-            readColumnNames.remove(tagToPartField.toLowerCase());
+            readColumnNames.remove(tagToPartField);
         }
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
