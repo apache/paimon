@@ -24,30 +24,43 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessin
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
+import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 
 import java.io.Serializable;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.HashMap;
+import java.util.Map;
+import java.util.function.Supplier;
 
 /** Factory for creating CDC timestamp extractors based on different source types. */
 public class CdcTimestampExtractorFactory implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    private static final Map<Class<?>, Supplier<CdcTimestampExtractor>> extractorMap =
+            new HashMap<>();
+
+    static {
+        extractorMap.put(MongoDBSource.class, MysqlCdcTimestampExtractor::new);
+        extractorMap.put(MySqlSource.class, MongoDBCdcTimestampExtractor::new);
+        extractorMap.put(PulsarSource.class, PulsarCdcTimestampExtractor::new);
+        extractorMap.put(KafkaSource.class, KafkaCdcTimestampExtractor::new);
+    }
+
     public static CdcTimestampExtractor createExtractor(Object source) {
-        if (source instanceof MongoDBSource) {
-            return new MysqlCdcTimestampExtractor();
-        } else if (source instanceof MySqlSource) {
-            return new MongoDBCdcTimestampExtractor();
-        } else if (source instanceof PulsarSource) {
-            return new PulsarCdcTimestampExtractor();
+        Supplier<CdcTimestampExtractor> extractorSupplier = extractorMap.get(source.getClass());
+        if (extractorSupplier != null) {
+            return extractorSupplier.get();
         }
         throw new IllegalArgumentException(
                 "Unsupported source type: " + source.getClass().getName());
     }
 
     /** Timestamp extractor for MongoDB sources in CDC applications. */
-    public static class MongoDBCdcTimestampExtractor
-            implements CdcTimestampExtractor, Serializable {
+    public static class MongoDBCdcTimestampExtractor implements CdcTimestampExtractor {
 
         private static final long serialVersionUID = 1L;
 
@@ -57,8 +70,39 @@ public class CdcTimestampExtractorFactory implements Serializable {
         }
     }
 
+    /** Timestamp extractor for Kafka sources in CDC applications. */
+    public static class KafkaCdcTimestampExtractor implements CdcTimestampExtractor {
+
+        private static final long serialVersionUID = 1L;
+
+        @Override
+        public long extractTimestamp(String record) throws JsonProcessingException {
+            if (JsonSerdeUtil.isNodeExists(record, "mysqlType")) {
+                // Canal json
+                return JsonSerdeUtil.extractValue(record, Long.class, "ts");
+            } else if (JsonSerdeUtil.isNodeExists(record, "pos")) {
+                // Ogg json
+                String dateTimeString = JsonSerdeUtil.extractValue(record, String.class, "op_ts");
+                DateTimeFormatter formatter =
+                        DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSSSSS");
+                LocalDateTime dateTime = LocalDateTime.parse(dateTimeString, formatter);
+                return dateTime.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli();
+            } else if (JsonSerdeUtil.isNodeExists(record, "xid")) {
+                // Maxwell json
+                return JsonSerdeUtil.extractValue(record, Long.class, "ts") * 1000;
+            } else if (JsonSerdeUtil.isNodeExists(record, "payload", "source", "connector")) {
+                // Dbz json
+                return JsonSerdeUtil.extractValue(record, Long.class, "payload", "ts_ms");
+            } else if (JsonSerdeUtil.isNodeExists(record, "source", "connector")) {
+                // Dbz json
+                return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
+            }
+            throw new RuntimeException("Unsupported kafka JSON format for timestamp extraction");
+        }
+    }
+
     /** Timestamp extractor for Pulsar sources in CDC applications. */
-    public static class PulsarCdcTimestampExtractor implements CdcTimestampExtractor, Serializable {
+    public static class PulsarCdcTimestampExtractor implements CdcTimestampExtractor {
 
         private static final long serialVersionUID = 1L;
 
@@ -69,9 +113,7 @@ public class CdcTimestampExtractorFactory implements Serializable {
     }
 
     /** Timestamp extractor for MySQL sources in CDC applications. */
-    public static class MysqlCdcTimestampExtractor implements CdcTimestampExtractor, Serializable {
-
-        private static final long serialVersionUID = 1L;
+    public static class MysqlCdcTimestampExtractor implements CdcTimestampExtractor {
 
         @Override
         public long extractTimestamp(String record) throws JsonProcessingException {
@@ -80,7 +122,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
     }
 
     /** Interface defining the contract for CDC timestamp extraction. */
-    public interface CdcTimestampExtractor {
+    public interface CdcTimestampExtractor extends Serializable {
+
         long extractTimestamp(String record) throws JsonProcessingException;
     }
 }

@@ -30,7 +30,6 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
-import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
@@ -131,8 +130,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     private DataStreamSource<String> buildDataStreamSource(Object source) {
         if (source instanceof Source) {
             WatermarkStrategy<String> watermarkStrategy;
-            if (!(source instanceof KafkaSource)
-                    && tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
+            if (tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
                     && Objects.equals(
                             tableConfig.get(CoreOptions.TAG_AUTOMATIC_CREATION.key()),
                             WATERMARK.toString())) {
