@@ -57,8 +57,8 @@ public class HiveUtils {
 
     public static Optional<Predicate> createPredicate(
             TableSchema tableSchema, JobConf jobConf, boolean limitToReadColumnNames) {
-        SearchArgument sarg = ConvertAstToSearchArg.createFromConf(jobConf);
-        if (sarg == null) {
+        SearchArgument searchArgument = ConvertAstToSearchArg.createFromConf(jobConf);
+        if (searchArgument == null) {
             return Optional.empty();
         }
         Set<String> readColumnNames = null;
@@ -75,11 +75,11 @@ public class HiveUtils {
             if (readColumnNames == null) {
                 readColumnNames = new HashSet<>(tableSchema.fieldNames());
             }
-            readColumnNames.remove(tagToPartField);
+            readColumnNames.remove(tagToPartField.toLowerCase());
         }
         SearchArgumentToPredicateConverter converter =
                 new SearchArgumentToPredicateConverter(
-                        sarg,
+                        searchArgument,
                         tableSchema.fieldNames(),
                         tableSchema.logicalRowType().getFieldTypes(),
                         readColumnNames);
