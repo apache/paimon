@@ -1173,13 +1173,13 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         // first write
 
         write.write(rowData(1, 10, 100L));
-        List<CommitMessage> commitMessages = write.prepareCommit(true, 0);
-        commit.commit(0, commitMessages);
+        List<CommitMessage> commitMessages1 = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages1);
 
         TableQuery query = table.newTableQuery();
         query.withIOManager(ioManager);
 
-        refreshTableService(query, commitMessages);
+        refreshTableService(query, commitMessages1);
         InternalRow value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
         assertThat(BATCH_ROW_TO_STRING.apply(value))
@@ -1189,10 +1189,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.write(rowData(1, 10, 200L));
         write.write(rowData(3, 10, 300L));
-        commitMessages = write.prepareCommit(true, 0);
-        commit.commit(0, commitMessages);
+        List<CommitMessage> commitMessages2 = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages2);
 
-        refreshTableService(query, commitMessages);
+        refreshTableService(query, commitMessages2);
 
         value = query.lookup(row(1), 0, row(10));
         assertThat(value).isNotNull();
@@ -1208,6 +1208,18 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         value = query.lookup(row(1), 0, row(20));
         assertThat(value).isNull();
+
+        // projection
+
+        query.close();
+        query.withValueProjection(new int[] {2, 1, 0});
+        refreshTableService(query, commitMessages1);
+        refreshTableService(query, commitMessages2);
+        value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        Function<InternalRow, String> projectToString =
+                rowData -> rowData.getLong(0) + "|" + rowData.getInt(1) + "|" + rowData.getInt(2);
+        assertThat(projectToString.apply(value)).isEqualTo("200|10|1");
 
         query.close();
         write.close();
