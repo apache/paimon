@@ -98,7 +98,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
             Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
             if (!recordOpt.isPresent()) {
-                throw new RuntimeException("invalid json");
+                return null;
             }
 
             Schema.Builder builder = Schema.newBuilder();
@@ -107,10 +107,8 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
             return builder.build();
         } catch (Exception e) {
             logInvalidJsonString(record);
-            // ignore
+            throw e;
         }
-
-        return null;
     }
 
     protected abstract List<RichCdcMultiplexRecord> extractRecords();
@@ -121,13 +119,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected boolean isDDL() {
         return false;
-    }
-
-    // get field -> type mapping from given data node
-    protected LinkedHashMap<String, DataType> extractPaimonFieldTypes() {
-        JsonNode record = getAndCheck(dataField());
-
-        return fillDefaultStringTypes(record);
     }
 
     // use STRING type in default when we cannot get origin data types (most cases)

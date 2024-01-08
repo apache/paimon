@@ -218,8 +218,7 @@ public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITC
                         getDataFormat(kafkaConfig),
                         TypeMapping.defaultMapping());
         List<DataField> fields = new ArrayList<>();
-        //        {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight":
-        // 3.14}
+        // {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight": 3.14}
         fields.add(new DataField(0, "id", DataTypes.STRING()));
         fields.add(new DataField(1, "name", DataTypes.STRING()));
         fields.add(new DataField(2, "description", DataTypes.STRING()));
