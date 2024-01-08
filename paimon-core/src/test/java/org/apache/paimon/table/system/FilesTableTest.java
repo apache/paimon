@@ -24,6 +24,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -31,6 +32,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -39,6 +42,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -49,7 +53,9 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
+import static org.apache.paimon.data.Timestamp.now;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -120,6 +126,62 @@ public class FilesTableTest extends TableTestBase {
                                 Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "3"));
         assertThatThrownBy(() -> read(filesTable))
                 .hasRootCauseInstanceOf(FileNotFoundException.class);
+    }
+
+    @Test
+    public void testReadFilesFromLatestWithPredicate() throws Exception {
+        RowType rowType = filesTable.rowType();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+        int creationTimeIdx = predicateBuilder.indexOf("creation_time");
+
+        Predicate predicate1 =
+                predicateBuilder.greaterOrEqual(
+                        creationTimeIdx,
+                        Timestamp.fromLocalDateTime(now().toLocalDateTime().minusHours(1)));
+
+        List<InternalRow> result = read(filesTable, predicate1, null);
+
+        assertThat(result.size()).isGreaterThan(0);
+        assertThat(result).allMatch(predicate1::test);
+
+        Predicate predicate2 = predicateBuilder.equal(creationTimeIdx, now());
+
+        result = read(filesTable, predicate2, null);
+
+        assertThat(result.size()).isEqualTo(0);
+    }
+
+    @Test
+    public void testReadFilesFromSpecifiedSnapshotWithPredicate() throws Exception {
+        List<InternalRow> expectedRow = getExceptedResult(1L);
+
+        RowType rowType = filesTable.rowType();
+        PredicateBuilder predicateBuilder = new PredicateBuilder(rowType);
+        int creationTimeIdx = predicateBuilder.indexOf("creation_time");
+
+        Predicate predicate1 =
+                predicateBuilder.greaterOrEqual(
+                        creationTimeIdx,
+                        Timestamp.fromLocalDateTime(now().toLocalDateTime().minusHours(1)));
+
+        filesTable =
+                (FilesTable)
+                        filesTable.copy(
+                                Collections.singletonMap(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1"));
+
+        List<InternalRow> result =
+                read(filesTable, predicate1, null).stream()
+                        .filter(predicate1::test)
+                        .collect(Collectors.toList());
+
+        assertThat(result.size()).isGreaterThan(0);
+        assertThat(result).containsExactlyInAnyOrderElementsOf(expectedRow);
+
+        Predicate predicate2 = predicateBuilder.equal(creationTimeIdx, now());
+
+        result = read(filesTable, predicate2, null);
+
+        assertThat(result.size()).isEqualTo(0);
     }
 
     private List<InternalRow> getExceptedResult(long snapshotId) {

@@ -29,6 +29,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -56,7 +57,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.UUID;
-import java.util.function.Predicate;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -84,7 +84,8 @@ public abstract class TableTestBase {
     @AfterEach
     public void after() throws IOException {
         // assert all connections are closed
-        Predicate<Path> pathPredicate = path -> path.toString().contains(tempPath.toString());
+        java.util.function.Predicate<Path> pathPredicate =
+                path -> path.toString().contains(tempPath.toString());
         assertThat(TraceableFileIO.openInputStreams(pathPredicate)).isEmpty();
         assertThat(TraceableFileIO.openOutputStreams(pathPredicate)).isEmpty();
     }
@@ -129,13 +130,16 @@ public abstract class TableTestBase {
         }
     }
 
-    protected List<InternalRow> read(Table table, Pair<ConfigOption<?>, String>... dynamicOptions)
-            throws Exception {
-        return read(table, null, dynamicOptions);
+    @SafeVarargs
+    protected final List<InternalRow> read(
+            Table table, Pair<ConfigOption<?>, String>... dynamicOptions) throws Exception {
+        return read(table, null, null, dynamicOptions);
     }
 
-    protected List<InternalRow> read(
+    @SafeVarargs
+    protected final List<InternalRow> read(
             Table table,
+            @Nullable Predicate predicate,
             @Nullable int[][] projection,
             Pair<ConfigOption<?>, String>... dynamicOptions)
             throws Exception {
@@ -148,6 +152,10 @@ public abstract class TableTestBase {
         if (projection != null) {
             readBuilder.withProjection(projection);
         }
+
+        if (predicate != null) {
+            readBuilder.withFilter(predicate);
+        }
         RecordReader<InternalRow> reader =
                 readBuilder.newRead().createReader(readBuilder.newScan().plan());
         InternalRowSerializer serializer =
@@ -155,8 +163,14 @@ public abstract class TableTestBase {
                         projection == null
                                 ? table.rowType()
                                 : Projection.of(projection).project(table.rowType()));
+
         List<InternalRow> rows = new ArrayList<>();
-        reader.forEachRemaining(row -> rows.add(serializer.copy(row)));
+        reader.forEachRemaining(
+                row -> {
+                    if (predicate == null || predicate.test(row)) {
+                        rows.add(serializer.copy(row));
+                    }
+                });
         return rows;
     }
 

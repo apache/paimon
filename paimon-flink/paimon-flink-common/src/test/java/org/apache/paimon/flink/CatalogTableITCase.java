@@ -628,6 +628,35 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
                                                 ? ","
                                                 : "[5],[10]")));
+
+        // Get files with predicate
+        List<Row> rows3 =
+                sql(
+                        String.format(
+                                "SELECT * FROM %s$files /*+ OPTIONS('scan.snapshot-id'='2') */ where creation_time < LOCALTIMESTAMP",
+                                tableName));
+        for (Row row : rows3) {
+            assertThat(StringUtils.endsWith((String) row.getField(2), ".orc"))
+                    .isTrue(); // check file name
+            assertThat((long) row.getField(7)).isGreaterThan(0L); // check file size
+        }
+
+        assertThat(getRowStringList(rows3))
+                .containsExactlyInAnyOrder(
+                        String.format(
+                                "[1],0,orc,0,0,2,%s,{a=0, b=0, c=0, d=2, e=2, f=2, p=0},{a=1, b=2, c=S1, d=null, e=null, f=null, p=1},{a=3, b=4, c=S2, d=null, e=null, f=null, p=1}",
+                                StringUtils.endsWith(tableName, "VALUE_COUNT")
+                                        ? "[1, 1, 2, S1],[3, 1, 4, S2]"
+                                        : (StringUtils.endsWith(tableName, "APPEND_ONLY")
+                                                ? ","
+                                                : "[1],[3]")),
+                        String.format(
+                                "[1],0,orc,1,0,2,%s,{a=0, b=0, c=0, d=0, e=0, f=0, p=0},{a=5, b=6, c=S3, d=7, e=8, f=9, p=1},{a=10, b=11, c=S4, d=12, e=13, f=14, p=1}",
+                                StringUtils.endsWith(tableName, "VALUE_COUNT")
+                                        ? "[5, 1, 6, S3, 7, 8, 9],[10, 1, 11, S4, 12, 13, 14]"
+                                        : (StringUtils.endsWith(tableName, "APPEND_ONLY")
+                                                ? ","
+                                                : "[5],[10]")));
     }
 
     @Nonnull

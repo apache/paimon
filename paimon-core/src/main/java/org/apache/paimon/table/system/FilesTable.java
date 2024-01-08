@@ -142,13 +142,15 @@ public class FilesTable implements ReadonlyTable {
 
         private final FileStoreTable storeTable;
 
+        private Predicate predicate;
+
         private FilesScan(FileStoreTable storeTable) {
             this.storeTable = storeTable;
         }
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -205,13 +207,15 @@ public class FilesTable implements ReadonlyTable {
 
         private int[][] projection;
 
+        private Predicate predicate;
+
         private FilesRead(SchemaManager schemaManager) {
             this.schemaManager = schemaManager;
         }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
-            // TODO
+            this.predicate = predicate;
             return this;
         }
 
@@ -283,6 +287,9 @@ public class FilesTable implements ReadonlyTable {
                                                 fieldStatsConverters)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());
+            if (predicate != null) {
+                rows = Iterators.filter(rows, row -> predicate.test(row));
+            }
             if (projection != null) {
                 rows =
                         Iterators.transform(
