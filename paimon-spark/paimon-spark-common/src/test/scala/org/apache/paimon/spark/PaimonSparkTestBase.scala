@@ -27,6 +27,9 @@ import org.apache.paimon.table.AbstractFileStoreTable
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.test.SharedSparkSession
 import org.scalactic.source.Position
 import org.scalatest.Tag
@@ -93,5 +96,14 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   def loadTable(tableName: String): AbstractFileStoreTable = {
     catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
+  }
+
+  protected def createRelationV2(tableName: String): LogicalPlan = {
+    val sparkTable = new SparkTable(loadTable(tableName))
+    DataSourceV2Relation.create(
+      sparkTable,
+      Some(spark.sessionState.catalogManager.currentCatalog),
+      Some(SparkIdentifier.of(Array(this.dbName0), tableName))
+    )
   }
 }

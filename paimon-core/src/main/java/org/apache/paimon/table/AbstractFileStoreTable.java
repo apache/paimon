@@ -417,4 +417,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
     }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        AbstractFileStoreTable that = (AbstractFileStoreTable) o;
+        return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
+    }
 }
