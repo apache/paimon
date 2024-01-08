@@ -21,9 +21,9 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParallelExecution;
 import org.apache.paimon.utils.ParallelExecution.ParallelBatch;
@@ -45,7 +45,7 @@ public class SplitsParallelReadUtil {
 
     public static RecordReader<InternalRow> parallelExecute(
             RowType projectedType,
-            ReadBuilder readBuilder,
+            FunctionWithIOException<Split, RecordReader<InternalRow>> readBuilder,
             List<Split> splits,
             int pageSize,
             int parallelism) {
@@ -61,7 +61,7 @@ public class SplitsParallelReadUtil {
 
     public static <EXTRA> RecordReader<InternalRow> parallelExecute(
             RowType projectedType,
-            ReadBuilder readBuilder,
+            FunctionWithIOException<Split, RecordReader<InternalRow>> readBuilder,
             List<Split> splits,
             int pageSize,
             int parallelism,
@@ -72,8 +72,7 @@ public class SplitsParallelReadUtil {
             suppliers.add(
                     () -> {
                         try {
-                            RecordReader<InternalRow> reader =
-                                    readBuilder.newRead().createReader(split);
+                            RecordReader<InternalRow> reader = readBuilder.apply(split);
                             return Pair.of(reader, extraFunction.apply(split));
                         } catch (IOException e) {
                             throw new UncheckedIOException(e);

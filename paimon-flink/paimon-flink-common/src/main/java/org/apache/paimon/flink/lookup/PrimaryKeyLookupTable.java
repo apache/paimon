@@ -39,6 +39,8 @@ public class PrimaryKeyLookupTable implements LookupTable {
 
     protected final RocksDBValueState<InternalRow, InternalRow> tableState;
 
+    protected final RowType rowType;
+
     protected final Predicate<InternalRow> recordFilter;
 
     protected int[] primaryKeyMapping;
@@ -52,9 +54,11 @@ public class PrimaryKeyLookupTable implements LookupTable {
             Predicate<InternalRow> recordFilter,
             long lruCacheSize)
             throws IOException {
+        this.rowType = rowType;
         List<String> fieldNames = rowType.getFieldNames();
         this.primaryKeyMapping = primaryKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKey = new KeyProjectedRow(primaryKeyMapping);
+
         this.tableState =
                 stateFactory.valueState(
                         "table",
@@ -71,10 +75,19 @@ public class PrimaryKeyLookupTable implements LookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
+            throws IOException {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
+            if (orderByLastField) {
+                InternalRow previous = tableState.get(primaryKey);
+                int orderIndex = rowType.getFieldCount() - 1;
+                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                    continue;
+                }
+            }
+
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
                 if (recordFilter.test(row)) {
                     tableState.put(primaryKey, row);

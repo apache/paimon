@@ -37,9 +37,11 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -72,6 +74,7 @@ import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /** A lookup {@link TableFunction} for file store. */
 public class FileStoreLookupFunction implements Serializable, Closeable {
@@ -93,6 +96,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     // timestamp when cache expires
     private transient long nextLoadTime;
     private transient TableStreamingReader streamingReader;
+
+    private final boolean sequenceFieldEnabled;
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
@@ -119,6 +124,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         this.predicate = predicate;
+        this.sequenceFieldEnabled =
+                table.primaryKeys().size() > 0
+                        && new CoreOptions(table.options()).sequenceField().isPresent();
     }
 
     public void open(FunctionContext context) throws Exception {
@@ -147,7 +155,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         this.lookupTable =
                 LookupTable.create(
                         stateFactory,
-                        rowType,
+                        sequenceFieldEnabled
+                                ? rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT())
+                                : rowType,
                         table.primaryKeys(),
                         joinKeys,
                         recordFilter,
@@ -162,7 +172,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(path.toString()), new CoreOptions(options));
         try (RecordReaderIterator<InternalRow> batch =
-                new RecordReaderIterator<>(streamingReader.nextBatch(true))) {
+                new RecordReaderIterator<>(streamingReader.nextBatch(true, sequenceFieldEnabled))) {
             while (batch.hasNext()) {
                 InternalRow row = batch.next();
                 if (lookupTable.recordFilter().test(row)) {
@@ -213,6 +223,9 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
             List<InternalRow> results = lookupTable.get(new FlinkRowWrapper(keyRow));
             List<RowData> rows = new ArrayList<>(results.size());
             for (InternalRow matchedRow : results) {
+                if (sequenceFieldEnabled) {
+                    matchedRow = new PartialRow(matchedRow.getFieldCount() - 1, matchedRow);
+                }
                 rows.add(new FlinkRowData(matchedRow));
             }
             return rows;
@@ -252,11 +265,12 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     private void refresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(streamingReader.nextBatch(false))) {
+                    new RecordReaderIterator<>(
+                            streamingReader.nextBatch(false, sequenceFieldEnabled))) {
                 if (!batch.hasNext()) {
                     return;
                 }
-                this.lookupTable.refresh(batch);
+                this.lookupTable.refresh(batch, sequenceFieldEnabled);
             }
         }
     }

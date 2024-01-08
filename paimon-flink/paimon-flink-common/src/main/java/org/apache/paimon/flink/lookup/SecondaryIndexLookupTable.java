@@ -65,21 +65,36 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
         List<InternalRow> pks = indexState.get(key);
         List<InternalRow> values = new ArrayList<>(pks.size());
         for (InternalRow pk : pks) {
-            InternalRow value = tableState.get(pk);
-            if (value != null) {
-                values.add(value);
+            InternalRow row = tableState.get(pk);
+            if (row != null) {
+                values.add(row);
             }
         }
         return values;
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
+            throws IOException {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKey.replaceRow(row);
+
+            boolean previousFetched = false;
+            InternalRow previous = null;
+            if (orderByLastField) {
+                previous = tableState.get(primaryKey);
+                previousFetched = true;
+                int orderIndex = rowType.getFieldCount() - 1;
+                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                    continue;
+                }
+            }
+
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                InternalRow previous = tableState.get(primaryKey);
+                if (!previousFetched) {
+                    previous = tableState.get(primaryKey);
+                }
                 if (previous != null) {
                     indexState.retract(secKeyRow.replaceRow(previous), primaryKey);
                 }

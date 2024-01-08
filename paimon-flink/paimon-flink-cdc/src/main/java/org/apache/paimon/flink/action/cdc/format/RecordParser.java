@@ -48,6 +48,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -95,14 +96,21 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 return null;
             }
 
+            Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
+            if (!recordOpt.isPresent()) {
+                throw new RuntimeException("invalid json");
+            }
+
             Schema.Builder builder = Schema.newBuilder();
-            extractPaimonFieldTypes().forEach(builder::column);
+            recordOpt.get().fieldTypes().forEach(builder::column);
             builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
             logInvalidJsonString(record);
-            throw e;
+            // ignore
         }
+
+        return null;
     }
 
     protected abstract List<RichCdcMultiplexRecord> extractRecords();

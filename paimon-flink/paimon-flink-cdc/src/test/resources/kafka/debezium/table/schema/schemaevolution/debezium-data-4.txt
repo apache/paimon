@@ -16,17 +16,4 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.query;
-
-import org.apache.paimon.data.BinaryRow;
-
-import java.io.IOException;
-
-/**
- * Query for a table, provides lookup method to lookup value by key. It does not download files on
- * its own, maintaining its role requires refreshing its file list.
- */
-public interface TableQuery {
-
-    BinaryRow[] lookup(BinaryRow partition, int bucket, BinaryRow[] keys) throws IOException;
-}
+{"schema":null, "payload":{"before": {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight": 3.14}, "after": null, "source": {"version": "1.9.7.Final", "connector": "mysql", "name": "mysql_binlog_source", "ts_ms": 1596684883000, "snapshot": "false", "db": "test", "sequence": null, "table": "product", "server_id": 0, "gtid": null, "file": "", "pos": 0, "row": 0, "thread": null, "query": null}, "op": "d", "ts_ms": 1596684883000, "transaction": null}}

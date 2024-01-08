@@ -19,13 +19,13 @@
 package org.apache.paimon.service.server;
 
 import org.apache.paimon.query.QueryServer;
-import org.apache.paimon.query.TableQuery;
 import org.apache.paimon.service.messages.KvRequest;
 import org.apache.paimon.service.messages.KvResponse;
 import org.apache.paimon.service.network.AbstractServerHandler;
 import org.apache.paimon.service.network.NetworkServer;
 import org.apache.paimon.service.network.messages.MessageSerializer;
 import org.apache.paimon.service.network.stats.ServiceRequestStats;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;

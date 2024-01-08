@@ -34,7 +34,7 @@ public interface LookupTable {
 
     List<InternalRow> get(InternalRow key) throws IOException;
 
-    void refresh(Iterator<InternalRow> input) throws IOException;
+    void refresh(Iterator<InternalRow> input, boolean orderByLastField) throws IOException;
 
     Predicate<InternalRow> recordFilter();
 

@@ -19,13 +19,15 @@
 package org.apache.paimon.service.server;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.query.TableQuery;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.service.exceptions.UnknownPartitionBucketException;
 import org.apache.paimon.service.messages.KvRequest;
 import org.apache.paimon.service.messages.KvResponse;
 import org.apache.paimon.service.network.AbstractServerHandler;
 import org.apache.paimon.service.network.messages.MessageSerializer;
 import org.apache.paimon.service.network.stats.ServiceRequestStats;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Preconditions;
 
@@ -49,6 +51,7 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
     private final int serverId;
     private final int numServers;
     private final TableQuery lookup;
+    private final InternalRowSerializer valueSerializer;
 
     /**
      * Create the handler used by the {@link KvQueryServer}.
@@ -70,6 +73,7 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
         this.serverId = serverId;
         this.numServers = numServers;
         this.lookup = Preconditions.checkNotNull(lookup);
+        this.valueSerializer = lookup.createValueSerializer();
     }
 
     @Override
@@ -85,8 +89,15 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
         }
 
         try {
-            BinaryRow[] values =
-                    lookup.lookup(request.partition(), request.bucket(), request.keys());
+            BinaryRow[] keys = request.keys();
+            BinaryRow[] values = new BinaryRow[keys.length];
+            for (int i = 0; i < values.length; i++) {
+                InternalRow value =
+                        this.lookup.lookup(request.partition(), request.bucket(), keys[i]);
+                if (value != null) {
+                    values[i] = valueSerializer.toBinaryRow(value).copy();
+                }
+            }
             responseFuture.complete(new KvResponse(values));
             return responseFuture;
         } catch (Throwable t) {

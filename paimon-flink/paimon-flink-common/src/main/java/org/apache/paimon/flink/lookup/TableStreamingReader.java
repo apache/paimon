@@ -19,7 +19,9 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
@@ -27,19 +29,20 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -48,6 +51,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_BOOTSTRAP_PARALLELISM;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /** A streaming reader to read table. */
 public class TableStreamingReader {
@@ -99,32 +103,33 @@ public class TableStreamingReader {
         }
     }
 
-    public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
-        try {
-            return read(scan.plan(), useParallelism);
-        } catch (EndOfScanException e) {
-            throw new IllegalArgumentException(
-                    "TableStreamingReader does not support finished enumerator.", e);
-        }
-    }
+    public RecordReader<InternalRow> nextBatch(boolean useParallelism, boolean readSequenceNumber)
+            throws Exception {
+        List<Split> splits = scan.plan().splits();
+        CoreOptions options = CoreOptions.fromMap(table.options());
+        FunctionWithIOException<Split, RecordReader<InternalRow>> readerSupplier =
+                readSequenceNumber
+                        ? createReaderWithSequenceSupplier()
+                        : split -> readBuilder.newRead().createReader(split);
 
-    private RecordReader<InternalRow> read(TableScan.Plan plan, boolean useParallelism)
-            throws IOException {
+        RowType readType = TypeUtils.project(table.rowType(), projection);
+        if (readSequenceNumber) {
+            readType = readType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT());
+        }
+
         RecordReader<InternalRow> reader;
         if (useParallelism) {
-            CoreOptions options = CoreOptions.fromMap(table.options());
             reader =
                     SplitsParallelReadUtil.parallelExecute(
-                            TypeUtils.project(table.rowType(), projection),
-                            readBuilder,
-                            plan.splits(),
+                            readType,
+                            readerSupplier,
+                            splits,
                             options.pageSize(),
                             new Options(table.options()).get(LOOKUP_BOOTSTRAP_PARALLELISM));
         } else {
-            TableRead read = readBuilder.newRead();
             List<ConcatRecordReader.ReaderSupplier<InternalRow>> readers = new ArrayList<>();
-            for (Split split : plan.splits()) {
-                readers.add(() -> read.createReader(split));
+            for (Split split : splits) {
+                readers.add(() -> readerSupplier.apply(split));
             }
             reader = ConcatRecordReader.create(readers);
         }
@@ -133,5 +138,26 @@ public class TableStreamingReader {
             reader = reader.filter(recordFilter::test);
         }
         return reader;
+    }
+
+    private FunctionWithIOException<Split, RecordReader<InternalRow>>
+            createReaderWithSequenceSupplier() {
+        return split -> {
+            TableRead read = readBuilder.newRead();
+            if (!(read instanceof KeyValueTableRead)) {
+                throw new IllegalArgumentException(
+                        "Only KeyValueTableRead supports sequence read, but it is: " + read);
+            }
+
+            KeyValueTableRead kvRead = (KeyValueTableRead) read;
+            JoinedRow reused = new JoinedRow();
+            return kvRead.kvReader(split)
+                    .transform(
+                            kv -> {
+                                reused.replace(kv.value(), GenericRow.of(kv.sequenceNumber()));
+                                reused.setRowKind(kv.valueKind());
+                                return reused;
+                            });
+        };
     }
 }
