@@ -94,7 +94,9 @@ public class HiveReadITCase extends HiveTestBase {
 
         result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 = 'Hello'");
         assertThat(result).containsExactly("1\tHello");
-        result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE Col2 in ('Hello', 'Paimon')");
+        result =
+                hiveShell.executeQuery(
+                        "SELECT * FROM " + tableName + " WHERE Col2 in ('Hello', 'Paimon')");
         assertThat(result).containsExactly("1\tHello", "2\tPaimon");
     }
 }
