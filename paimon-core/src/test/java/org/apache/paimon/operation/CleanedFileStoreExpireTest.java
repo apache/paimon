@@ -256,4 +256,26 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         expire.expire();
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
     }
+
+    // fix it
+    // @Test
+    // public void testExpireSchema() throws Exception {
+    //     FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
+    //     List<KeyValue> allData = new ArrayList<>();
+    //     List<Integer> snapshotPositions = new ArrayList<>();
+    //
+    //     commit(1, allData, snapshotPositions);
+    //
+    //     // create schema-1
+    //     schemaManager.commitChanges(SchemaChange.setOption("testKey", "testValue"));
+    //
+    //     commit(3, allData, snapshotPositions);
+    //
+    //     // expire commit1
+    //     expire.expire();
+    //
+    //     // commit1 is the last snapshot that references schema-0. When it expires, schema-0 will
+    //     // also be cleaned up.
+    //     assertThat(schemaManager.earliest().get().id()).isEqualTo(1);
+    // }
 }

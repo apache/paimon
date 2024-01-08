@@ -185,6 +185,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.snapshotNumRetainMin(),
                 options.snapshotNumRetainMax(),
                 options.snapshotTimeRetain().toMillis(),
+                schemaManager,
                 snapshotManager(),
                 newSnapshotDeletion(),
                 newTagManager(),

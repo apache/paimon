@@ -88,6 +88,17 @@ public class SchemaManager implements Serializable {
         return this;
     }
 
+    /** @return earliest schema. */
+    public Optional<TableSchema> earliest() {
+        try {
+            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+                    .reduce(Math::min)
+                    .map(this::schema);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     /** @return latest schema. */
     public Optional<TableSchema> latest() {
         try {

@@ -65,22 +65,22 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
 
-        expire.expireUntil(1, 2);
+        expire.expireBetween(1, 2);
         checkIndexFiles(2);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expire.expireUntil(2, 3);
+        expire.expireBetween(2, 3);
         checkIndexFiles(3);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expire.expireUntil(3, 5);
+        expire.expireBetween(3, 5);
         checkIndexFiles(5);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 2);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 2);
 
-        expire.expireUntil(5, 7);
+        expire.expireBetween(5, 7);
         checkIndexFiles(7);
         assertThat(indexFileSize()).isEqualTo(3);
         assertThat(indexManifestSize()).isEqualTo(1);
@@ -97,12 +97,12 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
 
-        expire.expireUntil(1, 5);
+        expire.expireBetween(1, 5);
         checkIndexFiles(5);
         assertThat(indexFileSize()).isEqualTo(indexFileSize - 1);
         assertThat(indexManifestSize()).isEqualTo(indexManifestSize - 1);
 
-        expire.expireUntil(5, 7);
+        expire.expireBetween(5, 7);
         checkIndexFiles(7);
         assertThat(indexFileSize()).isEqualTo(5);
         assertThat(indexManifestSize()).isEqualTo(3);
@@ -131,7 +131,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
 
         // test delete tag after expiring snapshots
         table.createTag("tag3", 3);
-        expire.expireUntil(1, 7);
+        expire.expireBetween(1, 7);
         table.deleteTag("tag3");
 
         TagManager tagManager = new TagManager(LocalFileIO.create(), table.path);
