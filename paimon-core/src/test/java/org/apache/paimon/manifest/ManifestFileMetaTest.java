@@ -291,6 +291,43 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         containSameEntryFile(mergedManifest, expected);
     }
 
+    @Test
+    public void testFullCompactionWithoutDeleteFile() {
+        List<ManifestEntry> entries = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            entries.add(makeEntry(true, String.valueOf(i)));
+        }
+
+        List<ManifestFileMeta> input = new ArrayList<>();
+
+        // base manifest
+        input.add(makeManifest(entries.toArray(new ManifestEntry[0])));
+
+        // delta manifest with no DELETE entry
+        input.add(makeManifest(makeEntry(true, "A"), makeEntry(true, "B"), makeEntry(true, "C")));
+        input.add(makeManifest(makeEntry(true, "D"), makeEntry(true, "E")));
+
+        // delta manifest which is expected to be compacted
+        List<ManifestFileMeta> newMetas = new ArrayList<>();
+        Optional<List<ManifestFileMeta>> compacted =
+                ManifestFileMeta.tryFullCompaction(
+                        input, newMetas, manifestFile, 500, 100, getPartitionType());
+        assertThat(compacted).isPresent();
+        assertThat(newMetas).isNotEmpty();
+
+        // now check if the compacted files match the expected input
+        List<String> expectedEntryFileNames = new ArrayList<>();
+        for (int i = 0; i < 16; i++) {
+            expectedEntryFileNames.add("ADD-" + i);
+        }
+        expectedEntryFileNames.add("ADD-A");
+        expectedEntryFileNames.add("ADD-B");
+        expectedEntryFileNames.add("ADD-C");
+        expectedEntryFileNames.add("ADD-D");
+        expectedEntryFileNames.add("ADD-E");
+        containSameEntryFile(compacted.get(), expectedEntryFileNames);
+    }
+
     private void createData(
             int numLastBits, List<ManifestFileMeta> input, List<ManifestFileMeta> expected) {
         // suggested size 500 and suggested count 3

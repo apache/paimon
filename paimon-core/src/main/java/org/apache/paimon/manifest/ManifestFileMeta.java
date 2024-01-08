@@ -233,7 +233,7 @@ public class ManifestFileMeta {
         // 1. should trigger full compaction
 
         List<ManifestFileMeta> base = new ArrayList<>();
-        int totalManifestSize = 0;
+        long totalManifestSize = 0;
         int i = 0;
         for (; i < inputs.size(); i++) {
             ManifestFileMeta file = inputs.get(i);
