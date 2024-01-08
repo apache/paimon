@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
@@ -120,5 +121,56 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         for (Snapshot snapshot : allSnapshots) {
             assertSnapshot(snapshot, allData, snapshotPositions);
         }
+    }
+
+    @Test
+    public void testExpireSchema() throws Exception {
+        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+
+        commit(1, allData, snapshotPositions);
+
+        // create schema-1
+        schemaManager.commitChanges(SchemaChange.setOption("testKey", "testValue"));
+
+        commit(3, allData, snapshotPositions);
+
+        // expire commit1
+        expire.expire();
+
+        // commit1 is the last snapshot that references schema-0, when it expires, schema-0 will
+        // also be cleaned up.
+        assertThat(schemaManager.earliest().get().id()).isEqualTo(1);
+    }
+
+    @Test
+    public void testExpireSchemaWithTag() throws Exception {
+        FileStoreExpire expire = store.newExpire(1, 3, Long.MAX_VALUE);
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+
+        commit(1, allData, snapshotPositions);
+
+        TagManager tagManager = store.newTagManager();
+        tagManager.createTag(snapshotManager.snapshot(1), "tag1", Collections.emptyList());
+
+        // create schema-1
+        schemaManager.commitChanges(SchemaChange.setOption("testKey", "testValue"));
+
+        commit(3, allData, snapshotPositions);
+
+        // expire commit1
+        expire.expire();
+
+        // commit1 is the last snapshot that references schema-0, when it expires, schema-0 can't
+        // be cleaned up, because it's referenced by a tag
+        assertThat(schemaManager.earliest().get().id()).isEqualTo(0);
+
+        // once the tag is removed, schema-0 will be cleaned up in the next expire task
+        tagManager.deleteTag("tag1", store.newTagDeletion(), snapshotManager);
+        commit(3, allData, snapshotPositions);
+        expire.expire();
+        assertThat(schemaManager.earliest().get().id()).isEqualTo(1);
     }
 }

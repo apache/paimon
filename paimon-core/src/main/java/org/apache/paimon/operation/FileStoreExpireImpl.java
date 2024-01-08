@@ -23,6 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -52,7 +53,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
     // snapshots exceeding any constraint will be expired
     private final int numRetainedMax;
     private final long millisRetained;
-
+    private final SchemaManager schemaManager;
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
@@ -67,6 +68,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             int numRetainedMin,
             int numRetainedMax,
             long millisRetained,
+            SchemaManager schemaManager,
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
@@ -84,6 +86,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         this.numRetainedMin = numRetainedMin;
         this.numRetainedMax = numRetainedMax;
         this.millisRetained = millisRetained;
+        this.schemaManager = schemaManager;
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
@@ -107,8 +110,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             return;
         }
 
-        long currentMillis = System.currentTimeMillis();
-
         Long earliest = snapshotManager.earliestSnapshotId();
         if (earliest == null) {
             return;
@@ -131,23 +132,24 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         // (the maximum number of snapshots allowed to expire at a time)
         maxExclusive = Math.min(maxExclusive, earliest + expireLimit);
 
+        long currentMillis = System.currentTimeMillis();
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
             // (the maximum time of snapshots to retain)
             if (snapshotManager.snapshotExists(id)
                     && currentMillis - snapshotManager.snapshot(id).timeMillis()
                             <= millisRetained) {
-                expireUntil(earliest, id);
-                return;
+                maxExclusive = id;
+                break;
             }
         }
 
-        expireUntil(earliest, maxExclusive);
+        expireBetween(earliest, maxExclusive);
     }
 
     @VisibleForTesting
-    public void expireUntil(long earliestId, long endExclusiveId) {
-        if (endExclusiveId <= earliestId) {
+    public void expireBetween(long beginInclusiveId, long endExclusiveId) {
+        if (endExclusiveId <= beginInclusiveId) {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
             // should avoid duplicate writes when the file exists
@@ -157,17 +159,6 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
             // fast exit
             return;
-        }
-
-        // find first snapshot to expire
-        long beginInclusiveId = earliestId;
-        for (long id = endExclusiveId - 1; id >= earliestId; id--) {
-            if (!snapshotManager.snapshotExists(id)) {
-                // only latest snapshots are retained, as we cannot find this snapshot, we can
-                // assume that all snapshots preceding it have been removed
-                beginInclusiveId = id + 1;
-                break;
-            }
         }
 
         if (LOG.isDebugEnabled()) {
@@ -233,7 +224,19 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
 
             // delete snapshot last
-            snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
+            snapshotManager.deleteSnapshot(id);
+        }
+
+        // delete schemas
+        if (snapshotManager.snapshotExists(endExclusiveId)) {
+            long earliestSchemaIdToKeep = snapshotManager.snapshot(endExclusiveId).schemaId();
+            if (!taggedSnapshots.isEmpty()) {
+                earliestSchemaIdToKeep =
+                        Math.min(earliestSchemaIdToKeep, taggedSnapshots.get(0).schemaId());
+            }
+            for (long id = schemaManager.earliest().get().id(); id < earliestSchemaIdToKeep; id++) {
+                schemaManager.deleteSchema(id);
+            }
         }
 
         writeEarliestHint(endExclusiveId);

@@ -51,13 +51,14 @@ public abstract class FileStoreExpireTestBase {
     @TempDir java.nio.file.Path tempDir;
     protected TestFileStore store;
     protected SnapshotManager snapshotManager;
+    protected SchemaManager schemaManager;
 
     @BeforeEach
     public void beforeEach() throws Exception {
         gen = new TestKeyValueGenerator();
         store = createStore();
         snapshotManager = store.snapshotManager();
-        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
         schemaManager.createTable(
                 new Schema(
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),

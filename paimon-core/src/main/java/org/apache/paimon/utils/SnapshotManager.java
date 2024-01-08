@@ -95,6 +95,10 @@ public class SnapshotManager implements Serializable {
         }
     }
 
+    public void deleteSnapshot(long snapshotId) {
+        fileIO.deleteQuietly(snapshotPath(snapshotId));
+    }
+
     public @Nullable Snapshot latestSnapshot() {
         Long snapshotId = latestSnapshotId();
         return snapshotId == null ? null : snapshot(snapshotId);

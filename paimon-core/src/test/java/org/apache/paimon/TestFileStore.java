@@ -148,6 +148,7 @@ public class TestFileStore extends KeyValueFileStore {
                 numRetainedMin,
                 numRetainedMax,
                 millisRetained,
+                schemaManager,
                 snapshotManager(),
                 newSnapshotDeletion(),
                 new TagManager(fileIO, options.path()),
