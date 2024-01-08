@@ -137,4 +137,12 @@ public class FlinkGenericCatalogITCase extends AbstractTestBase {
 
         assertThat(result).containsExactly(Row.of(1L, 0L, "APPEND"), Row.of(2L, 0L, "APPEND"));
     }
+
+    @Test
+    public void testReadPaimonAllProcedures() {
+        List<Row> result = sql("SHOW PROCEDURES");
+
+        assertThat(result)
+                .contains(Row.of("compact"), Row.of("merge_into"), Row.of("migrate_table"));
+    }
 }
