@@ -44,9 +44,6 @@ public class DebeziumEvent {
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_HISTORY_RECORD = "historyRecord";
     private static final String FIELD_OP = "op";
-    private static final String FIELD_DB = "db";
-    private static final String FIELD_TABLE = "table";
-    private static final String FIELD_TS_MS = "ts_ms";
     private static final String FIELD_FIELDS = "fields";
     private static final String FIELD_NAME = "name";
     private static final String FIELD_TYPE = "type";
@@ -80,7 +77,7 @@ public class DebeziumEvent {
     /** Payload elements in Debezium event record. */
     public static class Payload {
         @JsonProperty(FIELD_SOURCE)
-        private final Source source;
+        private final JsonNode source;
 
         @JsonProperty(FIELD_BEFORE)
         private final JsonNode before;
@@ -96,7 +93,7 @@ public class DebeziumEvent {
 
         @JsonCreator
         public Payload(
-                @JsonProperty(FIELD_SOURCE) Source source,
+                @JsonProperty(FIELD_SOURCE) JsonNode source,
                 @JsonProperty(FIELD_BEFORE) JsonNode before,
                 @JsonProperty(FIELD_AFTER) JsonNode after,
                 @JsonProperty(FIELD_HISTORY_RECORD) String historyRecord,
@@ -109,7 +106,7 @@ public class DebeziumEvent {
         }
 
         @JsonGetter(FIELD_SOURCE)
-        public Source source() {
+        public JsonNode source() {
             return source;
         }
 
@@ -218,43 +215,6 @@ public class DebeziumEvent {
                                     Function.identity(),
                                     (v1, v2) -> v2,
                                     LinkedHashMap::new));
-        }
-    }
-
-    /** Source element of payload in Debezium event record. */
-    public static class Source {
-        @JsonProperty(FIELD_DB)
-        private final String db;
-
-        @JsonProperty(FIELD_TABLE)
-        private final String table;
-
-        @JsonProperty(FIELD_TS_MS)
-        private final Long tsMs;
-
-        @JsonCreator
-        public Source(
-                @JsonProperty(FIELD_DB) String db,
-                @JsonProperty(FIELD_TABLE) String table,
-                @JsonProperty(FIELD_TS_MS) Long tsMs) {
-            this.db = db;
-            this.table = table;
-            this.tsMs = tsMs;
-        }
-
-        @JsonGetter(FIELD_DB)
-        public String db() {
-            return db;
-        }
-
-        @JsonGetter(FIELD_TABLE)
-        public String table() {
-            return table;
-        }
-
-        @JsonGetter(FIELD_TS_MS)
-        public Long tsMs() {
-            return tsMs;
         }
     }
 }

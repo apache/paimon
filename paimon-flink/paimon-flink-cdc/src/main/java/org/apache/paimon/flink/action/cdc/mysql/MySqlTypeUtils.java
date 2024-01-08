@@ -425,7 +425,11 @@ public class MySqlTypeUtils {
         private static final MySqlToPaimonTypeVisitor INSTANCE = new MySqlToPaimonTypeVisitor();
 
         @Override
-        public DataType visit(String type, @Nullable Integer length, @Nullable Integer scale, TypeMapping typeMapping) {
+        public DataType visit(
+                String type,
+                @Nullable Integer length,
+                @Nullable Integer scale,
+                TypeMapping typeMapping) {
             return toDataType(type, length, scale, typeMapping);
         }
     }

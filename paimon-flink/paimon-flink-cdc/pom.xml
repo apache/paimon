@@ -92,15 +92,15 @@ under the License.
 
         <dependency>
             <groupId>com.ververica</groupId>
-            <artifactId>flink-connector-mysql-cdc</artifactId>
-            <version>${flink.mysql.cdc.version}</version>
+            <artifactId>flink-connector-postgres-cdc</artifactId>
+            <version>${flink.postgres.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
 
         <dependency>
             <groupId>com.ververica</groupId>
-            <artifactId>flink-connector-postgres-cdc</artifactId>
-            <version>${flink.postgres.cdc.version}</version>
+            <artifactId>flink-connector-mysql-cdc</artifactId>
+            <version>${flink.mysql.cdc.version}</version>
             <scope>provided</scope>
         </dependency>
 

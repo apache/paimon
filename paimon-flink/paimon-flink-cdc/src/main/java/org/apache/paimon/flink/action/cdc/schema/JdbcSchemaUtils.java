@@ -51,7 +51,14 @@ public class JdbcSchemaUtils {
             TypeMapping typeMapping,
             JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor)
             throws SQLException {
-        return buildSchema(metaData, databaseName, null, tableName, tableComment, typeMapping, jdbcToPaimonTypeVisitor)
+        return buildSchema(
+                metaData,
+                databaseName,
+                null,
+                tableName,
+                tableComment,
+                typeMapping,
+                jdbcToPaimonTypeVisitor);
     }
 
     public static Schema buildSchema(
@@ -83,7 +90,8 @@ public class JdbcSchemaUtils {
                         typeMapping.containsMode(TO_NULLABLE)
                                 || isNullableColumn(rs.getString("IS_NULLABLE"));
                 DataType paimonType =
-                        jdbcToPaimonTypeVisitor.visit(fieldType, precision, scale, typeMapping)
+                        jdbcToPaimonTypeVisitor
+                                .visit(fieldType, precision, scale, typeMapping)
                                 .copy(isNullable);
 
                 builder.column(fieldName, paimonType, fieldComment);

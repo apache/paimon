@@ -114,27 +114,27 @@ public class MySqlActionUtils {
                     if (!databaseMatcher.matches()) {
                         continue;
                     }
-                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
-                            while (tables.next()) {
-                                String tableName = tables.getString("TABLE_NAME");
-                                String tableComment = tables.getString("REMARKS");
-                                Identifier identifier = Identifier.create(databaseName, tableName);
-                                if (monitorTablePredication.test(tableName)) {
-                                    Schema schema =
-                                            JdbcSchemaUtils.buildSchema(
-                                                    metaData,
-                                                    databaseName,
-                                                    tableName,
-                                                    tableComment,
-                                                    typeMapping,
-                                                    toPaimonTypeVisitor());
-                                    mySqlSchemasInfo.addSchema(identifier, schema);
-                                } else {
-                                    excludedTables.add(identifier);
-                                }
+                    try (ResultSet tables =
+                            metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
+                        while (tables.next()) {
+                            String tableName = tables.getString("TABLE_NAME");
+                            String tableComment = tables.getString("REMARKS");
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            if (monitorTablePredication.test(tableName)) {
+                                Schema schema =
+                                        JdbcSchemaUtils.buildSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                tableComment,
+                                                typeMapping,
+                                                toPaimonTypeVisitor());
+                                mySqlSchemasInfo.addSchema(identifier, schema);
+                            } else {
+                                excludedTables.add(identifier);
                             }
                         }
-
+                    }
                 }
             }
         }

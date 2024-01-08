@@ -57,8 +57,7 @@ public class ShardsMergedJdbcTableInfo implements JdbcTableInfo {
                 otherTableId.getObjectName(),
                 tableName);
 
-        schema =
-                JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
+        schema = JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromDatabases.add(otherTableId.getDatabaseName());
         return this;
     }

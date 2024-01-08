@@ -22,9 +22,9 @@ import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 
 import org.apache.flink.api.java.tuple.Tuple3;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 
 import java.util.ArrayList;
 import java.util.Optional;
@@ -51,8 +51,8 @@ public class PostgresSyncTableActionFactory implements ActionFactory {
         Tuple3<String, String, String> tablePath = getTablePath(params);
         checkRequiredArgument(params, POSTGRES_CONF);
 
-        MySqlSyncTableAction action =
-                new MySqlSyncTableAction(
+        PostgresSyncTableAction action =
+                new PostgresSyncTableAction(
                         tablePath.f0,
                         tablePath.f1,
                         tablePath.f2,

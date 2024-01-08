@@ -43,8 +43,7 @@ public class AllMergedJdbcTableInfo implements JdbcTableInfo {
     }
 
     public AllMergedJdbcTableInfo merge(Identifier otherTableId, Schema other) {
-        schema =
-                JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
+        schema = JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromTables.add(otherTableId);
         return this;
     }

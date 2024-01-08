@@ -254,6 +254,9 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             case "PulsarSyncTableAction":
             case "PulsarSyncDatabaseAction":
                 return "--" + CdcActionCommonUtils.PULSAR_CONF;
+            case "PostgresSyncTableAction":
+            case "PostgresSyncDatabaseAction":
+                return "--" + CdcActionCommonUtils.POSTGRES_CONF;
             default:
                 throw new UnsupportedOperationException(
                         "Unknown sync action: " + clazz.getSimpleName());

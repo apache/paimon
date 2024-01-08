@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.flink.action.cdc.JdbcToPaimonTypeVisitor;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
@@ -68,11 +67,12 @@ public class PostgresTypeUtils {
     private static final String PG_CHARACTER_VARYING_ARRAY = "_varchar";
 
     public static DataType toDataType(
-            String typeName, int precision, int scale, TypeMapping typeMapping) {
+            String typeName, @Nullable Integer precision, @Nullable Integer scale, TypeMapping typeMapping) {
         if (typeMapping.containsMode(TO_STRING)) {
             return DataTypes.STRING();
         }
-
+        precision = precision == null ? 0 : precision;
+        scale = scale == null ? 0 : scale;
         switch (typeName) {
             case PG_BOOLEAN:
                 return DataTypes.BOOLEAN();
@@ -159,11 +159,17 @@ public class PostgresTypeUtils {
 
     private static class PostgresToPaimonTypeVisitor implements JdbcToPaimonTypeVisitor {
 
-        private static final PostgresToPaimonTypeVisitor INSTANCE = new PostgresToPaimonTypeVisitor();
+        private static final PostgresToPaimonTypeVisitor INSTANCE =
+                new PostgresToPaimonTypeVisitor();
 
         @Override
-        public DataType visit(String type, @Nullable Integer length, @Nullable Integer scale, TypeMapping typeMapping) {
-            return toDataType(type, length == null ? 0 : length, scale == null ? 0 : scale, typeMapping);
+        public DataType visit(
+                String type,
+                @Nullable Integer length,
+                @Nullable Integer scale,
+                TypeMapping typeMapping) {
+            return toDataType(
+                    type, length, scale, typeMapping);
         }
     }
 }

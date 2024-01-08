@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
@@ -33,7 +32,6 @@ import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -88,11 +86,6 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
                 catalogConfig,
                 mySqlConfig,
                 SyncJobHandler.SourceType.MYSQL);
-    }
-
-    @Override
-    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
-        return Optional.of(MySqlMetadataProcessor.converter(column));
     }
 
     @Override

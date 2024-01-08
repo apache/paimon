@@ -35,7 +35,6 @@ import org.apache.flink.streaming.api.functions.source.SourceFunction;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -79,15 +78,9 @@ public abstract class SynchronizationActionBase extends ActionBase {
     public SynchronizationActionBase withMetadataColumns(List<String> metadataColumns) {
         this.metadataConverters =
                 metadataColumns.stream()
-                        .map(this::metadataConverter)
-                        .filter(Optional::isPresent)
-                        .map(Optional::get)
+                        .map(this.syncJobHandler::provideMetadataConverter)
                         .toArray(CdcMetadataConverter[]::new);
         return this;
-    }
-
-    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
-        return Optional.empty();
     }
 
     @VisibleForTesting

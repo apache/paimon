@@ -18,11 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.postgres;
 
-import io.debezium.time.Date;
-import io.debezium.time.MicroTime;
-import io.debezium.time.MicroTimestamp;
-import io.debezium.time.Timestamp;
-import io.debezium.time.ZonedTimestamp;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -35,7 +30,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
@@ -44,6 +38,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
@@ -51,6 +46,10 @@ import io.debezium.relational.Column;
 import io.debezium.relational.Table;
 import io.debezium.relational.history.TableChanges;
 import io.debezium.time.Date;
+import io.debezium.time.MicroTime;
+import io.debezium.time.MicroTimestamp;
+import io.debezium.time.Timestamp;
+import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
@@ -105,7 +104,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     // NOTE: current table name is not converted by tableNameConverter
     private String currentTable;
     private String databaseName;
-    private final CdcMetadataConverter<?>[] metadataConverters;
+    private final CdcMetadataConverter[] metadataConverters;
 
     private final Set<String> nonPkTables = new HashSet<>();
 
@@ -113,16 +112,16 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
             Configuration mySqlConfig,
             boolean caseSensitive,
             TypeMapping typeMapping,
-            CdcMetadataConverter<?>[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters) {
         this(mySqlConfig, caseSensitive, Collections.emptyList(), typeMapping, metadataConverters);
     }
 
     public PostgresRecordParser(
-            Configuration mySqlConfig,
+            Configuration postgresConfig,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
-            CdcMetadataConverter<?>[] metadataConverters) {
+            CdcMetadataConverter[] metadataConverters) {
         this.caseSensitive = caseSensitive;
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
@@ -130,7 +129,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        String stringifyServerTimeZone = mySqlConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
+        String stringifyServerTimeZone = postgresConfig.get(MySqlSourceOptions.SERVER_TIME_ZONE);
         this.serverTimeZone =
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()
@@ -140,8 +139,8 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     @Override
     public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
-        currentTable = root.payload().source().table();
-        databaseName = root.payload().source().db();
+        currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
+        databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
         if (root.payload().isSchemaChange()) {
             extractSchemaChange().forEach(out::collect);
@@ -184,45 +183,44 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
             return Collections.emptyList();
         }
 
-        Schema schema = buildSchema(tableChange);
-        return Collections.singletonList(createRecord(schema));
+        Table table = tableChange.getTable();
+
+        LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(table);
+        List<String> primaryKeys = listCaseConvert(table.primaryKeyColumnNames(), caseSensitive);
+
+        // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
+        return Collections.singletonList(
+                new RichCdcMultiplexRecord(
+                        databaseName,
+                        currentTable,
+                        fieldTypes,
+                        primaryKeys,
+                        CdcRecord.emptyRecord()));
     }
 
-    private Schema buildSchema(TableChanges.TableChange tableChange) {
-        Table table = tableChange.getTable();
-        String tableName = tableChange.getId().toString();
+    private LinkedHashMap<String, DataType> extractFieldTypes(Table table) {
         List<Column> columns = table.columns();
-
+        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(columns.size());
         Set<String> existedFields = new HashSet<>();
-        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+        Function<String, String> columnDuplicateErrMsg =
+                columnDuplicateErrMsg(table.id().toString());
 
-        Schema.Builder builder = Schema.newBuilder();
-
-        // column
         for (Column column : columns) {
-            DataType dataType =
-                    MySqlTypeUtils.toDataType(
-                            column.typeExpression(),
-                            column.length(),
-                            column.scale().orElse(null),
-                            typeMapping);
-
-            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
-
             String columnName =
                     columnCaseConvertAndDuplicateCheck(
                             column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
 
-            // TODO : add table comment and column comment when we upgrade flink cdc to 2.4
-            builder.column(columnName, dataType, null);
+            DataType dataType =
+                    PostgresTypeUtils.toDataType(
+                            column.typeExpression(),
+                            column.length(),
+                            column.scale().orElse(null),
+                            typeMapping);
+            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
+
+            fieldTypes.put(columnName, dataType);
         }
-
-        // primaryKey
-        List<String> primaryKeys = table.primaryKeyColumnNames();
-        primaryKeys = listCaseConvert(primaryKeys, caseSensitive);
-        builder.primaryKey(primaryKeys);
-
-        return builder.build();
+        return fieldTypes;
     }
 
     private List<RichCdcMultiplexRecord> extractRecords() {
@@ -254,7 +252,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         DebeziumEvent.Field schema =
                 Preconditions.checkNotNull(
                         root.schema(),
-                        "MySqlRecordParser only supports debezium JSON with schema. "
+                        "PostgresRecordParser only supports debezium JSON with schema. "
                                 + "Please make sure that `includeSchema` is true "
                                 + "in the JsonDebeziumDeserializationSchema you created");
 
@@ -387,23 +385,6 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         }
 
         return resultMap;
-    }
-
-    protected RichCdcMultiplexRecord createRecord(Schema schema) {
-        LinkedHashMap<String, DataType> fieldTypes =
-                schema.fields().stream()
-                        .collect(
-                                Collectors.toMap(
-                                        DataField::name,
-                                        DataField::type,
-                                        (v1, v2) -> v2,
-                                        LinkedHashMap::new));
-        return new RichCdcMultiplexRecord(
-                databaseName,
-                currentTable,
-                fieldTypes,
-                schema.primaryKeys(),
-                CdcRecord.emptyRecord());
     }
 
     protected RichCdcMultiplexRecord createRecord(RowKind rowKind, Map<String, String> data) {

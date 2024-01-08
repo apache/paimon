@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
@@ -26,6 +26,7 @@ import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
 import org.apache.paimon.flink.action.cdc.SyncDatabaseActionBase;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.TableNameConverter;
+import org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
@@ -54,16 +55,16 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.tableList;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize the whole MySQL database into one Paimon database.
+ * An {@link Action} which synchronize the whole PostgreSQL database into one Paimon database.
  *
- * <p>You should specify MySQL source database in {@code mySqlConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document
+ * <p>You should specify PostgreSQL source database in {@code postgresConfig}. See <a
+ * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
- * <p>For each MySQL table to be synchronized, if the corresponding Paimon table does not exist,
- * this action will automatically create the table. Its schema will be derived from all specified
- * MySQL tables. If the Paimon table already exists, its schema will be compared against the schema
- * of all specified MySQL tables.
+ * <p>For each PostgreSQL table to be synchronized, if the corresponding Paimon table does not
+ * exist, this action will automatically create the table. Its schema will be derived from all
+ * specified PostgreSQL tables. If the Paimon table already exists, its schema will be compared
+ * against the schema of all specified PostgreSQL tables.
  *
  * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
  * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
@@ -89,9 +90,9 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  * not very efficient in resource saving. We may optimize this action by merging all sinks into one
  * instance in the future.
  */
-public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
+public class PostgresSyncDatabaseAction extends SyncDatabaseActionBase {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlSyncDatabaseAction.class);
+    private static final Logger LOG = LoggerFactory.getLogger(PostgresSyncDatabaseAction.class);
 
     private boolean ignoreIncompatible = false;
 
@@ -99,16 +100,21 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
     private final List<Identifier> monitoredTables = new ArrayList<>();
     private final List<Identifier> excludedTables = new ArrayList<>();
 
-    public MySqlSyncDatabaseAction(
+    public PostgresSyncDatabaseAction(
             String warehouse,
             String database,
             Map<String, String> catalogConfig,
-            Map<String, String> mySqlConfig) {
-        super(warehouse, database, catalogConfig, mySqlConfig, SyncJobHandler.SourceType.MYSQL);
+            Map<String, String> postgresConfig) {
+        super(
+                warehouse,
+                database,
+                catalogConfig,
+                postgresConfig,
+                SyncJobHandler.SourceType.POSTGRES);
         this.mode = DIVIDED;
     }
 
-    public MySqlSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
+    public PostgresSyncDatabaseAction ignoreIncompatible(boolean ignoreIncompatible) {
         this.ignoreIncompatible = ignoreIncompatible;
         return this;
     }

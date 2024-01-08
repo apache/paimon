@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemaUtils;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
+import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.base.options.StartupOptions;
@@ -33,6 +34,8 @@ import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -79,14 +82,15 @@ public class PostgresActionUtils {
         JdbcSchemasInfo jdbcSchemasInfo = new JdbcSchemasInfo();
         try (Connection conn = PostgresActionUtils.getConnection(postgresConfig)) {
             DatabaseMetaData metaData = conn.getMetaData();
-            try (ResultSet schemas = metaData.getCatalogs()) {
+            try (ResultSet schemas = metaData.getSchemas()) {
                 while (schemas.next()) {
-                    String schemaName = schemas.getString("TABLE_SCHEMA");
+                    String schemaName = schemas.getString("TABLE_SCHEM");
                     Matcher schemaMatcher = schemaPattern.matcher(schemaName);
                     if (!schemaMatcher.matches()) {
                         continue;
                     }
-                    try (ResultSet tables = metaData.getTables(databaseName, schemaName, "%", null)) {
+                    try (ResultSet tables =
+                            metaData.getTables(databaseName, schemaName, "%",  new String[] {"TABLE"})) {
                         while (tables.next()) {
                             String tableName = tables.getString("TABLE_NAME");
                             String tableComment = tables.getString("REMARKS");
@@ -101,13 +105,12 @@ public class PostgresActionUtils {
                                                 tableComment,
                                                 typeMapping,
                                                 toPaimonTypeVisitor());
-                                jdbcSchemasInfo.addSchema(identifier, schema);
+                                jdbcSchemasInfo.addSchema(identifier, schemaName, schema);
                             } else {
                                 excludedTables.add(identifier);
                             }
                         }
                     }
-
                 }
             }
         }
@@ -117,7 +120,6 @@ public class PostgresActionUtils {
 
     public static JdbcIncrementalSource<String> buildPostgresSource(
             Configuration postgresConfig, String[] schemaList, String[] tableList) {
-        validatePostgresConfig(postgresConfig);
         PostgresSourceBuilder<String> sourceBuilder = PostgresIncrementalSource.builder();
 
         sourceBuilder
@@ -177,46 +179,24 @@ public class PostgresActionUtils {
         }
 
         Properties debeziumProperties = new Properties();
-        for (Map.Entry<String, String> entry : postgresConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX)) {
-                debeziumProperties.put(
-                        key.substring(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX.length()), value);
-            }
-        }
+        debeziumProperties.putAll(
+                OptionsUtils.convertToPropertiesPrefixKey(
+                        postgresConfig.toMap(), DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX));
         sourceBuilder.debeziumProperties(debeziumProperties);
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
-        return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+            return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
     }
 
-    private static void validatePostgresConfig(Configuration postgresConfig) {
-        checkArgument(
-                postgresConfig.get(PostgresSourceOptions.HOSTNAME) != null,
-                String.format(
-                        "postgres-conf [%s] must be specified.",
-                        PostgresSourceOptions.HOSTNAME.key()));
-
-        checkArgument(
-                postgresConfig.get(PostgresSourceOptions.USERNAME) != null,
-                String.format(
-                        "postgres-conf [%s] must be specified.",
-                        PostgresSourceOptions.USERNAME.key()));
-
-        checkArgument(
-                postgresConfig.get(PostgresSourceOptions.PASSWORD) != null,
-                String.format(
-                        "postgres-conf [%s] must be specified.",
-                        PostgresSourceOptions.PASSWORD.key()));
-
-        checkArgument(
-                postgresConfig.get(PostgresSourceOptions.DATABASE_NAME) != null,
-                String.format(
-                        "postgres-conf [%s] must be specified.",
-                        PostgresSourceOptions.DATABASE_NAME.key()));
+    public static void registerJdbcDriver() {
+        try {
+            Class.forName("org.postgresql.Driver");
+        } catch (ClassNotFoundException ex) {
+            throw new RuntimeException(
+                    "No suitable driver found. Cannot find class org.postgresql.Driver.");
+        }
     }
 }

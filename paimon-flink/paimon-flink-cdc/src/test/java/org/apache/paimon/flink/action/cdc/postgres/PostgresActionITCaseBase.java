@@ -22,8 +22,6 @@ import org.apache.paimon.flink.action.cdc.CdcActionITCaseBase;
 
 import com.ververica.cdc.connectors.postgres.source.PostgresConnectionPoolFactory;
 import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import org.apache.flink.api.java.utils.MultipleParameterTool;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlSyncTableAction;
 import org.junit.jupiter.api.AfterAll;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -35,10 +33,7 @@ import java.sql.Connection;
 import java.sql.DriverManager;
 import java.sql.SQLException;
 import java.sql.Statement;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
@@ -55,8 +50,11 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
 
     // use newer version of postgresql image to support pgoutput plugin
     // when testing postgres 13, only 13-alpine supports both amd64 and arm64
+//    protected static final DockerImageName PG_IMAGE =
+//            DockerImageName.parse("debezium/postgres:9.6").asCompatibleSubstituteFor("postgres");
+
     protected static final DockerImageName PG_IMAGE =
-            DockerImageName.parse("debezium/postgres:9.6").asCompatibleSubstituteFor("postgres");
+            DockerImageName.parse("postgres:13").asCompatibleSubstituteFor("postgres");
 
     protected static final PostgresContainer POSTGRES_CONTAINER =
             new PostgresContainer(PG_IMAGE)
@@ -71,7 +69,11 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
                             // default
                             "fsync=off",
                             "-c",
-                            "max_replication_slots=20");
+                            "wal_level=logical",
+                            "-c",
+                            "max_replication_slots=20",
+                            "-c",
+                            "max_wal_senders=20");
 
     protected static void start() {
         LOG.info("Starting containers...");
@@ -119,6 +121,7 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
         config.put(PostgresSourceOptions.USERNAME.key(), USER);
         config.put(PostgresSourceOptions.PASSWORD.key(), PASSWORD);
         config.put(PostgresSourceOptions.SLOT_NAME.key(), getSlotName());
+        config.put(PostgresSourceOptions.DECODING_PLUGIN_NAME.key(), "pgoutput");
         return config;
     }
 

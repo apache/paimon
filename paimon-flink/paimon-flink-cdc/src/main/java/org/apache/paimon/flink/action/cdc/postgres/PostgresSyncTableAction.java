@@ -20,15 +20,20 @@ package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.cdc.*;
-import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
+import org.apache.paimon.flink.action.cdc.SyncJobHandler;
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
+import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
 import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -86,11 +91,6 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
-        return Optional.of(PostgresMetadataProcessor.converter(column));
-    }
-
-    @Override
     protected Schema retrieveSchema() throws Exception {
         this.postgresSchemasInfo =
                 PostgresActionUtils.getPostgresTableInfos(
@@ -107,13 +107,11 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
         String[] tableList = new String[pkTables.size()];
         for (int i = 0; i < pkTables.size(); i++) {
             JdbcSchemasInfo.JdbcSchemaInfo pkTable = pkTables.get(i);
-            tableList[i] = pkTable.schemaName()
-                    + "."
-                    + pkTable.identifier().getObjectName();
+            tableList[i] = pkTable.schemaName() + "." + pkTable.identifier().getObjectName();
             schemaList.add(pkTable.schemaName());
         }
-        return PostgresActionUtils.buildPostgresSource(cdcSourceConfig, schemaList.toArray(new String[0]), tableList);
-
+        return PostgresActionUtils.buildPostgresSource(
+                cdcSourceConfig, schemaList.toArray(new String[0]), tableList);
     }
 
     private void validatePostgresTableInfos(JdbcSchemasInfo jdbcSchemasInfo) {
@@ -137,6 +135,4 @@ public class PostgresSyncTableAction extends SyncTableActionBase {
             return tableNamePattern.matcher(tableName).matches();
         };
     }
-
-
 }
