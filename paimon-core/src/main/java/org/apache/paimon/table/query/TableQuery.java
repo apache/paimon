@@ -24,6 +24,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -33,6 +34,10 @@ import java.util.List;
 
 /** A query of Table to perform lookup. */
 public interface TableQuery extends Closeable {
+
+    default TableQuery withValueProjection(int[] projection) {
+        return withValueProjection(Projection.of(projection).toNestedIndexes());
+    }
 
     TableQuery withValueProjection(int[][] projection);
 
