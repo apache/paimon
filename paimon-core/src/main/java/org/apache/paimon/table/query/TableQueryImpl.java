@@ -21,26 +21,21 @@
 package org.apache.paimon.table.query;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
-import org.apache.paimon.schema.KeyValueFieldsExtractor;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PrimaryKeyTableUtils;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
@@ -62,47 +57,29 @@ public class TableQueryImpl implements TableQuery {
 
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
 
-    private final RowType keyType;
-
-    private RowType projectedValueType;
-
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
-
-    private IOManager ioManager;
 
     private final HashLookupStoreFactory hashLookupStoreFactory;
 
+    private IOManager ioManager;
+
     public TableQueryImpl(FileStoreTable table) {
-        this.options = new CoreOptions(table.options());
+        this.options = table.coreOptions();
         this.tableView = new HashMap<>();
-        KeyValueFieldsExtractor pkExtractor =
-                PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR;
-        this.keyType = new RowType(pkExtractor.keyFields(table.schema()));
-        CacheManager cacheManager =
-                new CacheManager(
-                        options.pageSize(),
-                        options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE));
-        RowType partitionType = table.schema().logicalPartitionType();
-        this.readerFactoryBuilder =
-                KeyValueFileReaderFactory.builder(
-                        table.fileIO(),
-                        new SchemaManager(table.fileIO(), table.location()),
-                        table.schema().id(),
-                        keyType,
-                        table.rowType(),
-                        FileFormatDiscover.of(options),
-                        new FileStorePathFactory(
-                                options.path(),
-                                partitionType,
-                                options.partitionDefaultName(),
-                                options.fileFormat().getFormatIdentifier()),
-                        PrimaryKeyTableUtils.PrimaryKeyFieldsExtractor.EXTRACTOR,
-                        options);
-        this.projectedValueType = readerFactoryBuilder.projectedValueType();
-        this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
+        FileStore<?> tableStore = table.store();
+        if (!(tableStore instanceof KeyValueFileStore)) {
+            throw new UnsupportedOperationException(
+                    "Table Query only supports table with primary key.");
+        }
+        KeyValueFileStore store = (KeyValueFileStore) tableStore;
+
+        this.readerFactoryBuilder = store.newReaderFactoryBuilder();
+        this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.hashLookupStoreFactory =
                 new HashLookupStoreFactory(
-                        cacheManager,
+                        new CacheManager(
+                                options.pageSize(),
+                                options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE)),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR));
         Preconditions.checkArgument(
                 options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP,
@@ -115,41 +92,41 @@ public class TableQueryImpl implements TableQuery {
             int bucket,
             List<DataFileMeta> beforeFiles,
             List<DataFileMeta> dataFiles) {
-        Map<Integer, LookupLevels> buckets =
-                tableView.computeIfAbsent(partition, k -> new HashMap<>());
-        LookupLevels lookupLevels = buckets.get(bucket);
-
+        LookupLevels lookupLevels =
+                tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
         if (lookupLevels == null) {
             Preconditions.checkArgument(
                     beforeFiles.isEmpty(),
                     "The before file should be empty for the initial phase.");
-            Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
-
-            KeyValueFileReaderFactory factory = readerFactoryBuilder.build(partition, bucket);
-
-            lookupLevels =
-                    new LookupLevels(
-                            levels,
-                            keyComparatorSupplier.get(),
-                            keyType,
-                            projectedValueType,
-                            file ->
-                                    factory.createRecordReader(
-                                            file.schemaId(),
-                                            file.fileName(),
-                                            file.fileSize(),
-                                            file.level()),
-                            () ->
-                                    Preconditions.checkNotNull(ioManager, "IOManager is required.")
-                                            .createChannel()
-                                            .getPathFile(),
-                            hashLookupStoreFactory,
-                            options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                            options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
-            buckets.put(bucket, lookupLevels);
+            newLookupLevels(partition, bucket, dataFiles);
         } else {
             lookupLevels.getLevels().update(beforeFiles, dataFiles);
         }
+    }
+
+    private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
+        Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
+        KeyValueFileReaderFactory factory = readerFactoryBuilder.build(partition, bucket);
+        LookupLevels lookupLevels =
+                new LookupLevels(
+                        levels,
+                        keyComparatorSupplier.get(),
+                        readerFactoryBuilder.keyType(),
+                        readerFactoryBuilder.projectedValueType(),
+                        file ->
+                                factory.createRecordReader(
+                                        file.schemaId(),
+                                        file.fileName(),
+                                        file.fileSize(),
+                                        file.level()),
+                        () ->
+                                Preconditions.checkNotNull(ioManager, "IOManager is required.")
+                                        .createChannel()
+                                        .getPathFile(),
+                        hashLookupStoreFactory,
+                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+        tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
 
     @Nullable
@@ -162,21 +139,20 @@ public class TableQueryImpl implements TableQuery {
         LookupLevels lookupLevels = buckets.get(bucket);
         if (lookupLevels == null) {
             return null;
+        }
+
+        // lookup start from level 1.
+        KeyValue kv = lookupLevels.lookup(key, 1);
+        if (kv == null || kv.valueKind().isRetract()) {
+            return null;
         } else {
-            // lookup start from level 1.
-            KeyValue kv = lookupLevels.lookup(key, 1);
-            if (kv == null || kv.valueKind().isRetract()) {
-                return null;
-            } else {
-                return kv.value();
-            }
+            return kv.value();
         }
     }
 
     @Override
     public TableQuery withValueProjection(int[][] projection) {
-        this.readerFactoryBuilder.withValueProjection(Projection.of(projection).toNestedIndexes());
-        this.projectedValueType = readerFactoryBuilder.projectedValueType();
+        this.readerFactoryBuilder.withValueProjection(projection);
         return this;
     }
 
