@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexMaintainer;
 import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
@@ -112,13 +113,22 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreRead newRead() {
         return new KeyValueFileStoreRead(
-                fileIO,
                 schemaManager,
                 schemaId,
                 keyType,
                 valueType,
                 newKeyComparator(),
                 mfFactory,
+                newReaderFactoryBuilder());
+    }
+
+    public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
+        return KeyValueFileReaderFactory.builder(
+                fileIO,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor,
