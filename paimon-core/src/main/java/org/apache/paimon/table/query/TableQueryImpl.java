@@ -26,6 +26,8 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -176,6 +178,11 @@ public class TableQueryImpl implements TableQuery {
     public TableQuery withIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
         return this;
+    }
+
+    @Override
+    public InternalRowSerializer createValueSerializer() {
+        return InternalSerializers.create(readerFactoryBuilder.projectedValueType());
     }
 
     @Override
