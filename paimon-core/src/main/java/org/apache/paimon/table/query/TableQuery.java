@@ -22,6 +22,7 @@ package org.apache.paimon.table.query;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Projection;
@@ -42,6 +43,8 @@ public interface TableQuery extends Closeable {
     TableQuery withValueProjection(int[][] projection);
 
     TableQuery withIOManager(IOManager ioManager);
+
+    InternalRowSerializer createValueSerializer();
 
     void refreshFiles(
             BinaryRow partition,
