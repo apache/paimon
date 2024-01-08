@@ -18,13 +18,17 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.RowType;
-
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+
+import java.util.ArrayList;
+import java.util.List;
+
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
@@ -79,18 +83,24 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
         testStarUpOptionEarliest(DEBEZIUM);
     }
 
+        @Test
+        @Timeout(60)
+        public void testRecordWithNestedDataType() throws Exception {
+            String topic = "nested_type";
+            createTestTopic(topic, 1, 1);
+
+            List<String> lines = readLines("kafka/debezium/table/nestedtype/debezium-data-1.txt");
+            try {
+                writeRecordsToKafka(topic, lines);
+            } catch (Exception e) {
+                throw new Exception("Failed to write canal data to Kafka.", e);
+            }
+
     @Test
     @Timeout(60)
-    public void testRecordWithNestedDataType() throws Exception {
-        String topic = "nested_type";
-        createTestTopic(topic, 1, 1);
-
-        List<String> lines = readLines("kafka/debezium/table/nestedtype/debezium-data-1.txt");
-        try {
-            writeRecordsToKafka(topic, lines);
-        } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
-        }
+    public void testStarUpOptionGroup() throws Exception {
+        testStarUpOptionGroup(DEBEZIUM);
+    }
 
     @Test
     @Timeout(60)
