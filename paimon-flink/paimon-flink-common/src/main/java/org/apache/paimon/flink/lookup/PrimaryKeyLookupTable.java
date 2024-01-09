@@ -22,9 +22,13 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
@@ -40,11 +44,15 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     protected final KeyProjectedRow primaryKeyRow;
 
-    public PrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+    @Nullable private final ProjectedRow keyRearrange;
+
+    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
+            throws IOException {
         super(context);
         List<String> fieldNames = projectedType.getFieldNames();
+        FileStoreTable table = context.table;
         this.primaryKeyMapping =
-                context.table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
+                table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
 
         this.tableState =
@@ -54,10 +62,24 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, primaryKeyMapping)),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
+
+        ProjectedRow keyRearrange = null;
+        if (!table.primaryKeys().equals(joinKey)) {
+            keyRearrange =
+                    ProjectedRow.from(
+                            table.primaryKeys().stream()
+                                    .map(joinKey::indexOf)
+                                    .mapToInt(value -> value)
+                                    .toArray());
+        }
+        this.keyRearrange = keyRearrange;
     }
 
     @Override
     public List<InternalRow> innerGet(InternalRow key) throws IOException {
+        if (keyRearrange != null) {
+            key = keyRearrange.replaceRow(key);
+        }
         InternalRow value = tableState.get(key);
         return value == null ? Collections.emptyList() : Collections.singletonList(value);
     }

@@ -171,7 +171,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
             return new NoPrimaryKeyLookupTable(context, lruCacheSize);
         } else {
             if (new HashSet<>(primaryKeys).equals(new HashSet<>(context.joinKey))) {
-                return new PrimaryKeyLookupTable(context, lruCacheSize);
+                return new PrimaryKeyLookupTable(context, lruCacheSize, context.joinKey);
             } else {
                 return new SecondaryIndexLookupTable(context, lruCacheSize);
             }

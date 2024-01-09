@@ -38,7 +38,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     private final KeyProjectedRow secKeyRow;
 
     public SecondaryIndexLookupTable(Context context, long lruCacheSize) throws IOException {
-        super(context, lruCacheSize / 2);
+        super(context, lruCacheSize / 2, context.table.primaryKeys());
         List<String> fieldNames = projectedType.getFieldNames();
         int[] secKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);

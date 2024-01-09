@@ -746,11 +746,13 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testPartialCacheBucketKeyOrder() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testPartialCacheBucketKeyOrder(LookupCacheMode mode) throws Exception {
         sql(
                 "CREATE TABLE DIM (k2 INT, k1 INT, j INT , i INT, PRIMARY KEY(i, j) NOT ENFORCED) WITH"
-                        + " ('continuous.discovery-interval'='1 ms', 'lookup.cache'='auto', 'bucket' = '2', 'bucket-key' = 'j')");
+                        + " ('continuous.discovery-interval'='1 ms', 'lookup.cache'='%s', 'bucket' = '2', 'bucket-key' = 'j')",
+                mode);
 
         sql("CREATE TABLE T2 (j INT, i INT, `proctime` AS PROCTIME())");
 
