@@ -53,15 +53,17 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                 "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED)"
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
 
-        String lruOption =
-                ", 'changelog-producer'='lookup', 'lookup.cache' = 'partial', 'bucket' = '2'";
+        String fullOption =
+                ", 'changelog-producer'='lookup', 'lookup.cache' = 'full', 'bucket' = '2'";
+
+        String lruOption = ", 'changelog-producer'='lookup', 'bucket' = '2'";
 
         switch (cacheMode) {
             case FULL:
-                tEnv.executeSql(String.format(dim, ""));
-                tEnv.executeSql(String.format(partitioned, ""));
+                tEnv.executeSql(String.format(dim, fullOption));
+                tEnv.executeSql(String.format(partitioned, fullOption));
                 break;
-            case PARTIAL:
+            case AUTO:
                 tEnv.executeSql(String.format(dim, lruOption));
                 tEnv.executeSql(String.format(partitioned, lruOption));
                 break;
@@ -313,23 +315,14 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(LookupCacheMode.class)
-    public void testNonPkLookup(LookupCacheMode cacheMode) throws Exception {
-        initTable(cacheMode);
+    @Test
+    public void testNonPkLookup() throws Exception {
+        initTable(LookupCacheMode.AUTO);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
                 "SELECT D.i, T.i, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.j";
-        BlockingIterator<Row, Row> iterator;
-        if (cacheMode == LookupCacheMode.PARTIAL) {
-            assertThatThrownBy(() -> sEnv.executeSql(query))
-                    .hasRootCauseMessage(
-                            "For partial cache mode, the join key: [j] must equal to the primary key: [i]");
-            return;
-        } else {
-            iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
-        }
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (11), (22), (33)");
         List<Row> result = iterator.collect(4);
@@ -602,21 +595,12 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(LookupCacheMode.class)
-    public void testLookupPartitionedTable(LookupCacheMode cacheMode) throws Exception {
-        initTable(cacheMode);
+    @Test
+    public void testLookupPartitionedTable() throws Exception {
+        initTable(LookupCacheMode.AUTO);
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.i";
-        BlockingIterator<Row, Row> iterator;
-        if (cacheMode == LookupCacheMode.PARTIAL) {
-            assertThatThrownBy(() -> sEnv.executeSql(query))
-                    .hasRootCauseMessage(
-                            "For partial cache mode, the join key: [i] must equal to the primary key: [i, j]");
-            return;
-        } else {
-            iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
-        }
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (1), (2), (3)");
 
@@ -639,26 +623,16 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @ParameterizedTest
-    @EnumSource(LookupCacheMode.class)
-    public void testLookupNonPkAppendTable(LookupCacheMode cacheMode) throws Exception {
+    @Test
+    public void testLookupNonPkAppendTable() throws Exception {
         sql(
                 "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "
-                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)",
-                cacheMode == LookupCacheMode.PARTIAL ? ", 'lookup.cache' = 'partial'" : "");
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
 
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK for system_time as of T.proctime AS D ON T.i "
                         + "= D.i";
-        BlockingIterator<Row, Row> iterator;
-        if (cacheMode == LookupCacheMode.PARTIAL) {
-            assertThatThrownBy(() -> sEnv.executeSql(query))
-                    .hasRootCauseMessage(
-                            "For partial cache mode, the join key: [i] must equal to the primary key: []");
-            return;
-        } else {
-            iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
-        }
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (1), (2), (3)");
 
@@ -770,28 +744,5 @@ public class LookupJoinITCase extends CatalogITCaseBase {
                         Row.of(111, 1, 1, 1111), Row.of(111, 2, 2, 2222), Row.of(333, 3, 3, 3333));
 
         iterator.close();
-    }
-
-    @Test
-    public void testPartialCacheValidation() {
-        sql(
-                "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms', 'changelog-producer' = 'lookup', "
-                        + "'lookup.cache' = 'partial', 'bucket' = '-1')");
-
-        String query =
-                "SELECT T.i, D.k1 FROM T LEFT JOIN DIM2 for system_time as of T.proctime AS D ON T.i = D.i";
-        assertThatThrownBy(() -> sEnv.executeSql(query))
-                .hasRootCauseMessage("Only support fixed bucket mode in partial cache mode.");
-        sql(
-                "CREATE TABLE DIM3 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms', "
-                        + "'lookup.cache' = 'partial', 'bucket' = '1', 'merge-engine' = 'aggregation')");
-
-        String query2 =
-                "SELECT T.i, D.k1 FROM T LEFT JOIN DIM3 for system_time as of T.proctime AS D ON T.i = D.i";
-
-        assertThatThrownBy(() -> sEnv.executeSql(query2))
-                .hasRootCauseMessage("Only support deduplicate merge engine, but is: aggregation");
     }
 }
