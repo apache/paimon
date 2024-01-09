@@ -20,31 +20,187 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.lookup.BulkLoader;
+import org.apache.paimon.lookup.RocksDBState;
+import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.MutableObjectIterator;
+import org.apache.paimon.utils.PartialRow;
+import org.apache.paimon.utils.TypeUtils;
 
+import javax.annotation.Nullable;
+
+import java.io.File;
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.Iterator;
-import java.util.function.Predicate;
+import java.util.List;
+
+import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /** Lookup table of full cache. */
-public interface FullCacheLookupTable extends LookupTable {
+public abstract class FullCacheLookupTable implements LookupTable {
 
-    void refresh(Iterator<InternalRow> input, boolean orderByLastField) throws IOException;
+    protected final Context context;
+    protected final RocksDBStateFactory stateFactory;
+    protected final RowType projectedType;
+    private final TableStreamingReader reader;
+    private final boolean sequenceFieldEnabled;
 
-    Predicate<InternalRow> recordFilter();
+    public FullCacheLookupTable(Context context) throws IOException {
+        this.context = context;
+        this.stateFactory =
+                new RocksDBStateFactory(
+                        context.tempPath.toString(),
+                        context.table.coreOptions().toConfiguration(),
+                        null);
+        FileStoreTable table = context.table;
+        this.reader = new TableStreamingReader(table, context.projection, context.predicate);
+        this.sequenceFieldEnabled =
+                table.primaryKeys().size() > 0
+                        && new CoreOptions(table.options()).sequenceField().isPresent();
+        RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
+        if (sequenceFieldEnabled) {
+            projectedType = projectedType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT());
+        }
+        this.projectedType = projectedType;
+    }
 
-    byte[] toKeyBytes(InternalRow row) throws IOException;
+    @Override
+    public void open() throws Exception {
+        BinaryExternalSortBuffer bulkLoadSorter =
+                RocksDBState.createBulkLoadSorter(
+                        IOManager.create(context.tempPath.toString()), context.table.coreOptions());
+        try (RecordReaderIterator<InternalRow> batch =
+                new RecordReaderIterator<>(reader.nextBatch(true, sequenceFieldEnabled))) {
+            while (batch.hasNext()) {
+                InternalRow row = batch.next();
+                if (recordFilter().test(row)) {
+                    bulkLoadSorter.write(GenericRow.of(toKeyBytes(row), toValueBytes(row)));
+                }
+            }
+        }
 
-    byte[] toValueBytes(InternalRow row) throws IOException;
+        MutableObjectIterator<BinaryRow> keyIterator = bulkLoadSorter.sortedIterator();
+        BinaryRow row = new BinaryRow(2);
+        TableBulkLoader bulkLoader = createBulkLoader();
+        try {
+            while ((row = keyIterator.next(row)) != null) {
+                bulkLoader.write(row.getBinary(0), row.getBinary(1));
+            }
+        } catch (BulkLoader.WriteException e) {
+            throw new RuntimeException(
+                    "Exception in bulkLoad, the most suspicious reason is that "
+                            + "your data contains duplicates, please check your lookup table. ",
+                    e.getCause());
+        }
 
-    TableBulkLoader createBulkLoader();
+        bulkLoader.finish();
+        bulkLoadSorter.clear();
+    }
+
+    public void refresh() throws Exception {
+        while (true) {
+            try (RecordReaderIterator<InternalRow> batch =
+                    new RecordReaderIterator<>(reader.nextBatch(false, sequenceFieldEnabled))) {
+                if (!batch.hasNext()) {
+                    return;
+                }
+                refresh(batch, sequenceFieldEnabled);
+            }
+        }
+    }
+
+    @Override
+    public final List<InternalRow> get(InternalRow key) throws IOException {
+        List<InternalRow> values = innerGet(key);
+        if (!sequenceFieldEnabled) {
+            return values;
+        }
+
+        List<InternalRow> dropSequence = new ArrayList<>(values.size());
+        for (InternalRow matchedRow : values) {
+            dropSequence.add(new PartialRow(matchedRow.getFieldCount() - 1, matchedRow));
+        }
+        return dropSequence;
+    }
+
+    public abstract List<InternalRow> innerGet(InternalRow key) throws IOException;
+
+    public abstract void refresh(Iterator<InternalRow> input, boolean orderByLastField)
+            throws IOException;
+
+    public Filter<InternalRow> recordFilter() {
+        return context.recordFilter;
+    }
+
+    public abstract byte[] toKeyBytes(InternalRow row) throws IOException;
+
+    public abstract byte[] toValueBytes(InternalRow row) throws IOException;
+
+    public abstract TableBulkLoader createBulkLoader();
+
+    @Override
+    public void close() throws IOException {
+        stateFactory.close();
+    }
 
     /** Bulk loader for the table. */
-    interface TableBulkLoader {
+    public interface TableBulkLoader {
 
         void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
 
         void finish() throws IOException;
+    }
+
+    static FullCacheLookupTable create(Context context, long lruCacheSize) throws IOException {
+        List<String> primaryKeys = context.table.primaryKeys();
+        if (primaryKeys.isEmpty()) {
+            return new NoPrimaryKeyLookupTable(context, lruCacheSize);
+        } else {
+            if (new HashSet<>(primaryKeys).equals(new HashSet<>(context.joinKey))) {
+                return new PrimaryKeyLookupTable(context, lruCacheSize);
+            } else {
+                return new SecondaryIndexLookupTable(context, lruCacheSize);
+            }
+        }
+    }
+
+    /** Context for {@link LookupTable}. */
+    public static class Context {
+
+        public final FileStoreTable table;
+        public final int[] projection;
+        public final @Nullable Predicate predicate;
+        public final File tempPath;
+        public final Filter<InternalRow> recordFilter;
+        public final List<String> joinKey;
+
+        public Context(
+                FileStoreTable table,
+                int[] projection,
+                @Nullable Predicate predicate,
+                File tempPath,
+                Filter<InternalRow> recordFilter,
+                List<String> joinKey) {
+            this.table = table;
+            this.projection = projection;
+            this.predicate = predicate;
+            this.tempPath = tempPath;
+            this.recordFilter = recordFilter;
+            this.joinKey = joinKey;
+        }
     }
 }

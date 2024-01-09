@@ -290,7 +290,7 @@ public class FlinkConnectorOptions {
     public static final ConfigOption<LookupCacheMode> LOOKUP_CACHE_MODE =
             ConfigOptions.key("lookup.cache")
                     .enumType(LookupCacheMode.class)
-                    .defaultValue(LookupCacheMode.FULL)
+                    .defaultValue(LookupCacheMode.AUTO)
                     .withDescription("The cache mode of lookup join.");
 
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
@@ -331,8 +331,8 @@ public class FlinkConnectorOptions {
 
     /** The mode of lookup cache. */
     public enum LookupCacheMode {
-        /** Use partial caching mode. */
-        PARTIAL,
+        /** Auto mode, try to use partial mode. */
+        AUTO,
 
         /** Use full caching mode. */
         FULL

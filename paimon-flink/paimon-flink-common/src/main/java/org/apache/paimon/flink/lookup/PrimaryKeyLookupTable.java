@@ -21,10 +21,8 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.lookup.RocksDBValueState;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
 
@@ -32,44 +30,34 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Predicate;
 
 /** A {@link LookupTable} for primary key table. */
-public class PrimaryKeyLookupTable implements FullCacheLookupTable {
+public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     protected final RocksDBValueState<InternalRow, InternalRow> tableState;
 
-    protected final RowType rowType;
-
-    protected final Predicate<InternalRow> recordFilter;
-
     protected int[] primaryKeyMapping;
 
-    protected final KeyProjectedRow primaryKey;
+    protected final KeyProjectedRow primaryKeyRow;
 
-    public PrimaryKeyLookupTable(
-            RocksDBStateFactory stateFactory,
-            RowType rowType,
-            List<String> primaryKey,
-            Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
-            throws IOException {
-        this.rowType = rowType;
-        List<String> fieldNames = rowType.getFieldNames();
-        this.primaryKeyMapping = primaryKey.stream().mapToInt(fieldNames::indexOf).toArray();
-        this.primaryKey = new KeyProjectedRow(primaryKeyMapping);
+    public PrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+        super(context);
+        List<String> fieldNames = projectedType.getFieldNames();
+        this.primaryKeyMapping =
+                context.table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
+        this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
 
         this.tableState =
                 stateFactory.valueState(
                         "table",
-                        InternalSerializers.create(TypeUtils.project(rowType, primaryKeyMapping)),
-                        InternalSerializers.create(rowType),
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyMapping)),
+                        InternalSerializers.create(projectedType),
                         lruCacheSize);
-        this.recordFilter = recordFilter;
     }
 
     @Override
-    public List<InternalRow> get(InternalRow key) throws IOException {
+    public List<InternalRow> innerGet(InternalRow key) throws IOException {
         InternalRow value = tableState.get(key);
         return value == null ? Collections.emptyList() : Collections.singletonList(value);
     }
@@ -79,38 +67,33 @@ public class PrimaryKeyLookupTable implements FullCacheLookupTable {
             throws IOException {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
-            primaryKey.replaceRow(row);
+            primaryKeyRow.replaceRow(row);
             if (orderByLastField) {
-                InternalRow previous = tableState.get(primaryKey);
-                int orderIndex = rowType.getFieldCount() - 1;
+                InternalRow previous = tableState.get(primaryKeyRow);
+                int orderIndex = projectedType.getFieldCount() - 1;
                 if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
                     continue;
                 }
             }
 
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (recordFilter.test(row)) {
-                    tableState.put(primaryKey, row);
+                if (recordFilter().test(row)) {
+                    tableState.put(primaryKeyRow, row);
                 } else {
                     // The new record under primary key is filtered
                     // We need to delete this primary key as it no longer exists.
-                    tableState.delete(primaryKey);
+                    tableState.delete(primaryKeyRow);
                 }
             } else {
-                tableState.delete(primaryKey);
+                tableState.delete(primaryKeyRow);
             }
         }
     }
 
     @Override
-    public Predicate<InternalRow> recordFilter() {
-        return recordFilter;
-    }
-
-    @Override
     public byte[] toKeyBytes(InternalRow row) throws IOException {
-        primaryKey.replaceRow(row);
-        return tableState.serializeKey(primaryKey);
+        primaryKeyRow.replaceRow(row);
+        return tableState.serializeKey(primaryKeyRow);
     }
 
     @Override

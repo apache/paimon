@@ -29,7 +29,7 @@ import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Extractor to extract bucket from the primary key. */
-public class FixedBucketKeyExtractor implements KeyAndBucketExtractor<InternalRow> {
+public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<InternalRow> {
 
     private transient InternalRow primaryKey;
 
@@ -47,7 +47,7 @@ public class FixedBucketKeyExtractor implements KeyAndBucketExtractor<InternalRo
 
     private final Projection logPrimaryKeyProjection;
 
-    public FixedBucketKeyExtractor(TableSchema schema) {
+    public FixedBucketFromPkExtractor(TableSchema schema) {
         this.numBuckets = new CoreOptions(schema.options()).bucket();
         checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
         this.sameBucketKeyAndTrimmedPrimaryKey =

@@ -22,14 +22,15 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -37,20 +38,37 @@ import java.util.Collections;
 import java.util.List;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
-public class PrimaryKeyPartialLookupTable implements PartialCacheLookupTable {
+public class PrimaryKeyPartialLookupTable implements LookupTable {
 
-    private static final Logger LOG = LoggerFactory.getLogger(PrimaryKeyPartialLookupTable.class);
-
-    private final FixedBucketKeyExtractor extractor;
+    private final FixedBucketFromPkExtractor extractor;
 
     private final TableQuery tableQuery;
 
-    public PrimaryKeyPartialLookupTable(FileStoreTable table, int[] projection, File tempPath) {
+    private final TableFileMonitor fileMonitor;
+
+    public PrimaryKeyPartialLookupTable(
+            FileStoreTable table, @Nullable Predicate predicate, int[] projection, File tempPath) {
+        if (table.partitionKeys().size() > 0) {
+            throw new UnsupportedOperationException(
+                    "The partitioned table are not supported in partial cache mode.");
+        }
+
+        if (table.bucketMode() != BucketMode.FIXED) {
+            throw new UnsupportedOperationException(
+                    "Unsupported mode for partial lookup: " + table.bucketMode());
+        }
+
         this.tableQuery =
                 table.newTableQuery()
                         .withValueProjection(Projection.of(projection).toNestedIndexes())
                         .withIOManager(new IOManagerImpl(tempPath.toString()));
-        this.extractor = new FixedBucketKeyExtractor(table.schema());
+        this.extractor = new FixedBucketFromPkExtractor(table.schema());
+        this.fileMonitor = new TableFileMonitor(table, predicate);
+    }
+
+    @Override
+    public void open() throws Exception {
+        refresh();
     }
 
     @Override
@@ -68,7 +86,8 @@ public class PrimaryKeyPartialLookupTable implements PartialCacheLookupTable {
     }
 
     @Override
-    public void refresh(List<Split> splits) {
+    public void refresh() {
+        List<Split> splits = fileMonitor.readChanges();
         for (Split split : splits) {
             if (!(split instanceof DataSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
@@ -80,5 +99,10 @@ public class PrimaryKeyPartialLookupTable implements PartialCacheLookupTable {
 
             tableQuery.refreshFiles(partition, bucket, before, after);
         }
+    }
+
+    @Override
+    public void close() throws IOException {
+        tableQuery.close();
     }
 }
