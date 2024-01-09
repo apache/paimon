@@ -35,7 +35,6 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 public class CdcWatermarkStrategy implements WatermarkStrategy<String> {
 
     private final CdcTimestampExtractor timestampExtractor;
-
     private static final long serialVersionUID = 1L;
     private long currentMaxTimestamp;
 

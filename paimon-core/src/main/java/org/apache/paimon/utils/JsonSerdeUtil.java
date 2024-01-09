@@ -208,11 +208,7 @@ public class JsonSerdeUtil {
         return clazz.cast(resultNode);
     }
 
-    /**
-     * JsonExtractor is a utility class providing methods to extract data from a JSON string. It
-     * uses Jackson's ObjectMapper to parse JSON and allows for flexible data retrieval based on a
-     * specified path within the JSON structure.
-     */
+    /** Parses a JSON string and extracts a value of the specified type from the given path keys. */
     public static <T> T extractValue(String json, Class<T> valueType, String... path)
             throws JsonProcessingException {
         JsonNode currentNode = OBJECT_MAPPER_INSTANCE.readTree(json);

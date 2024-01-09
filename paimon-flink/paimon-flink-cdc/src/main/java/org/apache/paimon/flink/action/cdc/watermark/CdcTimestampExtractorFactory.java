@@ -46,8 +46,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
     static {
         extractorMap.put(MongoDBSource.class, MysqlCdcTimestampExtractor::new);
         extractorMap.put(MySqlSource.class, MongoDBCdcTimestampExtractor::new);
-        extractorMap.put(PulsarSource.class, PulsarCdcTimestampExtractor::new);
-        extractorMap.put(KafkaSource.class, KafkaCdcTimestampExtractor::new);
+        extractorMap.put(PulsarSource.class, MessageQueueCdcTimestampExtractor::new);
+        extractorMap.put(KafkaSource.class, MessageQueueCdcTimestampExtractor::new);
     }
 
     public static CdcTimestampExtractor createExtractor(Object source) {
@@ -70,8 +70,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
         }
     }
 
-    /** Timestamp extractor for Kafka sources in CDC applications. */
-    public static class KafkaCdcTimestampExtractor implements CdcTimestampExtractor {
+    /** Timestamp extractor for Kafka/Pulsar sources in CDC applications. */
+    public static class MessageQueueCdcTimestampExtractor implements CdcTimestampExtractor {
 
         private static final long serialVersionUID = 1L;
 
@@ -97,18 +97,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
                 // Dbz json
                 return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
             }
-            throw new RuntimeException("Unsupported kafka JSON format for timestamp extraction");
-        }
-    }
-
-    /** Timestamp extractor for Pulsar sources in CDC applications. */
-    public static class PulsarCdcTimestampExtractor implements CdcTimestampExtractor {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public long extractTimestamp(String record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(record, Long.class, "ts");
+            throw new RuntimeException(
+                    "Unsupported messageQueue json format for timestamp extraction");
         }
     }
 
