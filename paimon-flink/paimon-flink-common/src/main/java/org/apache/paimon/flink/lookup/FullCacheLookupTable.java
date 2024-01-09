@@ -111,6 +111,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         bulkLoadSorter.clear();
     }
 
+    @Override
     public void refresh() throws Exception {
         while (true) {
             try (RecordReaderIterator<InternalRow> batch =
