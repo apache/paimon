@@ -474,7 +474,6 @@ public class LookupTableTest extends TableTestBase {
         PrimaryKeyPartialLookupTable table =
                 new PrimaryKeyPartialLookupTable(
                         dimTable,
-                        null,
                         new int[] {0, 1, 2},
                         tempDir.toFile(),
                         ImmutableList.of("pk1", "pk2"));
@@ -505,7 +504,6 @@ public class LookupTableTest extends TableTestBase {
         PrimaryKeyPartialLookupTable table =
                 new PrimaryKeyPartialLookupTable(
                         dimTable,
-                        null,
                         new int[] {2, 1},
                         tempDir.toFile(),
                         ImmutableList.of("pk1", "pk2"));
@@ -531,7 +529,6 @@ public class LookupTableTest extends TableTestBase {
         PrimaryKeyPartialLookupTable table =
                 new PrimaryKeyPartialLookupTable(
                         dimTable,
-                        null,
                         new int[] {2, 1},
                         tempDir.toFile(),
                         ImmutableList.of("pk2", "pk1"));

@@ -22,12 +22,12 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
 
@@ -36,7 +36,13 @@ import javax.annotation.Nullable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
+
+import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
+import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
+import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
@@ -45,16 +51,12 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final TableQuery tableQuery;
 
-    private final TableFileMonitor fileMonitor;
+    private final StreamTableScan scan;
 
     @Nullable private final ProjectedRow keyRearrange;
 
     public PrimaryKeyPartialLookupTable(
-            FileStoreTable table,
-            @Nullable Predicate predicate,
-            int[] projection,
-            File tempPath,
-            List<String> joinKey) {
+            FileStoreTable table, int[] projection, File tempPath, List<String> joinKey) {
         if (table.partitionKeys().size() > 0) {
             throw new UnsupportedOperationException(
                     "The partitioned table are not supported in partial cache mode.");
@@ -70,7 +72,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                         .withValueProjection(Projection.of(projection).toNestedIndexes())
                         .withIOManager(new IOManagerImpl(tempPath.toString()));
         this.extractor = new FixedBucketFromPkExtractor(table.schema());
-        this.fileMonitor = new TableFileMonitor(table, predicate);
+
+        Map<String, String> dynamicOptions = new HashMap<>();
+        dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
+        dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
+        this.scan = table.copy(dynamicOptions).newReadBuilder().newStreamScan();
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -108,17 +114,23 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public void refresh() {
-        List<Split> splits = fileMonitor.readChanges();
-        for (Split split : splits) {
-            if (!(split instanceof DataSplit)) {
-                throw new IllegalArgumentException("Unsupported split: " + split.getClass());
+        while (true) {
+            List<Split> splits = scan.plan().splits();
+            if (splits.isEmpty()) {
+                return;
             }
-            BinaryRow partition = ((DataSplit) split).partition();
-            int bucket = ((DataSplit) split).bucket();
-            List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
-            List<DataFileMeta> after = ((DataSplit) split).dataFiles();
 
-            tableQuery.refreshFiles(partition, bucket, before, after);
+            for (Split split : splits) {
+                if (!(split instanceof DataSplit)) {
+                    throw new IllegalArgumentException("Unsupported split: " + split.getClass());
+                }
+                BinaryRow partition = ((DataSplit) split).partition();
+                int bucket = ((DataSplit) split).bucket();
+                List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
+                List<DataFileMeta> after = ((DataSplit) split).dataFiles();
+
+                tableQuery.refreshFiles(partition, bucket, before, after);
+            }
         }
     }
 
