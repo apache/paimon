@@ -28,6 +28,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
@@ -46,8 +47,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final TableFileMonitor fileMonitor;
 
+    private final ProjectedRow projectedKey;
+
     public PrimaryKeyPartialLookupTable(
-            FileStoreTable table, @Nullable Predicate predicate, int[] projection, File tempPath) {
+            FileStoreTable table,
+            @Nullable Predicate predicate,
+            int[] projection,
+            File tempPath,
+            List<String> joinKey) {
         if (table.partitionKeys().size() > 0) {
             throw new UnsupportedOperationException(
                     "The partitioned table are not supported in partial cache mode.");
@@ -64,6 +71,12 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                         .withIOManager(new IOManagerImpl(tempPath.toString()));
         this.extractor = new FixedBucketFromPkExtractor(table.schema());
         this.fileMonitor = new TableFileMonitor(table, predicate);
+        this.projectedKey =
+                ProjectedRow.from(
+                        table.primaryKeys().stream()
+                                .map(joinKey::indexOf)
+                                .mapToInt(value -> value)
+                                .toArray());
     }
 
     @Override
@@ -73,6 +86,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public List<InternalRow> get(InternalRow key) throws IOException {
+        key = projectedKey.replaceRow(key);
         extractor.setRecord(key);
         int bucket = extractor.bucket();
         BinaryRow partition = extractor.partition();

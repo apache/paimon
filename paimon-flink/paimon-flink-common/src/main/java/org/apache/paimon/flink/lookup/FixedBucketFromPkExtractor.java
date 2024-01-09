@@ -90,9 +90,7 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
             return trimmedPrimaryKey();
         }
 
-        if (bucketKey == null) {
-            bucketKey = bucketKeyProjection.apply(primaryKey);
-        }
+        bucketKey = bucketKeyProjection.apply(primaryKey);
         return bucketKey;
     }
 

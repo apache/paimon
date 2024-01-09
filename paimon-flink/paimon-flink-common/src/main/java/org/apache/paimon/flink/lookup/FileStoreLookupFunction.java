@@ -141,7 +141,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
             try {
                 this.lookupTable =
-                        new PrimaryKeyPartialLookupTable(storeTable, predicate, projection, path);
+                        new PrimaryKeyPartialLookupTable(
+                                storeTable, predicate, projection, path, joinKeys);
             } catch (UnsupportedOperationException ignore) {
             }
         }
