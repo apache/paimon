@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -119,6 +120,7 @@ public class CdcSinkBuilder<T> {
             case DYNAMIC:
                 return new CdcDynamicBucketSink((FileStoreTable) table).build(parsed, parallelism);
             case UNAWARE:
+                return buildForUnawareBucket(parsed);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
@@ -129,5 +131,11 @@ public class CdcSinkBuilder<T> {
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
         return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
+    }
+
+    private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
+        FileStoreTable dataTable = (FileStoreTable) table;
+        return new CdcUnawareBucketWriteSink((AppendOnlyFileStoreTable) dataTable, parallelism)
+                .sinkFrom(parsed);
     }
 }

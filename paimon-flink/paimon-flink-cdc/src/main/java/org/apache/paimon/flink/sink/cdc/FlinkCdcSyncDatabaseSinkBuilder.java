@@ -27,6 +27,7 @@ import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -169,6 +170,11 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         new CdcFixedBucketSink(table).sinkFrom(partitioned);
     }
 
+    private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
+        new CdcUnawareBucketWriteSink((AppendOnlyFileStoreTable) table, parallelism)
+                .sinkFrom(parsed);
+    }
+
     private void buildDividedCdcSink() {
         Preconditions.checkNotNull(tables);
 
@@ -205,8 +211,10 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 case DYNAMIC:
                     new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
                     break;
-                case GLOBAL_DYNAMIC:
                 case UNAWARE:
+                    buildForUnawareBucket(table, parsedForTable);
+                    break;
+                case GLOBAL_DYNAMIC:
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported bucket mode: " + bucketMode);

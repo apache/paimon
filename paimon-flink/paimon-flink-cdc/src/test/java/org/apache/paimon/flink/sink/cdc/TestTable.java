@@ -52,7 +52,12 @@ public class TestTable {
     private final Map<Integer, Map<String, String>> expected;
 
     public TestTable(
-            String tableName, int numEvents, int numSchemaChanges, int numPartitions, int numKeys) {
+            String tableName,
+            int numEvents,
+            int numSchemaChanges,
+            int numPartitions,
+            int numKeys,
+            boolean isAppendTable) {
         List<String> fieldNames = new ArrayList<>();
         List<Boolean> isBigInt = new ArrayList<>();
 
@@ -125,16 +130,28 @@ public class TestTable {
                 }
 
                 List<CdcRecord> records = new ArrayList<>();
-                boolean shouldInsert = true;
-                if (expected.containsKey(key)) {
-                    records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
-                    expected.remove(key);
-                    // 20% chance to only delete without insert
-                    shouldInsert = random.nextInt(5) > 0;
+                // Generate test data for pk table
+                if (!isAppendTable) {
+                    boolean shouldInsert = true;
+                    if (expected.containsKey(key)) {
+                        records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
+                        expected.remove(key);
+                        // 20% chance to only delete without insert
+                        shouldInsert = random.nextInt(5) > 0;
+                    }
+                    if (shouldInsert) {
+                        records.add(new CdcRecord(RowKind.INSERT, fields));
+                        expected.put(key, fields);
+                    }
                 }
-                if (shouldInsert) {
-                    records.add(new CdcRecord(RowKind.INSERT, fields));
-                    expected.put(key, fields);
+                // Generate test data for append table
+                else {
+                    if (expected.containsKey(key)) {
+                        records.add(new CdcRecord(RowKind.DELETE, expected.get(key)));
+                    } else {
+                        records.add(new CdcRecord(RowKind.INSERT, fields));
+                        expected.put(key, fields);
+                    }
                 }
                 events.add(new TestCdcEvent(tableName, records, Objects.hash(tableName, key)));
             }
