@@ -745,4 +745,40 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         iterator.close();
     }
+
+    @Test
+    public void testPartialCacheBucketKeyOrder() throws Exception {
+        sql(
+                "CREATE TABLE DIM (k2 INT, k1 INT, j INT , i INT, PRIMARY KEY(i, j) NOT ENFORCED) WITH"
+                        + " ('continuous.discovery-interval'='1 ms', 'lookup.cache'='auto', 'bucket' = '2', 'bucket-key' = 'j')");
+
+        sql("CREATE TABLE T2 (j INT, i INT, `proctime` AS PROCTIME())");
+
+        sql("INSERT INTO DIM VALUES (1111, 111, 11, 1), (2222, 222, 22, 2)");
+
+        String query =
+                "SELECT T2.i, D.j, D.k1, D.k2 FROM T2 LEFT JOIN DIM for system_time as of T2.proctime AS D ON T2.i = D.i and T2.j = D.j";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T2 VALUES (11, 1), (22, 2), (33, 3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM VALUES (2222, 222, 11, 1), (3333, 333, 33, 3)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T2 VALUES (11, 1), (22, 2), (33, 3), (44, 4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 222, 2222),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
+
+        iterator.close();
+    }
 }

@@ -47,6 +47,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -472,7 +473,11 @@ public class LookupTableTest extends TableTestBase {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
                 new PrimaryKeyPartialLookupTable(
-                        dimTable, null, new int[] {0, 1, 2}, tempDir.toFile());
+                        dimTable,
+                        null,
+                        new int[] {0, 1, 2},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"));
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -499,7 +504,11 @@ public class LookupTableTest extends TableTestBase {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
                 new PrimaryKeyPartialLookupTable(
-                        dimTable, null, new int[] {2, 1}, tempDir.toFile());
+                        dimTable,
+                        null,
+                        new int[] {2, 1},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"));
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -516,6 +525,32 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 22, -2);
     }
 
+    @Test
+    public void testPartialLookupTableJoinKeyOrder() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PrimaryKeyPartialLookupTable table =
+                new PrimaryKeyPartialLookupTable(
+                        dimTable,
+                        null,
+                        new int[] {2, 1},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk2", "pk1"));
+        List<InternalRow> result = table.get(row(-1, 1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(-1, 1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        result = table.get(row(-1, 1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 11, -1);
+        result = table.get(row(-2, 2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 22, -2);
+    }
+
     private FileStoreTable createDimTable() throws Exception {
         FileIO fileIO = LocalFileIO.create();
         org.apache.paimon.fs.Path tablePath =
@@ -523,13 +558,12 @@ public class LookupTableTest extends TableTestBase {
                         String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema =
                 Schema.newBuilder()
-                        .column("pk", DataTypes.INT())
-                        .column("col1", DataTypes.INT())
+                        .column("pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.INT())
                         .column("col2", DataTypes.INT())
-                        .primaryKey("pk", "col1")
-                        .option(CoreOptions.CHANGELOG_PRODUCER.key(), "lookup")
+                        .primaryKey("pk1", "pk2")
                         .option(CoreOptions.BUCKET.key(), "2")
-                        .option(CoreOptions.BUCKET_KEY.key(), "col1")
+                        .option(CoreOptions.BUCKET_KEY.key(), "pk2")
                         .build();
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
