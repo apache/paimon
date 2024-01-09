@@ -118,6 +118,12 @@ public class StaticFileStoreSplitEnumerator
 
     @Override
     public void handleSourceEvent(int subtaskId, SourceEvent sourceEvent) {
+        if (sourceEvent instanceof ReaderConsumeProgressEvent) {
+            // batch reading doesn't handle consumer
+            // avoid meaningless error logs
+            return;
+        }
+
         if (sourceEvent.getClass().getSimpleName().equals("DynamicFilteringEvent")) {
             checkNotNull(
                     dynamicPartitionFilteringInfo,
