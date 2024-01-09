@@ -33,8 +33,6 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
 
     private transient InternalRow primaryKey;
 
-    private BinaryRow bucketKey;
-
     private final boolean sameBucketKeyAndTrimmedPrimaryKey;
 
     private final int numBuckets;
@@ -90,8 +88,7 @@ public class FixedBucketFromPkExtractor implements KeyAndBucketExtractor<Interna
             return trimmedPrimaryKey();
         }
 
-        bucketKey = bucketKeyProjection.apply(primaryKey);
-        return bucketKey;
+        return bucketKeyProjection.apply(primaryKey);
     }
 
     @Override

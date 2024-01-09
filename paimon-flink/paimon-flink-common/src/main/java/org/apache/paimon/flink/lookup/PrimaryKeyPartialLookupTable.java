@@ -47,7 +47,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     private final TableFileMonitor fileMonitor;
 
-    private final ProjectedRow projectedKey;
+    @Nullable private final ProjectedRow keyRearrange;
 
     public PrimaryKeyPartialLookupTable(
             FileStoreTable table,
@@ -71,12 +71,17 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                         .withIOManager(new IOManagerImpl(tempPath.toString()));
         this.extractor = new FixedBucketFromPkExtractor(table.schema());
         this.fileMonitor = new TableFileMonitor(table, predicate);
-        this.projectedKey =
-                ProjectedRow.from(
-                        table.primaryKeys().stream()
-                                .map(joinKey::indexOf)
-                                .mapToInt(value -> value)
-                                .toArray());
+
+        ProjectedRow keyRearrange = null;
+        if (!table.primaryKeys().equals(joinKey)) {
+            keyRearrange =
+                    ProjectedRow.from(
+                            table.primaryKeys().stream()
+                                    .map(joinKey::indexOf)
+                                    .mapToInt(value -> value)
+                                    .toArray());
+        }
+        this.keyRearrange = keyRearrange;
     }
 
     @Override
@@ -86,7 +91,9 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public List<InternalRow> get(InternalRow key) throws IOException {
-        key = projectedKey.replaceRow(key);
+        if (keyRearrange != null) {
+            key = keyRearrange.replaceRow(key);
+        }
         extractor.setRecord(key);
         int bucket = extractor.bucket();
         BinaryRow partition = extractor.partition();
