@@ -37,6 +37,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
@@ -252,6 +253,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
         Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
@@ -270,7 +272,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.indexIncrement().newIndexFiles().stream()
                         .map(IndexFileMeta::fileName)
-                        .map(pathFactory::toPath)
+                        .map(indexFileFactory::toPath)
                         .forEach(files::add);
             }
         }
