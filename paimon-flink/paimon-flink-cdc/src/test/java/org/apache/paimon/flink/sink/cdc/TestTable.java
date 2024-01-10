@@ -19,7 +19,11 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -29,7 +33,6 @@ import org.apache.paimon.types.RowType;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.HashSet;
-import java.util.Iterator;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Map;
@@ -185,23 +188,40 @@ public class TestTable {
         return events;
     }
 
-    public void assertResult(TableSchema schema, Iterator<InternalRow> it) {
+    public void assertResult(FileStoreTable table) throws Exception {
         Map<Integer, Map<String, String>> actual = new HashMap<>();
-        while (it.hasNext()) {
-            InternalRow row = it.next();
-            Map<String, String> fields = new HashMap<>();
-            for (int i = 0; i < schema.fieldNames().size(); i++) {
-                if (!row.isNullAt(i)) {
-                    fields.put(
-                            schema.fieldNames().get(i),
-                            String.valueOf(
-                                    schema.fields().get(i).type().equals(DataTypes.BIGINT())
-                                            ? row.getLong(i)
-                                            : row.getInt(i)));
+        while (true) {
+            actual.clear();
+            table = table.copyWithLatestSchema();
+            TableSchema schema = table.schema();
+            ReadBuilder readBuilder = table.newReadBuilder();
+            TableScan.Plan plan = readBuilder.newScan().plan();
+
+            try (RecordReaderIterator<InternalRow> it =
+                    new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
+                while (it.hasNext()) {
+                    InternalRow row = it.next();
+                    Map<String, String> fields = new HashMap<>();
+                    for (int i = 0; i < schema.fieldNames().size(); i++) {
+                        if (!row.isNullAt(i)) {
+                            fields.put(
+                                    schema.fieldNames().get(i),
+                                    String.valueOf(
+                                            schema.fields().get(i).type().equals(DataTypes.BIGINT())
+                                                    ? row.getLong(i)
+                                                    : row.getInt(i)));
+                        }
+                    }
+                    actual.put(Integer.valueOf(fields.get("k")), fields);
                 }
             }
-            actual.put(Integer.valueOf(fields.get("k")), fields);
+
+            if (actual.size() == expected.size()) {
+                assertThat(actual).isEqualTo(expected);
+                break;
+            }
+
+            Thread.sleep(500);
         }
-        assertThat(actual).isEqualTo(expected);
     }
 }

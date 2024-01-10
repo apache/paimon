@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
@@ -29,15 +28,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -55,7 +51,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_PARALLELISM;
@@ -86,7 +81,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         innerTestRandomCdcEvents(() -> -1, true);
     }
 
-    private void innerTestRandomCdcEvents(Supplier<Integer> bucket, boolean isAppendTable)
+    private void innerTestRandomCdcEvents(Supplier<Integer> bucket, boolean unawareBucketMode)
             throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
@@ -111,7 +106,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             random.nextInt(maxSchemaChanges) + 1,
                             random.nextInt(maxPartitions) + 1,
                             random.nextInt(maxKeys) + 1,
-                            isAppendTable);
+                            unawareBucketMode);
             testTables.add(testTable);
 
             Path tablePath;
@@ -143,9 +138,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             fileIO,
                             testTable.initialRowType(),
                             Collections.singletonList("pt"),
-                            Arrays.asList("pt", "k"),
-                            bucket.get(),
-                            isAppendTable);
+                            unawareBucketMode ? Collections.emptyList() : Arrays.asList("pt", "k"),
+                            bucket.get());
             fileStoreTables.add(fileStoreTable);
         }
 
@@ -179,32 +173,17 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 10, 10000);
-
-        if (!isAppendTable) {
-            env.execute();
-        } else {
-            // When the unaware bucket table is synchronized, it creates a topology and compacts, so
-            // the task does not terminate.In the test task, we are given enough time to execute the
-            // job.
+        if (unawareBucketMode) {
+            // there's a compact operator which won't terminate
             env.executeAsync();
-            long waitResultTime = TimeUnit.SECONDS.toMillis(60);
-            Thread.sleep(waitResultTime);
+        } else {
+            env.execute();
         }
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
-
-        for (int i = 0; i < numTables; i++) {
-            FileStoreTable table = fileStoreTables.get(i).copyWithLatestSchema();
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-            TableSchema schema = schemaManager.latest().get();
-
-            ReadBuilder readBuilder = table.newReadBuilder();
-            TableScan.Plan plan = readBuilder.newScan().plan();
-            try (RecordReaderIterator<InternalRow> it =
-                    new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
-                testTables.get(i).assertResult(schema, it);
-            }
+        for (int i = 0; i < fileStoreTables.size(); i++) {
+            testTables.get(i).assertResult(fileStoreTables.get(i));
         }
     }
 
@@ -214,8 +193,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
             RowType rowType,
             List<String> partitions,
             List<String> primaryKeys,
-            int numBucket,
-            boolean isAppendTable)
+            int numBucket)
             throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, numBucket);
@@ -226,12 +204,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(fileIO, tablePath),
-                        new Schema(
-                                rowType.getFields(),
-                                partitions,
-                                isAppendTable ? Collections.emptyList() : primaryKeys,
-                                conf.toMap(),
-                                ""));
+                        new Schema(rowType.getFields(), partitions, primaryKeys, conf.toMap(), ""));
         return FileStoreTableFactory.create(fileIO, tablePath, tableSchema);
     }
 
