@@ -87,13 +87,9 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
         }
 
         try {
-            write(optionalConverted.get());
+            write.write(optionalConverted.get());
         } catch (Exception e) {
             throw new IOException(e);
         }
-    }
-
-    protected void write(GenericRow row) throws Exception {
-        write.write(row);
     }
 }

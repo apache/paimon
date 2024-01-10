@@ -18,11 +18,12 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
+
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
 /** A {@link PrepareCommitOperator} to write {@link CdcRecord} to unaware-bucket mode table. */
 public class CdcUnawareBucketWriteOperator extends CdcRecordStoreWriteOperator {
@@ -35,10 +36,10 @@ public class CdcUnawareBucketWriteOperator extends CdcRecordStoreWriteOperator {
     }
 
     @Override
-    protected void write(GenericRow row) throws Exception {
+    public void processElement(StreamRecord<CdcRecord> element) throws Exception {
         // only accepts INSERT record
-        if (row.getRowKind() == RowKind.INSERT) {
-            write.write(row);
+        if (element.getValue().kind() == RowKind.INSERT) {
+            super.processElement(element);
         }
     }
 }
