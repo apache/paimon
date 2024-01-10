@@ -200,6 +200,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                 r.after());
                     }
                     levels.update(r.before(), r.after());
+                    reportLevel0FileCount();
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Levels in compact manager updated. Current runs are\n{}",
