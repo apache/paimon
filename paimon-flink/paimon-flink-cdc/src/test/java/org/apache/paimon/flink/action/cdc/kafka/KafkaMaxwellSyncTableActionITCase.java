@@ -18,15 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
-
-import java.util.Map;
-
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
-import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCase {
@@ -87,38 +80,9 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCas
         testComputedColumn(MAXWELL);
     }
 
-
     @Test
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
-        String topic = "watermark";
-        createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, readLines("kafka/maxwell/table/watermark/maxwell-data-1.txt"));
-
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "maxwell-json");
-        kafkaConfig.put(TOPIC.key(), topic);
-
-        Map<String, String> config = getBasicTableConfig();
-        config.put("tag.automatic-creation", "watermark");
-        config.put("tag.creation-period", "hourly");
-        config.put("scan.watermark.alignment.group", "alignment-group-1");
-        config.put("scan.watermark.alignment.max-drift", "20 s");
-        config.put("scan.watermark.alignment.update-interval", "1 s");
-
-        KafkaSyncTableAction action =
-            syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
-        runActionWithDefaultEnv(action);
-
-        AbstractFileStoreTable table =
-            (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
-        while (true) {
-            if (table.snapshotManager().snapshotCount() > 0
-                && table.snapshotManager().latestSnapshot().watermark()
-                != -9223372036854775808L) {
-                return;
-            }
-            Thread.sleep(1000);
-        }
+        testWaterMarkSyncTable(MAXWELL);
     }
 }

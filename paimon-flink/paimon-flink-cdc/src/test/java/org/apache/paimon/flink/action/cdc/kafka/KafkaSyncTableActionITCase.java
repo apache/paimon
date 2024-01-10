@@ -18,15 +18,20 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Map;
+import org.apache.flink.configuration.Configuration;
+
+import java.util.*;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_MODE;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
@@ -38,7 +43,10 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.ScanStartupMode.TIMESTAMP;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
+import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
@@ -584,5 +592,71 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         "+I[101, scooter, Small 2-wheel scooter, 3.14]",
                         "+I[102, car battery, 12V car battery, 8.1]");
         waitForResult(expectedReplace, table, rowType, primaryKeys);
+    }
+
+    public void testKafkaBuildSchemaWithDelete(String format) throws Exception {
+        final String topic = "test_kafka_schema";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Debezium json into Kafka -------------------
+        List<String> lines =
+                readLines(
+                        String.format(
+                                "kafka/%s/table/schema/schemaevolution/%s-data-4.txt",
+                                format, format));
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
+        }
+        Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
+        kafkaConfig.setString(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.setString(TOPIC.key(), topic);
+
+        Schema kafkaSchema =
+                MessageQueueSchemaUtils.getSchema(
+                        getKafkaEarliestConsumer(kafkaConfig),
+                        getDataFormat(kafkaConfig),
+                        TypeMapping.defaultMapping());
+        List<DataField> fields = new ArrayList<>();
+        // {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight": 3.14}
+        fields.add(new DataField(0, "id", DataTypes.STRING()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "description", DataTypes.STRING()));
+        fields.add(new DataField(3, "weight", DataTypes.STRING()));
+        assertThat(kafkaSchema.fields()).isEqualTo(fields);
+    }
+
+    public void testWaterMarkSyncTable(String format) throws Exception {
+        String topic = "watermark";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(
+                topic,
+                readLines(String.format("kafka/%s/table/watermark/%s-data-1.txt", format, format)));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        Map<String, String> config = getBasicTableConfig();
+        config.put("tag.automatic-creation", "watermark");
+        config.put("tag.creation-period", "hourly");
+        config.put("scan.watermark.alignment.group", "alignment-group-1");
+        config.put("scan.watermark.alignment.max-drift", "20 s");
+        config.put("scan.watermark.alignment.update-interval", "1 s");
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
+        runActionWithDefaultEnv(action);
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        while (true) {
+            if (table.snapshotManager().snapshotCount() > 0
+                    && table.snapshotManager().latestSnapshot().watermark()
+                            != -9223372036854775808L) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 }
