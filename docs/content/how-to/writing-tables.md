@@ -331,7 +331,7 @@ For more information of drop_partition, see
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table/merge-engine#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table/merge-engine#partial-update" >}}) to support this feature.
 {{< /hint >}}
 
 {{< hint warning >}}
@@ -437,7 +437,7 @@ For more information of 'delete', see
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) to support this feature.
+2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table/merge-engine#deduplicate" >}}) to support this feature.
    {{< /hint >}}
 
 {{< hint warning >}}

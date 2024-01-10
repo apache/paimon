@@ -452,16 +452,16 @@ LSM tree organizes files into several sorted runs. A sorted run consists of one 
 By default, sorted runs number depends on `num-sorted-run.compaction-trigger`, see [Compaction for Primary Key Table]({{< ref "/maintenance/write-performance#compaction" >}}),
 this means that there are at least 5 files in a bucket. If you want to reduce this number, you can keep fewer files, but write performance may suffer.
 
-### Understand Files for Append-Only Table
+### Understand Files for Append Queue Table
 
-By default, Append-Only also does automatic compaction to reduce the number of small files.
+By default, Append also does automatic compaction to reduce the number of small files.
 
-However, for Bucket's Append-only table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Compaction for Append-Only Table]({{< ref "/concepts/append-only-table#compaction" >}}).
+However, for Bucket's Append table, it will only compact the files within the Bucket for sequential
+purposes, which may keep more small files. See [Append Queue Table]({{< ref "/concepts/append-table/append-queue-table" >}}).
 
 ### Understand Full-Compaction
 
-Maybe you think the 5 files for the primary key table are actually okay, but the Append-Only table (bucket)
+Maybe you think the 5 files for the primary key table are actually okay, but the Append table (bucket)
 may have 50 small files in a single bucket, which is very difficult to accept. Worse still, partitions that
 are no longer active also keep so many small files.
 

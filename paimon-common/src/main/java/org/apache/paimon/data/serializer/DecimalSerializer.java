@@ -23,6 +23,7 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 
 import java.io.IOException;
+import java.math.BigDecimal;
 
 /** Serializer for {@link Decimal}. */
 public final class DecimalSerializer implements Serializer<Decimal> {
@@ -62,6 +63,16 @@ public final class DecimalSerializer implements Serializer<Decimal> {
             byte[] bytes = BinarySerializer.INSTANCE.deserialize(source);
             return Decimal.fromUnscaledBytes(bytes, precision, scale);
         }
+    }
+
+    @Override
+    public String serializeToString(Decimal record) {
+        return record.toString();
+    }
+
+    @Override
+    public Decimal deserializeFromString(String s) {
+        return Decimal.fromBigDecimal(new BigDecimal(s), precision, scale);
     }
 
     @Override

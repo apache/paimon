@@ -33,7 +33,11 @@ import org.apache.hadoop.mapred.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 /**
  * Base {@link RecordReader} for paimon. Reads {@link KeyValue}s from data files and picks out
@@ -67,9 +71,20 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
             List<String> selectedColumns,
             @Nullable String tagToPartField)
             throws IOException {
-        if (!paimonColumns.equals(selectedColumns)) {
+
+        LinkedHashMap<String, Integer> paimonColumnIndexMap =
+                IntStream.range(0, paimonColumns.size())
+                        .boxed()
+                        .collect(
+                                Collectors.toMap(
+                                        index -> paimonColumns.get(index).toLowerCase(),
+                                        index -> index,
+                                        (existing, replacement) -> existing,
+                                        LinkedHashMap::new));
+
+        if (!new ArrayList<>(paimonColumnIndexMap.keySet()).equals(selectedColumns)) {
             readBuilder.withProjection(
-                    selectedColumns.stream().mapToInt(paimonColumns::indexOf).toArray());
+                    selectedColumns.stream().mapToInt(paimonColumnIndexMap::get).toArray());
         }
 
         if (hiveColumns.equals(selectedColumns)) {

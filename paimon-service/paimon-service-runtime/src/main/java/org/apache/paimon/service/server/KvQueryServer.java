@@ -18,14 +18,14 @@
 
 package org.apache.paimon.service.server;
 
-import org.apache.paimon.lookup.QueryLookup;
-import org.apache.paimon.lookup.QueryServer;
+import org.apache.paimon.query.QueryServer;
 import org.apache.paimon.service.messages.KvRequest;
 import org.apache.paimon.service.messages.KvResponse;
 import org.apache.paimon.service.network.AbstractServerHandler;
 import org.apache.paimon.service.network.NetworkServer;
 import org.apache.paimon.service.network.messages.MessageSerializer;
 import org.apache.paimon.service.network.stats.ServiceRequestStats;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -40,44 +40,39 @@ public class KvQueryServer extends NetworkServer<KvRequest, KvResponse> implemen
 
     private static final Logger LOG = LoggerFactory.getLogger(KvQueryServer.class);
 
-    /** The {@link QueryLookup} to query. */
-    private final QueryLookup lookup;
-
+    private final int serverId;
+    private final int numServers;
+    private final TableQuery lookup;
     private final ServiceRequestStats stats;
 
-    private MessageSerializer<KvRequest, KvResponse> serializer;
-
     public KvQueryServer(
+            final int serverId,
+            final int numServers,
             final String bindAddress,
             final Iterator<Integer> bindPortIterator,
             final Integer numEventLoopThreads,
             final Integer numQueryThreads,
-            final QueryLookup lookup,
+            final TableQuery lookup,
             final ServiceRequestStats stats) {
-
         super(
                 "Kv Query Server",
                 bindAddress,
                 bindPortIterator,
                 numEventLoopThreads,
                 numQueryThreads);
+        this.serverId = serverId;
+        this.numServers = numServers;
         this.stats = Preconditions.checkNotNull(stats);
         this.lookup = Preconditions.checkNotNull(lookup);
     }
 
     @Override
     public AbstractServerHandler<KvRequest, KvResponse> initializeHandler() {
-        this.serializer =
+        MessageSerializer<KvRequest, KvResponse> serializer =
                 new MessageSerializer<>(
                         new KvRequest.KvRequestDeserializer(),
                         new KvResponse.KvResponseDeserializer());
-        return new KvServerHandler(this, lookup, serializer, stats);
-    }
-
-    public MessageSerializer<KvRequest, KvResponse> getSerializer() {
-        Preconditions.checkState(
-                serializer != null, "Server " + getServerName() + " has not been started.");
-        return serializer;
+        return new KvServerHandler(this, serverId, numServers, lookup, serializer, stats);
     }
 
     @Override

@@ -66,6 +66,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final String commitUser;
     protected final SnapshotManager snapshotManager;
     private final FileStoreScan scan;
+    private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
 
     @Nullable protected IOManager ioManager;
@@ -87,7 +88,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             String tableName,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            int writerNumberMax) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
@@ -96,6 +98,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.pathFactory = pathFactory;
+        this.writerNumberMax = writerNumberMax;
     }
 
     @Override
@@ -327,11 +330,23 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 bucket, k -> createWriterContainer(partition.copy(), bucket, ignorePreviousFiles));
     }
 
+    private long writerNumber() {
+        return writers.values().stream().mapToLong(e -> e.values().size()).sum();
+    }
+
     @VisibleForTesting
     public WriterContainer<T> createWriterContainer(
             BinaryRow partition, int bucket, boolean ignorePreviousFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Creating writer for partition {}, bucket {}", partition, bucket);
+        }
+
+        if (!isStreamingMode && writerNumber() >= writerNumberMax) {
+            try {
+                forceBufferSpill();
+            } catch (Exception e) {
+                throw new RuntimeException("Error happens while force buffer spill", e);
+            }
         }
 
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
@@ -422,6 +437,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor);
 
+    // force buffer spill to avoid out of memory in batch mode
+    protected void forceBufferSpill() throws Exception {}
+
     /**
      * {@link RecordWriter} with the snapshot id it is created upon and the identifier of its last
      * modified commit.
@@ -443,5 +461,10 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                     baseSnapshotId == null ? Snapshot.FIRST_SNAPSHOT_ID - 1 : baseSnapshotId;
             this.lastModifiedCommitIdentifier = Long.MIN_VALUE;
         }
+    }
+
+    @VisibleForTesting
+    Map<BinaryRow, Map<Integer, WriterContainer<T>>> writers() {
+        return writers;
     }
 }

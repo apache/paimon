@@ -274,11 +274,24 @@ public class FlinkConnectorOptions {
                     .defaultValue(false)
                     .withDescription("Whether to enable async lookup join.");
 
+    public static final ConfigOption<Integer> LOOKUP_BOOTSTRAP_PARALLELISM =
+            ConfigOptions.key("lookup.bootstrap-parallelism")
+                    .intType()
+                    .defaultValue(4)
+                    .withDescription(
+                            "The parallelism for bootstrap in a single task for lookup join.");
+
     public static final ConfigOption<Integer> LOOKUP_ASYNC_THREAD_NUMBER =
             ConfigOptions.key("lookup.async-thread-number")
                     .intType()
                     .defaultValue(16)
                     .withDescription("The thread number for lookup async.");
+
+    public static final ConfigOption<LookupCacheMode> LOOKUP_CACHE_MODE =
+            ConfigOptions.key("lookup.cache")
+                    .enumType(LookupCacheMode.class)
+                    .defaultValue(LookupCacheMode.AUTO)
+                    .withDescription("The cache mode of lookup join.");
 
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
@@ -314,6 +327,15 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
+    }
+
+    /** The mode of lookup cache. */
+    public enum LookupCacheMode {
+        /** Auto mode, try to use partial mode. */
+        AUTO,
+
+        /** Use full caching mode. */
+        FULL
     }
 
     /** Watermark emit strategy for scan. */
