@@ -467,7 +467,7 @@ change type) in two ways:
 **Example:**
 
 ```scala
-// way1
+// Option 1
 val query1 = spark.readStream
   .format("paimon")
   .table("`table_name$audit_log`")
@@ -475,7 +475,7 @@ val query1 = spark.readStream
   .format("console")
   .start()
 
-// way2
+// Option 2
 val query2 = spark.readStream
   .format("paimon")
   .option("read.changelog", "true")
