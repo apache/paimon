@@ -75,6 +75,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
         this.metrics = metrics;
+        reportLevel0FileCount();
     }
 
     @Override
@@ -91,6 +92,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
+        reportLevel0FileCount();
     }
 
     @Override
@@ -205,6 +207,12 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                     }
                 });
         return result;
+    }
+
+    private void reportLevel0FileCount() {
+        if (metrics != null) {
+            metrics.reportLevel0FileCount(levels.level0().size());
+        }
     }
 
     @Override
