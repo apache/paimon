@@ -18,33 +18,22 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.LogSinkFunction;
+import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.UnawareBucketSink;
 import org.apache.paimon.table.AppendOnlyFileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
-import java.util.Map;
-
 /** CDC Sink for unaware bucket table. */
-public class CdcUnawareBucketWriteSink extends UnawareBucketSink {
+public class CdcUnawareBucketSink extends UnawareBucketSink<CdcRecord> {
 
-    public CdcUnawareBucketWriteSink(AppendOnlyFileStoreTable table, Integer parallelism) {
+    public CdcUnawareBucketSink(AppendOnlyFileStoreTable table, Integer parallelism) {
         super(table, null, null, parallelism, false);
     }
 
-    public CdcUnawareBucketWriteSink(
-            AppendOnlyFileStoreTable table,
-            Integer parallelism,
-            Map<String, String> overwritePartitions,
-            LogSinkFunction logSinkFunction,
-            boolean boundedInput) {
-        super(table, overwritePartitions, logSinkFunction, parallelism, boundedInput);
-    }
-
     @Override
-    protected OneInputStreamOperator createWriteOperator(
+    protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
         return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
     }

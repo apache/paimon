@@ -18,80 +18,28 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.sink.PrepareCommitOperator;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
-import org.apache.paimon.flink.sink.TableWriteOperator;
-import org.apache.paimon.options.ConfigOption;
-import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 
-import org.apache.flink.runtime.state.StateInitializationContext;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 
-import java.io.IOException;
-import java.time.Duration;
-import java.util.Optional;
-
-import static org.apache.paimon.flink.sink.cdc.CdcRecordUtils.toGenericRow;
-
-/** A {@link PrepareCommitOperator} to write {@link CdcRecord} with bucket. */
-public class CdcUnawareBucketWriteOperator extends TableWriteOperator<CdcRecord> {
-
-    private static final long serialVersionUID = 1L;
-
-    public static final ConfigOption<Duration> RETRY_SLEEP_TIME =
-            ConfigOptions.key("cdc.retry-sleep-time")
-                    .durationType()
-                    .defaultValue(Duration.ofMillis(500));
-
-    protected final long retrySleepMillis;
+/** A {@link PrepareCommitOperator} to write {@link CdcRecord} to unaware-bucket mode table. */
+public class CdcUnawareBucketWriteOperator extends CdcRecordStoreWriteOperator {
 
     public CdcUnawareBucketWriteOperator(
             FileStoreTable table,
             StoreSinkWrite.Provider storeSinkWriteProvider,
             String initialCommitUser) {
         super(table, storeSinkWriteProvider, initialCommitUser);
-        this.retrySleepMillis =
-                table.coreOptions().toConfiguration().get(RETRY_SLEEP_TIME).toMillis();
-    }
-
-    @Override
-    public void initializeState(StateInitializationContext context) throws Exception {
-        table = table.copyWithLatestSchema();
-        super.initializeState(context);
-    }
-
-    @Override
-    protected boolean containLogSystem() {
-        return false;
     }
 
     @Override
     public void processElement(StreamRecord<CdcRecord> element) throws Exception {
-        CdcRecord record = element.getValue();
-        Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
-        if (!optionalConverted.isPresent()) {
-            while (true) {
-                table = table.copyWithLatestSchema();
-                optionalConverted = toGenericRow(record, table.schema().fields());
-                if (optionalConverted.isPresent()) {
-                    break;
-                }
-                Thread.sleep(retrySleepMillis);
-            }
-            write.replace(table);
-        }
-
-        // Only insert type messages are processed
-        try {
-            GenericRow cdcDataRow = optionalConverted.get();
-            if (cdcDataRow.getRowKind() == RowKind.INSERT) {
-                write.write(cdcDataRow);
-            }
-        } catch (Exception e) {
-            throw new IOException(e);
+        // only accepts INSERT record
+        if (element.getValue().kind() == RowKind.INSERT) {
+            super.processElement(element);
         }
     }
 }
