@@ -44,8 +44,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
             new HashMap<>();
 
     static {
-        extractorMap.put(MongoDBSource.class, MysqlCdcTimestampExtractor::new);
-        extractorMap.put(MySqlSource.class, MongoDBCdcTimestampExtractor::new);
+        extractorMap.put(MongoDBSource.class, MongoDBCdcTimestampExtractor::new);
+        extractorMap.put(MySqlSource.class, MysqlCdcTimestampExtractor::new);
         extractorMap.put(PulsarSource.class, MessageQueueCdcTimestampExtractor::new);
         extractorMap.put(KafkaSource.class, MessageQueueCdcTimestampExtractor::new);
     }
@@ -98,7 +98,9 @@ public class CdcTimestampExtractorFactory implements Serializable {
                 return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
             }
             throw new RuntimeException(
-                    "Unsupported messageQueue json format for timestamp extraction");
+                    String.format(
+                            "Failed to extract timestamp: The JSON format of the message queue is unsupported. Record details: %s",
+                            record));
         }
     }
 
