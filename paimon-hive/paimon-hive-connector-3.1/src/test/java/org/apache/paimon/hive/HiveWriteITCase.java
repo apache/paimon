@@ -164,6 +164,7 @@ public class HiveWriteITCase {
     public void testInsertTimestampAndDate() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
+        // test different precisions
         int precision = ThreadLocalRandom.current().nextInt(10);
         String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
 
@@ -185,15 +186,6 @@ public class HiveWriteITCase {
                         outputTableName, fraction));
 
         List<String> select = hiveShell.executeQuery("SELECT * FROM " + outputTableName);
-        assertThat(select)
-                .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
-
-        // JavaTimestampObjectInspector#set(Object o, Timestamp value) fixed
-        select =
-                hiveShell.executeQuery(
-                        String.format(
-                                "SELECT * FROM %s WHERE a = '2023-01-13 20:00:01%s'",
-                                outputTableName, fraction));
         assertThat(select)
                 .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
     }
