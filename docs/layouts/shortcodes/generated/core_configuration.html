@@ -630,6 +630,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The maximum number of tags to retain.</td>
         </tr>
         <tr>
+            <td><h5>snapshot.watermark-idle-timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
+        </tr>
+        <tr>
             <td><h5>target-file-size</h5></td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>

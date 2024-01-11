@@ -102,7 +102,7 @@ public class TagAutoCreation {
     }
 
     public boolean forceCreatingSnapshot() {
-        if (timeExtractor instanceof WatermarkExtractor && !idlenessTimeout.isZero()) {
+        if (timeExtractor instanceof WatermarkExtractor && idlenessTimeout != null) {
             return checkIdleTimeout();
         }
         return timeExtractor instanceof ProcessTimeExtractor

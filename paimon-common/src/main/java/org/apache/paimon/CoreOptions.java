@@ -952,10 +952,9 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
-                    .defaultValue(Duration.ofMillis(0))
+                    .noDefaultValue()
                     .withDescription(
-                            "When a source remains idle for the specified timeout duration in the context of watermarking."
-                                    + " It triggers the advancement of snapshots, thereby promoting tag creation.");
+                            "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
 
     public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
             key("parquet.enable.dictionary")
