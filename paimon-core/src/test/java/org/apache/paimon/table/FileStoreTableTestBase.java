@@ -942,15 +942,16 @@ public abstract class FileStoreTableTestBase {
         table.createBranch("test-branch", "test-tag");
 
         // verify that branch file exist
-        BranchManager branchManager = new BranchManager(new TraceableFileIO(), tablePath);
+        TraceableFileIO fileIO = new TraceableFileIO();
+        BranchManager branchManager = new BranchManager(fileIO, tablePath,new SnapshotManager(fileIO,tablePath),new TagManager(fileIO,tablePath), new SchemaManager(fileIO,tablePath));
         assertThat(branchManager.branchExists("test-branch")).isTrue();
         // listFilesRecursively(new File(branchManager.getBranchPath("test-branch").substring(9)));
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),
-                        table.branchManager().branchTagPath("test-branch", "test-tag"));
+                        new TraceableFileIO(),tagManager.branchTagPath(table.branchManager().getBranchPath("test-branch"),"test-tag")
+                       );
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
@@ -1022,7 +1023,8 @@ public abstract class FileStoreTableTestBase {
         table.deleteBranch("branch1");
 
         // verify that branch file not exist
-        BranchManager branchManager = new BranchManager(new TraceableFileIO(), tablePath);
+        TraceableFileIO fileIO = new TraceableFileIO();
+        BranchManager branchManager = new BranchManager(fileIO, tablePath,new SnapshotManager(fileIO,tablePath),new TagManager(fileIO,tablePath), new SchemaManager(fileIO,tablePath));
         assertThat(branchManager.branchExists("branch1")).isFalse();
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))
