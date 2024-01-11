@@ -21,10 +21,11 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.query.RemoteTableQuery;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
@@ -33,6 +34,7 @@ import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
+import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
 import java.util.Collections;
@@ -47,16 +49,13 @@ import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 /** Lookup table for primary key which supports to read the LSM tree directly. */
 public class PrimaryKeyPartialLookupTable implements LookupTable {
 
+    private final QueryExecutor queryExecutor;
     private final FixedBucketFromPkExtractor extractor;
-
-    private final TableQuery tableQuery;
-
-    private final StreamTableScan scan;
-
     @Nullable private final ProjectedRow keyRearrange;
 
-    public PrimaryKeyPartialLookupTable(
-            FileStoreTable table, int[] projection, File tempPath, List<String> joinKey) {
+    private PrimaryKeyPartialLookupTable(
+            QueryExecutor queryExecutor, FileStoreTable table, List<String> joinKey) {
+        this.queryExecutor = queryExecutor;
         if (table.partitionKeys().size() > 0) {
             throw new UnsupportedOperationException(
                     "The partitioned table are not supported in partial cache mode.");
@@ -67,16 +66,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
                     "Unsupported mode for partial lookup: " + table.bucketMode());
         }
 
-        this.tableQuery =
-                table.newTableQuery()
-                        .withValueProjection(Projection.of(projection).toNestedIndexes())
-                        .withIOManager(new IOManagerImpl(tempPath.toString()));
         this.extractor = new FixedBucketFromPkExtractor(table.schema());
-
-        Map<String, String> dynamicOptions = new HashMap<>();
-        dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
-        dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
-        this.scan = table.copy(dynamicOptions).newReadBuilder().newStreamScan();
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -104,7 +94,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         int bucket = extractor.bucket();
         BinaryRow partition = extractor.partition();
 
-        InternalRow kv = tableQuery.lookup(partition, bucket, key);
+        InternalRow kv = queryExecutor.lookup(partition, bucket, key);
         if (kv == null) {
             return Collections.emptyList();
         } else {
@@ -114,28 +104,105 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
 
     @Override
     public void refresh() {
-        while (true) {
-            List<Split> splits = scan.plan().splits();
-            if (splits.isEmpty()) {
-                return;
-            }
-
-            for (Split split : splits) {
-                if (!(split instanceof DataSplit)) {
-                    throw new IllegalArgumentException("Unsupported split: " + split.getClass());
-                }
-                BinaryRow partition = ((DataSplit) split).partition();
-                int bucket = ((DataSplit) split).bucket();
-                List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
-                List<DataFileMeta> after = ((DataSplit) split).dataFiles();
-
-                tableQuery.refreshFiles(partition, bucket, before, after);
-            }
-        }
+        queryExecutor.refresh();
     }
 
     @Override
     public void close() throws IOException {
-        tableQuery.close();
+        queryExecutor.close();
+    }
+
+    public static PrimaryKeyPartialLookupTable createLocalTable(
+            FileStoreTable table, int[] projection, File tempPath, List<String> joinKey) {
+        LocalQueryExecutor queryExecutor = new LocalQueryExecutor(table, projection, tempPath);
+        return new PrimaryKeyPartialLookupTable(queryExecutor, table, joinKey);
+    }
+
+    public static PrimaryKeyPartialLookupTable createRemoteTable(
+            FileStoreTable table, int[] projection, List<String> joinKey) {
+        RemoveQueryExecutor queryExecutor = new RemoveQueryExecutor(table, projection);
+        return new PrimaryKeyPartialLookupTable(queryExecutor, table, joinKey);
+    }
+
+    private interface QueryExecutor extends Closeable {
+
+        InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
+
+        void refresh();
+    }
+
+    private static class LocalQueryExecutor implements QueryExecutor {
+
+        private final LocalTableQuery tableQuery;
+        private final StreamTableScan scan;
+
+        private LocalQueryExecutor(FileStoreTable table, int[] projection, File tempPath) {
+            this.tableQuery =
+                    table.newLocalTableQuery()
+                            .withValueProjection(Projection.of(projection).toNestedIndexes())
+                            .withIOManager(new IOManagerImpl(tempPath.toString()));
+
+            Map<String, String> dynamicOptions = new HashMap<>();
+            dynamicOptions.put(STREAM_SCAN_MODE.key(), FILE_MONITOR.getValue());
+            dynamicOptions.put(SCAN_BOUNDED_WATERMARK.key(), null);
+            this.scan = table.copy(dynamicOptions).newReadBuilder().newStreamScan();
+        }
+
+        @Override
+        public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
+                throws IOException {
+            return tableQuery.lookup(partition, bucket, key);
+        }
+
+        @Override
+        public void refresh() {
+            while (true) {
+                List<Split> splits = scan.plan().splits();
+                if (splits.isEmpty()) {
+                    return;
+                }
+
+                for (Split split : splits) {
+                    if (!(split instanceof DataSplit)) {
+                        throw new IllegalArgumentException(
+                                "Unsupported split: " + split.getClass());
+                    }
+                    BinaryRow partition = ((DataSplit) split).partition();
+                    int bucket = ((DataSplit) split).bucket();
+                    List<DataFileMeta> before = ((DataSplit) split).beforeFiles();
+                    List<DataFileMeta> after = ((DataSplit) split).dataFiles();
+
+                    tableQuery.refreshFiles(partition, bucket, before, after);
+                }
+            }
+        }
+
+        @Override
+        public void close() throws IOException {
+            tableQuery.close();
+        }
+    }
+
+    private static class RemoveQueryExecutor implements QueryExecutor {
+
+        private final RemoteTableQuery tableQuery;
+
+        private RemoveQueryExecutor(FileStoreTable table, int[] projection) {
+            this.tableQuery = new RemoteTableQuery(table).withValueProjection(projection);
+        }
+
+        @Override
+        public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
+                throws IOException {
+            return tableQuery.lookup(partition, bucket, key);
+        }
+
+        @Override
+        public void refresh() {}
+
+        @Override
+        public void close() throws IOException {
+            tableQuery.close();
+        }
     }
 }

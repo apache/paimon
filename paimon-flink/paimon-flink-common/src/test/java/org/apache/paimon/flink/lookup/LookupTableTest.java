@@ -472,7 +472,7 @@ public class LookupTableTest extends TableTestBase {
     public void testPartialLookupTable() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
-                new PrimaryKeyPartialLookupTable(
+                PrimaryKeyPartialLookupTable.createLocalTable(
                         dimTable,
                         new int[] {0, 1, 2},
                         tempDir.toFile(),
@@ -502,7 +502,7 @@ public class LookupTableTest extends TableTestBase {
     public void testPartialLookupTableWithProjection() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
-                new PrimaryKeyPartialLookupTable(
+                PrimaryKeyPartialLookupTable.createLocalTable(
                         dimTable,
                         new int[] {2, 1},
                         tempDir.toFile(),
@@ -527,7 +527,7 @@ public class LookupTableTest extends TableTestBase {
     public void testPartialLookupTableJoinKeyOrder() throws Exception {
         FileStoreTable dimTable = createDimTable();
         PrimaryKeyPartialLookupTable table =
-                new PrimaryKeyPartialLookupTable(
+                PrimaryKeyPartialLookupTable.createLocalTable(
                         dimTable,
                         new int[] {2, 1},
                         tempDir.toFile(),

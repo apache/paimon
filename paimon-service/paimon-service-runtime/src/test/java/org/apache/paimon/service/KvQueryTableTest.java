@@ -26,6 +26,7 @@ import org.apache.paimon.query.QueryLocationImpl;
 import org.apache.paimon.service.client.KvQueryClient;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -48,8 +49,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for remote lookup. */
 public class KvQueryTableTest extends PrimaryKeyTableTestBase {
 
-    private TableQuery query0;
-    private TableQuery query1;
+    private LocalTableQuery query0;
+    private LocalTableQuery query1;
 
     private KvQueryServer server0;
     private KvQueryServer server1;
@@ -59,8 +60,8 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     @BeforeEach
     public void beforeEach() {
         IOManager ioManager = IOManager.create(tempPath.toString());
-        this.query0 = table.newTableQuery().withIOManager(ioManager);
-        this.query1 = table.newTableQuery().withIOManager(ioManager);
+        this.query0 = table.newLocalTableQuery().withIOManager(ioManager);
+        this.query1 = table.newLocalTableQuery().withIOManager(ioManager);
 
         this.server0 = createServer(0, query0, 7777);
         this.server1 = createServer(1, query1, 7900);
@@ -190,7 +191,7 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
 
     private void write(int partition, int key, int value) throws Exception {
         int bucket = computeBucket(partition, key, value);
-        TableQuery query = select(row(partition), bucket, 2) == 0 ? query0 : query1;
+        LocalTableQuery query = select(row(partition), bucket, 2) == 0 ? query0 : query1;
         BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
         write.write(row(partition, key, value), bucket);
         CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
