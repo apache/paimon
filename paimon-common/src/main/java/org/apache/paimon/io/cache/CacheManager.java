@@ -59,12 +59,15 @@ public class CacheManager {
     }
 
     public MemorySegment getPage(
-            RandomAccessFile file, int pageNumber, Consumer<Integer> cleanCallback) {
+            RandomAccessFile file,
+            long fileLength,
+            int pageNumber,
+            Consumer<Integer> cleanCallback) {
         CacheKey key = new CacheKey(file, pageNumber);
         CacheValue value = cache.getIfPresent(key);
         while (value == null || value.isClosed) {
             try {
-                value = createValue(key, cleanCallback);
+                value = createValue(key, fileLength, cleanCallback);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -86,9 +89,9 @@ public class CacheManager {
         value.cleanCallback.accept(key.pageNumber);
     }
 
-    private CacheValue createValue(CacheKey key, Consumer<Integer> cleanCallback)
+    private CacheValue createValue(CacheKey key, long fileLength, Consumer<Integer> cleanCallback)
             throws IOException {
-        return new CacheValue(key.read(pageSize), cleanCallback);
+        return new CacheValue(key.read(fileLength, pageSize), cleanCallback);
     }
 
     private static class CacheKey {
@@ -101,10 +104,9 @@ public class CacheManager {
             this.pageNumber = pageNumber;
         }
 
-        private MemorySegment read(int pageSize) throws IOException {
-            long length = file.length();
+        private MemorySegment read(long fileLength, int pageSize) throws IOException {
             long pageAddress = (long) pageNumber * pageSize;
-            int len = (int) Math.min(pageSize, length - pageAddress);
+            int len = (int) Math.min(pageSize, fileLength - pageAddress);
             byte[] bytes = new byte[len];
             file.seek(pageAddress);
             file.readFully(bytes);

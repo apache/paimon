@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -153,7 +155,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
+            throw new Exception("Failed to write debezium data to Kafka.", e);
         }
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
@@ -192,7 +194,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         try {
             writeRecordsToKafka(topic, lines);
         } catch (Exception e) {
-            throw new Exception("Failed to write canal data to Kafka.", e);
+            throw new Exception("Failed to write debezium data to Kafka.", e);
         }
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
@@ -217,5 +219,39 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
         List<String> expected =
                 Collections.singletonList("+I[101, hammer, {\"row_key\":\"value\"}]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWaterMarkSyncTable() throws Exception {
+        String topic = "watermark";
+        createTestTopic(topic, 1, 1);
+        writeRecordsToKafka(topic, readLines("kafka/debezium/table/watermark/debezium-data-1.txt"));
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+
+        Map<String, String> config = getBasicTableConfig();
+        config.put("tag.automatic-creation", "watermark");
+        config.put("tag.creation-period", "hourly");
+        config.put("scan.watermark.alignment.group", "alignment-group-1");
+        config.put("scan.watermark.alignment.max-drift", "20 s");
+        config.put("scan.watermark.alignment.update-interval", "1 s");
+
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
+        runActionWithDefaultEnv(action);
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        while (true) {
+            if (table.snapshotManager().snapshotCount() > 0
+                    && table.snapshotManager().latestSnapshot().watermark()
+                            != -9223372036854775808L) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 }

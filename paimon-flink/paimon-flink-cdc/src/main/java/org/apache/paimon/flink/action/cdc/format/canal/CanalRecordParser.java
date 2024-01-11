@@ -125,21 +125,6 @@ public class CanalRecordParser extends RecordParser {
         return records;
     }
 
-    @Override
-    protected LinkedHashMap<String, DataType> extractPaimonFieldTypes() {
-        LinkedHashMap<String, String> originalFieldTypes = tryExtractOriginalFieldTypes();
-        if (originalFieldTypes != null) {
-            return toPaimonFieldTypes(originalFieldTypes);
-        }
-
-        // fall back to STRING type
-        ArrayNode records = getNodeAs(root, dataField(), ArrayNode.class);
-        checkNotNull(records, dataField());
-        JsonNode record = records.get(0);
-
-        return fillDefaultStringTypes(record);
-    }
-
     @Nullable
     private LinkedHashMap<String, String> tryExtractOriginalFieldTypes() {
         JsonNode schema = root.get(FIELD_MYSQL_TYPE);

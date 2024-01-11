@@ -66,10 +66,6 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
             for (IndexManifestEntry file : entries) {
                 if (file.kind() == FileKind.ADD) {
                     indexEntries.put(file.identifier(), file);
-                    if (file.indexFile().rowCount() == 0) {
-                        indexEntries.remove(file.identifier());
-                        fileIO.deleteQuietly(pathFactory.toPath(file.indexFile().fileName()));
-                    }
                 } else {
                     indexEntries.remove(file.identifier());
                 }

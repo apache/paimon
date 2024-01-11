@@ -40,6 +40,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -1054,7 +1055,7 @@ public class PreAggregationITCase {
     public static class FirstValueAggregation extends CatalogITCaseBase {
         @Override
         protected List<String> ddl() {
-            return Collections.singletonList(
+            return Arrays.asList(
                     "CREATE TABLE T ("
                             + "k INT,"
                             + "a INT,"
@@ -1066,6 +1067,15 @@ public class PreAggregationITCase {
                             + "'fields.b.aggregate-function'='first_value',"
                             + "'fields.c.aggregate-function'='first_not_null_value',"
                             + "'sequence.field'='a'"
+                            + ");",
+                    "CREATE TABLE T2 ("
+                            + "k INT,"
+                            + "v STRING,"
+                            + "PRIMARY KEY (k) NOT ENFORCED)"
+                            + "WITH ("
+                            + "'merge-engine' = 'aggregation',"
+                            + "'fields.v.aggregate-function' = 'first_value',"
+                            + "'fields.v.ignore-retract' = 'true'"
                             + ");");
         }
 
@@ -1108,6 +1118,27 @@ public class PreAggregationITCase {
             List<Row> result = batchSql("SELECT * FROM T");
             assertThat(result)
                     .containsExactlyInAnyOrder(Row.of(1, 2, null, "1"), Row.of(2, 2, "2", "2"));
+        }
+
+        @Test
+        public void testAggregatorResetWhenIgnoringRetract() {
+            int numRows = 100;
+            batchSql(
+                    "INSERT INTO T2 VALUES "
+                            + IntStream.range(0, numRows)
+                                    .mapToObj(i -> String.format("(%d, '%d')", i, i))
+                                    .collect(Collectors.joining(", ")));
+            batchSql(
+                    "INSERT INTO T2 VALUES "
+                            + IntStream.range(numRows / 2, numRows)
+                                    .mapToObj(i -> String.format("(%d, '%d')", i, i + numRows))
+                                    .collect(Collectors.joining(", ")));
+            List<Row> result = batchSql("SELECT * FROM T2");
+            assertThat(result)
+                    .containsExactlyInAnyOrder(
+                            IntStream.range(0, numRows)
+                                    .mapToObj(i -> Row.of(i, String.valueOf(i)))
+                                    .toArray(Row[]::new));
         }
     }
 

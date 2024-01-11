@@ -43,6 +43,10 @@ public interface SchemaChange extends Serializable {
         return new RemoveOption(key);
     }
 
+    static SchemaChange updateComment(@Nullable String comment) {
+        return new UpdateComment(comment);
+    }
+
     static SchemaChange addColumn(String fieldName, DataType dataType) {
         return addColumn(fieldName, dataType, null, null);
     }
@@ -156,6 +160,40 @@ public interface SchemaChange extends Serializable {
         @Override
         public int hashCode() {
             return Objects.hash(key);
+        }
+    }
+
+    /** A SchemaChange to Update table comment. */
+    final class UpdateComment implements SchemaChange {
+
+        private static final long serialVersionUID = 1L;
+
+        // If comment is null, means to remove comment
+        private final @Nullable String comment;
+
+        private UpdateComment(@Nullable String comment) {
+            this.comment = comment;
+        }
+
+        public @Nullable String comment() {
+            return comment;
+        }
+
+        @Override
+        public boolean equals(Object object) {
+            if (this == object) {
+                return true;
+            }
+            if (object == null || getClass() != object.getClass()) {
+                return false;
+            }
+            UpdateComment that = (UpdateComment) object;
+            return Objects.equals(comment, that.comment);
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(comment);
         }
     }
 

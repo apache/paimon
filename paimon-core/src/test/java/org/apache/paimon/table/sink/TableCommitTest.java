@@ -67,19 +67,28 @@ public class TableCommitTest {
     private static final Map<String, Set<Long>> commitCallbackResult = new ConcurrentHashMap<>();
 
     @Test
-    public void testCommitCallbackWithFailure() throws Exception {
+    public void testCommitCallbackWithFailureFixedBucket() throws Exception {
+        innerTestCommitCallbackWithFailure(1);
+    }
+
+    @Test
+    public void testCommitCallbackWithFailureDynamicBucket() throws Exception {
+        innerTestCommitCallbackWithFailure(-1);
+    }
+
+    private void innerTestCommitCallbackWithFailure(int bucket) throws Exception {
         int numIdentifiers = 30;
         String testId = UUID.randomUUID().toString();
         commitCallbackResult.put(testId, new HashSet<>());
 
         try {
-            testCommitCallbackWithFailureImpl(numIdentifiers, testId);
+            testCommitCallbackWithFailureImpl(bucket, numIdentifiers, testId);
         } finally {
             commitCallbackResult.remove(testId);
         }
     }
 
-    private void testCommitCallbackWithFailureImpl(int numIdentifiers, String testId)
+    private void testCommitCallbackWithFailureImpl(int bucket, int numIdentifiers, String testId)
             throws Exception {
         String failingName = UUID.randomUUID().toString();
         // no failure when creating table and writing data
@@ -94,6 +103,7 @@ public class TableCommitTest {
 
         Options conf = new Options();
         conf.set(CoreOptions.PATH, path);
+        conf.set(CoreOptions.BUCKET, bucket);
         conf.set(CoreOptions.COMMIT_CALLBACKS, TestCommitCallback.class.getName());
         conf.set(
                 CoreOptions.COMMIT_CALLBACK_PARAM
@@ -121,7 +131,11 @@ public class TableCommitTest {
         StreamTableWrite write = table.newWrite(commitUser);
         Map<Long, List<CommitMessage>> commitMessages = new HashMap<>();
         for (int i = 0; i < numIdentifiers; i++) {
-            write.write(GenericRow.of(i, i * 1000L));
+            if (bucket == -1) {
+                write.write(GenericRow.of(i, i * 1000L), 0);
+            } else {
+                write.write(GenericRow.of(i, i * 1000L));
+            }
             commitMessages.put((long) i, write.prepareCommit(true, i));
         }
         write.close();

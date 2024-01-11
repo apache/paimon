@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -192,5 +194,45 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
                         "+I[2, 8, very long string, 80000000000, NULL, NULL, NULL]",
                         "+I[1, 9, nine, 90000000000, 99999.999, [110, 105, 110, 101, 46, 98, 105, 110, 46, 108, 111, 110, 103], 9.00000000009]");
         waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWaterMarkSyncTable() throws Exception {
+        String topic = "watermark";
+        topics = Collections.singletonList(topic);
+        createTopic(topic, 1);
+        sendMessages(topic, getMessages("kafka/canal/table/watermark/canal-data-1.txt"));
+
+        Map<String, String> pulsarConfig = getBasicPulsarConfig();
+        pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            pulsarConfig.put(TOPIC.key(), topic);
+        } else {
+            pulsarConfig.put(TOPIC_PATTERN.key(), "schema_.*");
+        }
+        pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
+        Map<String, String> config = getBasicTableConfig();
+        config.put("tag.automatic-creation", "watermark");
+        config.put("tag.creation-period", "hourly");
+
+        PulsarSyncTableAction action =
+                syncTableActionBuilder(pulsarConfig)
+                        .withPartitionKeys("pt")
+                        .withPrimaryKeys("pt", "_id")
+                        .withTableConfig(config)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        while (true) {
+            if (table.snapshotManager().snapshotCount() > 0
+                    && table.snapshotManager().latestSnapshot().watermark()
+                            != -9223372036854775808L) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 }

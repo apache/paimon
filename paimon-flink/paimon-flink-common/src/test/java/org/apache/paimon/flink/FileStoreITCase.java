@@ -19,7 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.flink.sink.FileStoreSink;
+import org.apache.paimon.flink.sink.FixedBucketSink;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
 import org.apache.paimon.flink.source.ContinuousFileStoreSource;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
@@ -85,7 +85,7 @@ import static org.junit.jupiter.api.Assumptions.assumeTrue;
 
 /**
  * ITCase for {@link StaticFileStoreSource}, {@link ContinuousFileStoreSource} and {@link
- * FileStoreSink}.
+ * FixedBucketSink}.
  */
 @ExtendWith(ParameterizedTestExtension.class)
 public class FileStoreITCase extends AbstractTestBase {

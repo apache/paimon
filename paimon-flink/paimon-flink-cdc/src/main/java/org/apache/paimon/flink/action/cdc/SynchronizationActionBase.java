@@ -18,11 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
+import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.options.Options;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -32,10 +35,19 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
+
+import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
+import static org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.createExtractor;
 
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
@@ -123,9 +135,32 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     private DataStreamSource<String> buildDataStreamSource(Object source) {
         if (source instanceof Source) {
+            boolean isAutomaticWatermarkCreationEnabled =
+                    tableConfig.containsKey(CoreOptions.TAG_AUTOMATIC_CREATION.key())
+                            && Objects.equals(
+                                    tableConfig.get(CoreOptions.TAG_AUTOMATIC_CREATION.key()),
+                                    WATERMARK.toString());
+
+            Options options = Options.fromMap(tableConfig);
+            Duration idleTimeout = options.get(SCAN_WATERMARK_IDLE_TIMEOUT);
+            String watermarkAlignGroup = options.get(SCAN_WATERMARK_ALIGNMENT_GROUP);
+            WatermarkStrategy<String> watermarkStrategy =
+                    isAutomaticWatermarkCreationEnabled
+                            ? watermarkAlignGroup != null
+                                    ? new CdcWatermarkStrategy(createExtractor(source))
+                                            .withWatermarkAlignment(
+                                                    watermarkAlignGroup,
+                                                    options.get(SCAN_WATERMARK_ALIGNMENT_MAX_DRIFT),
+                                                    options.get(
+                                                            SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL))
+                                    : new CdcWatermarkStrategy(createExtractor(source))
+                            : WatermarkStrategy.noWatermarks();
+            if (idleTimeout != null) {
+                watermarkStrategy = watermarkStrategy.withIdleness(idleTimeout);
+            }
             return env.fromSource(
                     (Source<String, ?, ?>) source,
-                    WatermarkStrategy.noWatermarks(),
+                    watermarkStrategy,
                     syncJobHandler.provideSourceName());
         }
         if (source instanceof SourceFunction) {
