@@ -39,7 +39,10 @@ import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Stats;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
@@ -782,34 +785,37 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
         FileStoreCommitImpl fileStoreCommit = store.newCommit();
-
-        // Commit1
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
 
-        // Analyze1
+        // Analyze and check
         HashMap<String, ColStats> fakeColStatsMap = new HashMap<>();
         fakeColStatsMap.put("orderId", new ColStats(10L, 1L, 10L, 0L, 8L, 8L));
         Stats fakeStats = new Stats(10L, 1000L, fakeColStatsMap);
         fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
-
         Optional<Stats> readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
-        // Commit2
+        // New snapshot will inherit last snapshot's stats
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
-
-        // Inherit last snapshot's stats
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
-        // Analyze2
-        fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats(20L, 1L, 20L, 0L, 8L, 8L));
-        fakeStats = new Stats(20L, 2000L, fakeColStatsMap);
-        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
+        // When table schema is modified, new snapshot will not inherit last snapshot's stats
+        ArrayList<DataField> newFields =
+                new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
+        newFields.add(new DataField(-1, "newField", DataTypes.INT()));
+        store.mergeSchema(new RowType(false, newFields), true);
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isEmpty();
 
+        // We need to analyze again
+        fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", new ColStats(30L, 1L, 30L, 0L, 8L, 8L));
+        fakeStats = new Stats(30L, 3000L, fakeColStatsMap);
+        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);

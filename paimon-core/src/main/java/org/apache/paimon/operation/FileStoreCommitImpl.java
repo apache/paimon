@@ -781,7 +781,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             long latestSchemaId = schemaManager.latest().get().id();
 
-            // write new stats or inherit from latest snapshot
+            // write new stats or inherit from the previous snapshot
             String statsFileName = null;
             if (newStatsFileName != null) {
                 statsFileName = newStatsFileName;

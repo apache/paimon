@@ -33,7 +33,18 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 
-/* Col stats */
+/**
+ * Col stats, supports the following stats.
+ *
+ * <ul>
+ *   <li>distinctCount: the number of distinct values
+ *   <li>min: the minimum value of the column
+ *   <li>max: the maximum value of the column
+ *   <li>nullCount: the number of nulls
+ *   <li>avgLen: average column length
+ *   <li>maxLen: max column length
+ * </ul>
+ */
 public class ColStats {
 
     private static final String FIELD_DISTINCT_COUNT = "distinctCount";
@@ -103,7 +114,7 @@ public class ColStats {
     }
 
     public OptionalLong distinctCount() {
-        return OptionalUtils.of(distinctCount);
+        return OptionalUtils.ofNullable(distinctCount);
     }
 
     public Optional<Object> min() {
@@ -114,16 +125,16 @@ public class ColStats {
         return Optional.ofNullable(max);
     }
 
-    public OptionalLong NullCount() {
-        return OptionalUtils.of(nullCount);
+    public OptionalLong nullCount() {
+        return OptionalUtils.ofNullable(nullCount);
     }
 
     public OptionalLong avgLen() {
-        return OptionalUtils.of(avgLen);
+        return OptionalUtils.ofNullable(avgLen);
     }
 
     public OptionalLong maxLen() {
-        return OptionalUtils.of(maxLen);
+        return OptionalUtils.ofNullable(maxLen);
     }
 
     public void serializeFieldsToString(DataType dataType) {

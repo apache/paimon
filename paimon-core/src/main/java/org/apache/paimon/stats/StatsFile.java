@@ -46,9 +46,9 @@ public class StatsFile {
     }
 
     /**
-     * Write stats to stats file.
+     * Write stats to a stats file.
      *
-     * @return stats file name
+     * @return the written file name
      */
     public String write(Stats stats) {
         Path path = pathFactory.newPath();

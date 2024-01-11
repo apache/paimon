@@ -22,7 +22,7 @@ import java.util.OptionalLong;
 
 /** Utils for Optional. * */
 public class OptionalUtils {
-    public static OptionalLong of(Long value) {
+    public static OptionalLong ofNullable(Long value) {
         return value == null ? OptionalLong.empty() : OptionalLong.of(value);
     }
 }

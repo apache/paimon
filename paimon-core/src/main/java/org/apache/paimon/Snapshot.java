@@ -170,6 +170,8 @@ public class Snapshot {
     @Nullable
     private final Long watermark;
 
+    // stats file name for stats of this table
+    // null if no stats file
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_STATS)
     @Nullable

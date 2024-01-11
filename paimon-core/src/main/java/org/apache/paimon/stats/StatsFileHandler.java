@@ -24,7 +24,7 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.Optional;
 
-/** Handle stats files. */
+/** Handler of StatsFile. */
 public class StatsFileHandler {
 
     private final SnapshotManager snapshotManager;
@@ -39,21 +39,26 @@ public class StatsFileHandler {
     }
 
     /**
-     * Write stats to stats file.
+     * Write stats to a stats file.
      *
-     * @return stats file name
+     * @return the written file name
      */
     public String writeStats(Stats stats) {
         stats.serializeFieldsToString(schemaManager.latest().get());
         return statsFile.write(stats);
     }
 
+    /**
+     * Read stats of the latest snapshot.
+     *
+     * @return stats
+     */
     public Optional<Stats> readStats() {
         return readStats(snapshotManager.latestSnapshotId());
     }
 
     /**
-     * Read stats for the specified snapshotId.
+     * Read stats of the specified snapshot.
      *
      * @return stats
      */
@@ -65,6 +70,14 @@ public class StatsFileHandler {
             Stats stats = statsFile.read(snapshot.stats());
             stats.deserializeFieldsFromString(schemaManager.schema(snapshot.schemaId()));
             return Optional.of(stats);
+        }
+    }
+
+    /** Delete stats of the specified snapshot. */
+    public void deleteStats(long snapshotId) {
+        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        if (snapshot.stats() != null) {
+            statsFile.delete(snapshot.stats());
         }
     }
 }

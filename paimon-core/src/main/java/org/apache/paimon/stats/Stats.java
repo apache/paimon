@@ -37,7 +37,15 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.OptionalLong;
 
-/** Stats. */
+/**
+ * Global stats, supports the following stats.
+ *
+ * <ul>
+ *   <li>mergedRecordCount: the total number of records after merge
+ *   <li>mergedRecordSize: the size of the mergedRecordCount in bytes
+ *   <li>colStats: column stats map
+ * </ul>
+ */
 public class Stats {
 
     private static final String FIELD_MERGED_RECORD_COUNT = "mergedRecordCount";
@@ -46,18 +54,15 @@ public class Stats {
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MERGED_RECORD_COUNT)
-    @Nullable
-    private final Long mergedRecordCount;
+    private final @Nullable Long mergedRecordCount;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MERGED_RECORD_SIZE)
-    @Nullable
-    private final Long mergedRecordSize;
+    private final @Nullable Long mergedRecordSize;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_COL_STATS)
-    @Nullable
-    private final Map<String, ColStats> colStats;
+    private final @Nullable Map<String, ColStats> colStats;
 
     @JsonCreator
     public Stats(
@@ -70,11 +75,11 @@ public class Stats {
     }
 
     public OptionalLong mergedRecordCount() {
-        return OptionalUtils.of(mergedRecordCount);
+        return OptionalUtils.ofNullable(mergedRecordCount);
     }
 
     public OptionalLong mergedRecordSize() {
-        return OptionalUtils.of(mergedRecordSize);
+        return OptionalUtils.ofNullable(mergedRecordSize);
     }
 
     public Optional<Map<String, ColStats>> colStats() {
