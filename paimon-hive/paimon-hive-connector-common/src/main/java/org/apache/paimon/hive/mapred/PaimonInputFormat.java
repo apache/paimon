@@ -19,7 +19,6 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.hive.RowDataContainer;
-import org.apache.paimon.hive.utils.HiveSplitGenerator;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.hadoop.mapred.InputFormat;
@@ -31,6 +30,7 @@ import org.apache.hadoop.mapred.Reporter;
 import java.io.IOException;
 
 import static org.apache.paimon.hive.mapred.PaimonRecordReader.createRecordReader;
+import static org.apache.paimon.hive.utils.HiveSplitGenerator.generateSplits;
 import static org.apache.paimon.hive.utils.HiveUtils.createFileStoreTable;
 
 /**
@@ -42,7 +42,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public InputSplit[] getSplits(JobConf jobConf, int numSplits) {
         FileStoreTable table = createFileStoreTable(jobConf);
-        return HiveSplitGenerator.generateSplits(table, jobConf);
+        return generateSplits(table, jobConf);
     }
 
     @Override
