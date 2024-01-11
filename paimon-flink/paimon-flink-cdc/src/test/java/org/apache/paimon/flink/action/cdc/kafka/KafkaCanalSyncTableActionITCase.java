@@ -1246,7 +1246,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    public void testWatermarkSyncTable() throws Exception {
         String topic = "watermark";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, readLines("kafka/canal/table/watermark/canal-data-1.txt"));

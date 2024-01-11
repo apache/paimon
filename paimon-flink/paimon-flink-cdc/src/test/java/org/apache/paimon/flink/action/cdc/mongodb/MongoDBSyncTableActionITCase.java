@@ -19,6 +19,8 @@
 package org.apache.paimon.flink.action.cdc.mongodb;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -396,5 +398,36 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("_id"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWatermarkSyncTable() throws Exception {
+        writeRecordsToMongoDB("test-table-1", database, "table/watermark");
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "test_watermark");
+
+        Map<String, String> config = getBasicTableConfig();
+        config.put("tag.automatic-creation", "watermark");
+        config.put("tag.creation-period", "hourly");
+        config.put("scan.watermark.alignment.group", "alignment-group-1");
+        config.put("scan.watermark.alignment.max-drift", "20 s");
+        config.put("scan.watermark.alignment.update-interval", "1 s");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig).withTableConfig(config).build();
+        runActionWithDefaultEnv(action);
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        while (true) {
+            if (table.snapshotManager().snapshotCount() > 0
+                    && table.snapshotManager().latestSnapshot().watermark()
+                            != -9223372036854775808L) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 }

@@ -223,7 +223,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testWaterMarkSyncTable() throws Exception {
+    public void testWatermarkSyncTable() throws Exception {
         String topic = "watermark";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(topic, readLines("kafka/debezium/table/watermark/debezium-data-1.txt"));

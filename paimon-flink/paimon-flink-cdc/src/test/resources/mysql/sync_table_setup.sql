@@ -375,3 +375,16 @@ CREATE TABLE t (
     PART INT,
     PRIMARY KEY (ID0)
 );
+
+-- ################################################################################
+--  testWatermarkCase
+-- ################################################################################
+
+CREATE DATABASE watermark_case_sync_table;
+USE watermark_case_sync_table;
+
+CREATE TABLE t (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);

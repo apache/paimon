@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -1074,5 +1076,43 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         FileStoreTable table = getFileStoreTable();
         assertThat(table.primaryKeys()).containsExactly("id1", "part");
         assertThat(table.partitionKeys()).containsExactly("part");
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWatermarkSyncTable() throws Exception {
+        try (Statement statement = getStatement()) {
+            statement.execute("USE watermark_case_sync_table");
+            statement.executeUpdate("INSERT INTO t VALUES (1, '2023-07-30')");
+            statement.executeUpdate("INSERT INTO t VALUES (2, '2023-07-30')");
+        }
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "watermark_case_sync_table");
+        mySqlConfig.put("table-name", "t");
+
+        Map<String, String> config = getBasicTableConfig();
+        config.put("tag.automatic-creation", "watermark");
+        config.put("tag.creation-period", "hourly");
+        config.put("scan.watermark.alignment.group", "alignment-group-1");
+        config.put("scan.watermark.alignment.max-drift", "20 s");
+        config.put("scan.watermark.alignment.update-interval", "1 s");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withTableConfig(config)
+                        .withPrimaryKeys("pk")
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        AbstractFileStoreTable table =
+                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        while (true) {
+            if (table.snapshotManager().snapshotCount() > 0
+                    && table.snapshotManager().latestSnapshot().watermark()
+                            != -9223372036854775808L) {
+                return;
+            }
+            Thread.sleep(1000);
+        }
     }
 }
