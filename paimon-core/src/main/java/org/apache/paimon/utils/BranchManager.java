@@ -21,18 +21,14 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-
-import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 
-import static org.apache.paimon.schema.SchemaManager.SCHEMA_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SnapshotManager.SNAPSHOT_PREFIX;
-import static org.apache.paimon.utils.TagManager.TAG_PREFIX;
 
 /** Manager for {@code Branch}. */
 public class BranchManager {
@@ -47,8 +43,12 @@ public class BranchManager {
     private final TagManager tagManager;
     private final SchemaManager schemaManager;
 
-
-    public BranchManager(FileIO fileIO, Path path,SnapshotManager snapshotManager, TagManager tagManager, SchemaManager schemaManager) {
+    public BranchManager(
+            FileIO fileIO,
+            Path path,
+            SnapshotManager snapshotManager,
+            TagManager tagManager,
+            SchemaManager schemaManager) {
         this.fileIO = fileIO;
         this.tablePath = path;
         this.snapshotManager = snapshotManager;
@@ -61,21 +61,14 @@ public class BranchManager {
         return new Path(tablePath + "/branch");
     }
 
-    /** Return the path of a branch. */
+    /** Return the path string of a branch. */
     public String getBranchPath(String branchName) {
         return tablePath + "/branch/" + BRANCH_PREFIX + branchName;
     }
 
+    /** Return the path of a branch. */
     public Path branchPath(String branchName) {
         return new Path(getBranchPath(branchName));
-    }
-
-    public Path branchSnapshotPath(String branchName, long snapshotId) {
-        return new Path(getBranchPath(branchName) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
-    }
-
-    public Path branchSchemaPath(String branchName, long schemaId) {
-        return new Path(getBranchPath(branchName) + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     public void createBranch(String branchName, String tagName) {
@@ -91,12 +84,15 @@ public class BranchManager {
 
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
-            fileIO.copyFileUtf8(tagManager.tagPath(tagName), tagManager.branchTagPath(getBranchPath(branchName),tagName));
             fileIO.copyFileUtf8(
-                    snapshotManager.snapshotPath(snapshot.id()), branchSnapshotPath(branchName, snapshot.id()));
+                    tagManager.tagPath(tagName),
+                    tagManager.branchTagPath(getBranchPath(branchName), tagName));
+            fileIO.copyFileUtf8(
+                    snapshotManager.snapshotPath(snapshot.id()),
+                    snapshotManager.branchSnapshotPath(getBranchPath(branchName), snapshot.id()));
             fileIO.copyFileUtf8(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    branchSchemaPath(branchName, snapshot.schemaId()));
+                    schemaManager.branchSchemaPath(getBranchPath(branchName), snapshot.schemaId()));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
