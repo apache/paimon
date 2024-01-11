@@ -44,6 +44,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -91,7 +93,11 @@ public class HiveWriteITCase {
     }
 
     private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<InternalRow> data, String tableName)
+            RowType rowType,
+            List<String> partitionKeys,
+            List<InternalRow> data,
+            String tableName,
+            @Nullable CoreOptions.FileFormatType fileFormatType)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
         String tableNameNotNull =
@@ -100,7 +106,9 @@ public class HiveWriteITCase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                fileFormatType == null ? CoreOptions.FileFormatType.AVRO : fileFormatType);
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -152,7 +160,8 @@ public class HiveWriteITCase {
                                 new String[] {"pt", "a", "b", "c"}),
                         Collections.singletonList("pt"),
                         emptyData,
-                        "hive_test_table_output");
+                        "hive_test_table_output",
+                        null);
 
         hiveShell.execute(
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
@@ -179,7 +188,8 @@ public class HiveWriteITCase {
                                 new String[] {"pt", "a", "b"}),
                         Collections.singletonList("pt"),
                         emptyData,
-                        "hive_test_table_output");
+                        "hive_test_table_output",
+                        CoreOptions.FileFormatType.ORC);
         hiveShell.execute(
                 String.format(
                         "INSERT INTO %s VALUES (1, '2023-01-13 20:00:01%s', '2023-12-23')",
