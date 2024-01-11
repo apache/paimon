@@ -100,7 +100,7 @@ public class HiveWriteITCase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.ORC);
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -164,22 +164,37 @@ public class HiveWriteITCase {
     public void testInsertTimestampAndDate() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
+        int precision = ThreadLocalRandom.current().nextInt(10);
+        String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
+
         String outputTableName =
                 createAppendOnlyExternalTable(
                         RowType.of(
                                 new DataType[] {
-                                    DataTypes.INT(), DataTypes.TIMESTAMP(), DataTypes.DATE()
+                                    DataTypes.INT(),
+                                    DataTypes.TIMESTAMP(precision),
+                                    DataTypes.DATE(),
                                 },
                                 new String[] {"pt", "a", "b"}),
                         Collections.singletonList("pt"),
                         emptyData,
                         "hive_test_table_output");
         hiveShell.execute(
-                "insert into "
-                        + outputTableName
-                        + " values(1,'2023-01-13 20:00:01.123','2023-12-23')");
-        List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
+                String.format(
+                        "INSERT INTO %s VALUES (1, '2023-01-13 20:00:01%s', '2023-12-23')",
+                        outputTableName, fraction));
+
+        List<String> select = hiveShell.executeQuery("SELECT * FROM " + outputTableName);
         assertThat(select)
-                .isEqualTo(Collections.singletonList("1\t2023-01-13 20:00:01.123\t2023-12-23"));
+                .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
+
+        // JavaTimestampObjectInspector#set(Object o, Timestamp value) fixed
+        select =
+                hiveShell.executeQuery(
+                        String.format(
+                                "SELECT * FROM %s WHERE a = '2023-01-13 20:00:01%s'",
+                                outputTableName, fraction));
+        assertThat(select)
+                .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
     }
 }

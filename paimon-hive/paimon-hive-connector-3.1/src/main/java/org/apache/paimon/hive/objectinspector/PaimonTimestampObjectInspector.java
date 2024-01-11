@@ -34,9 +34,14 @@ public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectI
 
     @Override
     public Timestamp getPrimitiveJavaObject(Object o) {
-        return o == null
-                ? null
-                : Timestamp.ofEpochMilli(((org.apache.paimon.data.Timestamp) o).getMillisecond());
+        if (o == null) {
+            return null;
+        }
+
+        org.apache.paimon.data.Timestamp timestamp = (org.apache.paimon.data.Timestamp) o;
+        long millis = timestamp.getMillisecond();
+        int nanos = (int) (millis % 1000 * 1_000_000) + timestamp.getNanoOfMillisecond();
+        return Timestamp.ofEpochMilli(millis, nanos);
     }
 
     @Override

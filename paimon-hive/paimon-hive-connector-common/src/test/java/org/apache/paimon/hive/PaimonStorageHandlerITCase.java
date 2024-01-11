@@ -745,13 +745,14 @@ public class PaimonStorageHandlerITCase {
                 random.nextBoolean()
                         ? CoreOptions.FileFormatType.ORC
                         : CoreOptions.FileFormatType.PARQUET);
+
+        int precision = random.nextInt(10);
+        String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
-                                new DataType[] {
-                                    DataTypes.DATE(), DataTypes.TIMESTAMP(random.nextInt(10))
-                                },
+                                new DataType[] {DataTypes.DATE(), DataTypes.TIMESTAMP(precision)},
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
                         Collections.emptyList());
@@ -763,7 +764,7 @@ public class PaimonStorageHandlerITCase {
                 GenericRow.of(
                         375, /* 1971-01-11 */
                         Timestamp.fromLocalDateTime(
-                                LocalDateTime.of(2022, 5, 17, 17, 29, 20, 100_000_000))));
+                                LocalDateTime.of(2022, 5, 17, 17, 29, 20, 123_456_789))));
         commit.commit(0, write.prepareCommit(true, 0));
         write.write(GenericRow.of(null, null));
         commit.commit(1, write.prepareCommit(true, 1));
@@ -778,16 +779,29 @@ public class PaimonStorageHandlerITCase {
         commit.close();
 
         createExternalTable();
+
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-11'"))
-                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20" + fraction);
+
+        // ConstantPropagateProcFactory will truncate the value to milliseconds
+        // caused by JavaTimestampObjectInspector#set(Object o, Timestamp value)
+        assertThat(
+                        hiveShell.executeQuery(
+                                String.format(
+                                        "SELECT * FROM `%s` WHERE ts = '2022-05-17 17:29:20%s'",
+                                        externalTable, fraction)))
+                .containsExactly(
+                        "1971-01-11\t2022-05-17 17:29:20"
+                                + (fraction.length() <= 3 ? fraction : fraction.substring(0, 4)));
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `"
                                         + externalTable
-                                        + "` WHERE ts = '2022-05-17 17:29:20.1'"))
-                .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+                                        + "` WHERE ts < '2022-05-17 23:00:00'"))
+                .containsExactly("1971-01-11\t2022-05-17 17:29:20" + fraction);
+
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-12'"))
