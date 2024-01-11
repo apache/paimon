@@ -100,7 +100,10 @@ public class MongoDBActionUtils {
         Optional.ofNullable(mongodbConfig.get(MongoDBSourceOptions.HEARTBEAT_INTERVAL_MILLIS))
                 .ifPresent(sourceBuilder::heartbeatIntervalMillis);
         Optional.ofNullable(mongodbConfig.get(MongoDBSourceOptions.SCHEME))
-                .ifPresent(sourceBuilder::scheme);
+                .orElseThrow(
+                        () ->
+                                new IllegalArgumentException(
+                                        "Invalid Mongodb CDC bundled jar: Version 2.4 or higher is required."));
 
         Optional.ofNullable(mongodbConfig.get(MongoDBSourceOptions.POLL_MAX_BATCH_SIZE))
                 .ifPresent(sourceBuilder::pollMaxBatchSize);
