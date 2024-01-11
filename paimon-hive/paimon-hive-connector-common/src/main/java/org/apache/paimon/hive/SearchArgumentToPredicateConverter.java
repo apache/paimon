@@ -41,7 +41,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.convertJavaObject;
 
-/** Converts {@link SearchArgument} to {@link Predicate} with best effort. */
+/** Converts {@link SearchArgument} to {@link Predicate} with the best effort. */
 public class SearchArgumentToPredicateConverter {
 
     private static final Logger LOG =
@@ -55,20 +55,26 @@ public class SearchArgumentToPredicateConverter {
     private final PredicateBuilder builder;
 
     public SearchArgumentToPredicateConverter(
-            SearchArgument sarg,
+            SearchArgument searchArgument,
             List<String> columnNames,
             List<DataType> columnTypes,
             @Nullable Set<String> readColumnNames) {
-        this.root = sarg.getExpression();
-        this.leaves = sarg.getLeaves();
-        this.columnNames = columnNames;
+        this.root = searchArgument.getExpression();
+        this.leaves = searchArgument.getLeaves();
+        this.columnNames =
+                columnNames.stream().map(String::toLowerCase).collect(Collectors.toList());
         this.columnTypes = columnTypes;
+        if (readColumnNames != null) {
+            readColumnNames =
+                    readColumnNames.stream().map(String::toLowerCase).collect(Collectors.toSet());
+        }
         this.readColumnNames = readColumnNames;
+
         this.builder =
                 new PredicateBuilder(
                         RowType.of(
-                                columnTypes.toArray(new DataType[0]),
-                                columnNames.toArray(new String[0])));
+                                this.columnTypes.toArray(new DataType[0]),
+                                this.columnNames.toArray(new String[0])));
     }
 
     public Optional<Predicate> convert() {

@@ -18,14 +18,20 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
+import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
+import org.apache.flink.configuration.Configuration;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -33,6 +39,9 @@ import java.util.Map;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
+import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITCaseBase {
@@ -184,5 +193,36 @@ public class KafkaDebeziumWithSchemaSyncTableActionITCase extends KafkaActionITC
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("id"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testKafkaBuildSchemaWithDelete() throws Exception {
+        final String topic = "test_kafka_schema";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the Debezium json into Kafka -------------------
+        List<String> lines =
+                readLines("kafka/debezium/table/schema/schemaevolution/debezium-data-4.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Configuration kafkaConfig = Configuration.fromMap(getBasicKafkaConfig());
+        kafkaConfig.setString(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.setString(TOPIC.key(), topic);
+
+        Schema kafkaSchema =
+                MessageQueueSchemaUtils.getSchema(
+                        getKafkaEarliestConsumer(kafkaConfig),
+                        getDataFormat(kafkaConfig),
+                        TypeMapping.defaultMapping());
+        List<DataField> fields = new ArrayList<>();
+        // {"id": 101, "name": "scooter", "description": "Small 2-wheel scooter", "weight": 3.14}
+        fields.add(new DataField(0, "id", DataTypes.STRING()));
+        fields.add(new DataField(1, "name", DataTypes.STRING()));
+        fields.add(new DataField(2, "description", DataTypes.STRING()));
+        fields.add(new DataField(3, "weight", DataTypes.STRING()));
+        assertThat(kafkaSchema.fields()).isEqualTo(fields);
     }
 }

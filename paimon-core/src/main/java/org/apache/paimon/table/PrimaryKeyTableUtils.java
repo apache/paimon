@@ -81,11 +81,12 @@ public class PrimaryKeyTableUtils {
         }
     }
 
-    static class PrimaryKeyFieldsExtractor implements KeyValueFieldsExtractor {
+    /** Primary key fields extractor. */
+    public static class PrimaryKeyFieldsExtractor implements KeyValueFieldsExtractor {
 
         private static final long serialVersionUID = 1L;
 
-        static final PrimaryKeyFieldsExtractor EXTRACTOR = new PrimaryKeyFieldsExtractor();
+        public static final PrimaryKeyFieldsExtractor EXTRACTOR = new PrimaryKeyFieldsExtractor();
 
         private PrimaryKeyFieldsExtractor() {}
 

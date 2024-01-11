@@ -79,7 +79,10 @@ There are several ways to add this jar to Hive.
 * You can create an `auxlib` folder under the root directory of Hive, and copy `paimon-hive-connector-{{< version >}}.jar` into `auxlib`.
 * You can also copy this jar to a path accessible by Hive, then use `add jar /path/to/paimon-hive-connector-{{< version >}}.jar` to enable paimon support in Hive. Note that this method is not recommended. If you're using the MR execution engine and running a join statement, you may be faced with the exception `org.apache.hive.com.esotericsoftware.kryo.kryoexception: unable to find class`.
 
-NOTE: If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+NOTE: 
+
+* If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
+* With hive cbo, it may lead to some incorrect query results, such as to query `struct` type with `not null` predicate, you can disable the cbo by `set hive.cbo.enable=false;` command.
 
 ## Flink SQL: with Paimon Hive Catalog 
 

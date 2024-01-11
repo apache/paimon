@@ -18,28 +18,18 @@
 
 package org.apache.paimon.flink.lookup;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.FlinkRowWrapper;
-import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
 import org.apache.paimon.flink.utils.TableScanUtils;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBState;
-import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateFilter;
-import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.sort.BinaryExternalSortBuffer;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
@@ -62,6 +52,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
+import java.util.HashSet;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
@@ -69,6 +60,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
+import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
@@ -87,12 +79,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
     private transient Duration refreshInterval;
     private transient File path;
-    private transient RocksDBStateFactory stateFactory;
     private transient LookupTable lookupTable;
 
     // timestamp when cache expires
     private transient long nextLoadTime;
-    private transient TableStreamingReader streamingReader;
 
     public FileStoreLookupFunction(
             Table table, int[] projection, int[] joinKeyIndex, @Nullable Predicate predicate) {
@@ -129,66 +119,46 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     // we tag this method friendly for testing
     void open(String tmpDirectory) throws Exception {
         this.path = new File(tmpDirectory, "lookup-" + UUID.randomUUID());
+        if (!path.mkdirs()) {
+            throw new RuntimeException("Failed to create dir: " + path);
+        }
         open();
     }
 
     private void open() throws Exception {
+        this.nextLoadTime = -1;
+
         Options options = Options.fromMap(table.options());
         this.refreshInterval =
                 options.getOptional(LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL)
                         .orElse(options.get(CONTINUOUS_DISCOVERY_INTERVAL));
-        this.stateFactory = new RocksDBStateFactory(path.toString(), options, null);
 
         List<String> fieldNames = table.rowType().getFieldNames();
         int[] projection = projectFields.stream().mapToInt(fieldNames::indexOf).toArray();
-        RowType rowType = TypeUtils.project(table.rowType(), projection);
+        FileStoreTable storeTable = (FileStoreTable) table;
 
-        PredicateFilter recordFilter = createRecordFilter(projection);
-        this.lookupTable =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        table.primaryKeys(),
-                        joinKeys,
-                        recordFilter,
-                        options.get(LOOKUP_CACHE_ROWS));
-        this.nextLoadTime = -1;
-        this.streamingReader = new TableStreamingReader(table, projection, this.predicate);
-        bulkLoad(options);
-    }
-
-    private void bulkLoad(Options options) throws Exception {
-        BinaryExternalSortBuffer bulkLoadSorter =
-                RocksDBState.createBulkLoadSorter(
-                        IOManager.create(path.toString()), new CoreOptions(options));
-        try (RecordReaderIterator<InternalRow> batch =
-                new RecordReaderIterator<>(streamingReader.nextBatch(true))) {
-            while (batch.hasNext()) {
-                InternalRow row = batch.next();
-                if (lookupTable.recordFilter().test(row)) {
-                    bulkLoadSorter.write(
-                            GenericRow.of(
-                                    lookupTable.toKeyBytes(row), lookupTable.toValueBytes(row)));
-                }
+        if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
+                && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
+            try {
+                this.lookupTable =
+                        new PrimaryKeyPartialLookupTable(storeTable, projection, path, joinKeys);
+            } catch (UnsupportedOperationException ignore) {
             }
         }
 
-        MutableObjectIterator<BinaryRow> keyIterator = bulkLoadSorter.sortedIterator();
-        BinaryRow row = new BinaryRow(2);
-        TableBulkLoader bulkLoader = lookupTable.createBulkLoader();
-        try {
-            while ((row = keyIterator.next(row)) != null) {
-                bulkLoader.write(row.getBinary(0), row.getBinary(1));
-            }
-        } catch (BulkLoader.WriteException e) {
-            throw new RuntimeException(
-                    "Exception in bulkLoad, the most suspicious reason is that "
-                            + "your data contains duplicates, please check your lookup table. ",
-                    e.getCause());
+        if (lookupTable == null) {
+            FullCacheLookupTable.Context context =
+                    new FullCacheLookupTable.Context(
+                            storeTable,
+                            projection,
+                            predicate,
+                            path,
+                            createRecordFilter(projection),
+                            joinKeys);
+            this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
 
-        bulkLoader.finish();
-        bulkLoadSorter.clear();
+        lookupTable.open();
     }
 
     private PredicateFilter createRecordFilter(int[] projection) {
@@ -250,22 +220,14 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
     }
 
     private void refresh() throws Exception {
-        while (true) {
-            try (RecordReaderIterator<InternalRow> batch =
-                    new RecordReaderIterator<>(streamingReader.nextBatch(false))) {
-                if (!batch.hasNext()) {
-                    return;
-                }
-                this.lookupTable.refresh(batch);
-            }
-        }
+        lookupTable.refresh();
     }
 
     @Override
     public void close() throws IOException {
-        if (stateFactory != null) {
-            stateFactory.close();
-            stateFactory = null;
+        if (lookupTable != null) {
+            lookupTable.close();
+            lookupTable = null;
         }
 
         if (path != null) {

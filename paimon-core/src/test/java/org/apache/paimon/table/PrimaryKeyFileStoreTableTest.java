@@ -24,6 +24,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -34,10 +35,12 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -75,7 +78,10 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -352,8 +358,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testStreamingInputChangelog() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
         write.write(rowData(1, 10, 100L));
@@ -399,9 +404,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(
-                                    CoreOptions.CHANGELOG_PRODUCER,
-                                    ChangelogProducer.FULL_COMPACTION);
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.FULL_COMPACTION);
                             configure.accept(conf);
                         });
         StreamTableWrite write =
@@ -494,7 +497,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 "compatibility/table-changelog-0.2.zip", tablePath.toUri().getPath());
         FileStoreTable table =
                 createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
+                        conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT),
                         COMPATIBILITY_ROW_TYPE);
 
         List<List<List<String>>> expected =
@@ -786,7 +789,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
-                            conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
+                            conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT);
                             conf.set(
                                     String.format(
                                             "%s.%s.%s",
@@ -834,8 +837,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     @Test
     public void testAuditLog() throws Exception {
         FileStoreTable table =
-                createFileStoreTable(
-                        conf -> conf.set(CoreOptions.CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
+                createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, ChangelogProducer.INPUT));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -1148,6 +1150,96 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         write.close();
         commit.close();
+    }
+
+    @Test
+    public void testTableQueryForLookup() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(CHANGELOG_PRODUCER, LOOKUP));
+        innerTestTableQuery(table);
+    }
+
+    @Test
+    public void testTableQueryForNormal() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        innerTestTableQuery(table);
+    }
+
+    private void innerTestTableQuery(FileStoreTable table) throws Exception {
+        IOManager ioManager = IOManager.create(tablePath.toString());
+        StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        // first write
+
+        write.write(rowData(1, 10, 100L));
+        List<CommitMessage> commitMessages1 = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages1);
+
+        TableQuery query = table.newTableQuery();
+        query.withIOManager(ioManager);
+
+        refreshTableService(query, commitMessages1);
+        InternalRow value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(BATCH_ROW_TO_STRING.apply(value))
+                .isEqualTo("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // second write
+
+        write.write(rowData(1, 10, 200L));
+        write.write(rowData(3, 10, 300L));
+        List<CommitMessage> commitMessages2 = write.prepareCommit(true, 0);
+        commit.commit(0, commitMessages2);
+
+        refreshTableService(query, commitMessages2);
+
+        value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(BATCH_ROW_TO_STRING.apply(value))
+                .isEqualTo("1|10|200|binary|varbinary|mapKey:mapVal|multiset");
+
+        value = query.lookup(row(3), 0, row(10));
+        assertThat(value).isNotNull();
+        assertThat(BATCH_ROW_TO_STRING.apply(value))
+                .isEqualTo("3|10|300|binary|varbinary|mapKey:mapVal|multiset");
+
+        // query non value
+
+        value = query.lookup(row(1), 0, row(20));
+        assertThat(value).isNull();
+
+        // projection
+
+        query.close();
+        query.withValueProjection(new int[] {2, 1, 0});
+        refreshTableService(query, commitMessages1);
+        refreshTableService(query, commitMessages2);
+        value = query.lookup(row(1), 0, row(10));
+        assertThat(value).isNotNull();
+        Function<InternalRow, String> projectToString =
+                rowData -> rowData.getLong(0) + "|" + rowData.getInt(1) + "|" + rowData.getInt(2);
+        assertThat(projectToString.apply(value)).isEqualTo("200|10|1");
+
+        query.close();
+        write.close();
+        commit.close();
+    }
+
+    private void refreshTableService(TableQuery query, List<CommitMessage> commitMessages) {
+        for (CommitMessage m : commitMessages) {
+            CommitMessageImpl msg = (CommitMessageImpl) m;
+            query.refreshFiles(
+                    msg.partition(),
+                    msg.bucket(),
+                    Collections.emptyList(),
+                    msg.newFilesIncrement().newFiles());
+            query.refreshFiles(
+                    msg.partition(),
+                    msg.bucket(),
+                    msg.compactIncrement().compactBefore(),
+                    msg.compactIncrement().compactAfter());
+        }
     }
 
     @Override
