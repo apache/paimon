@@ -87,6 +87,7 @@ public class Snapshot {
     private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
     private static final String FIELD_WATERMARK = "watermark";
+    private static final String FIELD_STATS = "stats";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -169,6 +170,11 @@ public class Snapshot {
     @Nullable
     private final Long watermark;
 
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @JsonProperty(FIELD_STATS)
+    @Nullable
+    private final String stats;
+
     public Snapshot(
             long id,
             long schemaId,
@@ -184,7 +190,8 @@ public class Snapshot {
             @Nullable Long totalRecordCount,
             @Nullable Long deltaRecordCount,
             @Nullable Long changelogRecordCount,
-            @Nullable Long watermark) {
+            @Nullable Long watermark,
+            @Nullable String stats) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -201,7 +208,8 @@ public class Snapshot {
                 totalRecordCount,
                 deltaRecordCount,
                 changelogRecordCount,
-                watermark);
+                watermark,
+                stats);
     }
 
     @JsonCreator
@@ -218,10 +226,11 @@ public class Snapshot {
             @JsonProperty(FIELD_COMMIT_KIND) CommitKind commitKind,
             @JsonProperty(FIELD_TIME_MILLIS) long timeMillis,
             @JsonProperty(FIELD_LOG_OFFSETS) Map<Integer, Long> logOffsets,
-            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) Long totalRecordCount,
-            @JsonProperty(FIELD_DELTA_RECORD_COUNT) Long deltaRecordCount,
-            @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) Long changelogRecordCount,
-            @JsonProperty(FIELD_WATERMARK) Long watermark) {
+            @JsonProperty(FIELD_TOTAL_RECORD_COUNT) @Nullable Long totalRecordCount,
+            @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
+            @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
+            @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
+            @JsonProperty(FIELD_STATS) @Nullable String stats) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -238,6 +247,7 @@ public class Snapshot {
         this.deltaRecordCount = deltaRecordCount;
         this.changelogRecordCount = changelogRecordCount;
         this.watermark = watermark;
+        this.stats = stats;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -325,6 +335,12 @@ public class Snapshot {
     @Nullable
     public Long watermark() {
         return watermark;
+    }
+
+    @JsonGetter(FIELD_STATS)
+    @Nullable
+    public String stats() {
+        return stats;
     }
 
     /**
@@ -487,6 +503,9 @@ public class Snapshot {
         COMPACT,
 
         /** Changes that clear up the whole partition and then add new records. */
-        OVERWRITE
+        OVERWRITE,
+
+        /** Collect statistics. */
+        ANALYZE
     }
 }

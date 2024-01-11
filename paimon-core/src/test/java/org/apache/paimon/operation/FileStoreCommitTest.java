@@ -35,6 +35,9 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.stats.ColStats;
+import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.FailingFileIO;
@@ -772,6 +775,44 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
         file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
         assertThat(file).isEmpty();
+    }
+
+    @Test
+    public void testWriteStats() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        StatsFileHandler statsFileHandler = store.newStatsFileHandler();
+        FileStoreCommitImpl fileStoreCommit = store.newCommit();
+
+        // Commit1
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+
+        // Analyze1
+        HashMap<String, ColStats> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", new ColStats(10L, 1L, 10L, 0L, 8L, 8L));
+        Stats fakeStats = new Stats(10L, 1000L, fakeColStatsMap);
+        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
+
+        Optional<Stats> readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // Commit2
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+
+        // Inherit last snapshot's stats
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // Analyze2
+        fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", new ColStats(20L, 1L, 20L, 0L, 8L, 8L));
+        fakeStats = new Stats(20L, 2000L, fakeColStatsMap);
+        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
+
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {
