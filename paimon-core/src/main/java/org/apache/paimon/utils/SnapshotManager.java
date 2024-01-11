@@ -50,7 +50,7 @@ public class SnapshotManager implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
-    protected static final String SNAPSHOT_PREFIX = "snapshot-";
+    private static final String SNAPSHOT_PREFIX = "snapshot-";
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
     private static final int READ_HINT_RETRY_NUM = 3;
@@ -78,6 +78,10 @@ public class SnapshotManager implements Serializable {
 
     public Path snapshotPath(long snapshotId) {
         return new Path(tablePath + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
+    }
+
+    public Path branchSnapshotPath(String branchPath, long snapshotId) {
+        return new Path(branchPath + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
 
     public Snapshot snapshot(long snapshotId) {

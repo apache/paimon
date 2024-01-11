@@ -943,22 +943,31 @@ public abstract class FileStoreTableTestBase {
 
         // verify that branch file exist
         TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager = new BranchManager(fileIO, tablePath,new SnapshotManager(fileIO,tablePath),new TagManager(fileIO,tablePath), new SchemaManager(fileIO,tablePath));
+        BranchManager branchManager =
+                new BranchManager(
+                        fileIO,
+                        tablePath,
+                        new SnapshotManager(fileIO, tablePath),
+                        new TagManager(fileIO, tablePath),
+                        new SchemaManager(fileIO, tablePath));
         assertThat(branchManager.branchExists("test-branch")).isTrue();
         // listFilesRecursively(new File(branchManager.getBranchPath("test-branch").substring(9)));
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),tagManager.branchTagPath(table.branchManager().getBranchPath("test-branch"),"test-tag")
-                       );
+                        new TraceableFileIO(),
+                        tagManager.branchTagPath(
+                                table.branchManager().getBranchPath("test-branch"), "test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
+        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
-                        table.branchManager().branchSnapshotPath("test-branch", 2));
+                        snapshotManager.branchSnapshotPath(
+                                table.branchManager().getBranchPath("test-branch"), 2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
@@ -966,7 +975,8 @@ public abstract class FileStoreTableTestBase {
         TableSchema branchSchema =
                 SchemaManager.fromPath(
                         new TraceableFileIO(),
-                        table.branchManager().branchSchemaPath("test-branch", 0));
+                        schemaManager.branchSchemaPath(
+                                table.branchManager().getBranchPath("test-branch"), 0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1024,7 +1034,13 @@ public abstract class FileStoreTableTestBase {
 
         // verify that branch file not exist
         TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager = new BranchManager(fileIO, tablePath,new SnapshotManager(fileIO,tablePath),new TagManager(fileIO,tablePath), new SchemaManager(fileIO,tablePath));
+        BranchManager branchManager =
+                new BranchManager(
+                        fileIO,
+                        tablePath,
+                        new SnapshotManager(fileIO, tablePath),
+                        new TagManager(fileIO, tablePath),
+                        new SchemaManager(fileIO, tablePath));
         assertThat(branchManager.branchExists("branch1")).isFalse();
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))

@@ -71,7 +71,7 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 @ThreadSafe
 public class SchemaManager implements Serializable {
 
-    public static final String SCHEMA_PREFIX = "schema-";
+    private static final String SCHEMA_PREFIX = "schema-";
 
     private final FileIO fileIO;
     private final Path tableRoot;
@@ -477,6 +477,10 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
+    }
+
+    public Path branchSchemaPath(String branchPath, long schemaId) {
+        return new Path(branchPath + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     /**
