@@ -18,32 +18,22 @@
 
 package org.apache.paimon.hive.utils;
 
-import org.apache.paimon.hive.RowDataContainer;
 import org.apache.paimon.hive.mapred.PaimonInputSplit;
-import org.apache.paimon.hive.mapred.PaimonRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.types.RowType;
 
-import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
-import org.apache.hadoop.hive.ql.io.IOConstants;
-import org.apache.hadoop.hive.serde2.ColumnProjectionUtils;
-import org.apache.hadoop.hive.serde2.SerDeUtils;
 import org.apache.hadoop.mapred.InputSplit;
 import org.apache.hadoop.mapred.JobConf;
-import org.apache.hadoop.mapred.RecordReader;
 import org.apache.hadoop.mapreduce.lib.input.FileInputFormat;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -56,10 +46,8 @@ import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.hive.utils.HiveUtils.createPredicate;
 import static org.apache.paimon.hive.utils.HiveUtils.extractTagName;
 
-/**
- * Utils to handle everything about hive split, for example, create splits and create split readers.
- */
-public class HiveSplitUtils {
+/** Generator to generate hive input splits. */
+public class HiveSplitGenerator {
 
     public static InputSplit[] generateSplits(FileStoreTable table, JobConf jobConf) {
         List<Predicate> predicates = new ArrayList<>();
@@ -113,20 +101,6 @@ public class HiveSplitUtils {
         return splits.toArray(new InputSplit[0]);
     }
 
-    public static RecordReader<Void, RowDataContainer> createRecordReader(
-            FileStoreTable table, PaimonInputSplit split, JobConf jobConf) throws IOException {
-        ReadBuilder readBuilder = table.newReadBuilder();
-        createPredicate(table.schema(), jobConf, true).ifPresent(readBuilder::withFilter);
-        List<String> paimonColumns = table.schema().fieldNames();
-        return new PaimonRecordReader(
-                readBuilder,
-                split,
-                paimonColumns,
-                getHiveColumns(jobConf).orElse(paimonColumns),
-                Arrays.asList(getSelectedColumns(jobConf)),
-                table.coreOptions().tagToPartitionField());
-    }
-
     private static Optional<Predicate> createPartitionPredicate(
             RowType rowType, List<String> partitionKeys, String partitionDir) {
         Set<String> partitionKeySet = new HashSet<>(partitionKeys);
@@ -149,30 +123,5 @@ public class HiveSplitUtils {
         } else {
             return Optional.ofNullable(PredicateBuilder.partition(partition, rowType));
         }
-    }
-
-    private static Optional<List<String>> getHiveColumns(JobConf jobConf) {
-        String columns = jobConf.get(IOConstants.SCHEMA_EVOLUTION_COLUMNS);
-        if (columns == null) {
-            columns = jobConf.get(hive_metastoreConstants.META_TABLE_COLUMNS);
-        }
-        String delimiter =
-                jobConf.get(
-                        // serdeConstants.COLUMN_NAME_DELIMITER is not defined in earlier Hive
-                        // versions, so we use a constant string instead
-                        "column.name.delimite", String.valueOf(SerDeUtils.COMMA));
-        if (columns == null || delimiter == null) {
-            return Optional.empty();
-        } else {
-            return Optional.of(Arrays.asList(columns.split(delimiter)));
-        }
-    }
-
-    private static String[] getSelectedColumns(JobConf jobConf) {
-        // when using tez engine or when same table is joined multiple times,
-        // it is possible that some selected columns are duplicated
-        return Arrays.stream(ColumnProjectionUtils.getReadColumnNames(jobConf))
-                .distinct()
-                .toArray(String[]::new);
     }
 }
