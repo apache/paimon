@@ -66,6 +66,11 @@ public class TagManager {
         return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    /** Return the path of a tag in branch. */
+    public Path branchTagPath(String branchPath, String tagName) {
+        return new Path(branchPath + "/tag/" + TAG_PREFIX + tagName);
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);

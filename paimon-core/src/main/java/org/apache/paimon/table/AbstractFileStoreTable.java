@@ -422,7 +422,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public BranchManager branchManager() {
-        return new BranchManager(fileIO, path);
+        return new BranchManager(fileIO, path,snapshotManager(),tagManager(),schemaManager());
     }
 
     private RollbackHelper rollbackHelper() {

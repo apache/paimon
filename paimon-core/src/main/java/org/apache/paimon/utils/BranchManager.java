@@ -22,6 +22,8 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -41,10 +43,17 @@ public class BranchManager {
 
     private final FileIO fileIO;
     private final Path tablePath;
+    private final SnapshotManager snapshotManager;
+    private final TagManager tagManager;
+    private final SchemaManager schemaManager;
 
-    public BranchManager(FileIO fileIO, Path path) {
+
+    public BranchManager(FileIO fileIO, Path path,SnapshotManager snapshotManager, TagManager tagManager, SchemaManager schemaManager) {
         this.fileIO = fileIO;
         this.tablePath = path;
+        this.snapshotManager = snapshotManager;
+        this.tagManager = tagManager;
+        this.schemaManager = schemaManager;
     }
 
     /** Return the root Directory of branch. */
@@ -61,24 +70,8 @@ public class BranchManager {
         return new Path(getBranchPath(branchName));
     }
 
-    public Path tagPath(String tagName) {
-        return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
-    }
-
-    public Path branchTagPath(String branchName, String tagName) {
-        return new Path(getBranchPath(branchName) + "/tag/" + TAG_PREFIX + tagName);
-    }
-
-    public Path snapshotPath(long snapshotId) {
-        return new Path(tablePath + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
-    }
-
     public Path branchSnapshotPath(String branchName, long snapshotId) {
         return new Path(getBranchPath(branchName) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
-    }
-
-    public Path schemaPath(long schemaId) {
-        return new Path(tablePath + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     public Path branchSchemaPath(String branchName, long schemaId) {
@@ -88,21 +81,21 @@ public class BranchManager {
     public void createBranch(String branchName, String tagName) {
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
-        checkArgument(tagExists(tagName), "Tag name '%s' not exists.", tagName);
+        checkArgument(tagManager.tagExists(tagName), "Tag name '%s' not exists.", tagName);
         checkArgument(
                 !branchName.chars().allMatch(Character::isDigit),
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
 
-        Snapshot snapshot = taggedSnapshot(tagName);
+        Snapshot snapshot = tagManager.taggedSnapshot(tagName);
 
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
-            fileIO.copyFileUtf8(tagPath(tagName), branchTagPath(branchName, tagName));
+            fileIO.copyFileUtf8(tagManager.tagPath(tagName), tagManager.branchTagPath(getBranchPath(branchName),tagName));
             fileIO.copyFileUtf8(
-                    snapshotPath(snapshot.id()), branchSnapshotPath(branchName, snapshot.id()));
+                    snapshotManager.snapshotPath(snapshot.id()), branchSnapshotPath(branchName, snapshot.id()));
             fileIO.copyFileUtf8(
-                    schemaPath(snapshot.schemaId()),
+                    schemaManager.toSchemaPath(snapshot.schemaId()),
                     branchSchemaPath(branchName, snapshot.schemaId()));
         } catch (IOException e) {
             throw new RuntimeException(
@@ -140,21 +133,9 @@ public class BranchManager {
         }
     }
 
-    /** Check if a tag exists. */
-    public boolean tagExists(String tagName) {
-        Path tagPath = tagPath(tagName);
-        return fileExists(tagPath);
-    }
-
     /** Check if a branch exists. */
     public boolean branchExists(String branchName) {
         Path branchPath = branchPath(branchName);
         return fileExists(branchPath);
-    }
-
-    /** Get the tagged snapshot by name. */
-    public Snapshot taggedSnapshot(String tagName) {
-        checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        return Snapshot.fromPath(fileIO, tagPath(tagName));
     }
 }
