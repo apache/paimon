@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils;
 import org.apache.paimon.flink.action.cdc.mongodb.MongoDBRecordParser;
@@ -31,6 +30,7 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
@@ -116,7 +116,7 @@ public class SyncJobHandler {
                         cdcSourceConfig,
                         POSTGRES_CONF,
                         PostgresSourceOptions.HOSTNAME,
-                        PostgresSourceOptions.PG_PORT ,
+                        PostgresSourceOptions.PG_PORT,
                         PostgresSourceOptions.USERNAME,
                         PostgresSourceOptions.PASSWORD,
                         PostgresSourceOptions.DATABASE_NAME,

@@ -32,6 +32,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 /** Debezium Event Records Entity. */
@@ -203,11 +204,17 @@ public class DebeziumEvent {
         }
 
         public Map<String, Field> beforeAndAfterFields() {
+            return fields(
+                    item -> FIELD_BEFORE.equals(item.field) || FIELD_AFTER.equals(item.field));
+        }
+
+        public Map<String, Field> afterFields() {
+            return fields(item -> FIELD_AFTER.equals(item.field));
+        }
+
+        private Map<String, Field> fields(Predicate<Field> predicate) {
             return fields.stream()
-                    .filter(
-                            item ->
-                                    FIELD_BEFORE.equals(item.field)
-                                            || FIELD_AFTER.equals(item.field))
+                    .filter(predicate)
                     .flatMap(item -> item.fields.stream())
                     .collect(
                             Collectors.toMap(

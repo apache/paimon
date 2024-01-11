@@ -139,13 +139,10 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     @Override
     public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
+
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
-        if (root.payload().isSchemaChange()) {
-            extractSchemaChange().forEach(out::collect);
-            return;
-        }
         extractRecords().forEach(out::collect);
     }
 
@@ -223,6 +220,38 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         return fieldTypes;
     }
 
+    private LinkedHashMap<String, DataType> extractFieldTypes(DebeziumEvent.Field schema) {
+        Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
+                Preconditions.checkArgument(
+                        !afterFields.isEmpty(),
+                        "PostgresRecordParser only supports debezium JSON with schema. "
+                                + "Please make sure that `includeSchema` is true "
+                                + "in the JsonDebeziumDeserializationSchema you created");
+
+        List<Column> columns = table.columns();
+        LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>(columns.size());
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg =
+                columnDuplicateErrMsg(table.id().toString());
+
+        for (Column column : columns) {
+            String columnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            column.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
+            DataType dataType =
+                    PostgresTypeUtils.toDataType(
+                            column.typeExpression(),
+                            column.length(),
+                            column.scale().orElse(null),
+                            typeMapping);
+            dataType = dataType.copy(typeMapping.containsMode(TO_NULLABLE) || column.isOptional());
+
+            fieldTypes.put(columnName, dataType);
+        }
+        return fieldTypes;
+    }
+
     private List<RichCdcMultiplexRecord> extractRecords() {
         if (nonPkTables.contains(currentTable)) {
             return Collections.emptyList();
@@ -238,6 +267,9 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
+
+            LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
+            List<String> primaryKeys = listCaseConvert(table.primaryKeyColumnNames(), caseSensitive);
             records.add(createRecord(RowKind.INSERT, after));
         }
 

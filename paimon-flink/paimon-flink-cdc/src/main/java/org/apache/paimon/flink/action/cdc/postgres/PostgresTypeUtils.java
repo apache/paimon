@@ -67,7 +67,10 @@ public class PostgresTypeUtils {
     private static final String PG_CHARACTER_VARYING_ARRAY = "_varchar";
 
     public static DataType toDataType(
-            String typeName, @Nullable Integer precision, @Nullable Integer scale, TypeMapping typeMapping) {
+            String typeName,
+            @Nullable Integer precision,
+            @Nullable Integer scale,
+            TypeMapping typeMapping) {
         if (typeMapping.containsMode(TO_STRING)) {
             return DataTypes.STRING();
         }
@@ -168,8 +171,7 @@ public class PostgresTypeUtils {
                 @Nullable Integer length,
                 @Nullable Integer scale,
                 TypeMapping typeMapping) {
-            return toDataType(
-                    type, length, scale, typeMapping);
+            return toDataType(type, length, scale, typeMapping);
         }
     }
 }

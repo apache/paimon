@@ -115,11 +115,14 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
 
         statement.executeUpdate("ALTER TABLE schema_evolution_1 ADD COLUMN v2 INT");
-//        statement.executeUpdate(
-//                "INSERT INTO schema_evolution_1 VALUES (2, 3, 'three', 30), (1, 5, 'five', 50)");
-//        statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v2 INT");
-//        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (1, 6, 'six', 60)");
-//        statement.executeUpdate("UPDATE schema_evolution_2 SET v1 = 'second' WHERE _id = 2");
+        //        statement.executeUpdate(
+        //                "INSERT INTO schema_evolution_1 VALUES (2, 3, 'three', 30), (1, 5, 'five',
+        // 50)");
+        //        statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v2 INT");
+        //        statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (1, 6, 'six',
+        // 60)");
+        //        statement.executeUpdate("UPDATE schema_evolution_2 SET v1 = 'second' WHERE _id =
+        // 2");
         rowType =
                 RowType.of(
                         new DataType[] {

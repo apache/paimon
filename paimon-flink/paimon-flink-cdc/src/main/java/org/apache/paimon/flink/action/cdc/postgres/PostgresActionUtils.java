@@ -34,8 +34,6 @@ import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.kafka.connect.json.JsonConverterConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 
 import java.sql.Connection;
 import java.sql.DatabaseMetaData;
@@ -50,7 +48,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import static org.apache.paimon.flink.action.cdc.postgres.PostgresTypeUtils.toPaimonTypeVisitor;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Utils for Postgres Action. */
 public class PostgresActionUtils {
@@ -90,7 +87,8 @@ public class PostgresActionUtils {
                         continue;
                     }
                     try (ResultSet tables =
-                            metaData.getTables(databaseName, schemaName, "%",  new String[] {"TABLE"})) {
+                            metaData.getTables(
+                                    databaseName, schemaName, "%", new String[] {"TABLE"})) {
                         while (tables.next()) {
                             String tableName = tables.getString("TABLE_NAME");
                             String tableComment = tables.getString("REMARKS");
@@ -188,7 +186,7 @@ public class PostgresActionUtils {
         customConverterConfigs.put(JsonConverterConfig.DECIMAL_FORMAT_CONFIG, "numeric");
         JsonDebeziumDeserializationSchema schema =
                 new JsonDebeziumDeserializationSchema(true, customConverterConfigs);
-            return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
+        return sourceBuilder.deserializer(schema).includeSchemaChanges(true).build();
     }
 
     public static void registerJdbcDriver() {
