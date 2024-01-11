@@ -39,6 +39,8 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.hive.utils.HiveUtils.extractTagName;
+
 /**
  * Base {@link RecordReader} for paimon. Reads {@link KeyValue}s from data files and picks out
  * {@link InternalRow} for Hive to consume.
@@ -101,8 +103,7 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
         if (tagToPartField != null) {
             // in case of reading partition field
             // add last field (partition field from tag name) to row
-            String tag =
-                    PaimonInputFormat.extractTagName(split.getPath().getName(), tagToPartField);
+            String tag = extractTagName(split.getPath().getName(), tagToPartField);
             addTagToPartFieldRow = new JoinedRow();
             addTagToPartFieldRow.replace(null, GenericRow.of(BinaryString.fromString(tag)));
         } else {
