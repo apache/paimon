@@ -18,4 +18,5 @@
 
 package org.apache.paimon.hive.objectinspector;
 
+/** To maintain compatibility with Hive 3. */
 public class PaimonTimestampLocalTZObjectInspector extends PaimonTimestampObjectInspector {}
