@@ -65,14 +65,14 @@ public class Stats {
     private final @Nullable Long mergedRecordSize;
 
     @JsonProperty(FIELD_COL_STATS)
-    private final Map<String, ColStats> colStats;
+    private final Map<String, ColStats<?>> colStats;
 
     @JsonCreator
     public Stats(
             @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
-            @JsonProperty(FIELD_COL_STATS) Map<String, ColStats> colStats) {
+            @JsonProperty(FIELD_COL_STATS) Map<String, ColStats<?>> colStats) {
         this.snapshotId = snapshotId;
         this.mergedRecordCount = mergedRecordCount;
         this.mergedRecordSize = mergedRecordSize;
@@ -95,16 +95,16 @@ public class Stats {
         return OptionalUtils.ofNullable(mergedRecordSize);
     }
 
-    public Map<String, ColStats> colStats() {
+    public Map<String, ColStats<?>> colStats() {
         return colStats;
     }
 
     public void serializeFieldsToString(TableSchema schema) {
         try {
             if (colStats != null) {
-                for (Map.Entry<String, ColStats> entry : colStats.entrySet()) {
+                for (Map.Entry<String, ColStats<?>> entry : colStats.entrySet()) {
                     String colName = entry.getKey();
-                    ColStats colStats = entry.getValue();
+                    ColStats<?> colStats = entry.getValue();
                     DataType type =
                             schema.fields().stream()
                                     .filter(field -> field.name().equals(colName))
@@ -122,9 +122,9 @@ public class Stats {
     public void deserializeFieldsFromString(TableSchema schema) {
         try {
             if (colStats != null) {
-                for (Map.Entry<String, ColStats> entry : colStats.entrySet()) {
+                for (Map.Entry<String, ColStats<?>> entry : colStats.entrySet()) {
                     String colName = entry.getKey();
-                    ColStats colStats = entry.getValue();
+                    ColStats<?> colStats = entry.getValue();
                     DataType type =
                             schema.fields().stream()
                                     .filter(field -> field.name().equals(colName))

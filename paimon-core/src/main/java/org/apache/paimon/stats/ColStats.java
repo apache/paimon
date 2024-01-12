@@ -45,7 +45,7 @@ import java.util.OptionalLong;
  *   <li>maxLen: max column length
  * </ul>
  */
-public class ColStats {
+public class ColStats<T extends Comparable<T>> {
 
     private static final String FIELD_DISTINCT_COUNT = "distinctCount";
     private static final String FIELD_MIN = "min";
@@ -62,13 +62,13 @@ public class ColStats {
     @JsonProperty(FIELD_MIN)
     private @Nullable String serializedMin;
 
-    private @Nullable Object min;
+    private @Nullable T min;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MAX)
     private @Nullable String serializedMax;
 
-    private @Nullable Object max;
+    private @Nullable T max;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_NULL_COUNT)
@@ -100,8 +100,8 @@ public class ColStats {
 
     public ColStats(
             @Nullable Long distinctCount,
-            @Nullable Object min,
-            @Nullable Object max,
+            @Nullable T min,
+            @Nullable T max,
             @Nullable Long nullCount,
             @Nullable Long avgLen,
             @Nullable Long maxLen) {
@@ -117,11 +117,11 @@ public class ColStats {
         return OptionalUtils.ofNullable(distinctCount);
     }
 
-    public Optional<Object> min() {
+    public Optional<T> min() {
         return Optional.ofNullable(min);
     }
 
-    public Optional<Object> max() {
+    public Optional<T> max() {
         return Optional.ofNullable(max);
     }
 
@@ -151,7 +151,7 @@ public class ColStats {
 
     public void deserializeFieldsFromString(DataType dataType) {
         if ((serializedMin != null && min == null) || (serializedMax != null && max == null)) {
-            Serializer<Object> serializer = InternalSerializers.create(dataType);
+            Serializer<T> serializer = InternalSerializers.create(dataType);
             if (serializedMin != null && min == null) {
                 min = serializer.deserializeFromString(serializedMin);
             }
@@ -169,7 +169,7 @@ public class ColStats {
         if (object == null || getClass() != object.getClass()) {
             return false;
         }
-        ColStats colStats = (ColStats) object;
+        ColStats<?> colStats = (ColStats<?>) object;
         return Objects.equals(distinctCount, colStats.distinctCount)
                 && Objects.equals(serializedMin, colStats.serializedMin)
                 && Objects.equals(min, colStats.min)

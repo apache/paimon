@@ -788,8 +788,8 @@ public class FileStoreCommitTest {
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
 
         // Analyze and check
-        HashMap<String, ColStats> fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats(10L, 1L, 10L, 0L, 8L, 8L));
+        HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", new ColStats<>(10L, 1L, 10L, 0L, 8L, 8L));
         Stats fakeStats =
                 new Stats(store.snapshotManager().latestSnapshotId(), 10L, 1000L, fakeColStatsMap);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
@@ -814,7 +814,7 @@ public class FileStoreCommitTest {
 
         // Then we need to analyze again
         fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats(30L, 1L, 30L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", new ColStats<>(30L, 1L, 30L, 0L, 8L, 8L));
         fakeStats =
                 new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L, fakeColStatsMap);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
