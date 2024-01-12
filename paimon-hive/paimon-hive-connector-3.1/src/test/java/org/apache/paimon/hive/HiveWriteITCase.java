@@ -46,6 +46,7 @@ import org.junit.runner.RunWith;
 
 import javax.annotation.Nullable;
 
+import java.time.ZoneId;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -198,5 +199,42 @@ public class HiveWriteITCase {
         List<String> select = hiveShell.executeQuery("SELECT * FROM " + outputTableName);
         assertThat(select)
                 .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
+    }
+
+    @Test
+    public void testInsertLocalZonedTimestamp() throws Exception {
+        List<InternalRow> emptyData = Collections.emptyList();
+
+        // test different precisions
+        int precision = ThreadLocalRandom.current().nextInt(10);
+        String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
+
+        String outputTableName =
+                createAppendOnlyExternalTable(
+                        RowType.of(
+                                new DataType[] {
+                                    DataTypes.INT(),
+                                    DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision),
+                                },
+                                new String[] {
+                                    "pt", "ltz",
+                                }),
+                        Collections.singletonList("pt"),
+                        emptyData,
+                        "hive_test_table_output",
+                        CoreOptions.FileFormatType.ORC);
+
+        assertThat(hiveShell.executeQuery("SHOW CREATE TABLE " + outputTableName))
+                .contains("  `ltz` timestamp with local time zone COMMENT 'from deserializer')");
+
+        hiveShell.execute(
+                String.format(
+                        "INSERT INTO %s VALUES (1, '2023-01-12 20:00:01%s')",
+                        outputTableName, fraction));
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM " + outputTableName))
+                .containsExactly(
+                        String.format(
+                                "1\t2023-01-12 20:00:01%s %s", fraction, ZoneId.systemDefault()));
     }
 }

@@ -57,6 +57,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.VarcharTypeInfo;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.types.VarBinaryType.MAX_LENGTH;
@@ -185,7 +186,7 @@ public class HiveTypeUtils {
 
         @Override
         public TypeInfo visit(LocalZonedTimestampType localZonedTimestampType) {
-            return TypeInfoFactory.timestampTypeInfo;
+            return LocalZonedTimestampTypeUtils.toHiveType(localZonedTimestampType);
         }
 
         @Override
@@ -254,6 +255,12 @@ public class HiveTypeUtils {
         }
 
         public DataType atomic(TypeInfo atomic) {
+            Optional<DataType> localZonedTimestampType =
+                    LocalZonedTimestampTypeUtils.toPaimonType(atomic);
+            if (localZonedTimestampType.isPresent()) {
+                return localZonedTimestampType.get();
+            }
+
             if (TypeInfoFactory.booleanTypeInfo.equals(atomic)) {
                 return DataTypes.BOOLEAN();
             } else if (TypeInfoFactory.byteTypeInfo.equals(atomic)) {
