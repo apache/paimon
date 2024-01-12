@@ -943,11 +943,11 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
-    public static final ConfigOption<TagDateFormatter> TAG_FORMATTER_DATE =
-            key("tag.formatter-date")
-                    .enumType(TagDateFormatter.class)
-                    .defaultValue(TagDateFormatter.WITH_DASHES)
-                    .withDescription("Specifies the date format to be used for tags.");
+    public static final ConfigOption<TagPeriodFormatter> TAG_PERIOD_FORMATTER =
+            key("tag.period-formatter")
+                    .enumType(TagPeriodFormatter.class)
+                    .defaultValue(TagPeriodFormatter.WITH_DASHES)
+                    .withDescription("The date format for tag periods.");
 
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
@@ -1482,8 +1482,8 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_CREATION_DELAY);
     }
 
-    public TagDateFormatter tagFormatterDate() {
-        return options.get(TAG_FORMATTER_DATE);
+    public TagPeriodFormatter tagPeriodFormatter() {
+        return options.get(TAG_PERIOD_FORMATTER);
     }
 
     public Integer tagNumRetainedMax() {
@@ -2064,15 +2064,15 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** The date format options for tag creation. */
-    public enum TagDateFormatter implements DescribedEnum {
-        WITH_DASHES("with_dashes", "Represents yyyy-MM-dd format."),
-        WITHOUT_DASHES("without_dashes", "Represents yyyyMMdd format.");
+    /** The period format options for tag creation. */
+    public enum TagPeriodFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
 
         private final String value;
         private final String description;
 
-        TagDateFormatter(String value, String description) {
+        TagPeriodFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

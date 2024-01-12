@@ -33,8 +33,6 @@ import static java.time.temporal.ChronoField.DAY_OF_MONTH;
 import static java.time.temporal.ChronoField.HOUR_OF_DAY;
 import static java.time.temporal.ChronoField.MONTH_OF_YEAR;
 import static java.time.temporal.ChronoField.YEAR;
-import static org.apache.paimon.CoreOptions.TagDateFormatter.WITHOUT_DASHES;
-import static org.apache.paimon.CoreOptions.TagDateFormatter.WITH_DASHES;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Handle time for tag. */
@@ -52,6 +50,16 @@ public interface TagPeriodHandler {
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
 
+    DateTimeFormatter HOUR_FORMATTER_WITHOUT_DASHES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendLiteral(" ")
+                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
     DateTimeFormatter DAY_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
@@ -62,7 +70,7 @@ public interface TagPeriodHandler {
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
 
-    DateTimeFormatter FORMATTER_WITHOUT_DASHES =
+    DateTimeFormatter DAY_FORMATTER_WITHOUT_DASHES =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
                     .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
@@ -121,6 +129,12 @@ public interface TagPeriodHandler {
     /** Hourly {@link TagPeriodHandler}. */
     class HourlyTagPeriodHandler extends BaseTagPeriodHandler {
 
+        CoreOptions.TagPeriodFormatter formatter;
+
+        public HourlyTagPeriodHandler(CoreOptions.TagPeriodFormatter formatter) {
+            this.formatter = formatter;
+        }
+
         static final Duration ONE_PERIOD = Duration.ofHours(1);
 
         @Override
@@ -130,16 +144,23 @@ public interface TagPeriodHandler {
 
         @Override
         protected DateTimeFormatter formatter() {
-            return HOUR_FORMATTER;
+            switch (formatter) {
+                case WITH_DASHES:
+                    return HOUR_FORMATTER;
+                case WITHOUT_DASHES:
+                    return HOUR_FORMATTER_WITHOUT_DASHES;
+                default:
+                    throw new IllegalArgumentException("Unsupported date format type");
+            }
         }
     }
 
     /** Daily {@link TagPeriodHandler}. */
     class DailyTagPeriodHandler extends BaseTagPeriodHandler {
 
-        CoreOptions.TagDateFormatter formatter;
+        CoreOptions.TagPeriodFormatter formatter;
 
-        public DailyTagPeriodHandler(CoreOptions.TagDateFormatter formatter) {
+        public DailyTagPeriodHandler(CoreOptions.TagPeriodFormatter formatter) {
             this.formatter = formatter;
         }
 
@@ -156,7 +177,7 @@ public interface TagPeriodHandler {
                 case WITH_DASHES:
                     return DAY_FORMATTER;
                 case WITHOUT_DASHES:
-                    return FORMATTER_WITHOUT_DASHES;
+                    return DAY_FORMATTER_WITHOUT_DASHES;
                 default:
                     throw new IllegalArgumentException("Unsupported date format type");
             }
@@ -188,9 +209,9 @@ public interface TagPeriodHandler {
     static TagPeriodHandler create(CoreOptions options) {
         switch (options.tagCreationPeriod()) {
             case DAILY:
-                return new DailyTagPeriodHandler(options.tagFormatterDate());
+                return new DailyTagPeriodHandler(options.tagPeriodFormatter());
             case HOURLY:
-                return new HourlyTagPeriodHandler();
+                return new HourlyTagPeriodHandler(options.tagPeriodFormatter());
             case TWO_HOURS:
                 return new TwoHoursTagPeriodHandler();
             default:
