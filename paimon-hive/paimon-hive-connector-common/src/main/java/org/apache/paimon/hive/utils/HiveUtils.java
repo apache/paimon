@@ -20,6 +20,7 @@ package org.apache.paimon.hive.utils;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.LocationKeyExtractor;
 import org.apache.paimon.hive.SearchArgumentToPredicateConverter;
 import org.apache.paimon.options.Options;
@@ -27,6 +28,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.utils.PartitionPathUtils;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.ql.io.sarg.ConvertAstToSearchArg;
@@ -37,6 +39,7 @@ import org.apache.hadoop.mapred.JobConf;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
@@ -94,5 +97,12 @@ public class HiveUtils {
                         : convertToPropertiesPrefixKey(
                                 hiveConf, PAIMON_PREFIX, v -> !"NULL".equalsIgnoreCase(v));
         return Options.fromMap(configMap);
+    }
+
+    /** Extract tag name from location, partition field should be tag name. */
+    public static String extractTagName(String location, String tagToPartField) {
+        LinkedHashMap<String, String> partSpec =
+                PartitionPathUtils.extractPartitionSpecFromPath(new Path(location));
+        return partSpec.get(tagToPartField);
     }
 }
