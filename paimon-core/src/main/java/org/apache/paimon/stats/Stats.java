@@ -32,9 +32,9 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonPro
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Collections;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 import java.util.OptionalLong;
 
 /**
@@ -64,20 +64,23 @@ public class Stats {
     @JsonProperty(FIELD_MERGED_RECORD_SIZE)
     private final @Nullable Long mergedRecordSize;
 
-    @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_COL_STATS)
-    private final @Nullable Map<String, ColStats> colStats;
+    private final Map<String, ColStats> colStats;
 
     @JsonCreator
     public Stats(
             @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
-            @JsonProperty(FIELD_COL_STATS) @Nullable Map<String, ColStats> colStats) {
+            @JsonProperty(FIELD_COL_STATS) Map<String, ColStats> colStats) {
         this.snapshotId = snapshotId;
         this.mergedRecordCount = mergedRecordCount;
         this.mergedRecordSize = mergedRecordSize;
         this.colStats = colStats;
+    }
+
+    public Stats(Long snapshotId, Long mergedRecordCount, Long mergedRecordSize) {
+        this(snapshotId, mergedRecordCount, mergedRecordSize, Collections.emptyMap());
     }
 
     public long snapshotId() {
@@ -92,8 +95,8 @@ public class Stats {
         return OptionalUtils.ofNullable(mergedRecordSize);
     }
 
-    public Optional<Map<String, ColStats>> colStats() {
-        return Optional.ofNullable(colStats);
+    public Map<String, ColStats> colStats() {
+        return colStats;
     }
 
     public void serializeFieldsToString(TableSchema schema) {

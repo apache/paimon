@@ -191,10 +191,10 @@ public class ColStats {
         return "ColStats{"
                 + "distinctCount="
                 + distinctCount
-                + ", serializedMin='"
+                + ", min='"
                 + serializedMin
                 + '\''
-                + ", serializedMax='"
+                + ", max='"
                 + serializedMax
                 + '\''
                 + ", nullCount="

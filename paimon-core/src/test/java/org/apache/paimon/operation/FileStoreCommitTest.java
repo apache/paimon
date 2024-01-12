@@ -812,11 +812,18 @@ public class FileStoreCommitTest {
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isEmpty();
 
-        // We need to analyze again
+        // Then we need to analyze again
         fakeColStatsMap = new HashMap<>();
         fakeColStatsMap.put("orderId", new ColStats(30L, 1L, 30L, 0L, 8L, 8L));
         fakeStats =
                 new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L, fakeColStatsMap);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // Analyze without col stats and check
+        fakeStats = new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
