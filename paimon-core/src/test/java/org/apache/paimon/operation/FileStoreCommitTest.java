@@ -790,17 +790,18 @@ public class FileStoreCommitTest {
         // Analyze and check
         HashMap<String, ColStats> fakeColStatsMap = new HashMap<>();
         fakeColStatsMap.put("orderId", new ColStats(10L, 1L, 10L, 0L, 8L, 8L));
-        Stats fakeStats = new Stats(10L, 1000L, fakeColStatsMap);
-        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
+        Stats fakeStats =
+                new Stats(store.snapshotManager().latestSnapshotId(), 10L, 1000L, fakeColStatsMap);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         Optional<Stats> readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 1));
+        assertThat(readStats.get()).isEqualTo(fakeStats);
 
         // New snapshot will inherit last snapshot's stats
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 1));
+        assertThat(readStats.get()).isEqualTo(fakeStats);
 
         // When table schema is modified, new snapshot will not inherit last snapshot's stats
         ArrayList<DataField> newFields =
@@ -814,11 +815,12 @@ public class FileStoreCommitTest {
         // We need to analyze again
         fakeColStatsMap = new HashMap<>();
         fakeColStatsMap.put("orderId", new ColStats(30L, 1L, 30L, 0L, 8L, 8L));
-        fakeStats = new Stats(30L, 3000L, fakeColStatsMap);
-        fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
+        fakeStats =
+                new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L, fakeColStatsMap);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 4));
+        assertThat(readStats.get()).isEqualTo(fakeStats);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

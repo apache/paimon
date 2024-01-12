@@ -87,10 +87,10 @@ public interface FileStoreCommit {
     FileStoreCommit withMetrics(CommitMetrics metrics);
 
     /**
-     * Write new stats. The {@link Snapshot.CommitKind} of generated snapshot is {@link
+     * Commit new statistics. The {@link Snapshot.CommitKind} of generated snapshot is {@link
      * Snapshot.CommitKind#ANALYZE}.
      */
-    void writeStats(Stats stats, long commitIdentifier);
+    void commitStatistics(Stats stats, long commitIdentifier);
 
     FileStorePathFactory pathFactory();
 

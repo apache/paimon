@@ -513,7 +513,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void writeStats(Stats stats, long commitIdentifier) {
+    public void commitStatistics(Stats stats, long commitIdentifier) {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
                 Collections.emptyList(),

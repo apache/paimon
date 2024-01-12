@@ -44,11 +44,6 @@ public class StatsFileHandler {
      * @return the written file name
      */
     public String writeStats(Stats stats) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        if (latestSnapshotId == null) {
-            throw new IllegalStateException("Latest snapshot cannot be found");
-        }
-        stats = Stats.withNewSnapshotId(stats, latestSnapshotId);
         stats.serializeFieldsToString(
                 schemaManager
                         .latest()

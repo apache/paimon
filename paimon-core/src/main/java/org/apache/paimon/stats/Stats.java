@@ -54,7 +54,7 @@ public class Stats {
     private static final String FIELD_COL_STATS = "colStats";
 
     @JsonProperty(FIELD_SNAPSHOT_ID)
-    private final Long snapshotId;
+    private final long snapshotId;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MERGED_RECORD_COUNT)
@@ -80,13 +80,6 @@ public class Stats {
         this.colStats = colStats;
     }
 
-    public Stats(
-            @Nullable Long mergedRecordCount,
-            @Nullable Long mergedRecordSize,
-            @Nullable Map<String, ColStats> colStats) {
-        this(null, mergedRecordCount, mergedRecordSize, colStats);
-    }
-
     public long snapshotId() {
         return snapshotId;
     }
@@ -101,11 +94,6 @@ public class Stats {
 
     public Optional<Map<String, ColStats>> colStats() {
         return Optional.ofNullable(colStats);
-    }
-
-    public static Stats withNewSnapshotId(Stats stats, long snapshotId) {
-        return new Stats(
-                snapshotId, stats.mergedRecordCount, stats.mergedRecordSize, stats.colStats);
     }
 
     public void serializeFieldsToString(TableSchema schema) {
