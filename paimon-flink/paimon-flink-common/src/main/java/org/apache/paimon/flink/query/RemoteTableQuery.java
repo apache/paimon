@@ -79,6 +79,10 @@ public class RemoteTableQuery implements TableQuery {
             throw new IOException(e.getCause());
         }
 
+        if (row == null) {
+            return null;
+        }
+
         return ProjectedRow.from(projection).replaceRow(row);
     }
 
