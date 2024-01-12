@@ -794,13 +794,13 @@ public class FileStoreCommitTest {
         fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
         Optional<Stats> readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(fakeStats);
+        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 1));
 
         // New snapshot will inherit last snapshot's stats
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(fakeStats);
+        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 1));
 
         // When table schema is modified, new snapshot will not inherit last snapshot's stats
         ArrayList<DataField> newFields =
@@ -818,7 +818,7 @@ public class FileStoreCommitTest {
         fileStoreCommit.writeStats(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
-        assertThat(readStats.get()).isEqualTo(fakeStats);
+        assertThat(readStats.get()).isEqualTo(Stats.withNewSnapshotId(fakeStats, 4));
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

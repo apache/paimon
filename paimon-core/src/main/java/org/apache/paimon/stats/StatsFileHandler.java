@@ -44,7 +44,16 @@ public class StatsFileHandler {
      * @return the written file name
      */
     public String writeStats(Stats stats) {
-        stats.serializeFieldsToString(schemaManager.latest().get());
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (latestSnapshotId == null) {
+            throw new IllegalStateException("Latest snapshot cannot be found");
+        }
+        stats = Stats.withNewSnapshotId(stats, latestSnapshotId);
+        stats.serializeFieldsToString(
+                schemaManager
+                        .latest()
+                        .orElseThrow(
+                                () -> new IllegalStateException("Latest schema cannot be found")));
         return statsFile.write(stats);
     }
 
@@ -54,7 +63,11 @@ public class StatsFileHandler {
      * @return stats
      */
     public Optional<Stats> readStats() {
-        return readStats(snapshotManager.latestSnapshotId());
+        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        if (latestSnapshotId == null) {
+            throw new IllegalStateException("Latest snapshot cannot be found");
+        }
+        return readStats(latestSnapshotId);
     }
 
     /**
@@ -64,10 +77,10 @@ public class StatsFileHandler {
      */
     public Optional<Stats> readStats(long snapshotId) {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        if (snapshot.stats() == null) {
+        if (snapshot.statistics() == null) {
             return Optional.empty();
         } else {
-            Stats stats = statsFile.read(snapshot.stats());
+            Stats stats = statsFile.read(snapshot.statistics());
             stats.deserializeFieldsFromString(schemaManager.schema(snapshot.schemaId()));
             return Optional.of(stats);
         }
@@ -76,8 +89,8 @@ public class StatsFileHandler {
     /** Delete stats of the specified snapshot. */
     public void deleteStats(long snapshotId) {
         Snapshot snapshot = snapshotManager.snapshot(snapshotId);
-        if (snapshot.stats() != null) {
-            statsFile.delete(snapshot.stats());
+        if (snapshot.statistics() != null) {
+            statsFile.delete(snapshot.statistics());
         }
     }
 }

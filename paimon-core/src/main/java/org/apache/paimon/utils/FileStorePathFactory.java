@@ -215,12 +215,16 @@ public class FileStorePathFactory {
             @Override
             public Path newPath() {
                 return new Path(
-                        root + "/stats/stats-" + uuid + "-" + statsFileCount.getAndIncrement());
+                        root
+                                + "/statistics/stats-"
+                                + uuid
+                                + "-"
+                                + statsFileCount.getAndIncrement());
             }
 
             @Override
             public Path toPath(String fileName) {
-                return new Path(root + "/stats/" + fileName);
+                return new Path(root + "/statistics/" + fileName);
             }
         };
     }

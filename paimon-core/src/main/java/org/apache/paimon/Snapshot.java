@@ -87,7 +87,7 @@ public class Snapshot {
     private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
     private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
     private static final String FIELD_WATERMARK = "watermark";
-    private static final String FIELD_STATS = "stats";
+    private static final String FIELD_STATISTICS = "statistics";
 
     // version of snapshot
     // null for paimon <= 0.2
@@ -170,12 +170,12 @@ public class Snapshot {
     @Nullable
     private final Long watermark;
 
-    // stats file name for stats of this table
+    // stats file name for statistics of this table
     // null if no stats file
     @JsonInclude(JsonInclude.Include.NON_NULL)
-    @JsonProperty(FIELD_STATS)
+    @JsonProperty(FIELD_STATISTICS)
     @Nullable
-    private final String stats;
+    private final String statistics;
 
     public Snapshot(
             long id,
@@ -193,7 +193,7 @@ public class Snapshot {
             @Nullable Long deltaRecordCount,
             @Nullable Long changelogRecordCount,
             @Nullable Long watermark,
-            @Nullable String stats) {
+            @Nullable String statistics) {
         this(
                 CURRENT_VERSION,
                 id,
@@ -211,7 +211,7 @@ public class Snapshot {
                 deltaRecordCount,
                 changelogRecordCount,
                 watermark,
-                stats);
+                statistics);
     }
 
     @JsonCreator
@@ -232,7 +232,7 @@ public class Snapshot {
             @JsonProperty(FIELD_DELTA_RECORD_COUNT) @Nullable Long deltaRecordCount,
             @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT) @Nullable Long changelogRecordCount,
             @JsonProperty(FIELD_WATERMARK) @Nullable Long watermark,
-            @JsonProperty(FIELD_STATS) @Nullable String stats) {
+            @JsonProperty(FIELD_STATISTICS) @Nullable String statistics) {
         this.version = version;
         this.id = id;
         this.schemaId = schemaId;
@@ -249,7 +249,7 @@ public class Snapshot {
         this.deltaRecordCount = deltaRecordCount;
         this.changelogRecordCount = changelogRecordCount;
         this.watermark = watermark;
-        this.stats = stats;
+        this.statistics = statistics;
     }
 
     @JsonGetter(FIELD_VERSION)
@@ -339,10 +339,10 @@ public class Snapshot {
         return watermark;
     }
 
-    @JsonGetter(FIELD_STATS)
+    @JsonGetter(FIELD_STATISTICS)
     @Nullable
-    public String stats() {
-        return stats;
+    public String statistics() {
+        return statistics;
     }
 
     /**

@@ -48,9 +48,13 @@ import java.util.OptionalLong;
  */
 public class Stats {
 
+    private static final String FIELD_SNAPSHOT_ID = "snapshotId";
     private static final String FIELD_MERGED_RECORD_COUNT = "mergedRecordCount";
     private static final String FIELD_MERGED_RECORD_SIZE = "mergedRecordSize";
     private static final String FIELD_COL_STATS = "colStats";
+
+    @JsonProperty(FIELD_SNAPSHOT_ID)
+    private final Long snapshotId;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MERGED_RECORD_COUNT)
@@ -66,12 +70,25 @@ public class Stats {
 
     @JsonCreator
     public Stats(
+            @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
             @JsonProperty(FIELD_COL_STATS) @Nullable Map<String, ColStats> colStats) {
+        this.snapshotId = snapshotId;
         this.mergedRecordCount = mergedRecordCount;
         this.mergedRecordSize = mergedRecordSize;
         this.colStats = colStats;
+    }
+
+    public Stats(
+            @Nullable Long mergedRecordCount,
+            @Nullable Long mergedRecordSize,
+            @Nullable Map<String, ColStats> colStats) {
+        this(null, mergedRecordCount, mergedRecordSize, colStats);
+    }
+
+    public long snapshotId() {
+        return snapshotId;
     }
 
     public OptionalLong mergedRecordCount() {
@@ -84,6 +101,11 @@ public class Stats {
 
     public Optional<Map<String, ColStats>> colStats() {
         return Optional.ofNullable(colStats);
+    }
+
+    public static Stats withNewSnapshotId(Stats stats, long snapshotId) {
+        return new Stats(
+                snapshotId, stats.mergedRecordCount, stats.mergedRecordSize, stats.colStats);
     }
 
     public void serializeFieldsToString(TableSchema schema) {
@@ -152,20 +174,23 @@ public class Stats {
             return false;
         }
         Stats stats = (Stats) object;
-        return Objects.equals(mergedRecordCount, stats.mergedRecordCount)
+        return Objects.equals(snapshotId, stats.snapshotId)
+                && Objects.equals(mergedRecordCount, stats.mergedRecordCount)
                 && Objects.equals(mergedRecordSize, stats.mergedRecordSize)
                 && Objects.equals(colStats, stats.colStats);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(mergedRecordCount, mergedRecordSize, colStats);
+        return Objects.hash(snapshotId, mergedRecordCount, mergedRecordSize, colStats);
     }
 
     @Override
     public String toString() {
         return "Stats{"
-                + "mergedRecordCount="
+                + "snapshotId="
+                + snapshotId
+                + ", mergedRecordCount="
                 + mergedRecordCount
                 + ", mergedRecordSize="
                 + mergedRecordSize
