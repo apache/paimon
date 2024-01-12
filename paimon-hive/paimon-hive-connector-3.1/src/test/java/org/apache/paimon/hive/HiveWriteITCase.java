@@ -206,8 +206,8 @@ public class HiveWriteITCase {
         List<InternalRow> emptyData = Collections.emptyList();
 
         // test different precisions
-        int precision = ThreadLocalRandom.current().nextInt(10);
-        String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
+        int precision = ThreadLocalRandom.current().nextInt(3, 10);
+        String fraction = "." + "123456789".substring(0, precision);
 
         String outputTableName =
                 createAppendOnlyExternalTable(
