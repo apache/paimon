@@ -36,6 +36,7 @@ import java.time.ZoneId;
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_WATERMARK_IDLE_TIMEOUT;
 import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
@@ -244,6 +245,25 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
         assertThat(tagManager.tags().values())
                 .containsOnly("savepoint-11", "2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
+    }
+
+    @Test
+    public void testWatermarkIdleTimeoutForceCreatingSnapshot() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(SINK_WATERMARK_TIME_ZONE, ZoneId.systemDefault().toString());
+        options.set(SNAPSHOT_WATERMARK_IDLE_TIMEOUT.key(), "10 s");
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+
+        commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:00")));
+        commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:10")));
+
+        Long watermark1 = table.snapshotManager().snapshot(1).watermark();
+        Long watermark2 = table.snapshotManager().snapshot(2).watermark();
+        assertThat(watermark2 - watermark1).isEqualTo(10000);
+        commit.close();
     }
 
     private long localZoneMills(String timestamp) {
