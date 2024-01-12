@@ -81,7 +81,7 @@ public class RandomGenericRowDataGenerator {
                     "date",
                     "string",
                     "timestamp",
-                    "timestamp_ltz",
+                    "timestamp",
                     "array<bigint>",
                     "map<string,int>");
 
