@@ -139,7 +139,7 @@ public class ColStats<T extends Comparable<T>> {
 
     public void serializeFieldsToString(DataType dataType) {
         if ((min != null && serializedMin == null) || (max != null && serializedMax == null)) {
-            Serializer<Object> serializer = InternalSerializers.create(dataType);
+            Serializer<T> serializer = InternalSerializers.create(dataType);
             if (min != null && serializedMin == null) {
                 serializedMin = serializer.serializeToString(min);
             }
