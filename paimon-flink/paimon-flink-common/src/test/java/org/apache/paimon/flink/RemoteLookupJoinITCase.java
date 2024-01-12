@@ -25,29 +25,23 @@ import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.EnumSource;
 
 import org.apache.flink.types.Row;
-
+import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
-import java.net.UnknownHostException;
 import java.util.Collections;
 import java.util.List;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
-import static org.apache.paimon.table.sink.ChannelComputer.select;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** ITCase for remote lookup join. */
@@ -114,8 +108,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
                         new DisabledServiceRequestStats());
         server.start();
 
-        InetSocketAddress[] addresses =
-                new InetSocketAddress[] {server.getServerAddress()};
+        InetSocketAddress[] addresses = new InetSocketAddress[] {server.getServerAddress()};
         ServiceManager serviceManager = table.store().newServiceManager();
         serviceManager.resetService(PRIMARY_KEY_LOOKUP, addresses);
 
