@@ -85,6 +85,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -106,7 +107,6 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String STORAGE_HANDLER_CLASS_NAME =
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
-    private static final int HIVE_PREFIX_LENGTH = HIVE_PREFIX.length();
     public static final String HIVE_SITE_FILE = "hive-site.xml";
 
     private final HiveConf hiveConf;
@@ -208,10 +208,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
         try {
-            client.getDatabase(databaseName);
-            return true;
-        } catch (NoSuchObjectException e) {
-            return false;
+            return getDatabase(databaseName) != null;
         } catch (TException e) {
             throw new RuntimeException(
                     "Failed to determine if database " + databaseName + " exists", e);
@@ -219,29 +216,49 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) {
+    protected void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
         try {
-            Path databasePath = newDatabasePath(name);
-            locationHelper.createPathIfRequired(databasePath, fileIO);
+            Database database = getDatabase(name);
+            if (database == null) {
+                Path databasePath = newDatabasePath(name);
+                locationHelper.createPathIfRequired(databasePath, fileIO);
 
-            Database database = new Database();
-            database.setName(name);
-            locationHelper.specifyDatabaseLocation(databasePath, database);
-            client.createDatabase(database);
+                database = new Database();
+                database.setName(name);
+                locationHelper.specifyDatabaseLocation(databasePath, database);
+                client.createDatabase(database);
+            } else {
+                throw new DatabaseAlreadyExistException(name);
+            }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
 
     @Override
-    protected void dropDatabaseImpl(String name) {
+    protected void dropDatabaseImpl(String name) throws DatabaseNotExistException {
         try {
-            Database database = client.getDatabase(name);
-            String location = locationHelper.getDatabaseLocation(database);
-            locationHelper.dropPathIfRequired(new Path(location), fileIO);
-            client.dropDatabase(name, true, false, true);
+            Database database = getDatabase(name);
+            if (database != null) {
+                String location = locationHelper.getDatabaseLocation(database);
+                locationHelper.dropPathIfRequired(new Path(location), fileIO);
+                client.dropDatabase(name, true, false, true);
+            } else {
+                throw new DatabaseNotExistException(name);
+            }
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);
+        }
+    }
+
+    private Database getDatabase(String databaseName) throws TException {
+        try {
+            return client.getDatabase(databaseName);
+        } catch (NoSuchObjectException e) {
+            return null;
+        } catch (TException e) {
+            throw new RuntimeException(
+                    "Failed to determine if database " + databaseName + " exists", e);
         }
     }
 
@@ -336,14 +353,7 @@ public class HiveCatalog extends AbstractCatalog {
         Table table =
                 newHmsTable(
                         identifier,
-                        tableSchema.options().entrySet().stream()
-                                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
-                                .collect(
-                                        Collectors.toMap(
-                                                entry ->
-                                                        entry.getKey()
-                                                                .substring(HIVE_PREFIX_LENGTH),
-                                                Map.Entry::getValue)));
+                        convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);

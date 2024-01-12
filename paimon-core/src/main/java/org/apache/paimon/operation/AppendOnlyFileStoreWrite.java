@@ -47,6 +47,7 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutorService;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
@@ -69,6 +70,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
+    private boolean forceBufferSpill = false;
     private boolean skipCompaction;
     private BucketMode bucketMode = BucketMode.FIXED;
 
@@ -137,8 +139,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 commitForceCompact,
                 factory,
                 restoreIncrement,
-                useWriteBuffer,
-                spillable,
+                useWriteBuffer || forceBufferSpill,
+                spillable || forceBufferSpill,
                 fileCompression,
                 statsCollectors,
                 getWriterMetrics(partition, bucket));
@@ -192,5 +194,15 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     public void withIgnorePreviousFiles(boolean ignorePrevious) {
         // in unaware bucket mode, we need all writers to be empty
         super.withIgnorePreviousFiles(ignorePrevious || bucketMode == BucketMode.UNAWARE);
+    }
+
+    @Override
+    protected void forceBufferSpill() throws Exception {
+        forceBufferSpill = true;
+        for (Map<Integer, WriterContainer<InternalRow>> bucketWriters : writers.values()) {
+            for (WriterContainer<InternalRow> writerContainer : bucketWriters.values()) {
+                ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
+            }
+        }
     }
 }

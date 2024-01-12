@@ -22,7 +22,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.utils.JsonDeserializer;
 import org.apache.paimon.utils.JsonSerializer;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -72,7 +71,7 @@ public class SchemaSerializer
         }
         generator.writeEndObject();
 
-        if (!StringUtils.isNullOrWhitespaceOnly(tableSchema.comment())) {
+        if (tableSchema.comment() != null) {
             generator.writeStringField("comment", tableSchema.comment());
         }
 
@@ -114,7 +113,7 @@ public class SchemaSerializer
         }
 
         JsonNode commentNode = node.get("comment");
-        String comment = "";
+        String comment = null;
         if (commentNode != null) {
             comment = commentNode.asText();
         }

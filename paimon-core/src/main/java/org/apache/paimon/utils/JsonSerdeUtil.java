@@ -208,6 +208,31 @@ public class JsonSerdeUtil {
         return clazz.cast(resultNode);
     }
 
+    /** Parses a JSON string and extracts a value of the specified type from the given path keys. */
+    public static <T> T extractValue(String json, Class<T> valueType, String... path)
+            throws JsonProcessingException {
+        JsonNode currentNode = OBJECT_MAPPER_INSTANCE.readTree(json);
+        for (String key : path) {
+            currentNode = currentNode.get(key);
+            if (currentNode == null) {
+                throw new IllegalArgumentException("Invalid path or key not found: " + key);
+            }
+        }
+        return OBJECT_MAPPER_INSTANCE.treeToValue(currentNode, valueType);
+    }
+
+    /** Checks if a specified node exists in a JSON string. */
+    public static boolean isNodeExists(String json, String... path) throws JsonProcessingException {
+        JsonNode currentNode = OBJECT_MAPPER_INSTANCE.readTree(json);
+        for (String key : path) {
+            currentNode = currentNode.get(key);
+            if (currentNode == null) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static boolean isNull(JsonNode jsonNode) {
         return jsonNode == null || jsonNode.isNull();
     }

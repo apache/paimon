@@ -65,6 +65,7 @@ import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
 public abstract class AbstractFileStoreTable implements FileStoreTable {
@@ -359,9 +360,18 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager.snapshotExists(fromSnapshotId),
                 "Cannot create tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
+        createTag(tagName, snapshotManager.snapshot(fromSnapshotId));
+    }
 
-        Snapshot snapshot = snapshotManager.snapshot(fromSnapshotId);
-        tagManager().createTag(snapshot, tagName, store().createTagCallbacks());
+    @Override
+    public void createTag(String tagName) {
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        createTag(tagName, latestSnapshot);
+    }
+
+    private void createTag(String tagName, Snapshot fromSnapshot) {
+        tagManager().createTag(fromSnapshot, tagName, store().createTagCallbacks());
     }
 
     @Override
@@ -406,5 +416,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        AbstractFileStoreTable that = (AbstractFileStoreTable) o;
+        return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
     }
 }

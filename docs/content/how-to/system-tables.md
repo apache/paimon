@@ -146,8 +146,8 @@ so it is possible that the values of different keys come from different snapshot
 
 {{< /hint >}}
 
-For append-only tables, as all files can be read without merging,
-`ro` system table acts like the normal append-only table.
+For append tables, as all files can be read without merging,
+`ro` system table acts like the normal append table.
 
 ```sql
 SELECT * FROM MyTable$ro;
@@ -253,6 +253,25 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 | manifest-f4dcab43-ef6b-4713... |        12365|               40 |                 0 |             0 |
 +--------------------------------+-------------+------------------+-------------------+---------------+
 1 rows in set
+*/
+```
+
+### Aggregation fields Table
+
+You can query the historical aggregation of the table through aggregation fields table.
+
+```sql
+SELECT * FROM MyTable$aggregation_fields;
+
+/*
++------------+-----------------+--------------+--------------------------------+---------+
+| field_name |      field_type |    function  |               function_options | comment |
++------------+-----------------+--------------+--------------------------------+---------+
+| product_id | BIGINT NOT NULL |           [] |                             [] |  <NULL> |
+|      price |             INT | [true,count] | [fields.price.ignore-retrac... |  <NULL> |
+|      sales |          BIGINT |        [sum] | [fields.sales.aggregate-fun... |  <NULL> |
++------------+-----------------+--------------+--------------------------------+---------+
+3 rows in set
 */
 ```
 

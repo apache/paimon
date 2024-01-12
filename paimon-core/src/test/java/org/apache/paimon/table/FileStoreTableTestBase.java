@@ -101,6 +101,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
+import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.CoreOptions.FILE_FORMAT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_EXECUTION_MODE;
@@ -646,6 +647,18 @@ public abstract class FileStoreTableTestBase {
         assertThat(result)
                 .containsExactlyInAnyOrder("+1|30|300|binary|varbinary|mapKey:mapVal|multiset");
 
+        // read again using consume id with ignore progress
+        scan =
+                table.copy(Collections.singletonMap(CONSUMER_IGNORE_PROGRESS.key(), "true"))
+                        .newStreamScan();
+        List<Split> splits = scan.plan().splits();
+        result = getResult(read, splits, STREAMING_ROW_TO_STRING);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        "+1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "+1|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                        "+1|30|300|binary|varbinary|mapKey:mapVal|multiset");
+
         // test snapshot expiration
         for (int i = 3; i <= 8; i++) {
             write.write(rowData(1, (i + 1) * 10, (i + 1) * 100L));
@@ -665,6 +678,7 @@ public abstract class FileStoreTableTestBase {
                 table.copy(
                         Collections.singletonMap(
                                 CoreOptions.CONSUMER_EXPIRATION_TIME.key(), "1 s"));
+
         // commit to trigger expiration
         writeBuilder = table.newStreamWriteBuilder();
         write = writeBuilder.newWrite();

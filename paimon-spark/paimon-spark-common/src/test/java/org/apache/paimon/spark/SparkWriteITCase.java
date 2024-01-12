@@ -167,7 +167,8 @@ public class SparkWriteITCase {
     public void testWriteDynamicBucketPartitionedTable() {
         spark.sql(
                 "CREATE TABLE T (a INT, b INT, c STRING) PARTITIONED BY (a) TBLPROPERTIES"
-                        + " ('primary-key'='a,b', 'bucket'='-1', 'dynamic-bucket.target-row-num'='3')");
+                        + " ('primary-key'='a,b', 'bucket'='-1', "
+                        + "'dynamic-bucket.target-row-num'='3', 'dynamic-bucket.initial-buckets'='1')");
 
         spark.sql("INSERT INTO T VALUES (1, 1, '1'), (1, 2, '2')");
         List<Row> rows = spark.sql("SELECT max(bucket) FROM `T$FILES`").collectAsList();

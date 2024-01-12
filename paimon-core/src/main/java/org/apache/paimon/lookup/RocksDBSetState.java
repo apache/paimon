@@ -21,7 +21,6 @@ package org.apache.paimon.lookup;
 import org.apache.paimon.data.serializer.Serializer;
 
 import org.rocksdb.ColumnFamilyHandle;
-import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
 import org.rocksdb.RocksIterator;
 
@@ -38,12 +37,12 @@ public class RocksDBSetState<K, V> extends RocksDBState<K, V, List<byte[]>> {
     private static final byte[] EMPTY = new byte[0];
 
     public RocksDBSetState(
-            RocksDB db,
+            RocksDBStateFactory stateFactory,
             ColumnFamilyHandle columnFamily,
             Serializer<K> keySerializer,
             Serializer<V> valueSerializer,
             long lruCacheSize) {
-        super(db, columnFamily, keySerializer, valueSerializer, lruCacheSize);
+        super(stateFactory, columnFamily, keySerializer, valueSerializer, lruCacheSize);
     }
 
     public List<V> get(K key) throws IOException {

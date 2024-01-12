@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
@@ -30,15 +29,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -68,23 +64,30 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false);
+        innerTestRandomCdcEvents(ThreadLocalRandom.current().nextInt(5) + 1, false, false);
     }
 
     @Test
     @Timeout(120)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, false);
+        innerTestRandomCdcEvents(-1, false, false);
     }
 
     @Disabled
     @Test
     @Timeout(120)
     public void testRandomCdcEventsGlobalDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(-1, true);
+        innerTestRandomCdcEvents(-1, true, false);
     }
 
-    private void innerTestRandomCdcEvents(int numBucket, boolean globalIndex) throws Exception {
+    @Test
+    @Timeout(120)
+    public void testRandomCdcEventsUnawareBucket() throws Exception {
+        innerTestRandomCdcEvents(-1, false, true);
+    }
+
+    private void innerTestRandomCdcEvents(
+            int numBucket, boolean globalIndex, boolean unawareBucketMode) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numEvents = random.nextInt(1500) + 1;
@@ -94,7 +97,13 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         boolean enableFailure = random.nextBoolean();
 
         TestTable testTable =
-                new TestTable(TABLE_NAME, numEvents, numSchemaChanges, numPartitions, numKeys);
+                new TestTable(
+                        TABLE_NAME,
+                        numEvents,
+                        numSchemaChanges,
+                        numPartitions,
+                        numKeys,
+                        unawareBucketMode);
 
         Path tablePath;
         FileIO fileIO;
@@ -120,13 +129,17 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         // no failure when creating table
         FailingFileIO.reset(failingName, 0, 1);
 
+        List<String> primaryKeys =
+                unawareBucketMode
+                        ? Collections.emptyList()
+                        : globalIndex ? Collections.singletonList("k") : Arrays.asList("pt", "k");
         FileStoreTable table =
                 createFileStoreTable(
                         tablePath,
                         fileIO,
                         testTable.initialRowType(),
                         Collections.singletonList("pt"),
-                        globalIndex ? Collections.singletonList("k") : Arrays.asList("pt", "k"),
+                        primaryKeys,
                         numBucket);
 
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
@@ -156,21 +169,17 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 10, 10000);
 
-        env.execute();
+        if (unawareBucketMode) {
+            // there's a compact operator which won't terminate
+            env.executeAsync();
+        } else {
+            env.execute();
+        }
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
 
-        table = table.copyWithLatestSchema();
-        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-        TableSchema schema = schemaManager.latest().get();
-
-        ReadBuilder readBuilder = table.newReadBuilder();
-        TableScan.Plan plan = readBuilder.newScan().plan();
-        try (RecordReaderIterator<InternalRow> it =
-                new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
-            testTable.assertResult(schema, it);
-        }
+        testTable.assertResult(table);
     }
 
     private FileStoreTable createFileStoreTable(

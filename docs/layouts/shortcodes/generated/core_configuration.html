@@ -111,6 +111,12 @@ under the License.
             <td>The expiration interval of consumer files. A consumer file will be expired if it's lifetime after last modification is over this value.</td>
         </tr>
         <tr>
+            <td><h5>consumer.ignore-progress</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to ignore consumer progress for the newly started job.</td>
+        </tr>
+        <tr>
             <td><h5>consumer.mode</h5></td>
             <td style="word-wrap: break-word;">exactly-once</td>
             <td><p>Enum</p></td>
@@ -141,16 +147,16 @@ under the License.
             <td>Whether to ignore delete records in deduplicate mode.</td>
         </tr>
         <tr>
-            <td><h5>dynamic-bucket.initial-buckets</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
-        </tr>
-        <tr>
             <td><h5>dynamic-bucket.assigner-parallelism</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>Parallelism of assigner operator for dynamic bucket mode, it is related to the number of initialized bucket, too small will lead to insufficient processing speed of assigner.</td>
+        </tr>
+        <tr>
+            <td><h5>dynamic-bucket.initial-buckets</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Integer</td>
+            <td>Initial buckets for a partition in assigner operator for dynamic bucket mode.</td>
         </tr>
         <tr>
             <td><h5>dynamic-bucket.target-row-num</h5></td>
@@ -510,6 +516,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The time zone to parse the long watermark value to TIMESTAMP value. The default value is 'UTC', which means the watermark is defined on TIMESTAMP column or not defined. If the watermark is defined on TIMESTAMP_LTZ column, the time zone of watermark is user configured time zone, the value should be the user configured local time zone. The option value is either a full name such as 'America/Los_Angeles', or a custom timezone id such as 'GMT-08:00'.</td>
         </tr>
         <tr>
+            <td><h5>snapshot.expire.clean-empty-directories</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to try to clean empty directories when expiring snapshots. Note that trying to clean directories might throw exceptions in filesystem, but in most cases it won't cause problems.</td>
+        </tr>
+        <tr>
             <td><h5>snapshot.expire.execution-mode</h5></td>
             <td style="word-wrap: break-word;">sync</td>
             <td><p>Enum</p></td>
@@ -652,6 +664,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">0 bytes</td>
             <td>MemorySize</td>
             <td>Cache size for reading manifest files for write initialization.</td>
+        </tr>
+        <tr>
+            <td><h5>write-max-writers-to-spill</h5></td>
+            <td style="word-wrap: break-word;">5</td>
+            <td>Integer</td>
+            <td>When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. </td>
         </tr>
         <tr>
             <td><h5>write-only</h5></td>

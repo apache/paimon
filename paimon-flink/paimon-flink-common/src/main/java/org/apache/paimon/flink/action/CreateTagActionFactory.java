@@ -39,12 +39,15 @@ public class CreateTagActionFactory implements ActionFactory {
     @Override
     public Optional<Action> create(MultipleParameterToolAdapter params) {
         checkRequiredArgument(params, TAG_NAME);
-        checkRequiredArgument(params, SNAPSHOT);
 
         Tuple3<String, String, String> tablePath = getTablePath(params);
         Map<String, String> catalogConfig = optionalConfigMap(params, CATALOG_CONF);
         String tagName = params.get(TAG_NAME);
-        long snapshot = Long.parseLong(params.get(SNAPSHOT));
+
+        Long snapshot = null;
+        if (params.has(SNAPSHOT)) {
+            snapshot = Long.parseLong(params.get(SNAPSHOT));
+        }
 
         CreateTagAction action =
                 new CreateTagAction(
@@ -60,7 +63,7 @@ public class CreateTagActionFactory implements ActionFactory {
         System.out.println("Syntax:");
         System.out.println(
                 "  create_tag --warehouse <warehouse_path> --database <database_name> "
-                        + "--table <table_name> --tag_name <tag_name> --snapshot <snapshot_id>");
+                        + "--table <table_name> --tag_name <tag_name> [--snapshot <snapshot_id>]");
         System.out.println();
     }
 }

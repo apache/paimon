@@ -53,6 +53,11 @@ under the License.
             <artifactId>scala-compiler</artifactId>
             <version>${scala.version}</version>
         </dependency>
+        <dependency>
+            <groupId>com.github.davidmoten</groupId>
+            <artifactId>hilbert-curve</artifactId>
+            <version>0.2.2</version>
+        </dependency>
 
         <dependency>
             <groupId>org.apache.spark</groupId>
@@ -214,7 +219,6 @@ under the License.
     </dependencies>
 
     <build>
-
         <pluginManagement>
             <plugins>
                 <plugin>
@@ -235,7 +239,21 @@ under the License.
                 </plugin>
             </plugins>
         </pluginManagement>
+
         <plugins>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-jar-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <id>prepare-test-jar</id>
+                        <phase>test-compile</phase>
+                        <goals>
+                            <goal>test-jar</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-shade-plugin</artifactId>

@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
@@ -30,6 +32,12 @@ import org.apache.paimon.types.RowType;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderContext;
 import org.apache.flink.connector.testutils.source.reader.TestingReaderOutput;
+import org.apache.flink.metrics.CharacterFilter;
+import org.apache.flink.metrics.Counter;
+import org.apache.flink.metrics.Gauge;
+import org.apache.flink.metrics.Histogram;
+import org.apache.flink.metrics.Meter;
+import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.table.data.RowData;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,6 +46,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import static org.apache.paimon.flink.source.FileStoreSourceSplitSerializerTest.newSourceSplit;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
@@ -130,12 +139,61 @@ public class FileStoreSourceReaderTest {
         return new FileStoreSourceReader(
                 context,
                 new TestChangelogDataReadWrite(tempDir.toString()).createReadWithKey(),
-                null,
-                null,
+                new FileStoreSourceReaderMetrics(new DummyMetricGroup()),
+                IOManager.create(tempDir.toString()),
                 null);
     }
 
     protected static FileStoreSourceSplit createTestFileSplit(String id) {
         return newSourceSplit(id, row(1), 0, Collections.emptyList());
+    }
+
+    /** A {@link MetricGroup} for testing. */
+    public static class DummyMetricGroup implements MetricGroup {
+        public DummyMetricGroup() {}
+
+        public Counter counter(String name) {
+            return null;
+        }
+
+        public <C extends Counter> C counter(String name, C counter) {
+            return null;
+        }
+
+        public <T, G extends Gauge<T>> G gauge(String name, G gauge) {
+            return null;
+        }
+
+        public <H extends Histogram> H histogram(String name, H histogram) {
+            return null;
+        }
+
+        public <M extends Meter> M meter(String name, M meter) {
+            return null;
+        }
+
+        public MetricGroup addGroup(String name) {
+            return null;
+        }
+
+        public MetricGroup addGroup(String key, String value) {
+            return null;
+        }
+
+        public String[] getScopeComponents() {
+            return new String[0];
+        }
+
+        public Map<String, String> getAllVariables() {
+            return null;
+        }
+
+        public String getMetricIdentifier(String metricName) {
+            return null;
+        }
+
+        public String getMetricIdentifier(String metricName, CharacterFilter filter) {
+            return null;
+        }
     }
 }

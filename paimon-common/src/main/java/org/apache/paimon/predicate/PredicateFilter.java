@@ -20,14 +20,15 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import javax.annotation.Nullable;
 
 import java.util.List;
 
-/** A {@link java.util.function.Predicate} to filter {@link InternalRow}. */
-public class PredicateFilter implements java.util.function.Predicate<InternalRow> {
+/** A {@link Filter} to filter {@link InternalRow}. */
+public class PredicateFilter implements Filter<InternalRow> {
 
     private final RowDataToObjectArrayConverter arrayConverter;
     @Nullable private final Predicate predicate;

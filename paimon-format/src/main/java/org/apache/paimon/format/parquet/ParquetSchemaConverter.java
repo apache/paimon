@@ -114,16 +114,12 @@ public class ParquetSchemaConverter {
                 return Types.primitive(INT32, repetition).as(OriginalType.TIME_MILLIS).named(name);
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
-                return timestampType.getPrecision() <= 6
-                        ? Types.primitive(INT64, repetition).named(name)
-                        : Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition)
-                                .named(name);
+                return createTimestampWithLogicalType(
+                        name, timestampType.getPrecision(), repetition);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
-                return localZonedTimestampType.getPrecision() <= 6
-                        ? Types.primitive(INT64, repetition).named(name)
-                        : Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition)
-                                .named(name);
+                return createTimestampWithLogicalType(
+                        name, localZonedTimestampType.getPrecision(), repetition);
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return ConversionPatterns.listOfElements(
@@ -151,6 +147,17 @@ public class ParquetSchemaConverter {
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));
             default:
                 throw new UnsupportedOperationException("Unsupported type: " + type);
+        }
+    }
+
+    private static Type createTimestampWithLogicalType(
+            String name, int precision, Type.Repetition repetition) {
+        if (precision <= 3) {
+            return Types.primitive(INT64, repetition).as(OriginalType.TIMESTAMP_MILLIS).named(name);
+        } else if (precision > 6) {
+            return Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition).named(name);
+        } else {
+            return Types.primitive(INT64, repetition).as(OriginalType.TIMESTAMP_MICROS).named(name);
         }
     }
 

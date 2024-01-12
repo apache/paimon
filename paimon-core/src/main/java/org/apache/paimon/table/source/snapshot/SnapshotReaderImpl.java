@@ -417,20 +417,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
             BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
 
-        // bucket with only one file can be returned
-        if (dataFiles.size() == 1) {
-            return Collections.singletonList(makeRawTableFile(bucketPath, dataFiles.get(0)));
-        }
-
         // append only files can be returned
         if (tableSchema.primaryKeys().isEmpty()) {
             return makeRawTableFiles(bucketPath, dataFiles);
         }
 
-        // bucket containing only one level (except level 0) can be returned
-        Set<Integer> levels =
-                dataFiles.stream().map(DataFileMeta::level).collect(Collectors.toSet());
-        if (levels.size() == 1 && !levels.contains(0)) {
+        int maxLevel = options.numLevels() - 1;
+        if (dataFiles.stream().map(DataFileMeta::level).allMatch(l -> l == maxLevel)) {
             return makeRawTableFiles(bucketPath, dataFiles);
         }
 

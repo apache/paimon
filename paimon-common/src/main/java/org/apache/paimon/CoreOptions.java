@@ -64,6 +64,10 @@ public class CoreOptions implements Serializable {
 
     public static final String IGNORE_RETRACT = "ignore-retract";
 
+    public static final String NESTED_KEY = "nested-key";
+
+    public static final String DISTINCT = "distinct";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -211,6 +215,15 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The maximum number of snapshots allowed to expire at a time.");
 
+    public static final ConfigOption<Boolean> SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES =
+            key("snapshot.expire.clean-empty-directories")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to try to clean empty directories when expiring snapshots. "
+                                    + "Note that trying to clean directories might throw exceptions in filesystem, "
+                                    + "but in most cases it won't cause problems.");
+
     public static final ConfigOption<Duration> CONTINUOUS_DISCOVERY_INTERVAL =
             key("continuous.discovery-interval")
                     .durationType()
@@ -313,6 +326,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(false)
                     .withDescription(
                             "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
+
+    public static final ConfigOption<Integer> WRITE_MAX_WRITERS_TO_SPILL =
+            key("write-max-writers-to-spill")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
 
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
@@ -756,6 +776,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(ConsumerMode.EXACTLY_ONCE)
                     .withDescription("Specify the consumer consistency mode for table.");
 
+    public static final ConfigOption<Boolean> CONSUMER_IGNORE_PROGRESS =
+            key("consumer.ignore-progress")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to ignore consumer progress for the newly started job.");
+
     public static final ConfigOption<Long> DYNAMIC_BUCKET_TARGET_ROW_NUM =
             key("dynamic-bucket.target-row-num")
                     .longType()
@@ -1099,6 +1126,25 @@ public class CoreOptions implements Serializable {
                         .defaultValue(false));
     }
 
+    public List<String> fieldNestedUpdateAggNestedKey(String fieldName) {
+        String keyString =
+                options.get(
+                        key(FIELDS_PREFIX + "." + fieldName + "." + NESTED_KEY)
+                                .stringType()
+                                .noDefaultValue());
+        if (keyString == null) {
+            return Collections.emptyList();
+        }
+        return Arrays.asList(keyString.split(","));
+    }
+
+    public boolean fieldCollectAggDistinct(String fieldName) {
+        return options.get(
+                key(FIELDS_PREFIX + "." + fieldName + "." + DISTINCT)
+                        .booleanType()
+                        .defaultValue(false));
+    }
+
     public String fileCompression() {
         return options.get(FILE_COMPRESSION);
     }
@@ -1125,6 +1171,10 @@ public class CoreOptions implements Serializable {
 
     public int snapshotExpireLimit() {
         return options.get(SNAPSHOT_EXPIRE_LIMIT);
+    }
+
+    public boolean snapshotExpireCleanEmptyDirectories() {
+        return options.get(SNAPSHOT_EXPIRE_CLEAN_EMPTY_DIRECTORIES);
     }
 
     public int manifestMergeMinCount() {
@@ -1168,6 +1218,10 @@ public class CoreOptions implements Serializable {
 
     public boolean useWriteBufferForAppend() {
         return options.get(WRITE_BUFFER_FOR_APPEND);
+    }
+
+    public int writeMaxWritersToSpill() {
+        return options.get(WRITE_MAX_WRITERS_TO_SPILL);
     }
 
     public long sortSpillBufferSize() {
@@ -1399,8 +1453,8 @@ public class CoreOptions implements Serializable {
         return options.get(CONSUMER_EXPIRATION_TIME);
     }
 
-    public ConsumerMode consumerWithLegacyMode() {
-        return options.get(CONSUMER_CONSISTENCY_MODE);
+    public boolean consumerIgnoreProgress() {
+        return options.get(CONSUMER_IGNORE_PROGRESS);
     }
 
     public boolean partitionedTableInMetastore() {

@@ -302,8 +302,43 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
 
         Map<String, String> mongodbConfig = getBasicMongoDBConfig();
         mongodbConfig.put("database", database);
-        mongodbConfig.put("collection", "defaultId");
+        mongodbConfig.put("collection", "defaultId1");
         mongodbConfig.put("default.id.generation", "false");
+
+        MongoDBSyncTableAction action =
+                syncTableActionBuilder(mongodbConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+        List<String> primaryKeys = Collections.singletonList("_id");
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"_id", "name", "description", "weight"});
+
+        List<String> expectedInsert =
+                Arrays.asList(
+                        "+I[{\"$oid\":\"100000000000000000000101\"}, scooter, Small 2-wheel scooter, 3.14]",
+                        "+I[{\"$oid\":\"100000000000000000000102\"}, car battery, 12V car battery, 8.1]",
+                        "+I[{\"$oid\":\"100000000000000000000103\"}, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, 0.8]");
+        waitForResult(expectedInsert, table, rowType, primaryKeys);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testPrimaryKeyNotObjectIdType() throws Exception {
+        writeRecordsToMongoDB("defaultId-2", database, "table/defaultid");
+
+        Map<String, String> mongodbConfig = getBasicMongoDBConfig();
+        mongodbConfig.put("database", database);
+        mongodbConfig.put("collection", "defaultId2");
 
         MongoDBSyncTableAction action =
                 syncTableActionBuilder(mongodbConfig)

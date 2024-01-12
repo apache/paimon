@@ -34,6 +34,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
@@ -187,7 +188,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 snapshotManager(),
                 newSnapshotDeletion(),
                 newTagManager(),
-                options.snapshotExpireLimit());
+                options.snapshotExpireLimit(),
+                options.snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -257,5 +259,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                     new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
         }
         return callbacks;
+    }
+
+    @Override
+    public ServiceManager newServiceManager() {
+        return new ServiceManager(fileIO, options.path());
     }
 }

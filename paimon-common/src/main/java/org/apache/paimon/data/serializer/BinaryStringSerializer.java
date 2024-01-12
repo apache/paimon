@@ -61,4 +61,14 @@ public final class BinaryStringSerializer extends SerializerSingleton<BinaryStri
         source.readFully(bytes);
         return BinaryString.fromBytes(bytes);
     }
+
+    @Override
+    public String serializeToString(BinaryString record) {
+        return record.toString();
+    }
+
+    @Override
+    public BinaryString deserializeFromString(String s) {
+        return BinaryString.fromString(s);
+    }
 }

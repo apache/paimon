@@ -18,6 +18,9 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.flink.source.FileStoreSourceReaderTest.DummyMetricGroup;
+import org.apache.paimon.flink.source.metrics.FileStoreSourceReaderMetrics;
+
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.util.ArrayResultIterator;
@@ -60,7 +63,8 @@ public class FlinkRecordsWithSplitIdsTest {
 
         BulkFormat.RecordIterator<RowData> iterator = records.nextRecordFromSplit();
         assertThat(iterator).isNotNull();
-        FlinkRecordsWithSplitIds.emitRecord(iterator, output, state);
+        FlinkRecordsWithSplitIds.emitRecord(
+                iterator, output, state, new FileStoreSourceReaderMetrics(new DummyMetricGroup()));
         assertThat(output.getEmittedRecords()).containsExactly(rows);
         assertThat(state.recordsToSkip()).isEqualTo(2);
         assertThat(records.nextRecordFromSplit()).isNull();

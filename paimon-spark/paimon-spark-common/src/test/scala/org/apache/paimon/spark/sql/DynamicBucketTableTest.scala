@@ -52,4 +52,55 @@ class DynamicBucketTableTest extends PaimonSparkTestBase {
       spark.sql("SELECT DISTINCT bucket FROM `T$FILES`"),
       Row(0) :: Row(1) :: Row(2) :: Nil)
   }
+
+  test(s"Paimon dynamic bucket table: write with dynamic-bucket.initial-buckets") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |  pk STRING,
+                 |  v STRING,
+                 |  pt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'pk, pt',
+                 |  'bucket' = '-1',
+                 |  'dynamic-bucket.target-row-num'='3',
+                 |  'dynamic-bucket.initial-buckets'='3',
+                 |  'dynamic-bucket.assigner-parallelism'='10'
+                 |)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    spark.sql(
+      "INSERT INTO T VALUES ('1', 'a', 'p'), ('2', 'b', 'p'), ('3', 'c', 'p'), ('4', 'd', 'p'), ('5', 'e', 'p')")
+
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY pk"),
+      Row("1", "a", "p") :: Row("2", "b", "p") :: Row("3", "c", "p") :: Row("4", "d", "p") :: Row(
+        "5",
+        "e",
+        "p") :: Nil)
+
+    // Although `assigner-parallelism` is 10, but because `initial-buckets` is 3, the size of generated buckets is still 3
+    checkAnswer(
+      spark.sql("SELECT DISTINCT bucket FROM `T$FILES`"),
+      Row(0) :: Row(1) :: Row(2) :: Nil)
+  }
+
+  test(s"Paimon dynamic bucket table: write with global dynamic bucket") {
+    spark.sql(s"""
+                 |CREATE TABLE T (
+                 |  pk STRING,
+                 |  v STRING,
+                 |  pt STRING)
+                 |TBLPROPERTIES (
+                 |  'primary-key' = 'pk',
+                 |  'bucket' = '-1'
+                 |)
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    val error = intercept[UnsupportedOperationException] {
+      spark.sql("INSERT INTO T VALUES ('1', 'a', 'p')")
+    }.getMessage
+    assert(error.contains("Write with bucket mode GLOBAL_DYNAMIC is not supported"))
+  }
 }

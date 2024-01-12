@@ -23,7 +23,9 @@ import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.utils.InstantiationUtil;
+import org.apache.paimon.utils.Pair;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
@@ -34,6 +36,7 @@ import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.CyclicBarrier;
 
@@ -52,6 +55,10 @@ public abstract class SerializerTestBase<T> {
 
     protected T[] getSerializableTestData() {
         return getTestData();
+    }
+
+    protected List<Pair<T, String>> getSerializableToStringTestData() {
+        return Collections.emptyList();
     }
 
     // --------------------------------------------------------------------------------------------
@@ -212,6 +219,24 @@ public abstract class SerializerTestBase<T> {
                 checkToString(deserialized);
 
                 deepEquals("Deserialized value if wrong.", value, deserialized);
+            }
+        } catch (Exception e) {
+            System.err.println(e.getMessage());
+            e.printStackTrace();
+            fail("Exception in test: " + e.getMessage());
+        }
+    }
+
+    @Test
+    protected void testSerializeToString() {
+        try {
+            Serializer<T> serializer = getSerializer();
+            List<Pair<T, String>> serializableToStringTestData = getSerializableToStringTestData();
+            for (Pair<T, String> datumToString : serializableToStringTestData) {
+                String s = serializer.serializeToString(datumToString.getLeft());
+                Assertions.assertEquals(datumToString.getRight(), s);
+                T deserialized = serializer.deserializeFromString(s);
+                deepEquals("Deserialized value if wrong.", datumToString.getLeft(), deserialized);
             }
         } catch (Exception e) {
             System.err.println(e.getMessage());
