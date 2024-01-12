@@ -69,7 +69,7 @@ public class Stats {
 
     @JsonCreator
     public Stats(
-            @JsonProperty(FIELD_SNAPSHOT_ID) Long snapshotId,
+            @JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
             @JsonProperty(FIELD_COL_STATS) Map<String, ColStats<?>> colStats) {
