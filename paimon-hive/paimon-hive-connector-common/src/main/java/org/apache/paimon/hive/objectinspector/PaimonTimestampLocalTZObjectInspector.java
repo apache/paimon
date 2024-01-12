@@ -16,25 +16,6 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.hive;
+package org.apache.paimon.hive.objectinspector;
 
-import org.apache.paimon.types.LocalZonedTimestampType;
-
-import org.apache.hadoop.hive.serde2.typeinfo.TimestampLocalTZTypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
-import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-
-/**
- * Utils to convert between Hive {@link TimestampLocalTZTypeInfo} and Paimon {@link
- * LocalZonedTimestampType}.
- */
-public class LocalZonedTimestampTypeUtils {
-
-    public static boolean isLocalZonedTimestampType(TypeInfo hiveTypeInfo) {
-        return hiveTypeInfo instanceof TimestampLocalTZTypeInfo;
-    }
-
-    public static TypeInfo toHiveType(LocalZonedTimestampType paimonType) {
-        return TypeInfoFactory.timestampLocalTZTypeInfo;
-    }
-}
+public class PaimonTimestampLocalTZObjectInspector extends PaimonTimestampObjectInspector {}

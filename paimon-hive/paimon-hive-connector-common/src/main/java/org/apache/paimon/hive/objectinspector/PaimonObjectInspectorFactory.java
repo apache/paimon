@@ -19,7 +19,6 @@
 package org.apache.paimon.hive.objectinspector;
 
 import org.apache.paimon.hive.HiveTypeUtils;
-import org.apache.paimon.hive.LocalZonedTimestampTypeUtils;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
@@ -78,7 +77,7 @@ public class PaimonObjectInspectorFactory {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return new PaimonTimestampObjectInspector();
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return LocalZonedTimestampTypeUtils.createObjectInspector(logicalType);
+                return new PaimonTimestampLocalTZObjectInspector();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
                 return new PaimonListObjectInspector(arrayType.getElementType());

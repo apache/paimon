@@ -18,28 +18,19 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 
-import org.apache.hadoop.hive.serde2.objectinspector.ObjectInspector;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
-
-import java.util.Optional;
 
 /** To maintain compatibility with Hive 3. */
 public class LocalZonedTimestampTypeUtils {
 
-    public static Optional<DataType> toPaimonType(TypeInfo hiveTypeInfo) {
-        return Optional.empty();
+    public static boolean isLocalZonedTimestampType(TypeInfo hiveTypeInfo) {
+        return false;
     }
 
     public static TypeInfo toHiveType(LocalZonedTimestampType paimonType) {
         return TypeInfoFactory.timestampTypeInfo;
-    }
-
-    public static ObjectInspector createObjectInspector(DataType logicalType) {
-        throw new UnsupportedOperationException(
-                "Unsupported logical type " + logicalType.asSQLString());
     }
 }
