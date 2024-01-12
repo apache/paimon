@@ -79,6 +79,8 @@ public class CompactionMetricsTest {
                 (Gauge<Long>)
                         registeredGenericMetrics.get(
                                 CompactionMetrics.LAST_REWRITE_CHANGELOG_FILE_SIZE);
+        Gauge<Long> level0FileCount =
+                (Gauge<Long>) registeredGenericMetrics.get(CompactionMetrics.LEVEL_0_FILE_COUNT);
 
         assertThat(lastCompactionDuration.getValue()).isEqualTo(0);
         assertThat(compactionDuration.getCount()).isEqualTo(0);
@@ -132,6 +134,13 @@ public class CompactionMetricsTest {
         assertThat(lastRewriteInputFileSize.getValue()).isEqualTo(2001);
         assertThat(lastRewriteOutputFileSize.getValue()).isEqualTo(1201);
         assertThat(lastRewriteChangelogFileSize.getValue()).isEqualTo(2501);
+
+        // test level0FileCount
+        compactionMetrics.reportLevel0FileCount(10);
+        assertThat(level0FileCount.getValue()).isEqualTo(10);
+
+        compactionMetrics.reportLevel0FileCount(20);
+        assertThat(level0FileCount.getValue()).isEqualTo(20);
     }
 
     private void reportOnce(CompactionMetrics compactionMetrics) {
