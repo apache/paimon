@@ -31,6 +31,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -227,7 +228,8 @@ public class LookupLevelsTest {
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
                 Duration.ofHours(1),
-                maxDiskSize);
+                maxDiskSize,
+                rowCount -> BloomFilterBuilder.bfBuilder(rowCount, 0.05));
     }
 
     private KeyValue kv(int key, int value) {

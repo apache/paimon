@@ -26,6 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
@@ -46,6 +47,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
@@ -62,8 +64,8 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-
     private final Cache<String, ContainsFile> containsFiles;
+    private final Function<Long, BloomFilterBuilder> bfGenerator;
 
     public ContainsLevels(
             Levels levels,
@@ -73,7 +75,8 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Duration fileRetention,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            Function<Long, BloomFilterBuilder> bfGenerator) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -89,6 +92,7 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
                         .executor(MoreExecutors.directExecutor())
                         .build();
         levels.addDropFileCallback(this);
+        this.bfGenerator = bfGenerator;
     }
 
     @VisibleForTesting
@@ -150,7 +154,9 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter = lookupStoreFactory.createWriter(localFile);
+        try (LookupStoreWriter kvWriter =
+                        lookupStoreFactory.createWriter(
+                                localFile, () -> bfGenerator.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;

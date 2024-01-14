@@ -21,11 +21,14 @@ package org.apache.paimon.lookup.hash;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CachedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.lookup.bloom.BloomFilterTester;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -61,6 +64,7 @@ public class HashLookupStoreReader
     private CachedRandomInputView inputView;
     // Buffers
     private final byte[] slotBuffer;
+    @Nullable private BloomFilterTester bloomFilter;
 
     HashLookupStoreReader(CacheManager cacheManager, int cachePageSize, File file)
             throws IOException {
@@ -69,6 +73,8 @@ public class HashLookupStoreReader
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
         }
         LOG.info("Opening file {}", file.getName());
+        // Create Mapped file in read-only mode
+        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
 
         // Open file and read metadata
         long createdAt;
@@ -78,6 +84,7 @@ public class HashLookupStoreReader
         int keyCount;
         int indexOffset;
         long dataOffset;
+        boolean bloomFilterEnabled;
         try {
             // Time
             createdAt = dataInputStream.readLong();
@@ -88,6 +95,17 @@ public class HashLookupStoreReader
             int keyLengthCount = dataInputStream.readInt();
             // Max key length
             int maxKeyLength = dataInputStream.readInt();
+            // BloomFilter
+            bloomFilterEnabled = dataInputStream.readBoolean();
+            if (bloomFilterEnabled) {
+                long recordCount = dataInputStream.readLong();
+                int bfBytes = dataInputStream.readInt();
+                // Bloom filter buffer start index
+                int bfStartIndex = dataInputStream.readInt();
+                // Skip bloom filter buffers
+                dataInputStream.skipBytes(bfBytes);
+                bloomFilter = new BloomFilterTester(recordCount, bfStartIndex, bfBytes, inputView);
+            }
 
             // Read offset counts and keys
             indexOffsets = new int[maxKeyLength + 1];
@@ -127,14 +145,12 @@ public class HashLookupStoreReader
             inputStream.close();
         }
 
-        // Create Mapped file in read-only mode
-        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
-
         // logging
         DecimalFormat integerFormat = new DecimalFormat("#,##0.00");
         StringBuilder statMsg = new StringBuilder("Storage metadata\n");
         statMsg.append("  Created at: ").append(formatCreatedAt(createdAt)).append("\n");
         statMsg.append("  Key count: ").append(keyCount).append("\n");
+        statMsg.append("  Bloom filter: ").append(bloomFilterEnabled).append("\n");
         for (int i = 0; i < keyCounts.length; i++) {
             if (keyCounts[i] > 0) {
                 statMsg.append("  Key count for key length ")
@@ -159,6 +175,11 @@ public class HashLookupStoreReader
         if (keyLength >= slots.length || keyCounts[keyLength] == 0) {
             return null;
         }
+
+        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
+            return null;
+        }
+
         long hash = MurmurHashUtils.hashBytesPositive(key);
         int numSlots = slots[keyLength];
         int slotSize = slotSizes[keyLength];

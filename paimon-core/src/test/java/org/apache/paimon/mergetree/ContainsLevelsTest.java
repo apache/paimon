@@ -31,6 +31,7 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -158,7 +159,7 @@ public class ContainsLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(50));
+        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(60));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             assertThat(lookupLevels.contains(row(i), 1)).isTrue();
@@ -187,7 +188,8 @@ public class ContainsLevelsTest {
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
                 Duration.ofHours(1),
-                maxDiskSize);
+                maxDiskSize,
+                rowCount -> BloomFilterBuilder.bfBuilder(rowCount, 0.01));
     }
 
     private KeyValue kv(int key, int value) {

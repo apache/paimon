@@ -18,8 +18,11 @@
 
 package org.apache.paimon.lookup;
 
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
+
 import java.io.File;
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /**
  * A key-value store for lookup, key-value store should be single binary file written once and ready
@@ -32,7 +35,8 @@ import java.io.IOException;
  */
 public interface LookupStoreFactory {
 
-    LookupStoreWriter createWriter(File file) throws IOException;
+    LookupStoreWriter createWriter(File file, Supplier<BloomFilterBuilder> bfProvider)
+            throws IOException;
 
     LookupStoreReader createReader(File file) throws IOException;
 }

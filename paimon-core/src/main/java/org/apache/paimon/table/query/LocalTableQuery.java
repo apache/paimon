@@ -32,6 +32,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
@@ -141,7 +142,19 @@ public class LocalTableQuery implements TableQuery {
                                         .getPathFile(),
                         hashLookupStoreFactory,
                         options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
+                        rowCount -> {
+                            if (options.toConfiguration()
+                                            .get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_ENABLED)
+                                    && rowCount > 0) {
+                                return BloomFilterBuilder.bfBuilder(
+                                        rowCount,
+                                        options.toConfiguration()
+                                                .get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_FPP));
+                            }
+                            return null;
+                        });
+
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
 

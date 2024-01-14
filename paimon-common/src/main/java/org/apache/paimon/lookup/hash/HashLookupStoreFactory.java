@@ -20,9 +20,11 @@ package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.function.Supplier;
 
 /** A {@link LookupStoreFactory} which uses hash to lookup records on disk. */
 public class HashLookupStoreFactory implements LookupStoreFactory {
@@ -38,12 +40,13 @@ public class HashLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public HashLookupStoreWriter createWriter(File file) throws IOException {
-        return new HashLookupStoreWriter(loadFactor, file);
+    public HashLookupStoreReader createReader(File file) throws IOException {
+        return new HashLookupStoreReader(cacheManager, cachePageSize, file);
     }
 
     @Override
-    public HashLookupStoreReader createReader(File file) throws IOException {
-        return new HashLookupStoreReader(cacheManager, cachePageSize, file);
+    public HashLookupStoreWriter createWriter(File file, Supplier<BloomFilterBuilder> bfProvider)
+            throws IOException {
+        return new HashLookupStoreWriter(loadFactor, file, bfProvider);
     }
 }
