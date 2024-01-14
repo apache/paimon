@@ -98,11 +98,14 @@ public class SnapshotManager implements Serializable {
     }
 
     public Snapshot snapshot(long snapshotId) {
-        return snapshot(MAIN_BRANCH,snapshotId);
+        return snapshot(MAIN_BRANCH, snapshotId);
     }
 
     public Snapshot snapshot(String branchName, long snapshotId) {
-        Path snapshotPath = branchName.equals(MAIN_BRANCH) ? snapshotPath(snapshotId) : branchSnapshotPath(branchName, snapshotId);
+        Path snapshotPath =
+                branchName.equals(MAIN_BRANCH)
+                        ? snapshotPath(snapshotId)
+                        : branchSnapshotPath(branchName, snapshotId);
         return Snapshot.fromPath(fileIO, snapshotPath);
     }
 
@@ -123,7 +126,7 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Snapshot latestSnapshot(String branchName) {
         Long snapshotId = latestSnapshotId(branchName);
-        return snapshotId == null ? null : snapshot(branchName,snapshotId);
+        return snapshotId == null ? null : snapshot(branchName, snapshotId);
     }
 
     public @Nullable Long latestSnapshotId() {
@@ -410,13 +413,13 @@ public class SnapshotManager implements Serializable {
             return null;
         }
 
-        Long snapshotId = readHint(EARLIEST,branchName);
+        Long snapshotId = readHint(EARLIEST, branchName);
         // null and it is the earliest only it exists
         if (snapshotId != null && snapshotExists(snapshotId)) {
             return snapshotId;
         }
 
-        return findByListFiles(Math::min,branchName);
+        return findByListFiles(Math::min, branchName);
     }
 
     public Long readHint(String fileName) {
@@ -445,8 +448,12 @@ public class SnapshotManager implements Serializable {
         return null;
     }
 
-    private Long findByListFiles(BinaryOperator<Long> reducer, String branchName) throws IOException {
-        Path snapshotDir = branchName.equals(MAIN_BRANCH) ?snapshotDirectory() :branchSnapshotDirectory(branchName);
+    private Long findByListFiles(BinaryOperator<Long> reducer, String branchName)
+            throws IOException {
+        Path snapshotDir =
+                branchName.equals(MAIN_BRANCH)
+                        ? snapshotDirectory()
+                        : branchSnapshotDirectory(branchName);
         return listVersionedFiles(fileIO, snapshotDir, SNAPSHOT_PREFIX)
                 .reduce(reducer)
                 .orElse(null);

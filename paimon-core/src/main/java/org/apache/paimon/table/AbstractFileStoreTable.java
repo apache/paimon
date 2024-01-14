@@ -408,7 +408,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void replaceBranch(String branchName) {
-        // branchManager().deleteBranch(branchName);
+        // todo
     }
 
     @Override

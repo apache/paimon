@@ -951,7 +951,6 @@ public abstract class FileStoreTableTestBase {
                         new TagManager(fileIO, tablePath),
                         new SchemaManager(fileIO, tablePath));
         assertThat(branchManager.branchExists("test-branch")).isTrue();
-        // listFilesRecursively(new File(branchManager.getBranchPath("test-branch").substring(9)));
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
@@ -1056,20 +1055,14 @@ public abstract class FileStoreTableTestBase {
         }
 
         assertThat(
-            getResult(
-                table.newRead(),
-                toSplits(table.newSnapshotReader().read().dataSplits()),
-                BATCH_ROW_TO_STRING))
-            .containsExactlyInAnyOrder(
-                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
         table.createTag("tag1", 1);
         table.createBranch("branch1", "tag1");
-
-        assertThatThrownBy(() -> table.mergeBranch("test-branch"))
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Branch name 'test-branch' doesn't exist."));
 
         // verify that branch1 file exist
         TraceableFileIO fileIO = new TraceableFileIO();
@@ -1082,20 +1075,35 @@ public abstract class FileStoreTableTestBase {
                         new SchemaManager(fileIO, tablePath));
         assertThat(branchManager.branchExists("branch1")).isTrue();
 
-        // todo write data to branch and check
+        // Verify branch1 and the main branch have the same data
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Test for unsupported branch name
+        assertThatThrownBy(() -> table.mergeBranch("test-branch"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'test-branch' doesn't exist."));
+
+        assertThatThrownBy(() -> table.mergeBranch("main"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'main' do not use in merge branch."));
+
+        // Write data to branch1
         try (StreamTableWrite write = table.newWrite(commitUser);
                 StreamTableCommit commit = table.newCommit(commitUser, "branch1")) {
             write.write(rowData(2, 20, 200L));
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
-        // verify snapshot in test-branch is equal to snapshot 2
-        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
-        Snapshot branchSnapshot =
-                Snapshot.fromPath(
-                        new TraceableFileIO(), snapshotManager.branchSnapshotPath("branch1", 2));
-
-        System.out.println(branchSnapshot);
+        // Validate data in branch1
         assertThat(
                         getResult(
                                 table.newRead(),
@@ -1105,18 +1113,18 @@ public abstract class FileStoreTableTestBase {
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
+        // Validate data in main branch not changed
         assertThat(
-            getResult(
-                table.newRead(),
-                toSplits(table.newSnapshotReader().read().dataSplits()),
-                BATCH_ROW_TO_STRING))
-            .containsExactlyInAnyOrder(
-                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
 
         // Merge branch1 to main branch
         table.mergeBranch("branch1");
 
-        Snapshot t = Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
+        // After merge branch1, verify branch1 and the main branch have the same data
         assertThat(
                         getResult(
                                 table.newRead(),
@@ -1125,7 +1133,68 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
-        assertThat(branchSnapshot.equals(t)).isTrue();
+
+        // verify snapshot in branch1 and main branch is same
+        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        Snapshot branchSnapshot =
+                Snapshot.fromPath(
+                        new TraceableFileIO(), snapshotManager.branchSnapshotPath("branch1", 2));
+        Snapshot snapshot =
+                Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
+        assertThat(branchSnapshot.equals(snapshot)).isTrue();
+
+        // verify schema in branch1 and main branch is same
+        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
+        TableSchema branchSchema =
+                SchemaManager.fromPath(
+                        new TraceableFileIO(), schemaManager.branchSchemaPath("branch1", 0));
+        TableSchema schema0 = schemaManager.schema(0);
+        assertThat(branchSchema.equals(schema0)).isTrue();
+
+        // Write two rows data to branch1 again
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser, "branch1")) {
+            write.write(rowData(3, 30, 300L));
+            write.write(rowData(4, 40, 400L));
+            commit.commit(2, write.prepareCommit(false, 3));
+        }
+
+        // Verify data in branch1
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                        "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                        "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Verify data in main branch not changed
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Merge branch1 to main branch again
+        table.mergeBranch("branch1");
+
+        // Verify data in main branch is same to branch1
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                        "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
+                        "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
     }
 
     @Test

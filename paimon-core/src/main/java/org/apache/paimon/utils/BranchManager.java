@@ -122,11 +122,11 @@ public class BranchManager {
     }
 
     public void mergeBranch(String branchName) {
-        checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
         checkArgument(
                 !branchName.equals(MAIN_BRANCH),
                 "Branch name '%s' do not use in merge branch.",
                 branchName);
+        checkArgument(branchExists(branchName), "Branch name '%s' doesn't exist.", branchName);
         Long earliestSnapshotId = snapshotManager.earliestSnapshotId(branchName);
         Snapshot earliestSnapshot = snapshotManager.snapshot(branchName, earliestSnapshotId);
         long earliestSchemaId = earliestSnapshot.schemaId();
