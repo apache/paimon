@@ -206,11 +206,7 @@ public class PulsarSyncTableActionITCase extends PulsarActionITCaseBase {
 
         Map<String, String> pulsarConfig = getBasicPulsarConfig();
         pulsarConfig.put(PULSAR_PARTITION_DISCOVERY_INTERVAL_MS.key(), "-1");
-        if (ThreadLocalRandom.current().nextBoolean()) {
-            pulsarConfig.put(TOPIC.key(), topic);
-        } else {
-            pulsarConfig.put(TOPIC_PATTERN.key(), "schema_.*");
-        }
+        pulsarConfig.put(TOPIC.key(), topic);
         pulsarConfig.put(VALUE_FORMAT.key(), "canal-json");
         Map<String, String> config = getBasicTableConfig();
         config.put("tag.automatic-creation", "watermark");

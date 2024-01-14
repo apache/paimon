@@ -294,6 +294,12 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </thead>
     <tbody>
         <tr>
+            <td>level0FileCount</td>
+            <td>Bucket</td>
+            <td>Gauge</td>
+            <td>The level 0 file count will become larger if asynchronous compaction cannot be done in time.</td>
+        </tr>
+        <tr>
             <td>lastCompactionDuration</td>
             <td>Bucket</td>
             <td>Gauge</td>
