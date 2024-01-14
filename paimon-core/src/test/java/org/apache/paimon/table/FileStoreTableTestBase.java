@@ -1055,6 +1055,13 @@ public abstract class FileStoreTableTestBase {
             commit.commit(0, write.prepareCommit(false, 1));
         }
 
+        assertThat(
+            getResult(
+                table.newRead(),
+                toSplits(table.newSnapshotReader().read().dataSplits()),
+                BATCH_ROW_TO_STRING))
+            .containsExactlyInAnyOrder(
+                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
         table.createTag("tag1", 1);
         table.createBranch("branch1", "tag1");
 
@@ -1088,14 +1095,6 @@ public abstract class FileStoreTableTestBase {
                 Snapshot.fromPath(
                         new TraceableFileIO(), snapshotManager.branchSnapshotPath("branch1", 2));
 
-        //        assertThat(
-        //            getResult(
-        //                table.newRead(),
-        //                toSplits(table.newSnapshotReader().read().dataSplits()),
-        //                BATCH_ROW_TO_STRING))
-        //            .containsExactlyInAnyOrder(
-        //                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
-
         System.out.println(branchSnapshot);
         assertThat(
                         getResult(
@@ -1105,6 +1104,14 @@ public abstract class FileStoreTableTestBase {
                 .containsExactlyInAnyOrder(
                         "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+
+        assertThat(
+            getResult(
+                table.newRead(),
+                toSplits(table.newSnapshotReader().read().dataSplits()),
+                BATCH_ROW_TO_STRING))
+            .containsExactlyInAnyOrder(
+                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
 
         // Merge branch1 to main branch
         table.mergeBranch("branch1");
