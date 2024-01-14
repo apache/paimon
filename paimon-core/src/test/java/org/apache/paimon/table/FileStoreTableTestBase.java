@@ -956,9 +956,7 @@ public abstract class FileStoreTableTestBase {
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),
-                        tagManager.branchTagPath(
-                                table.branchManager().getBranchPath("test-branch"), "test-tag"));
+                        new TraceableFileIO(), tagManager.branchTagPath("test-branch", "test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
@@ -966,17 +964,14 @@ public abstract class FileStoreTableTestBase {
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
-                        snapshotManager.branchSnapshotPath(
-                                table.branchManager().getBranchPath("test-branch"), 2));
+                        snapshotManager.branchSnapshotPath("test-branch", 2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
         TableSchema branchSchema =
                 SchemaManager.fromPath(
-                        new TraceableFileIO(),
-                        schemaManager.branchSchemaPath(
-                                table.branchManager().getBranchPath("test-branch"), 0));
+                        new TraceableFileIO(), schemaManager.branchSchemaPath("test-branch", 0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
@@ -1048,6 +1043,82 @@ public abstract class FileStoreTableTestBase {
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'branch1' doesn't exist."));
+    }
+
+    @Test
+    public void testMergeBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch("branch1", "tag1");
+
+        assertThatThrownBy(() -> table.mergeBranch("test-branch"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'test-branch' doesn't exist."));
+
+        // verify that branch1 file exist
+        TraceableFileIO fileIO = new TraceableFileIO();
+        BranchManager branchManager =
+                new BranchManager(
+                        fileIO,
+                        tablePath,
+                        new SnapshotManager(fileIO, tablePath),
+                        new TagManager(fileIO, tablePath),
+                        new SchemaManager(fileIO, tablePath));
+        assertThat(branchManager.branchExists("branch1")).isTrue();
+
+        // todo write data to branch and check
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser, "branch1")) {
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        // verify snapshot in test-branch is equal to snapshot 2
+        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        Snapshot branchSnapshot =
+                Snapshot.fromPath(
+                        new TraceableFileIO(), snapshotManager.branchSnapshotPath("branch1", 2));
+
+        //        assertThat(
+        //            getResult(
+        //                table.newRead(),
+        //                toSplits(table.newSnapshotReader().read().dataSplits()),
+        //                BATCH_ROW_TO_STRING))
+        //            .containsExactlyInAnyOrder(
+        //                "1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+
+        System.out.println(branchSnapshot);
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+
+        // Merge branch1 to main branch
+        table.mergeBranch("branch1");
+
+        Snapshot t = Snapshot.fromPath(new TraceableFileIO(), snapshotManager.snapshotPath(2));
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder(
+                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
+        assertThat(branchSnapshot.equals(t)).isTrue();
     }
 
     @Test

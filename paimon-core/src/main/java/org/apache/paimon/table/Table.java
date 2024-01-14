@@ -91,6 +91,14 @@ public interface Table extends Serializable {
     @Experimental
     void deleteBranch(String branchName);
 
+    /** Merge a branch to main branch. */
+    @Experimental
+    void mergeBranch(String branchName);
+
+    /** Use a branch to replace main branch. */
+    @Experimental
+    void replaceBranch(String branchName);
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

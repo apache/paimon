@@ -65,6 +65,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -121,8 +122,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
+        return newSnapshotReader(MAIN_BRANCH);
+    }
+
+    @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
         return new SnapshotReaderImpl(
-                store().newScan(),
+                store().newScan(branchName),
                 tableSchema,
                 coreOptions(),
                 snapshotManager(),
@@ -269,8 +275,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCommitImpl newCommit(String commitUser) {
+        // Compatibility with previous design, the main branch is written by default
+        return newCommit(commitUser, MAIN_BRANCH);
+    }
+
+    public TableCommitImpl newCommit(String commitUser, String branchName) {
         return new TableCommitImpl(
-                store().newCommit(commitUser),
+                store().newCommit(commitUser, branchName),
                 createCommitCallbacks(),
                 coreOptions().writeOnly() ? null : store().newExpire(),
                 coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
@@ -388,6 +399,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void deleteBranch(String branchName) {
         branchManager().deleteBranch(branchName);
+    }
+
+    @Override
+    public void mergeBranch(String branchName) {
+        branchManager().mergeBranch(branchName);
+    }
+
+    @Override
+    public void replaceBranch(String branchName) {
+        // branchManager().deleteBranch(branchName);
     }
 
     @Override

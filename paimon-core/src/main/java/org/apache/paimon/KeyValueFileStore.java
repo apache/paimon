@@ -107,7 +107,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(false);
+        return newScan("main");
+    }
+
+    public KeyValueFileStoreScan newScan(String branchName) {
+        return newScan(false, branchName);
     }
 
     @Override
@@ -159,7 +163,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
+                newScan(true, "main").withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
                 keyValueFieldsExtractor,
@@ -182,7 +186,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return pathFactoryMap;
     }
 
-    private KeyValueFileStoreScan newScan(boolean forWrite) {
+    private KeyValueFileStoreScan newScan(boolean forWrite, String branchName) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
@@ -212,7 +216,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                branchName);
     }
 
     @Override

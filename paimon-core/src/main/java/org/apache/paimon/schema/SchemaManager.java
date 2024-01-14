@@ -64,6 +64,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
+import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
+import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -90,8 +92,16 @@ public class SchemaManager implements Serializable {
 
     /** @return latest schema. */
     public Optional<TableSchema> latest() {
+        return latest(MAIN_BRANCH);
+    }
+
+    public Optional<TableSchema> latest(String branchName) {
+        Path directoryPath =
+                branchName.equals(MAIN_BRANCH)
+                        ? schemaDirectory()
+                        : branchSchemaDirectory(branchName);
         try {
-            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+            return listVersionedFiles(fileIO, directoryPath, SCHEMA_PREFIX)
                     .reduce(Math::max)
                     .map(this::schema);
         } catch (IOException e) {
@@ -470,7 +480,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private Path schemaDirectory() {
+    public Path schemaDirectory() {
         return new Path(tableRoot + "/schema");
     }
 
@@ -479,8 +489,19 @@ public class SchemaManager implements Serializable {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
     }
 
-    public Path branchSchemaPath(String branchPath, long schemaId) {
-        return new Path(branchPath + "/schema/" + SCHEMA_PREFIX + schemaId);
+    public Path branchSchemaDirectory(String branchName) {
+        return new Path(tableRoot + "/branch/" + BRANCH_PREFIX + branchName + "/schema");
+    }
+
+    public Path branchSchemaPath(String branchName, long schemaId) {
+        return new Path(
+                tableRoot
+                        + "/branch/"
+                        + BRANCH_PREFIX
+                        + branchName
+                        + "/schema/"
+                        + SCHEMA_PREFIX
+                        + schemaId);
     }
 
     /**
