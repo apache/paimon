@@ -45,6 +45,8 @@ import org.apache.paimon.utils.TagManager;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.nio.file.Files;
 import java.nio.file.Paths;
@@ -76,11 +78,13 @@ public class FileDeletionTest {
 
     private long commitIdentifier;
     private String root;
+    private TagManager tagManager;
 
     @BeforeEach
     public void setup() throws Exception {
         commitIdentifier = 0L;
         root = tempDir.toString();
+        tagManager = null;
     }
 
     /**
@@ -95,11 +99,12 @@ public class FileDeletionTest {
      *       dt=0402/hr=8 will be deleted after expiring).
      *   <li>4. Generate snapshot 4 by deleting all data of partition dt=0402/hr=12/bucket-0 (thus
      *       directory dt=0402/hr=12/bucket-0 will be deleted after expiring).
-     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=20/bucket-1 survives) and check.
+     *   <li>5. Expire snapshot 1-3 (dt=0402/hr=12/bucket-1 survives) and check.
      * </ul>
      */
-    @Test
-    public void testMultiPartitions() throws Exception {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testMultiPartitions(boolean cleanEmptyDirs) throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED);
@@ -148,14 +153,30 @@ public class FileDeletionTest {
         cleanBucket(store, partition, 0);
 
         // step 5: expire and check file paths
-        store.newExpire(1, 1, Long.MAX_VALUE).expire();
-        // whole dt=0401 is deleted
-        assertPathNotExists(fileIO, new Path(root, "dt=0401"));
-        // whole dt=0402/hr=8 is deleted
-        assertPathNotExists(fileIO, new Path(root, "dt=0402/hr=8"));
-        // for dt=0402/hr=12, bucket-0 is delete but bucket-1 survives
-        assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
-        assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
+        store.newExpire(1, 1, Long.MAX_VALUE, cleanEmptyDirs).expire();
+
+        // check dt=0401
+        if (cleanEmptyDirs) {
+            assertPathNotExists(fileIO, new Path(root, "dt=0401"));
+        } else {
+            for (String hr : new String[] {"hr=8", "hr=12"}) {
+                for (String bucket : new String[] {"bucket-0", "bucket-1"}) {
+                    Path path = new Path(root, String.format("dt=0401/%s/%s", hr, bucket));
+                    assertThat(fileIO.listStatus(path).length).isEqualTo(0);
+                }
+            }
+        }
+
+        // check dt=0402
+        assertPathExists(fileIO, new Path(root, "dt=0402/hr=12/bucket-1"));
+        if (cleanEmptyDirs) {
+            assertPathNotExists(fileIO, new Path(root, "dt=0402/hr=12/bucket-0"));
+            assertPathNotExists(fileIO, new Path(root, "dt=0402/hr-8"));
+        } else {
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=8/bucket-0")).length).isEqualTo(0);
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=8/bucket-1")).length).isEqualTo(0);
+            assertThat(fileIO.listStatus(new Path("dt=0402/hr=12/bucket-0")).length).isEqualTo(0);
+        }
     }
 
     // only exists bucket directories
@@ -221,7 +242,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithExistingTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 4);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -237,7 +258,7 @@ public class FileDeletionTest {
 
         // step 2: commit -A (by clean bucket 0) and create tag1
         cleanBucket(store, gen.getPartition(gen.next()), 0);
-        tagManager.createTag(snapshotManager.snapshot(2), "tag1");
+        createTag(snapshotManager.snapshot(2), "tag1");
         assertThat(tagManager.tagExists("tag1")).isTrue();
 
         // step 3: commit C to bucket 2
@@ -248,7 +269,7 @@ public class FileDeletionTest {
 
         // step 4: commit -B (by clean bucket 1) and create tag2
         cleanBucket(store, partition, 1);
-        tagManager.createTag(snapshotManager.snapshot(4), "tag2");
+        createTag(snapshotManager.snapshot(4), "tag2");
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         // step 5: commit D to bucket 3
@@ -299,7 +320,7 @@ public class FileDeletionTest {
     @Test
     public void testExpireWithUpgradeAndTags() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -328,7 +349,7 @@ public class FileDeletionTest {
         // snapshot 3: commit -A (by clean bucket 0)
         cleanBucket(store, gen.getPartition(gen.next()), 0);
 
-        tagManager.createTag(snapshotManager.snapshot(1), "tag1");
+        createTag(snapshotManager.snapshot(1), "tag1");
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
 
         // check data file and manifests
@@ -353,7 +374,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithSnapshot() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -385,7 +406,7 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot1.baseManifestList(), snapshot1.deltaManifestList());
 
         // create tag1
-        tagManager.createTag(snapshot1, "tag1");
+        createTag(snapshot1, "tag1");
 
         // expire snapshot 1, 2
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -426,7 +447,7 @@ public class FileDeletionTest {
     @Test
     public void testDeleteTagWithOtherTag() throws Exception {
         TestFileStore store = createStore(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED, 3);
-        TagManager tagManager = new TagManager(fileIO, store.options().path());
+        tagManager = new TagManager(fileIO, store.options().path());
         SnapshotManager snapshotManager = store.snapshotManager();
         TestKeyValueGenerator gen =
                 new TestKeyValueGenerator(TestKeyValueGenerator.GeneratorMode.NON_PARTITIONED);
@@ -459,9 +480,9 @@ public class FileDeletionTest {
                 Arrays.asList(snapshot2.baseManifestList(), snapshot2.deltaManifestList());
 
         // create tags
-        tagManager.createTag(snapshotManager.snapshot(1), "tag1");
-        tagManager.createTag(snapshotManager.snapshot(2), "tag2");
-        tagManager.createTag(snapshotManager.snapshot(4), "tag3");
+        createTag(snapshotManager.snapshot(1), "tag1");
+        createTag(snapshotManager.snapshot(2), "tag2");
+        createTag(snapshotManager.snapshot(4), "tag3");
 
         // expire snapshot 1, 2, 3, 4
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
@@ -702,5 +723,9 @@ public class FileDeletionTest {
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
                         null);
+    }
+
+    private void createTag(Snapshot snapshot, String tagName) {
+        tagManager.createTag(snapshot, tagName, Collections.emptyList());
     }
 }

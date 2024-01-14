@@ -45,4 +45,14 @@ public final class LongSerializer extends SerializerSingleton<Long> {
     public Long deserialize(DataInputView source) throws IOException {
         return source.readLong();
     }
+
+    @Override
+    public String serializeToString(Long record) {
+        return record.toString();
+    }
+
+    @Override
+    public Long deserializeFromString(String s) {
+        return Long.valueOf(s);
+    }
 }

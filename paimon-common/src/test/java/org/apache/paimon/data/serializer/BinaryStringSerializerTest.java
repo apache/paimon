@@ -19,8 +19,10 @@
 package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.utils.Pair;
 
 import java.util.Arrays;
+import java.util.List;
 
 /** Test for {@link BinaryStringSerializer}. */
 public class BinaryStringSerializerTest extends SerializerTestBase<BinaryString> {
@@ -43,5 +45,16 @@ public class BinaryStringSerializerTest extends SerializerTestBase<BinaryString>
                         })
                 .map(BinaryString::fromString)
                 .toArray(BinaryString[]::new);
+    }
+
+    @Override
+    protected List<Pair<BinaryString, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(BinaryString.fromString("a"), "a"),
+                Pair.of(BinaryString.fromString(""), ""),
+                Pair.of(
+                        BinaryString.fromString("jbmbmner8 jhk hj \n \t üäßß@µ"),
+                        "jbmbmner8 jhk hj \n \t üäßß@µ"),
+                Pair.of(BinaryString.fromString("non-empty"), "non-empty"));
     }
 }

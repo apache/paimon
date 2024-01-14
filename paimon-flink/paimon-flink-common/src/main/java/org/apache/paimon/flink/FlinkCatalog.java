@@ -38,9 +38,7 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataPartitionComputer;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.table.api.TableColumn;
 import org.apache.flink.table.api.TableSchema;
-import org.apache.flink.table.api.WatermarkSpec;
 import org.apache.flink.table.catalog.AbstractCatalog;
 import org.apache.flink.table.catalog.CatalogBaseTable;
 import org.apache.flink.table.catalog.CatalogDatabase;
@@ -50,8 +48,11 @@ import org.apache.flink.table.catalog.CatalogPartition;
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.CatalogTableImpl;
+import org.apache.flink.table.catalog.Column;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.ResolvedCatalogBaseTable;
+import org.apache.flink.table.catalog.ResolvedCatalogTable;
+import org.apache.flink.table.catalog.ResolvedSchema;
 import org.apache.flink.table.catalog.TableChange;
 import org.apache.flink.table.catalog.TableChange.AddColumn;
 import org.apache.flink.table.catalog.TableChange.AddWatermark;
@@ -67,6 +68,7 @@ import org.apache.flink.table.catalog.TableChange.ModifyPhysicalColumnType;
 import org.apache.flink.table.catalog.TableChange.ModifyWatermark;
 import org.apache.flink.table.catalog.TableChange.ResetOption;
 import org.apache.flink.table.catalog.TableChange.SetOption;
+import org.apache.flink.table.catalog.WatermarkSpec;
 import org.apache.flink.table.catalog.exceptions.CatalogException;
 import org.apache.flink.table.catalog.exceptions.DatabaseAlreadyExistException;
 import org.apache.flink.table.catalog.exceptions.DatabaseNotEmptyException;
@@ -99,6 +101,7 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.descriptors.DescriptorProperties.COMMENT;
 import static org.apache.flink.table.descriptors.DescriptorProperties.NAME;
 import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK;
 import static org.apache.flink.table.descriptors.DescriptorProperties.WATERMARK_ROWTIME;
@@ -119,8 +122,7 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.compoundK
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeNonPhysicalColumn;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
-import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNonPhysicalColumns;
-import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeWatermarkSpec;
+import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
@@ -458,10 +460,19 @@ public class FlinkCatalog extends AbstractCatalog {
             ResetOption resetOption = (ResetOption) change;
             schemaChanges.add(SchemaChange.removeOption(resetOption.getKey()));
             return schemaChanges;
-        } else {
-            throw new UnsupportedOperationException(
-                    "Change is not supported: " + change.getClass());
+        } else if (change instanceof TableChange.ModifyColumn) {
+            // let non-physical column handle by option
+            if (oldTableNonPhysicalColumnIndex.containsKey(
+                            ((TableChange.ModifyColumn) change).getOldColumn().getName())
+                    && !(((TableChange.ModifyColumn) change).getNewColumn()
+                            instanceof Column.PhysicalColumn)) {
+                return schemaChanges;
+            } else {
+                throw new UnsupportedOperationException(
+                        "Change is not supported: " + change.getClass());
+            }
         }
+        throw new UnsupportedOperationException("Change is not supported: " + change.getClass());
     }
 
     @Override
@@ -670,6 +681,7 @@ public class FlinkCatalog extends AbstractCatalog {
         Map<String, String> newOptions = new HashMap<>(table.options());
 
         TableSchema.Builder builder = TableSchema.builder();
+        Map<String, String> nonPhysicalColumnComments = new HashMap<>();
 
         // add columns
         List<RowType.RowField> physicalRowFields = toLogicalType(table.rowType()).getFields();
@@ -687,6 +699,11 @@ public class FlinkCatalog extends AbstractCatalog {
             } else {
                 // build non-physical column from options
                 builder.add(deserializeNonPhysicalColumn(newOptions, i));
+                if (newOptions.containsKey(compoundKey(SCHEMA, i, COMMENT))) {
+                    nonPhysicalColumnComments.put(
+                            optionalName, newOptions.get(compoundKey(SCHEMA, i, COMMENT)));
+                    newOptions.remove(compoundKey(SCHEMA, i, COMMENT));
+                }
             }
         }
 
@@ -711,11 +728,17 @@ public class FlinkCatalog extends AbstractCatalog {
         removeProperties.asMap().keySet().forEach(newOptions::remove);
 
         return new DataCatalogTable(
-                table, schema, table.partitionKeys(), newOptions, table.comment().orElse(""));
+                table,
+                schema,
+                table.partitionKeys(),
+                newOptions,
+                table.comment().orElse(""),
+                nonPhysicalColumnComments);
     }
 
-    public static Schema fromCatalogTable(CatalogTable catalogTable) {
-        TableSchema schema = catalogTable.getSchema();
+    public static Schema fromCatalogTable(CatalogTable table) {
+        ResolvedCatalogTable catalogTable = (ResolvedCatalogTable) table;
+        ResolvedSchema schema = catalogTable.getResolvedSchema();
         RowType rowType = (RowType) schema.toPhysicalRowDataType().getLogicalType();
 
         Map<String, String> options = new HashMap<>(catalogTable.getOptions());
@@ -754,29 +777,14 @@ public class FlinkCatalog extends AbstractCatalog {
     }
 
     /** Only reserve necessary options. */
-    private static Map<String, String> columnOptions(TableSchema schema) {
-        Map<String, String> columnOptions = new HashMap<>();
-        // field name -> index
-        final Map<String, Integer> indexMap = new HashMap<>();
-        List<TableColumn> tableColumns = schema.getTableColumns();
-        for (int i = 0; i < tableColumns.size(); i++) {
-            indexMap.put(tableColumns.get(i).getName(), i);
-        }
-
-        // non-physical columns
-        List<TableColumn> nonPhysicalColumns =
-                tableColumns.stream().filter(c -> !c.isPhysical()).collect(Collectors.toList());
-        if (!nonPhysicalColumns.isEmpty()) {
-            columnOptions.putAll(serializeNonPhysicalColumns(indexMap, nonPhysicalColumns));
-        }
-
-        // watermark
+    private static Map<String, String> columnOptions(ResolvedSchema schema) {
+        Map<String, String> columnOptions =
+                new HashMap<>(FlinkCatalogPropertiesUtil.serializeNonPhysicalNewColumns(schema));
         List<WatermarkSpec> watermarkSpecs = schema.getWatermarkSpecs();
         if (!watermarkSpecs.isEmpty()) {
             checkArgument(watermarkSpecs.size() == 1);
-            columnOptions.putAll(serializeWatermarkSpec(watermarkSpecs.get(0)));
+            columnOptions.putAll(serializeNewWatermarkSpec(watermarkSpecs.get(0)));
         }
-
         return columnOptions;
     }
 
@@ -919,7 +927,9 @@ public class FlinkCatalog extends AbstractCatalog {
             throws PartitionNotExistException, CatalogException {
 
         if (!partitionExists(tablePath, partitionSpec)) {
-            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            if (!ignoreIfNotExists) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
         }
 
         try {

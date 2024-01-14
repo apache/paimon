@@ -41,6 +41,7 @@ public class HashBucketAssigner implements BucketAssigner {
     private final SnapshotManager snapshotManager;
     private final String commitUser;
     private final IndexFileHandler indexFileHandler;
+    private final int numChannels;
     private final int numAssigners;
     private final int assignId;
     private final long targetBucketRowNumber;
@@ -51,12 +52,14 @@ public class HashBucketAssigner implements BucketAssigner {
             SnapshotManager snapshotManager,
             String commitUser,
             IndexFileHandler indexFileHandler,
+            int numChannels,
             int numAssigners,
             int assignId,
             long targetBucketRowNumber) {
         this.snapshotManager = snapshotManager;
         this.commitUser = commitUser;
         this.indexFileHandler = indexFileHandler;
+        this.numChannels = numChannels;
         this.numAssigners = numAssigners;
         this.assignId = assignId;
         this.targetBucketRowNumber = targetBucketRowNumber;
@@ -66,7 +69,8 @@ public class HashBucketAssigner implements BucketAssigner {
     /** Assign a bucket for key hash of a record. */
     @Override
     public int assign(BinaryRow partition, int hash) {
-        int recordAssignId = computeAssignId(hash);
+        int partitionHash = partition.hashCode();
+        int recordAssignId = computeAssignId(partitionHash, hash);
         checkArgument(
                 recordAssignId == assignId,
                 "This is a bug, record assign id %s should equal to assign id %s.",
@@ -76,11 +80,11 @@ public class HashBucketAssigner implements BucketAssigner {
         PartitionIndex index = this.partitionIndex.get(partition);
         if (index == null) {
             partition = partition.copy();
-            index = loadIndex(partition);
+            index = loadIndex(partition, partitionHash);
             this.partitionIndex.put(partition, index);
         }
 
-        int assigned = index.assign(hash, (bucket) -> computeAssignId(bucket) == assignId);
+        int assigned = index.assign(hash, this::isMyBucket);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Assign " + assigned + " to the partition " + partition + " key hash " + hash);
@@ -150,16 +154,20 @@ public class HashBucketAssigner implements BucketAssigner {
         return partitionIndex.keySet();
     }
 
-    private int computeAssignId(int hash) {
-        return Math.abs(hash % numAssigners);
+    private int computeAssignId(int partitionHash, int keyHash) {
+        return BucketAssigner.computeAssigner(partitionHash, keyHash, numChannels, numAssigners);
     }
 
-    private PartitionIndex loadIndex(BinaryRow partition) {
+    private boolean isMyBucket(int bucket) {
+        return bucket % numAssigners == assignId % numAssigners;
+    }
+
+    private PartitionIndex loadIndex(BinaryRow partition, int partitionHash) {
         return PartitionIndex.loadIndex(
                 indexFileHandler,
                 partition,
                 targetBucketRowNumber,
-                (hash) -> computeAssignId(hash) == assignId,
-                (bucket) -> computeAssignId(bucket) == assignId);
+                (hash) -> computeAssignId(partitionHash, hash) == assignId,
+                this::isMyBucket);
     }
 }

@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link LongSerializer}. */
@@ -39,5 +43,17 @@ public class LongSerializerTest extends SerializerTestBase<Long> {
         long rndLong = rnd.nextLong();
 
         return new Long[] {0L, 1L, -1L, Long.MAX_VALUE, Long.MIN_VALUE, rndLong, -rndLong};
+    }
+
+    @Override
+    protected List<Pair<Long, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(0L, "0"),
+                Pair.of(1L, "1"),
+                Pair.of(-1L, "-1"),
+                Pair.of(Long.MAX_VALUE, "9223372036854775807"),
+                Pair.of(Long.MIN_VALUE, "-9223372036854775808"),
+                Pair.of(1234567890123456789L, "1234567890123456789"),
+                Pair.of(-1234567890123456789L, "-1234567890123456789"));
     }
 }

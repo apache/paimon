@@ -22,58 +22,57 @@ package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBListState;
-import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.types.RowKind;
-import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.List;
-import java.util.function.Predicate;
 
 /** A {@link LookupTable} for table without primary key. */
-public class NoPrimaryKeyLookupTable implements LookupTable {
+public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     private final RocksDBListState<InternalRow, InternalRow> state;
 
-    private final Predicate<InternalRow> recordFilter;
-
     private final KeyProjectedRow joinKeyRow;
 
-    public NoPrimaryKeyLookupTable(
-            RocksDBStateFactory stateFactory,
-            RowType rowType,
-            List<String> joinKeys,
-            Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
-            throws IOException {
-        List<String> fieldNames = rowType.getFieldNames();
-        int[] joinKeyMapping = joinKeys.stream().mapToInt(fieldNames::indexOf).toArray();
+    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+        super(context);
+        List<String> fieldNames = projectedType.getFieldNames();
+        int[] joinKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.joinKeyRow = new KeyProjectedRow(joinKeyMapping);
         this.state =
                 stateFactory.listState(
                         "join-key-index",
-                        InternalSerializers.create(TypeUtils.project(rowType, joinKeyMapping)),
-                        InternalSerializers.create(rowType),
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, joinKeyMapping)),
+                        InternalSerializers.create(projectedType),
                         lruCacheSize);
-        this.recordFilter = recordFilter;
     }
 
     @Override
-    public List<InternalRow> get(InternalRow key) throws IOException {
+    public List<InternalRow> innerGet(InternalRow key) throws IOException {
         return state.get(key);
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
+            throws IOException {
+        if (orderByLastField) {
+            throw new IllegalArgumentException(
+                    "Append table does not support order by last field.");
+        }
+
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             joinKeyRow.replaceRow(row);
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (recordFilter.test(row)) {
+                if (recordFilter().test(row)) {
                     state.add(joinKeyRow, row);
                 }
             } else {
@@ -83,5 +82,55 @@ public class NoPrimaryKeyLookupTable implements LookupTable {
                                 row.getRowKind()));
             }
         }
+    }
+
+    @Override
+    public byte[] toKeyBytes(InternalRow row) throws IOException {
+        joinKeyRow.replaceRow(row);
+        return state.serializeKey(joinKeyRow);
+    }
+
+    @Override
+    public byte[] toValueBytes(InternalRow row) throws IOException {
+        return state.serializeValue(row);
+    }
+
+    @Override
+    public TableBulkLoader createBulkLoader() {
+        BulkLoader bulkLoader = state.createBulkLoader();
+        return new TableBulkLoader() {
+
+            private final List<byte[]> values = new ArrayList<>();
+
+            private byte[] currentKey;
+
+            @Override
+            public void write(byte[] key, byte[] value) throws IOException {
+                if (currentKey != null && !Arrays.equals(key, currentKey)) {
+                    flush();
+                }
+                currentKey = key;
+                values.add(value);
+            }
+
+            @Override
+            public void finish() throws IOException {
+                flush();
+                bulkLoader.finish();
+            }
+
+            private void flush() throws IOException {
+                if (currentKey != null && values.size() > 0) {
+                    try {
+                        bulkLoader.write(currentKey, state.serializeList(values));
+                    } catch (BulkLoader.WriteException e) {
+                        throw new RuntimeException(e);
+                    }
+                }
+
+                currentKey = null;
+                values.clear();
+            }
+        };
     }
 }

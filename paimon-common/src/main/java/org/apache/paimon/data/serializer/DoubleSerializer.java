@@ -45,4 +45,14 @@ public final class DoubleSerializer extends SerializerSingleton<Double> {
     public Double deserialize(DataInputView source) throws IOException {
         return source.readDouble();
     }
+
+    @Override
+    public String serializeToString(Double record) {
+        return record.toString();
+    }
+
+    @Override
+    public Double deserializeFromString(String s) {
+        return Double.valueOf(s);
+    }
 }

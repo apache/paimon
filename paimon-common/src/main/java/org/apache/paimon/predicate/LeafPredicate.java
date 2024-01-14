@@ -145,6 +145,21 @@ public class LeafPredicate implements Predicate {
         return Objects.hash(function, type, fieldIndex, fieldName, literals);
     }
 
+    @Override
+    public String toString() {
+        String literalsStr;
+        if (literals == null || literals.isEmpty()) {
+            literalsStr = "";
+        } else if (literals.size() == 1) {
+            literalsStr = Objects.toString(literals.get(0));
+        } else {
+            literalsStr = literals.toString();
+        }
+        return literalsStr.isEmpty()
+                ? function + "(" + fieldName + ")"
+                : function + "(" + fieldName + ", " + literalsStr + ")";
+    }
+
     private ListSerializer<Object> objectsSerializer() {
         return new ListSerializer<>(
                 NullableSerializer.wrapIfNullIsNotSupported(InternalSerializers.create(type)));

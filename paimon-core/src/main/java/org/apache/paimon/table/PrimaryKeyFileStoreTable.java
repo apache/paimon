@@ -36,6 +36,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.TableQueryImpl;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -109,7 +111,8 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             rowType,
                             extractor,
                             mfFactory,
-                            name());
+                            name(),
+                            catalogEnvironment);
         }
         return lazyStore;
     }
@@ -203,5 +206,10 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                     : rowKindGenerator.generate(row);
                     return kv.replace(record.primaryKey(), sequenceNumber, rowKind, row);
                 });
+    }
+
+    @Override
+    public TableQuery newTableQuery() {
+        return new TableQueryImpl(this);
     }
 }

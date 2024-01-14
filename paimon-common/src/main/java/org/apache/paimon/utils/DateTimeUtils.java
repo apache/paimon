@@ -504,7 +504,7 @@ public class DateTimeUtils {
     // Format
     // --------------------------------------------------------------------------------------------
 
-    private static String formatTimestamp(Timestamp ts, int precision) {
+    public static String formatTimestamp(Timestamp ts, int precision) {
         LocalDateTime ldt = ts.toLocalDateTime();
 
         String fraction = pad(9, ldt.getNano());

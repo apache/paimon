@@ -248,10 +248,14 @@ public abstract class AbstractFlinkTableFactory
         newOptions.putAll(origin.getOptions());
         newOptions.putAll(dynamicOptions);
 
+        // notice that the Paimon table schema must be the same with the Flink's
         if (origin instanceof DataCatalogTable) {
-            table = ((DataCatalogTable) origin).table().copy(newOptions);
+            FileStoreTable fileStoreTable = (FileStoreTable) ((DataCatalogTable) origin).table();
+            table = fileStoreTable.copyWithoutTimeTravel(newOptions);
         } else {
-            table = FileStoreTableFactory.create(createCatalogContext(context)).copy(newOptions);
+            table =
+                    FileStoreTableFactory.create(createCatalogContext(context))
+                            .copyWithoutTimeTravel(newOptions);
         }
 
         Schema schema = FlinkCatalog.fromCatalogTable(context.getCatalogTable());

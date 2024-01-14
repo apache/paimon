@@ -24,7 +24,7 @@ import java.util.Map;
 public class CreateTagAction extends TableActionBase {
 
     private final String tagName;
-    private final long snapshotId;
+    private final Long snapshotId;
 
     public CreateTagAction(
             String warehouse,
@@ -32,7 +32,7 @@ public class CreateTagAction extends TableActionBase {
             String tableName,
             Map<String, String> catalogConfig,
             String tagName,
-            long snapshotId) {
+            Long snapshotId) {
         super(warehouse, databaseName, tableName, catalogConfig);
         this.tagName = tagName;
         this.snapshotId = snapshotId;
@@ -40,6 +40,10 @@ public class CreateTagAction extends TableActionBase {
 
     @Override
     public void run() throws Exception {
-        table.createTag(tagName, snapshotId);
+        if (snapshotId == null) {
+            table.createTag(tagName);
+        } else {
+            table.createTag(tagName, snapshotId);
+        }
     }
 }

@@ -36,7 +36,7 @@ If you have other requirements, please contact us.
 ### Core
 
 - Foreign Key Join Partial-Update
-- Append-only table supports batch / streaming z-order sort
+- Append table supports batch / streaming z-order sort
 - Supports cross partition update
 
 ### Compute Engines

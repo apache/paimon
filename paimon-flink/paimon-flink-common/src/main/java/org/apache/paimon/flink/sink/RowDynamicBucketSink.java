@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
 import org.apache.paimon.utils.SerializableFunction;
@@ -43,8 +44,8 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
     }
 
     @Override
-    protected ChannelComputer<InternalRow> channelComputer1() {
-        return new RowHashKeyChannelComputer(table.schema());
+    protected ChannelComputer<InternalRow> assignerChannelComputer(Integer numAssigners) {
+        return new RowAssignerChannelComputer(table.schema(), numAssigners);
     }
 
     @Override

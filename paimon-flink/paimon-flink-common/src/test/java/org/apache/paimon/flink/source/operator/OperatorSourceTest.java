@@ -197,12 +197,23 @@ public class OperatorSourceTest {
                         MetricUtils.getGauge(readerOperatorMetricGroup, "currentFetchEventTimeLag")
                                 .getValue())
                 .isEqualTo(-1L);
+        assertThat(
+                        MetricUtils.getGauge(readerOperatorMetricGroup, "currentEmitEventTimeLag")
+                                .getValue())
+                .isEqualTo(-1L);
         harness.processElement(new StreamRecord<>(splits.get(0)));
         assertThat(
                         (Long)
                                 MetricUtils.getGauge(
                                                 readerOperatorMetricGroup,
                                                 "currentFetchEventTimeLag")
+                                        .getValue())
+                .isGreaterThan(0);
+        assertThat(
+                        (Long)
+                                MetricUtils.getGauge(
+                                                readerOperatorMetricGroup,
+                                                "currentEmitEventTimeLag")
                                         .getValue())
                 .isGreaterThan(0);
     }

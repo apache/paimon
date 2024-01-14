@@ -312,11 +312,9 @@ public class LogSystemITCase extends KafkaTableTestBase {
         env.setParallelism(1);
 
         tEnv.executeSql(
-                String.format(
-                        "CREATE TABLE T (i INT, j INT) WITH ("
-                                + "'log.system'='kafka', "
-                                + "'kafka.topic'='T')",
-                        getBootstrapServers()));
+                "CREATE TABLE T (i INT, j INT) WITH ("
+                        + "'log.system'='kafka', "
+                        + "'kafka.topic'='T')");
 
         checkTopicExists("T", 2, 1);
     }

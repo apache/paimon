@@ -19,29 +19,22 @@
 package org.apache.paimon.lookup;
 
 import org.apache.paimon.data.serializer.Serializer;
-import org.apache.paimon.utils.KeyValueIterator;
 
 import org.rocksdb.ColumnFamilyDescriptor;
 import org.rocksdb.ColumnFamilyHandle;
 import org.rocksdb.ColumnFamilyOptions;
 import org.rocksdb.DBOptions;
-import org.rocksdb.EnvOptions;
-import org.rocksdb.IngestExternalFileOptions;
 import org.rocksdb.Options;
 import org.rocksdb.RocksDB;
 import org.rocksdb.RocksDBException;
-import org.rocksdb.SstFileWriter;
 import org.rocksdb.TtlDB;
 
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
-import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.ArrayList;
-import java.util.List;
 
 /** Factory to create state. */
 public class RocksDBStateFactory implements Closeable {
@@ -53,7 +46,6 @@ public class RocksDBStateFactory implements Closeable {
     private final ColumnFamilyOptions columnFamilyOptions;
 
     private RocksDB db;
-    private int sstIndex = 0;
 
     public RocksDBStateFactory(
             String path, org.apache.paimon.options.Options conf, @Nullable Duration ttlSecs)
@@ -81,49 +73,16 @@ public class RocksDBStateFactory implements Closeable {
         }
     }
 
-    public void bulkLoad(RocksDBState<?, ?, ?> state, KeyValueIterator<byte[], byte[]> iterator)
-            throws IOException, RocksDBException {
-        long targetFileSize = options.targetFileSizeBase();
+    public RocksDB db() {
+        return db;
+    }
 
-        List<String> files = new ArrayList<>();
-        SstFileWriter writer = null;
-        long recordNum = 0;
-        while (iterator.advanceNext()) {
-            byte[] key = iterator.getKey();
-            byte[] value = iterator.getValue();
+    public Options options() {
+        return options;
+    }
 
-            if (writer == null) {
-                writer = new SstFileWriter(new EnvOptions(), options);
-                String path = new File(this.path, "sst-" + (sstIndex++)).getPath();
-                writer.open(path);
-                files.add(path);
-            }
-
-            try {
-                writer.put(key, value);
-            } catch (RocksDBException e) {
-                throw new RuntimeException(
-                        "Exception in bulkLoad, the most suspicious reason is that "
-                                + "your data contains duplicates, please check your sink table. "
-                                + "(The likelihood of duplication is that you used multiple jobs to write the "
-                                + "same dynamic bucket table, it only supports single write)",
-                        e);
-            }
-            recordNum++;
-            if (recordNum % 1000 == 0 && writer.fileSize() >= targetFileSize) {
-                writer.finish();
-                writer = null;
-                recordNum = 0;
-            }
-        }
-
-        if (writer != null) {
-            writer.finish();
-        }
-
-        if (files.size() > 0) {
-            db.ingestExternalFile(state.columnFamily, files, new IngestExternalFileOptions());
-        }
+    public String path() {
+        return path;
     }
 
     public <K, V> RocksDBValueState<K, V> valueState(
@@ -133,7 +92,7 @@ public class RocksDBStateFactory implements Closeable {
             long lruCacheSize)
             throws IOException {
         return new RocksDBValueState<>(
-                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+                this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     public <K, V> RocksDBSetState<K, V> setState(
@@ -143,7 +102,7 @@ public class RocksDBStateFactory implements Closeable {
             long lruCacheSize)
             throws IOException {
         return new RocksDBSetState<>(
-                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+                this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     public <K, V> RocksDBListState<K, V> listState(
@@ -154,7 +113,7 @@ public class RocksDBStateFactory implements Closeable {
             throws IOException {
 
         return new RocksDBListState<>(
-                db, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
+                this, createColumnFamily(name), keySerializer, valueSerializer, lruCacheSize);
     }
 
     private ColumnFamilyHandle createColumnFamily(String name) throws IOException {

@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexMaintainer;
 import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
@@ -34,6 +35,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
@@ -79,8 +81,9 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
-            String tableName) {
-        super(fileIO, schemaManager, schemaId, options, partitionType);
+            String tableName,
+            CatalogEnvironment catalogEnvironment) {
+        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -110,13 +113,22 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     @Override
     public KeyValueFileStoreRead newRead() {
         return new KeyValueFileStoreRead(
-                fileIO,
                 schemaManager,
                 schemaId,
                 keyType,
                 valueType,
                 newKeyComparator(),
                 mfFactory,
+                newReaderFactoryBuilder());
+    }
+
+    public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
+        return KeyValueFileReaderFactory.builder(
+                fileIO,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor,

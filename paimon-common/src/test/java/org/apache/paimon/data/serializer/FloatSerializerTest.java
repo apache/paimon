@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link FloatSerializer}. */
@@ -39,9 +43,9 @@ public class FloatSerializerTest extends SerializerTestBase<Float> {
         float rndFloat = rnd.nextFloat() * Float.MAX_VALUE;
 
         return new Float[] {
-            (float) 0,
+            0F,
             1F,
-            (float) -1,
+            -1F,
             Float.MAX_VALUE,
             Float.MIN_VALUE,
             rndFloat,
@@ -50,5 +54,18 @@ public class FloatSerializerTest extends SerializerTestBase<Float> {
             Float.NEGATIVE_INFINITY,
             Float.POSITIVE_INFINITY
         };
+    }
+
+    @Override
+    protected List<Pair<Float, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of(0F, "0.0"),
+                Pair.of(1F, "1.0"),
+                Pair.of(-1F, "-1.0"),
+                Pair.of(Float.MAX_VALUE, "3.4028235E38"),
+                Pair.of(Float.MIN_VALUE, "1.4E-45"),
+                Pair.of(Float.NaN, "NaN"),
+                Pair.of(Float.NEGATIVE_INFINITY, "-Infinity"),
+                Pair.of(Float.POSITIVE_INFINITY, "Infinity"));
     }
 }

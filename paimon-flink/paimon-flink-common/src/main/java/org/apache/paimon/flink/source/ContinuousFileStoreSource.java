@@ -28,6 +28,7 @@ import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
+import org.apache.flink.metrics.groups.SplitEnumeratorMetricGroup;
 
 import javax.annotation.Nullable;
 
@@ -75,12 +76,22 @@ public class ContinuousFileStoreSource extends FlinkSource {
             splits = checkpoint.splits();
         }
         StreamTableScan scan = readBuilder.newStreamScan();
-        if (context.metricGroup() != null) {
+        if (metricGroup(context) != null) {
             ((InnerStreamTableScan) scan)
                     .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
         }
         scan.restore(nextSnapshotId);
         return buildEnumerator(context, splits, nextSnapshotId, scan);
+    }
+
+    @Nullable
+    private SplitEnumeratorMetricGroup metricGroup(SplitEnumeratorContext<?> context) {
+        try {
+            return context.metricGroup();
+        } catch (NullPointerException ignore) {
+            // ignore NPE for some Flink versions
+            return null;
+        }
     }
 
     protected SplitEnumerator<FileStoreSourceSplit, PendingSplitsCheckpoint> buildEnumerator(

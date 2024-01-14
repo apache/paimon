@@ -26,12 +26,12 @@ import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.pulsar.common.config.PulsarClientFactory;
-import org.apache.flink.connector.pulsar.common.config.PulsarOptions;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 import org.apache.flink.connector.pulsar.source.PulsarSourceBuilder;
 import org.apache.flink.connector.pulsar.source.config.SourceConfiguration;
 import org.apache.flink.connector.pulsar.source.enumerator.cursor.StartCursor;
 import org.apache.flink.connector.pulsar.source.enumerator.cursor.StopCursor;
+import org.apache.flink.connector.pulsar.source.enumerator.subscriber.impl.TopicPatternSubscriber;
 import org.apache.flink.connector.pulsar.source.enumerator.topic.TopicPartition;
 import org.apache.flink.connector.pulsar.source.reader.PulsarPartitionSplitReader;
 import org.apache.pulsar.client.api.Consumer;
@@ -42,25 +42,30 @@ import org.apache.pulsar.client.api.MessageId;
 import org.apache.pulsar.client.api.PulsarClient;
 import org.apache.pulsar.client.api.PulsarClientException;
 import org.apache.pulsar.client.api.SubscriptionInitialPosition;
+import org.apache.pulsar.client.impl.LookupService;
+import org.apache.pulsar.client.impl.PulsarClientImpl;
 import org.apache.pulsar.client.internal.DefaultImplementation;
+import org.apache.pulsar.common.api.proto.CommandGetTopicsOfNamespace;
+import org.apache.pulsar.common.lookup.GetTopicsResult;
+import org.apache.pulsar.common.naming.NamespaceName;
+import org.apache.pulsar.common.naming.TopicName;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
-import java.util.stream.Collectors;
+import java.util.regex.Pattern;
 
-import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.CLIENT_CONFIG_PREFIX;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAMS;
+import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAM_MAP;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PLUGIN_CLASS_NAME;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_SERVICE_URL;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_CONSUMER_NAME;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME;
 import static org.apache.flink.connector.pulsar.source.config.PulsarSourceConfigUtils.createConsumerBuilder;
 import static org.apache.flink.connector.pulsar.source.enumerator.topic.range.TopicRangeUtils.isFullTopicRanges;
-import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.pulsar.client.api.KeySharedPolicy.stickyHashRange;
 
@@ -73,19 +78,25 @@ public class PulsarActionUtils {
                     .noDefaultValue()
                     .withDescription("Defines the format identifier for encoding value data.");
 
-    public static final ConfigOption<String> TOPIC =
+    public static final ConfigOption<List<String>> TOPIC =
             ConfigOptions.key("topic")
+                    .stringType()
+                    .asList()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Topic name(s) from which the data is read. It also supports topic list by separating topic "
+                                    + "by semicolon like 'topic-1;topic-2'. Note, only one of \"topic-pattern\" and \"topic\" "
+                                    + "can be specified.");
+
+    public static final ConfigOption<String> TOPIC_PATTERN =
+            ConfigOptions.key("topic-pattern")
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Topic names from which the table is read. Either 'topic' or 'topic-pattern' must be set for source. "
-                                    + "Option 'topic' is required for sink.");
-
-    static final ConfigOption<String> PULSAR_AUTH_PARAM_MAP =
-            ConfigOptions.key(CLIENT_CONFIG_PREFIX + "authParamMap")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("Parameters for the authentication plugin.");
+                            "The regular expression for a pattern of topic names to read from. All topics with names "
+                                    + "that match the specified regular expression will be subscribed by the consumer "
+                                    + "when the job starts running. Note, only one of \"topic-pattern\" and \"topic\" "
+                                    + "can be specified.");
 
     static final ConfigOption<String> PULSAR_START_CURSOR_FROM_MESSAGE_ID =
             ConfigOptions.key("pulsar.startCursor.fromMessageId")
@@ -151,9 +162,7 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
-    public static PulsarSource<String> buildPulsarSource(Configuration rawConfig) {
-        Configuration pulsarConfig = preprocessPulsarConfig(rawConfig);
-
+    public static PulsarSource<String> buildPulsarSource(Configuration pulsarConfig) {
         PulsarSourceBuilder<String> pulsarSourceBuilder = PulsarSource.builder();
 
         // the minimum setup
@@ -161,11 +170,10 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setTopics(
-                        Arrays.stream(pulsarConfig.get(TOPIC).split(","))
-                                .map(String::trim)
-                                .collect(Collectors.toList()))
                 .setDeserializationSchema(new SimpleStringSchema());
+
+        pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
+        pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
 
         // other settings
 
@@ -231,8 +239,7 @@ public class PulsarActionUtils {
         String authPluginClassName = pulsarConfig.get(PULSAR_AUTH_PLUGIN_CLASS_NAME);
         if (authPluginClassName != null) {
             String authParamsString = pulsarConfig.get(PULSAR_AUTH_PARAMS);
-            Map<String, String> authParamsMap =
-                    pulsarConfig.get(PulsarOptions.PULSAR_AUTH_PARAM_MAP);
+            Map<String, String> authParamsMap = pulsarConfig.get(PULSAR_AUTH_PARAM_MAP);
 
             checkArgument(
                     authParamsString != null || authParamsMap != null,
@@ -278,21 +285,6 @@ public class PulsarActionUtils {
         }
     }
 
-    static SourceConfiguration toSourceConfiguration(Configuration rawConfig) {
-        return new SourceConfiguration(preprocessPulsarConfig(rawConfig));
-    }
-
-    private static Configuration preprocessPulsarConfig(Configuration rawConfig) {
-        Configuration cloned = new Configuration(rawConfig);
-        if (cloned.contains(PULSAR_AUTH_PARAM_MAP)) {
-            Map<String, String> authParamsMap =
-                    parseCommaSeparatedKeyValues(cloned.get(PULSAR_AUTH_PARAM_MAP));
-            cloned.removeConfig(PULSAR_AUTH_PARAM_MAP);
-            cloned.set(PulsarOptions.PULSAR_AUTH_PARAM_MAP, authParamsMap);
-        }
-        return cloned;
-    }
-
     public static DataFormat getDataFormat(Configuration pulsarConfig) {
         return DataFormat.fromConfigString(pulsarConfig.get(VALUE_FORMAT));
     }
@@ -301,7 +293,7 @@ public class PulsarActionUtils {
     public static MessageQueueSchemaUtils.ConsumerWrapper createPulsarConsumer(
             Configuration pulsarConfig) {
         try {
-            SourceConfiguration pulsarSourceConfiguration = toSourceConfiguration(pulsarConfig);
+            SourceConfiguration pulsarSourceConfiguration = new SourceConfiguration(pulsarConfig);
             PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
 
             ConsumerBuilder<String> consumerBuilder =
@@ -313,7 +305,10 @@ public class PulsarActionUtils {
             // The default position is Latest
             consumerBuilder.subscriptionInitialPosition(SubscriptionInitialPosition.Earliest);
 
-            String topic = pulsarConfig.get(PulsarActionUtils.TOPIC).split(",")[0];
+            String topic =
+                    pulsarConfig.contains(TOPIC)
+                            ? pulsarConfig.get(TOPIC).get(0)
+                            : findOneTopic(pulsarClient, pulsarConfig.get(TOPIC_PATTERN));
             TopicPartition topicPartition = new TopicPartition(topic);
             consumerBuilder.topic(topicPartition.getFullTopicName());
 
@@ -334,6 +329,44 @@ public class PulsarActionUtils {
 
             return new PulsarConsumerWrapper(consumer, topic);
         } catch (PulsarClientException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Referenced to {@link TopicPatternSubscriber}. */
+    private static String findOneTopic(PulsarClient pulsarClient, String topicPattern) {
+        TopicName destination = TopicName.get(topicPattern);
+        String pattern = destination.toString();
+
+        Pattern shortenedPattern = Pattern.compile(pattern.split("://")[1]);
+        String namespace = destination.getNamespaceObject().toString();
+
+        LookupService lookupService = ((PulsarClientImpl) pulsarClient).getLookup();
+        NamespaceName namespaceName = NamespaceName.get(namespace);
+        try {
+            // Pulsar 2.11.0 can filter regular expression on broker, but it has a bug which
+            // can only be used for wildcard filtering.
+            String queryPattern = shortenedPattern.toString();
+            if (!queryPattern.endsWith(".*")) {
+                queryPattern = null;
+            }
+
+            GetTopicsResult topicsResult =
+                    lookupService
+                            .getTopicsUnderNamespace(
+                                    namespaceName,
+                                    CommandGetTopicsOfNamespace.Mode.ALL,
+                                    queryPattern,
+                                    null)
+                            .get();
+            List<String> topics = topicsResult.getTopics();
+
+            if (topics == null || topics.isEmpty()) {
+                throw new RuntimeException("Cannot find topics match the topic-pattern " + pattern);
+            }
+
+            return topics.get(0);
+        } catch (ExecutionException | InterruptedException e) {
             throw new RuntimeException(e);
         }
     }

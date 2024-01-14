@@ -27,6 +27,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.reader.RecordReader;
@@ -97,10 +98,27 @@ public abstract class TableTestBase {
         return identifier(DEFAULT_TABLE_NAME);
     }
 
-    protected void write(Table table, InternalRow... rows) throws Exception {
+    @SafeVarargs
+    protected final void write(Table table, Pair<InternalRow, Integer>... rows) throws Exception {
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
         try (BatchTableWrite write = writeBuilder.newWrite();
                 BatchTableCommit commit = writeBuilder.newCommit()) {
+            for (Pair<InternalRow, Integer> row : rows) {
+                write.write(row.getKey(), row.getValue());
+            }
+            commit.commit(write.prepareCommit());
+        }
+    }
+
+    protected void write(Table table, InternalRow... rows) throws Exception {
+        write(table, null, rows);
+    }
+
+    protected void write(Table table, IOManager ioManager, InternalRow... rows) throws Exception {
+        BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+        try (BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit()) {
+            write.withIOManager(ioManager);
             for (InternalRow row : rows) {
                 write.write(row);
             }

@@ -20,6 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.utils.SerializableFunction;
 
@@ -46,7 +47,7 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
         super(table, overwritePartition);
     }
 
-    protected abstract ChannelComputer<T> channelComputer1();
+    protected abstract ChannelComputer<T> assignerChannelComputer(Integer numAssigners);
 
     protected abstract ChannelComputer<Tuple2<T, Integer>> channelComputer2();
 
@@ -58,21 +59,22 @@ public abstract class DynamicBucketSink<T> extends FlinkWriteSink<Tuple2<T, Inte
 
         // Topology:
         // input -- shuffle by key hash --> bucket-assigner -- shuffle by partition & bucket -->
-        // writer -->
-        // committer
+        // writer --> committer
 
         // 1. shuffle by key hash
         Integer assignerParallelism = table.coreOptions().dynamicBucketAssignerParallelism();
         if (assignerParallelism == null) {
             assignerParallelism = parallelism;
         }
+
+        Integer numAssigners = table.coreOptions().dynamicBucketInitialBuckets();
         DataStream<T> partitionByKeyHash =
-                partition(input, channelComputer1(), assignerParallelism);
+                partition(input, assignerChannelComputer(numAssigners), assignerParallelism);
 
         // 2. bucket-assigner
         HashBucketAssignerOperator<T> assignerOperator =
                 new HashBucketAssignerOperator<>(
-                        initialCommitUser, table, extractorFunction(), false);
+                        initialCommitUser, table, numAssigners, extractorFunction(), false);
         TupleTypeInfo<Tuple2<T, Integer>> rowWithBucketType =
                 new TupleTypeInfo<>(partitionByKeyHash.getType(), BasicTypeInfo.INT_TYPE_INFO);
         DataStream<Tuple2<T, Integer>> bucketAssigned =

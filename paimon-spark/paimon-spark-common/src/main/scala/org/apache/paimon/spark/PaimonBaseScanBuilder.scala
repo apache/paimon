@@ -17,7 +17,7 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate, PredicateBuilder}
+import org.apache.paimon.predicate.{PartitionPredicateVisitor, Predicate}
 import org.apache.paimon.table.Table
 
 import org.apache.spark.internal.Logging
@@ -40,7 +40,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushed, pushDownLimit)
+    PaimonScan(table, requiredSchema, pushed.map(_._2), pushDownLimit)
   }
 
   /**

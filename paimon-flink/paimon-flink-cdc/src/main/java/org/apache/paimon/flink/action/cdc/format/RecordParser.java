@@ -27,7 +27,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.TypeUtils;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
@@ -42,10 +44,11 @@ import org.slf4j.LoggerFactory;
 import javax.annotation.Nullable;
 
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
@@ -93,8 +96,13 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 return null;
             }
 
+            Optional<RichCdcMultiplexRecord> recordOpt = extractRecords().stream().findFirst();
+            if (!recordOpt.isPresent()) {
+                return null;
+            }
+
             Schema.Builder builder = Schema.newBuilder();
-            extractPaimonFieldTypes().forEach(builder::column);
+            recordOpt.get().fieldTypes().forEach(builder::column);
             builder.primaryKey(extractPrimaryKeys());
             return builder.build();
         } catch (Exception e) {
@@ -111,13 +119,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected boolean isDDL() {
         return false;
-    }
-
-    // get field -> type mapping from given data node
-    protected LinkedHashMap<String, DataType> extractPaimonFieldTypes() {
-        JsonNode record = getAndCheck(dataField());
-
-        return fillDefaultStringTypes(record);
     }
 
     // use STRING type in default when we cannot get origin data types (most cases)
@@ -141,10 +142,27 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     protected Map<String, String> extractRowData(
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
         paimonFieldTypes.putAll(fillDefaultStringTypes(record));
-        Map<String, String> recordMap =
-                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, String>>() {});
-
-        Map<String, String> rowData = new HashMap<>(recordMap);
+        Map<String, Object> recordMap =
+                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
+        Map<String, String> rowData =
+                recordMap.entrySet().stream()
+                        .collect(
+                                Collectors.toMap(
+                                        Map.Entry::getKey,
+                                        entry -> {
+                                            if (Objects.nonNull(entry.getValue())
+                                                    && !TypeUtils.isBasicType(entry.getValue())) {
+                                                try {
+                                                    return OBJECT_MAPPER
+                                                            .writer()
+                                                            .writeValueAsString(entry.getValue());
+                                                } catch (JsonProcessingException e) {
+                                                    LOG.error("Failed to deserialize record.", e);
+                                                    return Objects.toString(entry.getValue());
+                                                }
+                                            }
+                                            return Objects.toString(entry.getValue(), null);
+                                        }));
         evalComputedColumns(rowData, paimonFieldTypes);
         return rowData;
     }

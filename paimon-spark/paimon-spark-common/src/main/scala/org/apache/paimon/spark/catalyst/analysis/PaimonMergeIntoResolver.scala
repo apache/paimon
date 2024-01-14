@@ -17,72 +17,55 @@
  */
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
-
-import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.catalyst.analysis.UnresolvedAttribute
-import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, InsertAction, InsertStarAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
+import org.apache.spark.sql.catalyst.expressions.Expression
+import org.apache.spark.sql.catalyst.plans.logical.{Assignment, DeleteAction, LogicalPlan, MergeAction, MergeIntoTable, UpdateAction, UpdateStarAction}
 
 /** Resolve all the expressions for MergeInto. */
-object PaimonMergeIntoResolver extends ExpressionHelper {
+object PaimonMergeIntoResolver extends PaimonMergeIntoResolverBase {
 
-  def apply(merge: MergeIntoTable, spark: SparkSession): LogicalPlan = {
-    val target = merge.targetTable
-    val source = merge.sourceTable
-    assert(target.resolved, "Target should have been resolved here.")
-    assert(source.resolved, "Source should have been resolved here.")
-
-    val condition = merge.mergeCondition
-    val matched = merge.matchedActions
-    val notMatched = merge.notMatchedActions
-
-    val resolve = resolveExpression(spark) _
-
+  def resolveNotMatchedBySourceActions(
+      merge: MergeIntoTable,
+      target: LogicalPlan,
+      source: LogicalPlan,
+      resolve: (Expression, LogicalPlan) => Expression): Seq[MergeAction] = {
     def resolveMergeAction(action: MergeAction): MergeAction = {
       action match {
         case DeleteAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, merge))
+          val resolvedCond = condition.map(resolve(_, target))
           DeleteAction(resolvedCond)
         case UpdateAction(condition, assignments) =>
-          val resolvedCond = condition.map(resolve(_, merge))
+          val resolvedCond = condition.map(resolve(_, target))
           val resolvedAssignments = assignments.map {
             assignment =>
               assignment.copy(
-                key = resolve(assignment.key, merge),
-                value = resolve(assignment.value, merge))
+                key = resolve(assignment.key, target),
+                value = resolve(assignment.value, target))
           }
           UpdateAction(resolvedCond, resolvedAssignments)
         case UpdateStarAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, merge))
+          val resolvedCond = condition.map(resolve(_, target))
           val resolvedAssignments = target.output.map {
             attr => Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), source))
           }
           UpdateAction(resolvedCond, resolvedAssignments)
-        case InsertAction(condition, assignments) =>
-          val resolvedCond = condition.map(resolve(_, source))
-          val resolvedAssignments = assignments.map {
-            assignment =>
-              assignment.copy(
-                key = resolve(assignment.key, source),
-                value = resolve(assignment.value, source))
-          }
-          InsertAction(resolvedCond, resolvedAssignments)
-        case InsertStarAction(condition) =>
-          val resolvedCond = condition.map(resolve(_, source))
-          val resolvedAssignments = target.output.map {
-            attr => Assignment(attr, resolve(UnresolvedAttribute.quotedString(attr.name), source))
-          }
-          InsertAction(resolvedCond, resolvedAssignments)
-        case _ =>
-          throw new RuntimeException(s"Can't recognize this action: $action")
       }
     }
 
-    val resolvedCond = resolve(condition, merge)
-    val resolvedMatched: Seq[MergeAction] = matched.map(resolveMergeAction)
-    val resolvedNotMatched: Seq[MergeAction] = notMatched.map(resolveMergeAction)
+    merge.notMatchedBySourceActions.map(resolveMergeAction)
+  }
 
-    merge.copy(target, source, resolvedCond, resolvedMatched, resolvedNotMatched)
+  def build(
+      merge: MergeIntoTable,
+      resolvedCond: Expression,
+      resolvedMatched: Seq[MergeAction],
+      resolvedNotMatched: Seq[MergeAction],
+      resolvedNotMatchedBySource: Seq[MergeAction]): MergeIntoTable = {
+    merge.copy(
+      mergeCondition = resolvedCond,
+      matchedActions = resolvedMatched,
+      notMatchedActions = resolvedNotMatched,
+      notMatchedBySourceActions = resolvedNotMatchedBySource)
   }
 
 }

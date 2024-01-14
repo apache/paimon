@@ -294,6 +294,12 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
     </thead>
     <tbody>
         <tr>
+            <td>level0FileCount</td>
+            <td>Bucket</td>
+            <td>Gauge</td>
+            <td>The level 0 file count will become larger if asynchronous compaction cannot be done in time.</td>
+        </tr>
+        <tr>
             <td>lastCompactionDuration</td>
             <td>Bucket</td>
             <td>Gauge</td>
@@ -427,11 +433,17 @@ When using Flink to read and write, Paimon has implemented some key standard Fli
     </thead>
     <tbody>
         <tr>
+            <td>currentEmitEventTimeLag</td>
+            <td>Flink Source Operator</td>
+            <td>Gauge</td>
+            <td>Time difference between sending the record out of source and file creation.</td>
+        </tr>
+        <tr>
             <td>currentFetchEventTimeLag</td>
             <td>Flink Source Operator</td>
             <td>Gauge</td>
             <td>Time difference between reading the data file and file creation.</td>
-        </tr>    
+        </tr>
     </tbody>
 </table>
 

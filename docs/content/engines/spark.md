@@ -99,7 +99,8 @@ When starting `spark-sql`, use the following command to register Paimon’s Spar
 ```bash
 spark-sql ... \
     --conf spark.sql.catalog.paimon=org.apache.paimon.spark.SparkCatalog \
-    --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon
+    --conf spark.sql.catalog.paimon.warehouse=file:/tmp/paimon \
+    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
 Catalogs are configured using properties under spark.sql.catalog.(catalog_name). In above case, 'paimon' is the
@@ -127,7 +128,8 @@ Hive conf from Spark session, you just need to configure Spark's Hive conf.
 
 ```bash
 spark-sql ... \
-    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog
+    --conf spark.sql.catalog.spark_catalog=org.apache.paimon.spark.SparkGenericCatalog \
+    --conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 ```
 
 Using `SparkGenericCatalog`, you can use Paimon tables in this Catalog or non-Paimon tables such as Spark's csv,
@@ -224,7 +226,7 @@ dataset.show()
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table/merge-engine#partial-update" >}}) to support this feature.
    {{< /hint >}}
 
 {{< hint warning >}}
@@ -457,13 +459,24 @@ val query = spark.readStream
 ```
 
 Paimon Structured Streaming supports read row in the form of changelog (add rowkind column in row to represent its 
-change type) by setting `read.changelog` to true (default is false).
+change type) in two ways:
+
+- Direct streaming read with the system audit_log table
+- Set `read.changelog` to true (default is false), then streaming read with table location
 
 **Example:**
 
 ```scala
-// no any scan-related configs are provided, that will use latest-full scan mode.
-val query = spark.readStream
+// Option 1
+val query1 = spark.readStream
+  .format("paimon")
+  .table("`table_name$audit_log`")
+  .writeStream
+  .format("console")
+  .start()
+
+// Option 2
+val query2 = spark.readStream
   .format("paimon")
   .option("read.changelog", "true")
   .load("/path/to/paimon/source/table")
@@ -550,7 +563,7 @@ This section introduce all available spark procedures about paimon.
     <tr>
       <td>compact</td>
       <td><nobr>CALL [paimon.]sys.compact(table => '&ltidentifier&gt' [,partitions => '&ltpartitions&gt'] </nobr><br>[, order_strategy =>'&ltsort_type&gt'] [,order_by => '&ltcolumns&gt'])</td>
-      <td>identifier: the target table identifier. Cannot be empty.<br><br><nobr>partitions: partition filter. Left empty for all partitions.<br> "," means "AND"<br>";" means "OR"</nobr><br><br>order_strategy: 'order' or 'zorder' or 'none'. Left empty for 'none'. <br><br><nobr>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'. </nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
+      <td>identifier: the target table identifier. Cannot be empty.<br><br><nobr>partitions: partition filter. Left empty for all partitions.<br> "," means "AND"<br>";" means "OR"</nobr><br><br>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'. <br><br><nobr>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'. </nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
       <td><nobr>SET spark.sql.shuffle.partitions=10; --set the compact parallelism</nobr><br><nobr>CALL sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')</nobr></td>
     </tr>
     </tbody>

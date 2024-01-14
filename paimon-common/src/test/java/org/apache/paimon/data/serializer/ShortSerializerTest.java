@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link ShortSerializer}. */
@@ -41,5 +45,17 @@ public class ShortSerializerTest extends SerializerTestBase<Short> {
         return new Short[] {
             0, 1, -1, Short.MAX_VALUE, Short.MIN_VALUE, rndShort, (short) -rndShort
         };
+    }
+
+    @Override
+    protected List<Pair<Short, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of((short) 0, "0"),
+                Pair.of((short) 1, "1"),
+                Pair.of((short) -1, "-1"),
+                Pair.of(Short.MAX_VALUE, "32767"),
+                Pair.of(Short.MIN_VALUE, "-32768"),
+                Pair.of((short) 12345, "12345"),
+                Pair.of((short) -12345, "-12345"));
     }
 }

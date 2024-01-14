@@ -97,7 +97,7 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         // create tags for each snapshot
         for (int id = 1; id <= latestSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
-            tagManager.createTag(snapshot, "tag" + id);
+            tagManager.createTag(snapshot, "tag" + id, Collections.emptyList());
         }
 
         // randomly expire snapshots

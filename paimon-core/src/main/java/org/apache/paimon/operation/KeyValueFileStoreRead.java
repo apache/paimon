@@ -96,8 +96,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor,
             CoreOptions options) {
-        this.tableSchema = schemaManager.schema(schemaId);
-        this.readerFactoryBuilder =
+        this(
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                keyComparator,
+                mfFactory,
                 KeyValueFileReaderFactory.builder(
                         fileIO,
                         schemaManager,
@@ -107,7 +112,19 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                         formatDiscover,
                         pathFactory,
                         extractor,
-                        options);
+                        options));
+    }
+
+    public KeyValueFileStoreRead(
+            SchemaManager schemaManager,
+            long schemaId,
+            RowType keyType,
+            RowType valueType,
+            Comparator<InternalRow> keyComparator,
+            MergeFunctionFactory<KeyValue> mfFactory,
+            KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
+        this.tableSchema = schemaManager.schema(schemaId);
+        this.readerFactoryBuilder = readerFactoryBuilder;
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter =

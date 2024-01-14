@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.DynamicBucketRow;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
@@ -48,7 +47,6 @@ public class DynamicBucketRowWriteOperator
     @Override
     public void processElement(StreamRecord<Tuple2<InternalRow, Integer>> element)
             throws Exception {
-        DynamicBucketRow row = new DynamicBucketRow(element.getValue().f0, element.getValue().f1);
-        write.write(row);
+        write.write(element.getValue().f0, element.getValue().f1);
     }
 }

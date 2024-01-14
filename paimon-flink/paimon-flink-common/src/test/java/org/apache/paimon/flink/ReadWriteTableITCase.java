@@ -1226,7 +1226,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     }
 
     @Test
-    public void testUnsupportedComputedColumnComments() {
+    public void testComputedColumnComments() {
         String ddl = "CREATE TABLE T(a INT , b INT, c AS a + b COMMENT 'computed');";
         bEnv.executeSql(ddl);
 
@@ -1236,9 +1236,9 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         .collect(Collectors.toList());
         assertThat(result)
                 .containsExactlyInAnyOrder(
-                        "+I[a, INT, true, null, null, null]",
-                        "+I[b, INT, true, null, null, null]",
-                        "+I[c, INT, true, null, AS `a` + `b`, null]");
+                        "+I[a, INT, true, null, null, null, null]",
+                        "+I[b, INT, true, null, null, null, null]",
+                        "+I[c, INT, true, null, AS `a` + `b`, null, computed]");
     }
 
     @Test

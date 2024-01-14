@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.DataCatalogTable;
 import org.apache.paimon.flink.FlinkCatalog;
-import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.annotation.Minio;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.s3.MinioTestContainer;
@@ -752,17 +751,6 @@ public abstract class HiveCatalogITCaseBase {
                         String.format(
                                 "Field name %s cannot contain upper case in the catalog.",
                                 "[A, C]"));
-    }
-
-    @Test
-    public void testQuickPathInShowTables() throws Exception {
-        collect("CREATE TABLE t ( a INT, b STRING )");
-        List<Row> tables = collect("SHOW TABLES");
-        assertThat(tables.toString()).isEqualTo("[+I[t]]");
-
-        new LocalFileIO().delete(new org.apache.paimon.fs.Path(path, "test_db.db/t"), true);
-        tables = collect("SHOW TABLES");
-        assertThat(tables.toString()).isEqualTo("[]");
     }
 
     @Test

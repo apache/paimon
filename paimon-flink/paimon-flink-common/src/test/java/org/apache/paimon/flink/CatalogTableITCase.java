@@ -19,16 +19,11 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.schema.SchemaChange;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SinkTableLineageTable;
 import org.apache.paimon.table.system.SourceTableLineageTable;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
@@ -39,7 +34,6 @@ import org.junit.jupiter.api.Test;
 
 import javax.annotation.Nonnull;
 
-import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
 
@@ -251,7 +245,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testCreateTableAs() throws Exception {
+    public void testCreateTableAs() {
         sql("CREATE TABLE t (a INT)");
         sql("INSERT INTO t VALUES(1),(2)");
         sql("CREATE TABLE t1 AS SELECT * FROM t");
@@ -481,6 +475,11 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                 .hasMessage(
                         "Partition CatalogPartitionSpec{{dt=2020-10-10}} of table default.PartitionTable in catalog PAIMON does not exist.");
 
+        assertThat(
+                        sql("ALTER TABLE PartitionTable DROP IF EXISTS PARTITION (`dt` = '2020-10-10')")
+                                .toString())
+                .isEqualTo("[+I[OK]]");
+
         List<Row> result = sql("SHOW PARTITIONS PartitionTable");
         assertThat(result.toString())
                 .isEqualTo(
@@ -518,7 +517,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testFilesTable() throws Exception {
+    public void testFilesTable() {
         sql(
                 "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
                         + "PARTITIONED BY (p) ");
@@ -530,24 +529,16 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertFilesTable("T_APPEND_ONLY");
     }
 
-    private void assertFilesTable(String tableName) throws Exception {
+    private void assertFilesTable(String tableName) {
         assertThat(sql(String.format("SELECT * FROM %s$files", tableName))).isEmpty();
 
-        // TODO should use sql for schema evolution after flink supports it.
-        SchemaManager schemaManager =
-                new SchemaManager(
-                        LocalFileIO.create(),
-                        new Path(path, String.format("default.db/%s", tableName)));
         sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 1, 2, 'S1')", tableName));
 
         // The result fields are [a->INT, p -> INT, b->BIGINT, c->STRING, d->INT, e->INT, f->INT]
         // after
         // evolution
-        schemaManager.commitChanges(
-                Arrays.asList(
-                        SchemaChange.addColumn("d", new IntType()),
-                        SchemaChange.addColumn("e", new IntType()),
-                        SchemaChange.addColumn("f", new IntType())));
+        sql(String.format("ALTER TABLE %s ADD (d INT, e INT, f INT)", tableName));
+
         sql(
                 String.format(
                         "INSERT INTO %s VALUES "
@@ -555,12 +546,10 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                 + "(10, 1, 11, 'S4', 12, 13, 14)",
                         tableName));
 
-        schemaManager.commitChanges(
-                Arrays.asList(
-                        SchemaChange.dropColumn("c"),
-                        SchemaChange.dropColumn("e"),
-                        SchemaChange.renameColumn("b", "bb"),
-                        SchemaChange.renameColumn("d", "dd")));
+        sql(String.format("ALTER TABLE %s DROP (c, e)", tableName));
+        sql(String.format("ALTER TABLE %s RENAME d TO dd", tableName));
+        sql(String.format("ALTER TABLE %s RENAME b TO bb", tableName));
+
         // The result fields are [a->INT, p -> INT, bb->BIGINT, dd->INT, f->INT] after evolution
         sql(
                 String.format(
@@ -581,7 +570,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertThat(getRowStringList(rows1))
                 .containsExactlyInAnyOrder(
                         String.format(
-                                "[2],0,orc,2,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=23, bb=24, dd=25, f=26, p=2},{a=27, bb=28, dd=29, f=30, p=2}",
+                                "[2],0,orc,4,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=23, bb=24, dd=25, f=26, p=2},{a=27, bb=28, dd=29, f=30, p=2}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         // value count table use all fields as min/max key
                                         ? "[23, 2, 24, 25, 26],[27, 2, 28, 29, 30]"
@@ -605,7 +594,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                                 ? ","
                                                 : "[5],[10]")),
                         String.format(
-                                "[1],0,orc,2,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=15, bb=16, dd=17, f=18, p=1},{a=19, bb=20, dd=21, f=22, p=1}",
+                                "[1],0,orc,4,0,2,%s,{a=0, bb=0, dd=0, f=0, p=0},{a=15, bb=16, dd=17, f=18, p=1},{a=19, bb=20, dd=21, f=22, p=1}",
                                 StringUtils.endsWith(tableName, "VALUE_COUNT")
                                         ? "[15, 1, 16, 17, 18],[19, 1, 20, 21, 22]"
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
@@ -697,7 +686,7 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testPartitionsTable() throws Exception {
+    public void testPartitionsTable() {
         sql(
                 "CREATE TABLE T_WITH_KEY (a INT, p INT, b BIGINT, c STRING, PRIMARY KEY (a, p) NOT ENFORCED) "
                         + "PARTITIONED BY (p)");
@@ -709,13 +698,8 @@ public class CatalogTableITCase extends CatalogITCaseBase {
         assertPartitionsTable("T_APPEND_ONLY");
     }
 
-    private void assertPartitionsTable(String tableName) throws Exception {
+    private void assertPartitionsTable(String tableName) {
         assertThat(sql(String.format("SELECT * FROM %s$partitions", tableName))).isEmpty();
-        // TODO should use sql for schema evolution after flink supports it.
-        SchemaManager schemaManager =
-                new SchemaManager(
-                        LocalFileIO.create(),
-                        new Path(path, String.format("default.db/%s", tableName)));
         sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S2'), (1, 2, 2, 'S1')", tableName));
         sql(String.format("INSERT INTO %s VALUES (3, 1, 4, 'S3'), (1, 2, 2, 'S4')", tableName));
         List<Row> rows1 = sql(String.format("SELECT * FROM %s$partitions", tableName));
@@ -755,22 +739,16 @@ public class CatalogTableITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testAlterTableNonPhysicalColumn() {
-        sql(
-                "CREATE TABLE T (a INT,  c ROW < a INT, d INT> METADATA, b INT, ts TIMESTAMP(3), WATERMARK FOR ts AS ts)");
-        sql("ALTER TABLE T ADD e VARCHAR METADATA");
-        sql("ALTER TABLE T DROP c ");
-        sql("ALTER TABLE T RENAME e TO ee");
+    public void testShowTableMetadataComment() {
+        sql("CREATE TABLE T (a INT, name VARCHAR METADATA COMMENT 'header1', b INT)");
         List<Row> result = sql("SHOW CREATE TABLE T");
         assertThat(result.get(0).toString())
                 .contains(
                         "CREATE TABLE `PAIMON`.`default`.`T` (\n"
                                 + "  `a` INT,\n"
-                                + "  `b` INT,\n"
-                                + "  `ts` TIMESTAMP(3),\n"
-                                + "  `ee` VARCHAR(2147483647) METADATA,\n"
-                                + "  WATERMARK FOR `ts` AS `ts`\n"
-                                + ") ")
+                                + "  `name` VARCHAR(2147483647) METADATA COMMENT 'header1',\n"
+                                + "  `b` INT\n"
+                                + ")")
                 .doesNotContain("schema");
     }
 

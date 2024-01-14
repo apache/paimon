@@ -32,6 +32,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -81,7 +82,8 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             tableSchema.logicalPartitionType(),
                             tableSchema.logicalBucketKeyType(),
                             tableSchema.logicalRowType(),
-                            name());
+                            name(),
+                            catalogEnvironment);
         }
         return lazyStore;
     }
@@ -146,5 +148,10 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                             record.row().getRowKind());
                     return record.row();
                 });
+    }
+
+    @Override
+    public TableQuery newTableQuery() {
+        throw new UnsupportedOperationException();
     }
 }

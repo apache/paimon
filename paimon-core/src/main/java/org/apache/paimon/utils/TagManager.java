@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.TagDeletion;
+import org.apache.paimon.table.sink.TagCallback;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -66,7 +67,7 @@ public class TagManager {
     }
 
     /** Create a tag from given snapshot and save it in the storage. */
-    public void createTag(Snapshot snapshot, String tagName) {
+    public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
         checkArgument(
@@ -84,6 +85,14 @@ public class TagManager {
                                     + "Cannot clean up because we can't determine the success.",
                             tagName, newTagPath),
                     e);
+        }
+
+        try {
+            callbacks.forEach(callback -> callback.notifyCreation(tagName));
+        } finally {
+            for (TagCallback tagCallback : callbacks) {
+                IOUtils.closeQuietly(tagCallback);
+            }
         }
     }
 
@@ -179,6 +188,21 @@ public class TagManager {
 
     /** Get all tagged snapshots with names sorted by snapshot id. */
     public SortedMap<Snapshot, String> tags() {
+        return tags(tagName -> true);
+    }
+
+    /**
+     * Retrieves a sorted map of snapshots filtered based on a provided predicate. The predicate
+     * determines which tag names should be included in the result. Only snapshots with tag names
+     * that pass the predicate test are included.
+     *
+     * @param filter A Predicate that tests each tag name. Snapshots with tag names that fail the
+     *     test are excluded from the result.
+     * @return A sorted map of filtered snapshots keyed by their IDs, each associated with its tag
+     *     name.
+     * @throws RuntimeException if an IOException occurs during retrieval of snapshots.
+     */
+    public SortedMap<Snapshot, String> tags(Predicate<String> filter) {
         TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
             List<Path> paths =
@@ -187,14 +211,15 @@ public class TagManager {
                             .collect(Collectors.toList());
 
             for (Path path : paths) {
+                String tagName = path.getName().substring(TAG_PREFIX.length());
+
+                if (!filter.test(tagName)) {
+                    continue;
+                }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 Snapshot.safelyFromPath(fileIO, path)
-                        .ifPresent(
-                                snapshot ->
-                                        tags.put(
-                                                snapshot,
-                                                path.getName().substring(TAG_PREFIX.length())));
+                        .ifPresent(snapshot -> tags.put(snapshot, tagName));
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
