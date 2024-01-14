@@ -59,6 +59,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    protected static final String DB_LOCATION_PROP = "location";
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -94,7 +95,7 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract boolean databaseExistsImpl(String databaseName);
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
+    public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         if (isSystemDatabase(name)) {
             throw new ProcessSystemDatabaseException();
@@ -105,9 +106,22 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw new DatabaseAlreadyExistException(name);
         }
-
-        createDatabaseImpl(name);
+        createDatabaseImpl(name, properties);
     }
+
+    @Override
+    public Map<String, String> loadDatabaseProperties(String name)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(name)) {
+            return Collections.emptyMap();
+        }
+        if (!databaseExists(name)) {
+            throw new DatabaseNotExistException(name);
+        }
+        return loadDatabasePropertiesImpl(name);
+    }
+
+    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name);
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
@@ -119,7 +133,7 @@ public abstract class AbstractCatalog implements Catalog {
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
-    protected abstract void createDatabaseImpl(String name);
+    protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
