@@ -48,7 +48,7 @@ public class CacheManager {
     }
 
     @VisibleForTesting
-    Cache<CacheKey, CacheValue> cache() {
+    public Cache<CacheKey, CacheValue> cache() {
         return cache;
     }
 

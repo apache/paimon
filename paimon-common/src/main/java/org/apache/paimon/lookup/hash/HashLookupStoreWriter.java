@@ -19,11 +19,14 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -42,6 +45,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Supplier;
 
 /** Internal write implementation for hash kv store. */
 public class HashLookupStoreWriter implements LookupStoreWriter {
@@ -76,8 +80,10 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int valueCount;
     // Number of collisions
     private int collisions;
+    @Nullable private final BloomFilterBuilder bloomFilter;
 
-    HashLookupStoreWriter(double loadFactor, File file) throws IOException {
+    HashLookupStoreWriter(double loadFactor, File file, Supplier<BloomFilterBuilder> bfProvider)
+            throws IOException {
         this.loadFactor = loadFactor;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(
@@ -98,6 +104,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         dataLengths = new long[0];
         maxOffsetLengths = new int[0];
         keyCounts = new int[0];
+        bloomFilter = bfProvider.get();
     }
 
     @Override
@@ -145,6 +152,9 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
         keyCount++;
         keyCounts[keyLength]++;
+        if (bloomFilter != null) {
+            bloomFilter.addHash(MurmurHashUtils.hashBytes(key));
+        }
     }
 
     @Override
@@ -222,6 +232,20 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
         // Write the max value for keyLength
         dataOutputStream.writeInt(maxKeyLength);
+
+        // Write whether the bloom filter is enabled.
+        dataOutputStream.writeBoolean(bloomFilter != null);
+
+        if (bloomFilter != null) {
+            dataOutputStream.writeLong(bloomFilter.getNumRecords());
+            dataOutputStream.writeInt(bloomFilter.getBuffer().size());
+
+            // Write the bloom filter start index
+            dataOutputStream.writeInt(dataOutputStream.size() + Integer.SIZE / Byte.SIZE);
+
+            dataOutputStream.write(bloomFilter.getBuffer().getArray());
+            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+        }
 
         // For each keyLength
         long datasLength = 0L;
