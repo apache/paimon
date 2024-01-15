@@ -48,11 +48,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
-import static org.apache.paimon.utils.DateTimeUtils.AUTO_PARSE_PATTERNS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Core options for paimon. */
@@ -496,10 +496,7 @@ public class CoreOptions implements Serializable {
                     .stringType()
                     .noDefaultValue()
                     .withDescription(
-                            "Optional timestamp used in case of \"from-timestamp\" scan mode,Supported timestamp formats include："
-                                    + Arrays.stream(AUTO_PARSE_PATTERNS)
-                                            .collect(Collectors.joining(","))
-                                    + ", it will be automatically converted to timestamp in unix milliseconds, default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8");
+                            "Optional timestamp used in case of \"from-timestamp\" scan mode, it will be automatically converted to timestamp in unix milliseconds, use local time zone");
 
     public static final ConfigOption<Long> SCAN_TIMESTAMP_MILLIS =
             key("scan.timestamp-millis")
@@ -1349,7 +1346,8 @@ public class CoreOptions implements Serializable {
         String timestampStr = scanTimestamp();
         Long timestampMillis = options.get(SCAN_TIMESTAMP_MILLIS);
         if (timestampMillis == null && timestampStr != null) {
-            return DateTimeUtils.autoFormatToTimestamp(timestampStr).getMillisecond();
+            return DateTimeUtils.parseTimestampData(timestampStr, 3, TimeZone.getDefault())
+                    .getMillisecond();
         }
         return timestampMillis;
     }

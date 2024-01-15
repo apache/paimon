@@ -52,9 +52,8 @@ SELECT * FROM t /*+ OPTIONS('scan.snapshot-id' = '1') */;
 SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
 -- read the snapshot from specified timestamp string ,it will be automatically converted to timestamp in unix milliseconds
--- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
--- default local time zone,if you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
-SELECT * FROM t /*+ OPTIONS('scan.timestamp' = '2023-12-09 23:09') */;
+-- Supported formats include：yyyy-MM-dd, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS, use default local time zone
+SELECT * FROM t /*+ OPTIONS('scan.timestamp' = '2023-12-09 23:09:12') */;
 
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
@@ -130,9 +129,8 @@ SET SESSION paimon.scan_timestamp_millis=1679486589444;
 SELECT * FROM t;
 
 -- read the snapshot from specified timestamp string ,it will be automatically converted to timestamp in unix milliseconds
--- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
--- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
-SET paimon.scan_timestamp='2023-11-29 14:55';
+-- Supported formats include：yyyy-MM-dd, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS, use default local time zone
+SET paimon.scan_timestamp='2023-11-29 14:55:12';
 SELECT * FROM t;
 ```
 
@@ -179,9 +177,8 @@ SELECT * FROM t;
 SET paimon.scan.timestamp-millis=null;
 
 -- read the snapshot from specified timestamp string ,it will be automatically converted to timestamp in unix milliseconds
--- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
--- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
-SET paimon.scan.timestamp='2023-12-09 23:09';
+-- Supported formats include：yyyy-MM-dd, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS, use default local time zone
+SET paimon.scan.timestamp=2023-12-09 23:09:01;
 SELECT * FROM t;
 SET paimon.scan.timestamp=null;
     
@@ -205,9 +202,8 @@ SELECT * FROM t;
 
 -- Re enter the client
 -- read the snapshot from specified timestamp string ,it will be automatically converted to timestamp in unix milliseconds
--- Supported formats include：yyyy,yyyy-MM,yyyy-MM-dd, yyyy-MM-dd HH, yyyy-MM-dd HH:mm, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS
--- default local time zone,If you need to specify a time zone, please end with '/UTC{offset}',for example: 2023-12-11 12:12/UTC+8
-SET paimon.scan_timestamp='2023-11-29 14:55';
+-- Supported formats include：yyyy-MM-dd, yyyy-MM-dd HH:mm:ss, yyyy-MM-dd HH:mm:ss.SSS, use default local time zone
+SET paimon.scan_timestamp='2023-11-29 14:55:12';
 SELECT * FROM t;
 ```
 {{< /tab >}}

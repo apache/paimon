@@ -71,7 +71,7 @@ public class KafkaLogStoreFactoryTest {
 
     @ParameterizedTest
     @EnumSource(CoreOptions.StartupMode.class)
-    public void testCreateKafkaLogStoreFactoryDatetime(CoreOptions.StartupMode startupMode) {
+    public void testCreateKafkaLogStoreFactoryTimestampStr(CoreOptions.StartupMode startupMode) {
         DateTimeFormatter formatter = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
         String timestampString = LocalDateTime.now().format(formatter);
         Consumer<Map<String, String>> setter =

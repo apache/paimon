@@ -23,6 +23,7 @@ import org.apache.paimon.data.Timestamp;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
+import java.time.format.DateTimeFormatter;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -46,22 +47,25 @@ public class DateTimeUtilsTest {
     }
 
     @Test
-    public void testAutoFormatTimestampTz() {
-        long millisPerHour = 3600000L;
-        String testDatetime = "2023-12-12 10:12:12";
-        long testTimestamp = 1702375932000L;
+    public void testParseTimestampData() {
+        String dt = "2024-01-14 19:35:00.012";
+        Timestamp ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(
+                        ts.toLocalDateTime()
+                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS")));
 
-        Timestamp utc = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC");
-        Timestamp utc1 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC+1");
-        Timestamp utcMinus1 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC-1");
-        Timestamp utc8 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC+8");
-        Timestamp utcMinus8 = DateTimeUtils.autoFormatToTimestamp(testDatetime + "/UTC-8");
+        dt = "2024-01-14 19:35:20";
+        ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(
+                        ts.toLocalDateTime()
+                                .format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss")));
 
-        assertThat(utc.getMillisecond()).isEqualTo(testTimestamp);
-        assertThat(utc1.getMillisecond()).isEqualTo(testTimestamp - millisPerHour);
-        assertThat(utcMinus1.getMillisecond()).isEqualTo(testTimestamp + millisPerHour);
-        assertThat(utc8.getMillisecond()).isEqualTo(testTimestamp - millisPerHour * 8);
-        assertThat(utcMinus8.getMillisecond()).isEqualTo(testTimestamp + millisPerHour * 8);
+        dt = "2024-01-14";
+        ts = DateTimeUtils.parseTimestampData(dt, 3);
+        assertThat(dt)
+                .isEqualTo(ts.toLocalDateTime().format(DateTimeFormatter.ofPattern("yyyy-MM-dd")));
     }
 
     @Test

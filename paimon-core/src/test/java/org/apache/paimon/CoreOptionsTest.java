@@ -40,7 +40,7 @@ public class CoreOptionsTest {
                 .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
 
         conf = new Options();
-        conf.set(CoreOptions.SCAN_TIMESTAMP, "2023-12-06 12:12");
+        conf.set(CoreOptions.SCAN_TIMESTAMP, "2023-12-06 12:12:12");
         assertThat(new CoreOptions(conf).startupMode())
                 .isEqualTo(CoreOptions.StartupMode.FROM_TIMESTAMP);
     }

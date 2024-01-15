@@ -42,6 +42,7 @@ import javax.annotation.Nullable;
 
 import java.util.List;
 import java.util.Properties;
+import java.util.TimeZone;
 
 import static org.apache.kafka.clients.consumer.ConsumerConfig.ISOLATION_LEVEL_CONFIG;
 import static org.apache.paimon.CoreOptions.LOG_CHANGELOG_MODE;
@@ -93,7 +94,9 @@ public class KafkaLogStoreFactory implements LogStoreTableFactory {
         String timestampString = options.get(SCAN_TIMESTAMP);
 
         if (timestampMills == null && timestampString != null) {
-            timestampMills = DateTimeUtils.autoFormatToTimestamp(timestampString).getMillisecond();
+            timestampMills =
+                    DateTimeUtils.parseTimestampData(timestampString, 3, TimeZone.getDefault())
+                            .getMillisecond();
         }
         return new KafkaLogSourceProvider(
                 topic(context),
