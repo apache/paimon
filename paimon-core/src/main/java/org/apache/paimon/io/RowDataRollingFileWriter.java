@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
+import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -46,9 +47,11 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 fileFormat.createWriterFactory(writeSchema),
                                 pathFactory.newPath(),
                                 writeSchema,
-                                fileFormat
-                                        .createStatsExtractor(writeSchema, statsCollectors)
-                                        .orElse(null),
+                                fileFormat instanceof AvroFileFormat
+                                        ? null
+                                        : fileFormat
+                                                .createStatsExtractor(writeSchema, statsCollectors)
+                                                .orElse(null),
                                 schemaId,
                                 seqNumCounter,
                                 fileCompression,

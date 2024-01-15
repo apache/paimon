@@ -69,6 +69,13 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testAvro() throws Exception {
+        testUpgradeNonPartitionTable("avro");
+        resetMetastore();
+        testUpgradePartitionTable("avro");
+    }
+
+    @Test
     public void testParquetNonPartitionTable() throws Exception {
         testUpgradeNonPartitionTable("parquet");
         resetMetastore();
@@ -152,7 +159,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     @ParameterizedTest
-    @ValueSource(strings = {"orc", "parquet"})
+    @ValueSource(strings = {"orc", "parquet", "avro"})
     public void testMigrateAction(String format) throws Exception {
         StreamExecutionEnvironment env = buildDefaultEnv(false);
 

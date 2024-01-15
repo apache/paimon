@@ -83,7 +83,7 @@ under the License.
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-format</artifactId>
             <version>${project.version}</version>
-            <scope>test</scope>
+            <scope>provided</scope>
         </dependency>
 
         <dependency>
