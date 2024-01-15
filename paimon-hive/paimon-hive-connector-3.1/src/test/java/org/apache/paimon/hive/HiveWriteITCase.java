@@ -44,6 +44,8 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.junit.runner.RunWith;
 
+import javax.annotation.Nullable;
+
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
@@ -91,7 +93,11 @@ public class HiveWriteITCase {
     }
 
     private String createAppendOnlyExternalTable(
-            RowType rowType, List<String> partitionKeys, List<InternalRow> data, String tableName)
+            RowType rowType,
+            List<String> partitionKeys,
+            List<InternalRow> data,
+            String tableName,
+            @Nullable CoreOptions.FileFormatType fileFormatType)
             throws Exception {
         String path = folder.newFolder().toURI().toString();
         String tableNameNotNull =
@@ -100,7 +106,9 @@ public class HiveWriteITCase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, path);
         conf.set(CoreOptions.BUCKET, 2);
-        conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set(
+                CoreOptions.FILE_FORMAT,
+                fileFormatType == null ? CoreOptions.FileFormatType.AVRO : fileFormatType);
         Identifier identifier = Identifier.create(DATABASE_NAME, tableNameNotNull);
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
@@ -152,7 +160,8 @@ public class HiveWriteITCase {
                                 new String[] {"pt", "a", "b", "c"}),
                         Collections.singletonList("pt"),
                         emptyData,
-                        "hive_test_table_output");
+                        "hive_test_table_output",
+                        null);
 
         hiveShell.execute(
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
@@ -164,22 +173,30 @@ public class HiveWriteITCase {
     public void testInsertTimestampAndDate() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 
+        // test different precisions
+        int precision = ThreadLocalRandom.current().nextInt(10);
+        String fraction = precision == 0 ? "" : "." + "123456789".substring(0, precision);
+
         String outputTableName =
                 createAppendOnlyExternalTable(
                         RowType.of(
                                 new DataType[] {
-                                    DataTypes.INT(), DataTypes.TIMESTAMP(), DataTypes.DATE()
+                                    DataTypes.INT(),
+                                    DataTypes.TIMESTAMP(precision),
+                                    DataTypes.DATE(),
                                 },
                                 new String[] {"pt", "a", "b"}),
                         Collections.singletonList("pt"),
                         emptyData,
-                        "hive_test_table_output");
+                        "hive_test_table_output",
+                        CoreOptions.FileFormatType.ORC);
         hiveShell.execute(
-                "insert into "
-                        + outputTableName
-                        + " values(1,'2023-01-13 20:00:01.123','2023-12-23')");
-        List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
+                String.format(
+                        "INSERT INTO %s VALUES (1, '2023-01-13 20:00:01%s', '2023-12-23')",
+                        outputTableName, fraction));
+
+        List<String> select = hiveShell.executeQuery("SELECT * FROM " + outputTableName);
         assertThat(select)
-                .isEqualTo(Collections.singletonList("1\t2023-01-13 20:00:01.123\t2023-12-23"));
+                .containsExactly(String.format("1\t2023-01-13 20:00:01%s\t2023-12-23", fraction));
     }
 }
