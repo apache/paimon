@@ -72,12 +72,12 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void createDatabaseImpl(String name) {
+    protected void createDatabaseImpl(String name) {
         uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
     }
 
     @Override
-    public void dropDatabaseImpl(String name) {
+    protected void dropDatabaseImpl(String name) {
         uncheck(() -> fileIO.delete(newDatabasePath(name), true));
     }
 
