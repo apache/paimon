@@ -147,9 +147,11 @@ public class LocalTableQuery implements TableQuery {
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
 
+    /** TODO remove synchronized and supports multiple thread to lookup. */
     @Nullable
     @Override
-    public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
+    public synchronized InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
+            throws IOException {
         Map<Integer, LookupLevels> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;

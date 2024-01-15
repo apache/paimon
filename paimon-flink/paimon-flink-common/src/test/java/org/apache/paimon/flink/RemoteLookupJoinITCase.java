@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.flink.query.RemoteTableQuery;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
@@ -34,6 +35,7 @@ import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 
 import java.io.Closeable;
@@ -58,6 +60,38 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
     @Override
     protected int defaultParallelism() {
         return 1;
+    }
+
+    @Test
+    public void testQueryServiceLookup() throws Exception {
+        sql(
+                "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
+        CloseableIterator<Row> service = streamSqlIter("CALL sys.query_service('default.DIM', 2)");
+        RemoteTableQuery query = new RemoteTableQuery(getPaimonTable("DIM"));
+
+        sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");
+        Thread.sleep(2000);
+
+        assertThat(query.lookup(row(), 0, row(1)))
+                .isNotNull()
+                .extracting(r -> r.getInt(1))
+                .isEqualTo(11);
+        assertThat(query.lookup(row(), 0, row(2)))
+                .isNotNull()
+                .extracting(r -> r.getInt(1))
+                .isEqualTo(22);
+        assertThat(query.lookup(row(), 1, row(3)))
+                .isNotNull()
+                .extracting(r -> r.getInt(1))
+                .isEqualTo(33);
+        assertThat(query.lookup(row(), 0, row(4)))
+                .isNotNull()
+                .extracting(r -> r.getInt(1))
+                .isEqualTo(44);
+        assertThat(query.lookup(row(), 0, row(5))).isNull();
+
+        service.close();
+        query.close();
     }
 
     @Test
