@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
@@ -225,6 +226,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         refresh();
 
         nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+    }
+
+    @VisibleForTesting
+    LookupTable lookupTable() {
+        return lookupTable;
     }
 
     private void refresh() throws Exception {

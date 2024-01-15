@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManagerImpl;
@@ -80,6 +81,11 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         this.keyRearrange = keyRearrange;
     }
 
+    @VisibleForTesting
+    QueryExecutor queryExecutor() {
+        return queryExecutor;
+    }
+
     @Override
     public void open() throws Exception {
         refresh();
@@ -124,14 +130,14 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         return new PrimaryKeyPartialLookupTable(queryExecutor, table, joinKey);
     }
 
-    private interface QueryExecutor extends Closeable {
+    interface QueryExecutor extends Closeable {
 
         InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;
 
         void refresh();
     }
 
-    private static class LocalQueryExecutor implements QueryExecutor {
+    static class LocalQueryExecutor implements QueryExecutor {
 
         private final LocalTableQuery tableQuery;
         private final StreamTableScan scan;
@@ -183,7 +189,7 @@ public class PrimaryKeyPartialLookupTable implements LookupTable {
         }
     }
 
-    private static class RemoveQueryExecutor implements QueryExecutor {
+    static class RemoveQueryExecutor implements QueryExecutor {
 
         private final RemoteTableQuery tableQuery;
 
