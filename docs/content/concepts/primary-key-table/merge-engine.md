@@ -290,7 +290,7 @@ Current supported aggregate functions and data types are:
 
 * `collect`:
   The collect function collects elements into an Array. You can set `fields.<field-name>.distinct=true` to deduplicate elements.
-  It only supports ARRAY type, and the element data type can not be ARRAY, MULTISET, MAP, and ROW.
+  It only supports ARRAY type.
 
 * `merge_map`:
   The merge_map function merge input maps. It only supports MAP type.
