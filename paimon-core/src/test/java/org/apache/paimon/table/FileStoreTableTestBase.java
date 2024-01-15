@@ -951,14 +951,11 @@ public abstract class FileStoreTableTestBase {
                         new TagManager(fileIO, tablePath),
                         new SchemaManager(fileIO, tablePath));
         assertThat(branchManager.branchExists("test-branch")).isTrue();
-        // listFilesRecursively(new File(branchManager.getBranchPath("test-branch").substring(9)));
 
         // verify test-tag in test-branch is equal to snapshot 2
         Snapshot branchTag =
                 Snapshot.fromPath(
-                        new TraceableFileIO(),
-                        tagManager.branchTagPath(
-                                table.branchManager().getBranchPath("test-branch"), "test-tag"));
+                        new TraceableFileIO(), tagManager.branchTagPath("test-branch", "test-tag"));
         assertThat(branchTag.equals(snapshot2)).isTrue();
 
         // verify snapshot in test-branch is equal to snapshot 2
@@ -966,17 +963,14 @@ public abstract class FileStoreTableTestBase {
         Snapshot branchSnapshot =
                 Snapshot.fromPath(
                         new TraceableFileIO(),
-                        snapshotManager.branchSnapshotPath(
-                                table.branchManager().getBranchPath("test-branch"), 2));
+                        snapshotManager.branchSnapshotPath("test-branch", 2));
         assertThat(branchSnapshot.equals(snapshot2)).isTrue();
 
         // verify schema in test-branch is equal to schema 0
         SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
         TableSchema branchSchema =
                 SchemaManager.fromPath(
-                        new TraceableFileIO(),
-                        schemaManager.branchSchemaPath(
-                                table.branchManager().getBranchPath("test-branch"), 0));
+                        new TraceableFileIO(), schemaManager.branchSchemaPath("test-branch", 0));
         TableSchema schema0 = schemaManager.schema(0);
         assertThat(branchSchema.equals(schema0)).isTrue();
     }

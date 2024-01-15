@@ -35,7 +35,7 @@ public class BranchManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(BranchManager.class);
 
-    private static final String BRANCH_PREFIX = "branch-";
+    public static final String BRANCH_PREFIX = "branch-";
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -85,14 +85,13 @@ public class BranchManager {
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
             fileIO.copyFileUtf8(
-                    tagManager.tagPath(tagName),
-                    tagManager.branchTagPath(getBranchPath(branchName), tagName));
+                    tagManager.tagPath(tagName), tagManager.branchTagPath(branchName, tagName));
             fileIO.copyFileUtf8(
                     snapshotManager.snapshotPath(snapshot.id()),
-                    snapshotManager.branchSnapshotPath(getBranchPath(branchName), snapshot.id()));
+                    snapshotManager.branchSnapshotPath(branchName, snapshot.id()));
             fileIO.copyFileUtf8(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.branchSchemaPath(getBranchPath(branchName), snapshot.schemaId()));
+                    schemaManager.branchSchemaPath(branchName, snapshot.schemaId()));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(
