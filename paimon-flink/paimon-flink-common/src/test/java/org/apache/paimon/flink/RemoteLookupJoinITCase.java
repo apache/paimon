@@ -26,7 +26,10 @@ import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -116,9 +119,14 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
             @Override
             public void write(InternalRow row) throws Exception {
-                BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+                BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
+                BatchTableWrite write = writeBuilder.newWrite();
+                BatchTableCommit commit = writeBuilder.newCommit();
                 write.write(row);
-                CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
+                List<CommitMessage> commitMessages = write.prepareCommit();
+                commit.commit(commitMessages);
+
+                CommitMessageImpl message = (CommitMessageImpl) commitMessages.get(0);
                 query.refreshFiles(
                         message.partition(),
                         message.bucket(),
