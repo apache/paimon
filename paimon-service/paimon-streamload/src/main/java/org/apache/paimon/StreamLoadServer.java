@@ -19,6 +19,11 @@
 package org.apache.paimon;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
+import io.netty.handler.timeout.IdleStateHandler;
+import org.apache.flink.shaded.netty4.io.netty.buffer.PooledByteBufAllocator;
+import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
+import org.apache.flink.shaded.netty4.io.netty.handler.logging.LogLevel;
+import org.apache.flink.shaded.netty4.io.netty.handler.logging.LoggingHandler;
 import org.apache.paimon.config.NettyServerConfig;
 import org.apache.paimon.exception.RemoteException;
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
@@ -35,6 +40,7 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpServerCode
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.apache.flink.shaded.netty4.io.netty.handler.timeout.ReadTimeoutHandler;
 import org.apache.flink.shaded.netty4.io.netty.handler.timeout.WriteTimeoutHandler;
+import org.apache.paimon.utils.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.apache.paimon.server.LoadHttpHandler;
@@ -97,6 +103,7 @@ public class StreamLoadServer {
                     .childOption(ChannelOption.TCP_NODELAY, serverConfig.isTcpNoDelay())
                     .childOption(ChannelOption.SO_SNDBUF, serverConfig.getSendBufferSize())
                     .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
+                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childHandler(
                             new ChannelInitializer<Channel>() {
 
@@ -147,14 +154,13 @@ public class StreamLoadServer {
      */
     private void initNettyChannel(Channel ch) {
 
-        int readTimeoutSeconds = 30;
-        int writeTimeoutSeconds = 30;
         ch.pipeline()
-                .addLast("", new ReadTimeoutHandler(readTimeoutSeconds, TimeUnit.SECONDS))
-                .addLast("", new WriteTimeoutHandler(writeTimeoutSeconds, TimeUnit.SECONDS))
-                .addLast("", new HttpServerCodec())
-                .addLast("", new ChunkedWriteHandler())
-                .addLast("", new LoadHttpHandler());
+                .addLast("idleStateHandler", (ChannelHandler) new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME, TimeUnit.MILLISECONDS))
+                .addLast("encoder-decoder", new HttpServerCodec())
+                .addLast(new LoggingHandler(LogLevel.INFO))
+                .addLast("chunkedWriteHandler", new ChunkedWriteHandler())
+                .addLast("yourBusinessLogicHandler", new LoadHttpHandler());
+
     }
 
     public void close() {
