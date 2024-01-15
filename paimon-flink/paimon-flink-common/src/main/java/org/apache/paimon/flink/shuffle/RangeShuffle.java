@@ -483,8 +483,7 @@ public class RangeShuffle {
         }
 
         public int get() {
-            int size = list.size();
-            return size > 1 ? list.get(RANDOM.nextInt(list.size())) : list.get(0);
+            return list.get(RANDOM.nextInt(list.size()));
         }
     }
 }
