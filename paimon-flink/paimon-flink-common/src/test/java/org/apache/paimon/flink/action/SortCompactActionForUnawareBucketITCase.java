@@ -62,6 +62,17 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         commit(commitMessages);
     }
 
+    private void prepareSameData(int size) throws Exception {
+        createTable();
+        BatchWriteBuilder builder = getTable().newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            for (int i = 0; i < size; i++) {
+                batchTableWrite.write(data(0, 0, 0));
+            }
+            commit(batchTableWrite.prepareCommit());
+        }
+    }
+
     @Test
     public void testOrderBy() throws Exception {
         prepareData(300, 1);
@@ -230,6 +241,23 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                 .isEqualTo("20");
     }
 
+    @Test
+    public void testRandomSuffixWorks() throws Exception {
+        prepareSameData(200);
+        Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
+                .doesNotThrowAnyException();
+        List<ManifestEntry> files =
+                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(3);
+
+        dropTable();
+        prepareSameData(200);
+        Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
+                .doesNotThrowAnyException();
+        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(3);
+    }
+
     private void zorder(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
             createAction("zorder", columns).run();
@@ -274,6 +302,10 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     private void createTable() throws Exception {
         catalog.createDatabase(database, true);
         catalog.createTable(identifier(), schema(), true);
+    }
+
+    private void dropTable() throws Exception {
+        catalog.dropTable(identifier(), true);
     }
 
     private Identifier identifier() {
