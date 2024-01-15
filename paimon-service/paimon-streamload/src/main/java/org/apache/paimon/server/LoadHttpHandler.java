@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -54,6 +55,12 @@ import java.util.List;
 public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private static final Logger LOG = LoggerFactory.getLogger(LoadHttpHandler.class);
+
+    @Override
+    public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
+        LOG.info(ctx.channel().remoteAddress()+"请求连接上来了");
+        super.handlerAdded(ctx);
+    }
 
     @Override
     public void channelInactive(ChannelHandlerContext ctx) throws Exception {
@@ -111,7 +118,6 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             ByteBuf buf = content.content();
             String receivedContent = buf.toString(CharsetUtil.UTF_8);
             String[] split = receivedContent.split(",");
-
             Options options = new Options();
             options.set(
                     "warehouse", "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");

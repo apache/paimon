@@ -21,10 +21,15 @@ package org.apache.paimon;
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
 import io.netty.handler.timeout.IdleStateHandler;
 import org.apache.flink.shaded.netty4.io.netty.buffer.PooledByteBufAllocator;
+import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpObjectAggregator;
 import org.apache.flink.shaded.netty4.io.netty.handler.logging.LogLevel;
 import org.apache.flink.shaded.netty4.io.netty.handler.logging.LoggingHandler;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogContext;
+import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.config.NettyServerConfig;
 import org.apache.paimon.exception.RemoteException;
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
@@ -38,6 +43,8 @@ import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpServerCodec;
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.server.LoadHttpHandler2;
 import org.apache.paimon.utils.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -95,25 +102,27 @@ public class StreamLoadServer {
             this.serverBootstrap
                     .group(this.bossGroup, this.workGroup)
                     .channel(NioServerSocketChannel.class)
-                    .option(ChannelOption.SO_REUSEADDR, true)
-                    .option(ChannelOption.SO_BACKLOG, serverConfig.getSoBacklog())
-                    .childOption(ChannelOption.SO_KEEPALIVE, serverConfig.isSoKeepalive())
-                    .childOption(ChannelOption.TCP_NODELAY, serverConfig.isTcpNoDelay())
-                    .childOption(ChannelOption.SO_SNDBUF, serverConfig.getSendBufferSize())
-                    .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
-                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
+//                    .option(ChannelOption.SO_REUSEADDR, true)
+//                    .option(ChannelOption.SO_BACKLOG, serverConfig.getSoBacklog())
+//                    .childOption(ChannelOption.SO_KEEPALIVE, serverConfig.isSoKeepalive())
+//                    .childOption(ChannelOption.TCP_NODELAY, serverConfig.isTcpNoDelay())
+//                    .childOption(ChannelOption.SO_SNDBUF, serverConfig.getSendBufferSize())
+//                    .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
+//                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childHandler(
-                            new ChannelInitializer<SocketChannel>() {
+                            new ChannelInitializer<Channel>() {
 
                                 @Override
-                                protected void initChannel(SocketChannel ch) {
+                                protected void initChannel(Channel ch) {
                                     initNettyChannel(ch);
                                 }
                             });
 
             ChannelFuture future;
             try {
-                future = serverBootstrap.bind(serverConfig.getListenPort()).sync();
+                future = serverBootstrap.bind(serverConfig.getListenPort()).sync().addListener(f -> {
+                    LOG.info("ftp server is started and listening ");
+                });
             } catch (Exception e) {
                 LOG.error("{} bind fail {}, exit", serverConfig.getServerName(), e.getMessage(), e);
                 throw new RemoteException(
@@ -145,13 +154,14 @@ public class StreamLoadServer {
         }
     }
 
-    private void initNettyChannel(SocketChannel ch) {
+    private void initNettyChannel(Channel ch) {
         ch.pipeline()
-                .addLast("idleStateHandler", (ChannelHandler) new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME, TimeUnit.MILLISECONDS))
+                //.addLast("idleStateHandler", (ChannelHandler) new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME, TimeUnit.MILLISECONDS))
                 .addLast("encoder-decoder", new HttpServerCodec())
-                .addLast(new LoggingHandler(LogLevel.INFO))
+//                .addLast(new LoggingHandler(LogLevel.INFO))
+                .addLast(new HttpObjectAggregator(512 * 1024))
                 .addLast("chunkedWriteHandler", new ChunkedWriteHandler())
-                .addLast("yourBusinessLogicHandler", new LoadHttpHandler());
+                .addLast("yourBusinessLogicHandler", new LoadHttpHandler2());
     }
 
     public void close() {
@@ -171,13 +181,18 @@ public class StreamLoadServer {
         }
     }
 
-    //    public static void main(String[] args) throws Exception {
-    //        int port = 8888;
-    //        Options options = new Options();
-    //        options.set("warehouse",
-    // "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");
-    //        CatalogContext context = CatalogContext.create(options);
-    //        Catalog catalog = CatalogFactory.createCatalog(context);
-    //        new org.apache.paimon.StreamLoadServer(port, catalog).run();
-    //    }
+        public static void main(String[] args) throws Exception {
+            int port = 8888;
+            Options options = new Options();
+            options.set("warehouse",
+     "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");
+            CatalogContext context = CatalogContext.create(options);
+            Catalog catalog = CatalogFactory.createCatalog(context);
+            NettyServerConfig nettyServerConfig = new NettyServerConfig();
+            nettyServerConfig.setListenPort(port);
+            nettyServerConfig.setServerName("test");
+            new StreamLoadServer(nettyServerConfig).start();
+// 阻止主线程结束
+            Thread.currentThread().join();
+        }
 }
