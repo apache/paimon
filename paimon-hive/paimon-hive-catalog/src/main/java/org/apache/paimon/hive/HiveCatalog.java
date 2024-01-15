@@ -205,7 +205,10 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
         try {
-            return getDatabase(databaseName) != null;
+            client.getDatabase(databaseName);
+            return true;
+        } catch (NoSuchObjectException e) {
+            return false;
         } catch (TException e) {
             throw new RuntimeException(
                     "Failed to determine if database " + databaseName + " exists", e);
@@ -213,49 +216,29 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
+    protected void createDatabaseImpl(String name) {
         try {
-            Database database = getDatabase(name);
-            if (database == null) {
-                Path databasePath = newDatabasePath(name);
-                locationHelper.createPathIfRequired(databasePath, fileIO);
+            Path databasePath = newDatabasePath(name);
+            locationHelper.createPathIfRequired(databasePath, fileIO);
 
-                database = new Database();
-                database.setName(name);
-                locationHelper.specifyDatabaseLocation(databasePath, database);
-                client.createDatabase(database);
-            } else {
-                throw new DatabaseAlreadyExistException(name);
-            }
+            Database database = new Database();
+            database.setName(name);
+            locationHelper.specifyDatabaseLocation(databasePath, database);
+            client.createDatabase(database);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
 
     @Override
-    protected void dropDatabaseImpl(String name) throws DatabaseNotExistException {
+    protected void dropDatabaseImpl(String name) {
         try {
-            Database database = getDatabase(name);
-            if (database != null) {
-                String location = locationHelper.getDatabaseLocation(database);
-                locationHelper.dropPathIfRequired(new Path(location), fileIO);
-                client.dropDatabase(name, true, false, true);
-            } else {
-                throw new DatabaseNotExistException(name);
-            }
+            Database database = client.getDatabase(name);
+            String location = locationHelper.getDatabaseLocation(database);
+            locationHelper.dropPathIfRequired(new Path(location), fileIO);
+            client.dropDatabase(name, true, false, true);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to drop database " + name, e);
-        }
-    }
-
-    private Database getDatabase(String databaseName) throws TException {
-        try {
-            return client.getDatabase(databaseName);
-        } catch (NoSuchObjectException e) {
-            return null;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Failed to determine if database " + databaseName + " exists", e);
         }
     }
 
