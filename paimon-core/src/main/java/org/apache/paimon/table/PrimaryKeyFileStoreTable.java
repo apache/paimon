@@ -36,8 +36,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.query.TableQuery;
-import org.apache.paimon.table.query.TableQueryImpl;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -209,7 +208,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableQuery newTableQuery() {
-        return new TableQueryImpl(this);
+    public LocalTableQuery newLocalTableQuery() {
+        return new LocalTableQuery(this);
     }
 }

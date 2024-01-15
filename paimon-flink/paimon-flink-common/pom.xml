@@ -237,6 +237,8 @@ under the License.
                             <artifactSet>
                                 <includes combine.children="append">
                                     <include>org.apache.paimon:paimon-bundle</include>
+                                    <include>org.apache.paimon:paimon-service-client</include>
+                                    <include>org.apache.paimon:paimon-service-runtime</include>
                                 </includes>
                             </artifactSet>
                         </configuration>

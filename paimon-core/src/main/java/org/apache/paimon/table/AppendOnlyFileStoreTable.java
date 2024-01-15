@@ -32,7 +32,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -151,7 +151,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableQuery newTableQuery() {
+    public LocalTableQuery newLocalTableQuery() {
         throw new UnsupportedOperationException();
     }
 }
