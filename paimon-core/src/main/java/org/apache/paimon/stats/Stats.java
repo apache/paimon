@@ -48,6 +48,7 @@ import java.util.OptionalLong;
  */
 public class Stats {
 
+    // SnapshotId that stats belongs to
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
     private static final String FIELD_MERGED_RECORD_COUNT = "mergedRecordCount";
     private static final String FIELD_MERGED_RECORD_SIZE = "mergedRecordSize";
@@ -109,7 +110,10 @@ public class Stats {
                             schema.fields().stream()
                                     .filter(field -> field.name().equals(colName))
                                     .findFirst()
-                                    .get()
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Unable to obtain the latest schema"))
                                     .type();
                     colStats.serializeFieldsToString(type);
                 }
@@ -129,7 +133,10 @@ public class Stats {
                             schema.fields().stream()
                                     .filter(field -> field.name().equals(colName))
                                     .findFirst()
-                                    .get()
+                                    .orElseThrow(
+                                            () ->
+                                                    new IllegalStateException(
+                                                            "Unable to obtain the latest schema"))
                                     .type();
                     colStats.deserializeFieldsFromString(type);
                 }

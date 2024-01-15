@@ -48,7 +48,9 @@ public class StatsFileHandler {
                 schemaManager
                         .latest()
                         .orElseThrow(
-                                () -> new IllegalStateException("Latest schema cannot be found")));
+                                () ->
+                                        new IllegalStateException(
+                                                "Unable to obtain the latest schema")));
         return statsFile.write(stats);
     }
 
@@ -60,7 +62,7 @@ public class StatsFileHandler {
     public Optional<Stats> readStats() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
-            throw new IllegalStateException("Latest snapshot cannot be found");
+            throw new IllegalStateException("Unable to obtain the latest schema");
         }
         return readStats(latestSnapshotId);
     }

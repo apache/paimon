@@ -44,8 +44,10 @@ import java.util.OptionalLong;
  *   <li>avgLen: average column length
  *   <li>maxLen: max column length
  * </ul>
+ *
+ * @param <T> col internal data type
  */
-public class ColStats<T extends Comparable<T>> {
+public class ColStats<T> {
 
     private static final String FIELD_DISTINCT_COUNT = "distinctCount";
     private static final String FIELD_MIN = "min";
@@ -62,13 +64,13 @@ public class ColStats<T extends Comparable<T>> {
     @JsonProperty(FIELD_MIN)
     private @Nullable String serializedMin;
 
-    private @Nullable T min;
+    private @Nullable Comparable<T> min;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MAX)
     private @Nullable String serializedMax;
 
-    private @Nullable T max;
+    private @Nullable Comparable<T> max;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_NULL_COUNT)
@@ -100,8 +102,8 @@ public class ColStats<T extends Comparable<T>> {
 
     public ColStats(
             @Nullable Long distinctCount,
-            @Nullable T min,
-            @Nullable T max,
+            @Nullable Comparable<T> min,
+            @Nullable Comparable<T> max,
             @Nullable Long nullCount,
             @Nullable Long avgLen,
             @Nullable Long maxLen) {
@@ -117,11 +119,11 @@ public class ColStats<T extends Comparable<T>> {
         return OptionalUtils.ofNullable(distinctCount);
     }
 
-    public Optional<T> min() {
+    public Optional<Comparable<T>> min() {
         return Optional.ofNullable(min);
     }
 
-    public Optional<T> max() {
+    public Optional<Comparable<T>> max() {
         return Optional.ofNullable(max);
     }
 
@@ -137,26 +139,28 @@ public class ColStats<T extends Comparable<T>> {
         return OptionalUtils.ofNullable(maxLen);
     }
 
+    @SuppressWarnings("unchecked")
     public void serializeFieldsToString(DataType dataType) {
         if ((min != null && serializedMin == null) || (max != null && serializedMax == null)) {
             Serializer<T> serializer = InternalSerializers.create(dataType);
             if (min != null && serializedMin == null) {
-                serializedMin = serializer.serializeToString(min);
+                serializedMin = serializer.serializeToString((T) min);
             }
             if (max != null && serializedMax == null) {
-                serializedMax = serializer.serializeToString(max);
+                serializedMax = serializer.serializeToString((T) max);
             }
         }
     }
 
+    @SuppressWarnings("unchecked")
     public void deserializeFieldsFromString(DataType dataType) {
         if ((serializedMin != null && min == null) || (serializedMax != null && max == null)) {
             Serializer<T> serializer = InternalSerializers.create(dataType);
             if (serializedMin != null && min == null) {
-                min = serializer.deserializeFromString(serializedMin);
+                min = (Comparable<T>) serializer.deserializeFromString(serializedMin);
             }
             if (serializedMax != null && max == null) {
-                max = serializer.deserializeFromString(serializedMax);
+                max = (Comparable<T>) serializer.deserializeFromString(serializedMax);
             }
         }
     }
