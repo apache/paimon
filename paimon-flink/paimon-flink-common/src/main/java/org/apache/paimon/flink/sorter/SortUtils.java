@@ -180,11 +180,12 @@ public class SortUtils {
     }
 
     /** Abstract key from a row data. */
-    interface KeyAbstract<KEY> extends Serializable {
+    public interface KeyAbstract<KEY> extends Serializable {
         default void open() {}
 
         KEY apply(RowData value);
     }
 
-    interface ShuffleKeyConvertor<KEY> extends Function<KEY, InternalRow>, Serializable {}
+    /** Convert KEY to InternalRow. */
+    public interface ShuffleKeyConvertor<KEY> extends Function<KEY, InternalRow>, Serializable {}
 }

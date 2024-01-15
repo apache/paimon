@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
@@ -45,6 +46,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Random;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -60,6 +62,18 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
             commitMessages.addAll(writeData(size));
         }
         commit(commitMessages);
+    }
+
+    private void prepareSameDataWithDynamicOptinos(int size, Map<String, String> options)
+            throws Exception {
+        createTable(options);
+        BatchWriteBuilder builder = getTable().newBatchWriteBuilder();
+        try (BatchTableWrite batchTableWrite = builder.newWrite()) {
+            for (int i = 0; i < size; i++) {
+                batchTableWrite.write(data(0, 0, 0));
+            }
+            commit(batchTableWrite.prepareCommit());
+        }
     }
 
     @Test
@@ -128,6 +142,39 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                             Assertions.assertThat(current).isGreaterThanOrEqualTo(i.get());
                             i.set(current);
                         });
+    }
+
+    @Test
+    public void testRandomSuffixWorks() throws Exception {
+        prepareSameDataWithDynamicOptinos(200, null);
+        Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
+                .doesNotThrowAnyException();
+        List<ManifestEntry> files =
+                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(1);
+
+        dropTable();
+        prepareSameDataWithDynamicOptinos(
+                200, Collections.singletonMap(CoreOptions.SORT_RANDOM_BYTES_SUFFIX.key(), "8"));
+        Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
+                .doesNotThrowAnyException();
+        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(3);
+
+        dropTable();
+        prepareSameDataWithDynamicOptinos(200, null);
+        Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
+                .doesNotThrowAnyException();
+        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(1);
+
+        dropTable();
+        prepareSameDataWithDynamicOptinos(
+                200, Collections.singletonMap(CoreOptions.SORT_RANDOM_BYTES_SUFFIX.key(), "8"));
+        Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
+                .doesNotThrowAnyException();
+        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        Assertions.assertThat(files.size()).isEqualTo(3);
     }
 
     @Test
@@ -273,7 +320,16 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
     private void createTable() throws Exception {
         catalog.createDatabase(database, true);
-        catalog.createTable(identifier(), schema(), true);
+        catalog.createTable(identifier(), schema(null), true);
+    }
+
+    private void createTable(Map<String, String> options) throws Exception {
+        catalog.createDatabase(database, true);
+        catalog.createTable(identifier(), schema(options), true);
+    }
+
+    private void dropTable() throws Exception {
+        catalog.dropTable(identifier(), true);
     }
 
     private Identifier identifier() {
@@ -287,7 +343,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     // schema with all the basic types.
-    private static Schema schema() {
+    private static Schema schema(Map<String, String> options) {
         Schema.Builder schemaBuilder = Schema.newBuilder();
         schemaBuilder.column("f0", DataTypes.TINYINT());
         schemaBuilder.column("f1", DataTypes.INT());
@@ -310,6 +366,9 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         schemaBuilder.option("sink.parallelism", "3");
         schemaBuilder.option("target-file-size", "1 M");
         schemaBuilder.partitionKeys("f0");
+        if (options != null) {
+            options.forEach(schemaBuilder::option);
+        }
         return schemaBuilder.build();
     }
 

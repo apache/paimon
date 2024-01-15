@@ -72,6 +72,8 @@ public class ZorderSorter extends TableSorter {
             DataStream<RowData> inputStream, FileStoreTable table) {
         final ZIndexer zIndexer =
                 new ZIndexer(table.rowType(), orderColNames, table.coreOptions().varTypeSize());
+        final int randomSuffixBytes = table.coreOptions().sortRandomBytesSuffix();
+
         return SortUtils.sortStreamByKey(
                 inputStream,
                 table,
@@ -89,17 +91,24 @@ public class ZorderSorter extends TableSorter {
                             return 0;
                         },
                 new SortUtils.KeyAbstract<byte[]>() {
+
+                    private transient RandomBytesSuffixGenerator randomBytesSuffixGenerator;
+
                     @Override
                     public void open() {
                         zIndexer.open();
+                        randomBytesSuffixGenerator =
+                                RandomBytesSuffixGenerator.create(randomSuffixBytes);
                     }
 
                     @Override
                     public byte[] apply(RowData value) {
                         byte[] zorder = zIndexer.index(new FlinkRowWrapper(value));
-                        // we can just return the reused bytes zorder, because the sample operator
+                        // we can't just return the reused bytes zorder, because the sample operator
                         // will remember the record to sample.
-                        return Arrays.copyOf(zorder, zorder.length);
+                        return randomSuffixBytes > 0
+                                ? randomBytesSuffixGenerator.addRandomSuffix(zorder)
+                                : Arrays.copyOf(zorder, zorder.length);
                     }
                 },
                 GenericRow::of);

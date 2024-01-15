@@ -1016,6 +1016,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The bytes of types (CHAR, VARCHAR, BINARY, VARBINARY) devote to the zorder sort.");
 
+    public static final ConfigOption<Integer> SORT_RANDOM_BYTES_SUFFIX =
+            key("sort.random-bytes-suffix")
+                    .intType()
+                    .defaultValue(0)
+                    .withDescription(
+                            "The random bytes added behind sort columns to avoid data skew");
+
     public static final ConfigOption<MemorySize> FILE_READER_ASYNC_THRESHOLD =
             key("file-reader-async-threshold")
                     .memoryType()
@@ -1543,6 +1550,10 @@ public class CoreOptions implements Serializable {
 
     public int varTypeSize() {
         return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+    }
+
+    public int sortRandomBytesSuffix() {
+        return options.get(SORT_RANDOM_BYTES_SUFFIX);
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -50,8 +50,11 @@ public class OrderSorter extends TableSorter {
     public DataStream<RowData> sort() {
         final RowType valueRowType = table.rowType();
         final int[] keyProjectionMap = table.schema().projection(orderColNames);
+        final int randomSuffixBytes = table.coreOptions().sortRandomBytesSuffix();
         final RowType keyRowType =
-                addKeyNamePrefix(Projection.of(keyProjectionMap).project(valueRowType));
+                RandomBytesSuffixGenerator.combine(
+                        addKeyNamePrefix(Projection.of(keyProjectionMap).project(valueRowType)),
+                        randomSuffixBytes);
 
         return SortUtils.sortStreamByKey(
                 origin,
@@ -61,18 +64,22 @@ public class OrderSorter extends TableSorter {
                 new KeyComparatorSupplier(keyRowType),
                 new SortUtils.KeyAbstract<InternalRow>() {
 
+                    private transient RandomBytesSuffixGenerator randomBytesSuffixGenerator;
                     private transient org.apache.paimon.codegen.Projection keyProjection;
 
                     @Override
                     public void open() {
                         // use key gen to speed up projection
                         keyProjection = CodeGenUtils.newProjection(valueRowType, keyProjectionMap);
+                        randomBytesSuffixGenerator =
+                                RandomBytesSuffixGenerator.create(randomSuffixBytes);
                     }
 
                     @Override
                     public InternalRow apply(RowData value) {
                         // deep copy by wrapper the Flink RowData
-                        return keyProjection.apply(new FlinkRowWrapper(value)).copy();
+                        return randomBytesSuffixGenerator.addRandomSuffix(
+                                keyProjection.apply(new FlinkRowWrapper(value)).copy());
                     }
                 },
                 row -> row);

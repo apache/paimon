@@ -570,6 +570,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>If the maximum number of sort readers exceeds this value, a spill will be attempted. This prevents too many readers from consuming too much memory and causing OOM.</td>
         </tr>
         <tr>
+            <td><h5>sort.random-bytes-suffix</h5></td>
+            <td style="word-wrap: break-word;">0</td>
+            <td>Integer</td>
+            <td>The random bytes added behind sort columns to avoid data skew</td>
+        </tr>
+        <tr>
             <td><h5>source.split.open-file-cost</h5></td>
             <td style="word-wrap: break-word;">4 mb</td>
             <td>MemorySize</td>
