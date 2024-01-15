@@ -53,6 +53,10 @@ public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> 
         return new RowDataRecordReader(read.createReader((DataSplit) split));
     }
 
+    public final RecordReader<KeyValue> kvReader(Split split) throws IOException {
+        return read.createReader((DataSplit) split);
+    }
+
     protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
             RecordReader.RecordIterator<KeyValue> kvRecordIterator);
 

@@ -54,7 +54,7 @@ public abstract class CatalogTestBase {
     @TempDir java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;
-    protected Catalog catalog;
+    protected AbstractCatalog catalog;
     protected static final Schema DEFAULT_TABLE_SCHEMA =
             new Schema(
                     Lists.newArrayList(
@@ -141,6 +141,21 @@ public abstract class CatalogTestBase {
     }
 
     @Test
+    public void testCreateDatabaseImpl() throws Exception {
+        // Create database creates a new database when it does not exist
+        catalog.createDatabaseImpl("new_db");
+        boolean exists = catalog.databaseExists("new_db");
+        assertThat(exists).isTrue();
+
+        catalog.createDatabaseImpl("existing_db");
+
+        // Create database throws DatabaseAlreadyExistException when database already exists
+        assertThatExceptionOfType(Catalog.DatabaseAlreadyExistException.class)
+                .isThrownBy(() -> catalog.createDatabaseImpl("existing_db"))
+                .withMessage("Database existing_db already exists.");
+    }
+
+    @Test
     public void testDropDatabase() throws Exception {
         // Drop database deletes the database when it exists and there are no tables
         catalog.createDatabase("db_to_drop", false);
@@ -171,6 +186,29 @@ public abstract class CatalogTestBase {
         assertThatExceptionOfType(Catalog.DatabaseNotEmptyException.class)
                 .isThrownBy(() -> catalog.dropDatabase("db_with_tables", false, false))
                 .withMessage("Database db_with_tables is not empty.");
+    }
+
+    @Test
+    public void testDropDatabaseImpl() throws Exception {
+        // Drop database deletes the database when it exists and there are no tables
+        catalog.createDatabase("db_to_drop", false);
+        catalog.dropDatabase("db_to_drop", false, false);
+        boolean exists = catalog.databaseExists("db_to_drop");
+        assertThat(exists).isFalse();
+
+        // Drop database does throw exception when database does not exist
+        assertThatExceptionOfType(Catalog.DatabaseNotExistException.class)
+                .isThrownBy(() -> catalog.dropDatabaseImpl("non_existing_db"))
+                .withMessage("Database non_existing_db does not exist.");
+
+        // Drop database deletes all tables in the database
+        catalog.createDatabase("db_to_drop", false);
+        catalog.createTable(Identifier.create("db_to_drop", "table1"), DEFAULT_TABLE_SCHEMA, false);
+        catalog.createTable(Identifier.create("db_to_drop", "table2"), DEFAULT_TABLE_SCHEMA, false);
+
+        catalog.dropDatabaseImpl("db_to_drop");
+        exists = catalog.databaseExists("db_to_drop");
+        assertThat(exists).isFalse();
     }
 
     @Test
@@ -800,5 +838,36 @@ public abstract class CatalogTestBase {
                         anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot change nullability of primary key"));
+    }
+
+    @Test
+    public void testAlterTableUpdateComment() throws Exception {
+        catalog.createDatabase("test_db", false);
+
+        Identifier identifier = Identifier.create("test_db", "test_table");
+        catalog.createTable(
+                identifier,
+                new Schema(
+                        Lists.newArrayList(
+                                new DataField(0, "col1", DataTypes.STRING(), "field1"),
+                                new DataField(1, "col2", DataTypes.STRING(), "field2")),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Maps.newHashMap(),
+                        "comment"),
+                false);
+
+        catalog.alterTable(
+                identifier, Lists.newArrayList(SchemaChange.updateComment("new comment")), false);
+
+        Table table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent() && table.comment().get().equals("new comment"))
+                .isTrue();
+
+        // drop comment
+        catalog.alterTable(identifier, Lists.newArrayList(SchemaChange.updateComment(null)), false);
+
+        table = catalog.getTable(identifier);
+        assertThat(table.comment().isPresent()).isFalse();
     }
 }

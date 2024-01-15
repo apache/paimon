@@ -18,8 +18,8 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.flink.sink.MultiTableCommittable;
+import org.apache.paimon.table.sink.ChannelComputer;
 
 import java.util.Objects;
 

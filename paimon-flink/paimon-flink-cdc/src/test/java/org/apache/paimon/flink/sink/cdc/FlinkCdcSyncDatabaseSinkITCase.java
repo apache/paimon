@@ -21,7 +21,6 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
@@ -29,15 +28,12 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -70,16 +66,23 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
     @Test
     @Timeout(120)
     public void testRandomCdcEvents() throws Exception {
-        innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1);
+        innerTestRandomCdcEvents(() -> ThreadLocalRandom.current().nextInt(5) + 1, false);
     }
 
     @Test
     @Timeout(180)
     public void testRandomCdcEventsDynamicBucket() throws Exception {
-        innerTestRandomCdcEvents(() -> -1);
+        innerTestRandomCdcEvents(() -> -1, false);
     }
 
-    private void innerTestRandomCdcEvents(Supplier<Integer> bucket) throws Exception {
+    @Test
+    @Timeout(180)
+    public void testRandomCdcEventsUnawareBucket() throws Exception {
+        innerTestRandomCdcEvents(() -> -1, true);
+    }
+
+    private void innerTestRandomCdcEvents(Supplier<Integer> bucket, boolean unawareBucketMode)
+            throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 
         int numTables = random.nextInt(3) + 1;
@@ -102,7 +105,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             random.nextInt(maxEvents) + 1,
                             random.nextInt(maxSchemaChanges) + 1,
                             random.nextInt(maxPartitions) + 1,
-                            random.nextInt(maxKeys) + 1);
+                            random.nextInt(maxKeys) + 1,
+                            unawareBucketMode);
             testTables.add(testTable);
 
             Path tablePath;
@@ -134,7 +138,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                             fileIO,
                             testTable.initialRowType(),
                             Collections.singletonList("pt"),
-                            Arrays.asList("pt", "k"),
+                            unawareBucketMode ? Collections.emptyList() : Arrays.asList("pt", "k"),
                             bucket.get());
             fileStoreTables.add(fileStoreTable);
         }
@@ -169,23 +173,17 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 10, 10000);
-
-        env.execute();
+        if (unawareBucketMode) {
+            // there's a compact operator which won't terminate
+            env.executeAsync();
+        } else {
+            env.execute();
+        }
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
-
-        for (int i = 0; i < numTables; i++) {
-            FileStoreTable table = fileStoreTables.get(i).copyWithLatestSchema();
-            SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
-            TableSchema schema = schemaManager.latest().get();
-
-            ReadBuilder readBuilder = table.newReadBuilder();
-            TableScan.Plan plan = readBuilder.newScan().plan();
-            try (RecordReaderIterator<InternalRow> it =
-                    new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
-                testTables.get(i).assertResult(schema, it);
-            }
+        for (int i = 0; i < fileStoreTables.size(); i++) {
+            testTables.get(i).assertResult(fileStoreTables.get(i));
         }
     }
 

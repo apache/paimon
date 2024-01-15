@@ -218,6 +218,10 @@ public class KeyValueFileReaderFactory {
             return this;
         }
 
+        public RowType keyType() {
+            return keyType;
+        }
+
         public RowType projectedValueType() {
             return projectedValueType;
         }

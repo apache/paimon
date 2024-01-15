@@ -183,7 +183,7 @@ public class ParallelExecution<T, E> implements Closeable {
             }
 
             @Override
-            public E extraMesage() {
+            public E extraMessage() {
                 return extraMessage;
             }
         };
@@ -197,6 +197,6 @@ public class ParallelExecution<T, E> implements Closeable {
 
         void releaseBatch();
 
-        E extraMesage();
+        E extraMessage();
     }
 }

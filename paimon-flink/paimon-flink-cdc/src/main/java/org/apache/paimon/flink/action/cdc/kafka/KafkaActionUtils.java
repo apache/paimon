@@ -59,6 +59,7 @@ import java.util.stream.Collectors;
 import java.util.stream.StreamSupport;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.SCAN_STARTUP_SPECIFIC_OFFSETS;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for Kafka Action. */
 public class KafkaActionUtils {
@@ -284,13 +285,7 @@ public class KafkaActionUtils {
 
     private static Properties createKafkaProperties(Configuration kafkaConfig) {
         Properties props = new Properties();
-        for (Map.Entry<String, String> entry : kafkaConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(PROPERTIES_PREFIX)) {
-                props.put(key.substring(PROPERTIES_PREFIX.length()), value);
-            }
-        }
+        props.putAll(convertToPropertiesPrefixKey(kafkaConfig.toMap(), PROPERTIES_PREFIX));
         return props;
     }
 

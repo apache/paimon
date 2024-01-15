@@ -45,6 +45,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.TreeSet;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
@@ -101,8 +102,15 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
     }
 
     public boolean contains(InternalRow key, int startLevel) throws IOException {
-        Boolean result = LookupUtils.lookup(levels, key, startLevel, this::contains);
+        Boolean result =
+                LookupUtils.lookup(levels, key, startLevel, this::contains, this::containsLevel0);
         return result != null && result;
+    }
+
+    @Nullable
+    private Boolean containsLevel0(InternalRow key, TreeSet<DataFileMeta> level0)
+            throws IOException {
+        return LookupUtils.lookupLevel0(keyComparator, key, level0, this::contains);
     }
 
     @Nullable

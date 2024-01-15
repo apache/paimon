@@ -24,6 +24,8 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.StringUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
@@ -56,7 +58,7 @@ public class TableSchema implements Serializable {
 
     private final Map<String, String> options;
 
-    private final String comment;
+    private final @Nullable String comment;
 
     private final long timeMillis;
 
@@ -67,7 +69,7 @@ public class TableSchema implements Serializable {
             List<String> partitionKeys,
             List<String> primaryKeys,
             Map<String, String> options,
-            String comment) {
+            @Nullable String comment) {
         this(
                 id,
                 fields,
@@ -86,7 +88,7 @@ public class TableSchema implements Serializable {
             List<String> partitionKeys,
             List<String> primaryKeys,
             Map<String, String> options,
-            String comment,
+            @Nullable String comment,
             long timeMillis) {
         this.id = id;
         this.fields = fields;
@@ -205,7 +207,7 @@ public class TableSchema implements Serializable {
         return new HashSet<>(all).containsAll(new HashSet<>(contains));
     }
 
-    public String comment() {
+    public @Nullable String comment() {
         return comment;
     }
 

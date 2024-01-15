@@ -226,7 +226,7 @@ dataset.show()
 {{< hint info >}}
 Important table properties setting:
 1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table#partial-update" >}}) to support this feature.
+2. [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table/merge-engine#partial-update" >}}) to support this feature.
    {{< /hint >}}
 
 {{< hint warning >}}
@@ -459,13 +459,24 @@ val query = spark.readStream
 ```
 
 Paimon Structured Streaming supports read row in the form of changelog (add rowkind column in row to represent its 
-change type) by setting `read.changelog` to true (default is false).
+change type) in two ways:
+
+- Direct streaming read with the system audit_log table
+- Set `read.changelog` to true (default is false), then streaming read with table location
 
 **Example:**
 
 ```scala
-// no any scan-related configs are provided, that will use latest-full scan mode.
-val query = spark.readStream
+// Option 1
+val query1 = spark.readStream
+  .format("paimon")
+  .table("`table_name$audit_log`")
+  .writeStream
+  .format("console")
+  .start()
+
+// Option 2
+val query2 = spark.readStream
   .format("paimon")
   .option("read.changelog", "true")
   .load("/path/to/paimon/source/table")
