@@ -21,7 +21,6 @@ package org.apache.paimon.mergetree.compact.aggregate;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
@@ -100,9 +99,14 @@ public abstract class FieldAggregator implements Serializable {
                                         fieldType, options.fieldNestedUpdateAggNestedKey(field));
                         break;
                     case FieldCollectAgg.NAME:
+                        checkArgument(
+                                fieldType instanceof ArrayType,
+                                "Data type for collect column must be 'Array' but was '%s'.",
+                                fieldType);
                         fieldAggregator =
-                                createFieldCollectAgg(
-                                        fieldType, options.fieldCollectAggDistinct(field));
+                                new FieldCollectAgg(
+                                        (ArrayType) fieldType,
+                                        options.fieldCollectAggDistinct(field));
                         break;
                     case FieldMergeMapAgg.NAME:
                         checkArgument(
@@ -139,23 +143,6 @@ public abstract class FieldAggregator implements Serializable {
         checkArgument(arrayType.getElementType() instanceof RowType, typeErrorMsg, fieldType);
 
         return new FieldNestedUpdateAgg(arrayType, nestedKey);
-    }
-
-    private static FieldAggregator createFieldCollectAgg(DataType fieldType, boolean distinct) {
-        checkArgument(
-                fieldType instanceof ArrayType,
-                "Data type for collect column must be 'Array' but was '%s'.",
-                fieldType);
-        ArrayType arrayType = (ArrayType) fieldType;
-        checkArgument(
-                !arrayType
-                        .getElementType()
-                        .getTypeRoot()
-                        .getFamilies()
-                        .contains(DataTypeFamily.CONSTRUCTED),
-                "Element type of collect column cannot be ARRAY, MULTISET, MAP and ROW.");
-
-        return new FieldCollectAgg(arrayType, distinct);
     }
 
     abstract String name();
