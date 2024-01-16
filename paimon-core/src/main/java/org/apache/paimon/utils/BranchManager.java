@@ -62,13 +62,13 @@ public class BranchManager {
     }
 
     /** Return the path string of a branch. */
-    public String getBranchPath(String branchName) {
-        return tablePath + "/branch/" + BRANCH_PREFIX + branchName;
+    public static String getBranchPath(Path tablePath, String branchName) {
+        return tablePath.toString() + "/branch/" + BRANCH_PREFIX + branchName;
     }
 
     /** Return the path of a branch. */
     public Path branchPath(String branchName) {
-        return new Path(getBranchPath(branchName));
+        return new Path(getBranchPath(tablePath, branchName));
     }
 
     public void createBranch(String branchName, String tagName) {
@@ -96,7 +96,7 @@ public class BranchManager {
             throw new RuntimeException(
                     String.format(
                             "Exception occurs when create branch '%s' (directory in %s).",
-                            branchName, getBranchPath(branchName)),
+                            branchName, getBranchPath(tablePath, branchName)),
                     e);
         }
     }
@@ -110,7 +110,7 @@ public class BranchManager {
             LOG.info(
                     String.format(
                             "Deleting the branch failed due to an exception in deleting the directory %s. Please try again.",
-                            getBranchPath(branchName)),
+                            getBranchPath(tablePath, branchName)),
                     e);
         }
     }
