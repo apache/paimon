@@ -40,7 +40,3 @@ If you want to query fast enough in certain scenarios, but can only find older d
    results of optimized files avoids merging records with the same key, thus improving reading performance.
 
 You can flexibly balance query performance and data latency when reading.
-
-## Format
-
-Paimon has some query optimizations to parquet reading, so parquet will be slightly faster that orc.
