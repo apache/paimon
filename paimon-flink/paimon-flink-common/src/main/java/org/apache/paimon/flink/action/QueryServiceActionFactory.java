@@ -28,7 +28,7 @@ import java.util.Optional;
 /** Factory to create QueryService Action. */
 public class QueryServiceActionFactory implements ActionFactory {
 
-    public static final String IDENTIFIER = "query-service";
+    public static final String IDENTIFIER = "query_service";
 
     public static final String PARALLELISM = "parallelism";
 
