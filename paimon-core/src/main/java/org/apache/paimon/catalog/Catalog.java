@@ -73,7 +73,7 @@ public interface Catalog extends AutoCloseable {
 
     /**
      * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
-     * properties)}
+     * properties)}.
      */
     default void createDatabase(String name, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException {
