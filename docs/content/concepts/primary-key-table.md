@@ -326,14 +326,14 @@ Current supported aggregate functions and data types are:
   The first_not_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
-* `nested_update`:
-  The nested_update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
+* `nested-update`:
+  The nested-update function collects multiple rows into one array<row> (so-called 'nested table'). It supports ARRAY<ROW> data types.
 
   Use `fields.<field-name>.nested-key=pk0,pk1,...` to specify the primary keys of the nested table. If no keys, row will be appended to array<row>.
 
   An example:
   
-  {{< tabs "nested_update-example" >}}
+  {{< tabs "nested-update-example" >}}
 
   {{< tab "Flink" >}}
 
@@ -363,7 +363,7 @@ Current supported aggregate functions and data types are:
     sub_orders ARRAY<ROW<sub_order_id BIGINT, product_name STRING, price BIGINT>>
   ) WITH (
     'merge-engine' = 'aggregation',
-    'fields.sub_orders.aggregate-function' = 'nested_update',
+    'fields.sub_orders.aggregate-function' = 'nested-update',
     'fields.sub_orders.nested-key' = 'sub_order_id'
   );
   
