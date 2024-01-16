@@ -28,23 +28,28 @@ import java.util.List;
 import java.util.NoSuchElementException;
 import java.util.Queue;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ForkJoinPool;
 import java.util.function.Function;
 
 /**
  * This class is a parallel execution util class, which mainly aim to process tasks parallelly with
  * memory control.
  */
-public class ParallellyExecuteUtils {
+public class ScanParallelExecutor {
 
     // reduce memory usage by batch iterable process, the cached result in memory will be queueSize
     public static <T, U> Iterable<T> parallelismBatchIterable(
             Function<List<U>, List<T>> processor, List<U> input, @Nullable Integer queueSize) {
+        ForkJoinPool poolCandidate = FileUtils.COMMON_IO_FORK_JOIN_POOL;
         if (queueSize == null) {
-            queueSize = FileUtils.COMMON_IO_FORK_JOIN_POOL.getParallelism();
+            queueSize = poolCandidate.getParallelism();
         } else if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negetive");
+        } else if (queueSize > poolCandidate.getParallelism()) {
+            poolCandidate = FileUtils.getScanIoForkJoinPool(queueSize);
         }
 
+        final ForkJoinPool pool = poolCandidate;
         final Queue<List<U>> stack = new ArrayDeque<>(Lists.partition(input, queueSize));
 
         return () ->
@@ -75,8 +80,7 @@ public class ParallellyExecuteUtils {
                             try {
                                 activeList =
                                         CompletableFuture.supplyAsync(
-                                                        () -> processor.apply(stack.poll()),
-                                                        FileUtils.COMMON_IO_FORK_JOIN_POOL)
+                                                        () -> processor.apply(stack.poll()), pool)
                                                 .get();
                             } catch (Exception e) {
                                 throw new RuntimeException(e);

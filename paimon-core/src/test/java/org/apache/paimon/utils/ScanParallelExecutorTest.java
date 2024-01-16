@@ -29,8 +29,8 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
 
-/** This test mainly test for the methods in {@link ParallellyExecuteUtils}. */
-public class ParallellyExecuteUtilsTest {
+/** This test mainly test for the methods in {@link ScanParallelExecutor}. */
+public class ScanParallelExecutorTest {
 
     @Test
     public void testParallelismBatchIterable() {
@@ -41,7 +41,7 @@ public class ParallellyExecuteUtilsTest {
         }
 
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         nums,
                         null);
@@ -62,7 +62,7 @@ public class ParallellyExecuteUtilsTest {
         }
 
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         nums,
                         null);
@@ -83,7 +83,7 @@ public class ParallellyExecuteUtilsTest {
         }
 
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         nums,
                         null);
@@ -109,7 +109,7 @@ public class ParallellyExecuteUtilsTest {
         }
 
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         nums,
                         null);
@@ -129,7 +129,7 @@ public class ParallellyExecuteUtilsTest {
     @Test
     public void testForEmptyInput() {
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         (List<Integer>) Collections.EMPTY_LIST,
                         null);
@@ -139,7 +139,7 @@ public class ParallellyExecuteUtilsTest {
     @Test
     public void testForSingletonInput() {
         Iterable<Integer> re =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         l -> l.parallelStream().map(i -> i + 1).collect(Collectors.toList()),
                         Collections.singletonList(1),
                         null);
@@ -150,7 +150,7 @@ public class ParallellyExecuteUtilsTest {
     public void testDifferentQueueSizeWithFilterElement() {
         for (int queueSize = 1; queueSize < 20; queueSize++) {
             Iterable<Integer> re =
-                    ParallellyExecuteUtils.parallelismBatchIterable(
+                    ScanParallelExecutor.parallelismBatchIterable(
                             l -> l.parallelStream().filter(i -> i > 5).collect(Collectors.toList()),
                             Arrays.asList(1, 2, 3, 4, 5, 6, 7, 8, 9, 10),
                             queueSize);
