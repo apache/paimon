@@ -408,6 +408,14 @@ public class CoreOptions implements Serializable {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
+    public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
+            key("compaction.optimization-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Implying how often to perform an optimization compaction, this configuration is used to "
+                                    + "ensure the query timeliness of the read-optimized system table.");
+
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
                     .intType()
@@ -1251,6 +1259,11 @@ public class CoreOptions implements Serializable {
 
     public int numSortedRunCompactionTrigger() {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
+    }
+
+    @Nullable
+    public Duration optimizedCompactionInterval() {
+        return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
     }
 
     public int numSortedRunStopTrigger() {
