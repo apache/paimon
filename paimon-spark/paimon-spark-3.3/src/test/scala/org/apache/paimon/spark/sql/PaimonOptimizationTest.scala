@@ -17,6 +17,17 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.apache.paimon.spark.procedure.CompactProcedureTestBase
+import org.apache.spark.sql.catalyst.dsl.expressions._
+import org.apache.spark.sql.catalyst.expressions.{Attribute, GetStructField, NamedExpression, ScalarSubquery}
+import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-class CompactProcedureTest extends CompactProcedureTestBase {}
+class PaimonOptimizationTest extends PaimonOptimizationTestBase {
+
+  override def extractorExpression(
+      cteIndex: Int,
+      output: Seq[Attribute],
+      fieldIndex: Int): NamedExpression = {
+    GetStructField(ScalarSubquery(CTERelationRef(cteIndex, _resolved = true, output)), fieldIndex)
+      .as("scalarsubquery()")
+  }
+}
