@@ -46,6 +46,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   protected val tableName0: String = "T"
 
+  /** Add paimon ([[SparkCatalog]] in fileSystem) catalog */
   override protected def sparkConf: SparkConf = {
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
@@ -70,6 +71,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     }
   }
 
+  /** Default is paimon catalog */
   override protected def beforeEach(): Unit = {
     super.beforeAll()
     spark.sql(s"USE paimon")

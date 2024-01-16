@@ -27,8 +27,13 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
@@ -36,6 +41,8 @@ import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
 
 /** A catalog implementation for {@link FileIO}. */
 public class FileSystemCatalog extends AbstractCatalog {
+
+    private static final Logger LOG = LoggerFactory.getLogger(FileSystemCatalog.class);
 
     private final Path warehouse;
 
@@ -72,8 +79,22 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) {
+    protected void createDatabaseImpl(String name, Map<String, String> properties) {
+        if (properties.containsKey(AbstractCatalog.DB_LOCATION_PROP)) {
+            throw new IllegalArgumentException(
+                    "Cannot specify location for a database when using fileSystem catalog.");
+        }
+        if (!properties.isEmpty()) {
+            LOG.warn(
+                    "Currently filesystem catalog can't store database properties, discard properties: {}",
+                    properties);
+        }
         uncheck(() -> fileIO.mkdirs(newDatabasePath(name)));
+    }
+
+    @Override
+    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+        return Collections.emptyMap();
     }
 
     @Override
