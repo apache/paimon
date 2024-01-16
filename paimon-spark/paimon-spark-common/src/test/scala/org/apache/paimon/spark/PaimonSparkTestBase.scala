@@ -58,12 +58,12 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     super.beforeAll()
     spark.sql(s"USE paimon")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon.$dbName0")
-    spark.sql(s"USE paimon.$dbName0")
   }
 
   override protected def afterAll(): Unit = {
     try {
       spark.sql(s"USE paimon")
+      spark.sql(s"DROP TABLE IF EXISTS $dbName0.$tableName0")
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE paimon.$dbName0 CASCADE")
     } finally {
@@ -75,6 +75,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
   override protected def beforeEach(): Unit = {
     super.beforeAll()
     spark.sql(s"USE paimon")
+    spark.sql(s"USE paimon.$dbName0")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
   }
 
@@ -92,8 +93,8 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
     val options = Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf)
     val catalogContext =
-      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf());
-    CatalogFactory.createCatalog(catalogContext);
+      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
+    CatalogFactory.createCatalog(catalogContext)
   }
 
   def loadTable(tableName: String): AbstractFileStoreTable = {
