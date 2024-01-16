@@ -71,6 +71,10 @@ public interface Catalog extends AutoCloseable {
      */
     boolean databaseExists(String databaseName);
 
+    /**
+     * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
+     * properties)}
+     */
     default void createDatabase(String name, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException {
         createDatabase(name, ignoreIfExists, Collections.emptyMap());
