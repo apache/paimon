@@ -37,7 +37,7 @@ If you want to query fast enough in certain scenarios, but can only find older d
 1. Configure 'compaction.optimization-interval' when writing data. For streaming jobs, optimized compaction will then
    be performed periodically; For batch jobs, optimized compaction will be carried out when the job ends.
 2. Query from [read-optimized system table]({{< ref "how-to/system-tables#read-optimized-table" >}}). Reading from
-   results of full compaction avoids merging records with the same key, thus improving reading performance.
+   results of optimized files avoids merging records with the same key, thus improving reading performance.
 
 You can flexibly balance query performance and data latency when reading.
 
