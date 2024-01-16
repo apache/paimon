@@ -951,6 +951,12 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
+    public static final ConfigOption<TagPeriodFormatter> TAG_PERIOD_FORMATTER =
+            key("tag.period-formatter")
+                    .enumType(TagPeriodFormatter.class)
+                    .defaultValue(TagPeriodFormatter.WITH_DASHES)
+                    .withDescription("The date format for tag periods.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -1487,6 +1493,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagCreationDelay() {
         return options.get(TAG_CREATION_DELAY);
+    }
+
+    public TagPeriodFormatter tagPeriodFormatter() {
+        return options.get(TAG_PERIOD_FORMATTER);
     }
 
     public Integer tagNumRetainedMax() {
@@ -2052,6 +2062,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The period format options for tag creation. */
+    public enum TagPeriodFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+
+        private final String value;
+        private final String description;
+
+        TagPeriodFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

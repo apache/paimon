@@ -927,12 +927,6 @@ public abstract class FileStoreTableTestBase {
                         AssertionUtils.anyCauseMatches(
                                 IllegalArgumentException.class,
                                 String.format("Tag name '%s' is blank", "")));
-
-        assertThatThrownBy(() -> table.createTag("10", 1))
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                IllegalArgumentException.class,
-                                "Tag name cannot be pure numeric string but is '10'."));
     }
 
     @Test

@@ -70,10 +70,6 @@ public class TagManager {
     public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
-        checkArgument(
-                !tagName.chars().allMatch(Character::isDigit),
-                "Tag name cannot be pure numeric string but is '%s'.",
-                tagName);
 
         Path newTagPath = tagPath(tagName);
         try {
