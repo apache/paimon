@@ -93,6 +93,12 @@ under the License.
             <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append-only table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
         </tr>
         <tr>
+            <td><h5>compaction.optimization-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Implying how often to perform an optimization compaction, this configuration is used to ensure the query timeliness of the read-optimized system table.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.size-ratio</h5></td>
             <td style="word-wrap: break-word;">1</td>
             <td>Integer</td>

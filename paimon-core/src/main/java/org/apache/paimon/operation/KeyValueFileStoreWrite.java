@@ -156,7 +156,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger());
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval());
         CompactStrategy compactStrategy =
                 options.changelogProducer() == ChangelogProducer.LOOKUP
                         ? new LookupCompaction(universalCompaction)
