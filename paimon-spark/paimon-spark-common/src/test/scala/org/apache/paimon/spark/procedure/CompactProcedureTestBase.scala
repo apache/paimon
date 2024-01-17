@@ -412,6 +412,84 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     checkAnswer(spark.sql(s"SELECT COUNT(*) FROM T"), Row(count) :: Nil)
   }
 
+  test("Paimon Procedure: sort compact with string partition works") {
+    failAfter(streamingTimeout) {
+      withTempDir {
+        checkpointDir =>
+          spark.sql(s"""
+                       |CREATE TABLE T (p1 STRING, p2 STRING, a INT, b INT)
+                       |TBLPROPERTIES ('bucket'='-1')
+                       |PARTITIONED BY (p1,p2)
+                       |""".stripMargin)
+          val location = loadTable("T").location().toString
+
+          val inputData = MemoryStream[(String, String, Int, Int)]
+          val stream = inputData
+            .toDS()
+            .toDF("p1", "p2", "a", "b")
+            .writeStream
+            .option("checkpointLocation", checkpointDir.getCanonicalPath)
+            .foreachBatch {
+              (batch: Dataset[Row], _: Long) =>
+                batch.write.format("paimon").mode("append").save(location)
+            }
+            .start()
+
+          val query0 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='01'")
+          val query1 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='02'")
+
+          try {
+            // test zorder sort
+            inputData.addData(("2024-01-14", "01", 0, 0))
+            inputData.addData(("2024-01-14", "01", 0, 1))
+            inputData.addData(("2024-01-14", "01", 0, 2))
+            inputData.addData(("2024-01-14", "01", 1, 0))
+            inputData.addData(("2024-01-14", "01", 1, 1))
+            inputData.addData(("2024-01-14", "01", 1, 2))
+            inputData.addData(("2024-01-14", "01", 2, 0))
+            inputData.addData(("2024-01-14", "01", 2, 1))
+            inputData.addData(("2024-01-14", "01", 2, 2))
+
+            inputData.addData(("2024-01-14", "02", 0, 0))
+            inputData.addData(("2024-01-14", "02", 0, 1))
+            inputData.addData(("2024-01-14", "02", 0, 2))
+            inputData.addData(("2024-01-14", "02", 1, 0))
+            inputData.addData(("2024-01-14", "02", 1, 1))
+            inputData.addData(("2024-01-14", "02", 1, 2))
+            inputData.addData(("2024-01-14", "02", 2, 0))
+            inputData.addData(("2024-01-14", "02", 2, 1))
+            inputData.addData(("2024-01-14", "02", 2, 2))
+
+            stream.processAllAvailable()
+
+            val result0 = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result0.add(Row("2024-01-14", "01", a, b))
+              }
+            }
+            val result1 = new util.ArrayList[Row]()
+            for (a <- 0 until 3) {
+              for (b <- 0 until 3) {
+                result1.add(Row("2024-01-14", "02", a, b))
+              }
+            }
+            Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
+            Assertions.assertThat(query1().collect()).containsExactlyElementsOf(result1)
+
+            checkAnswer(
+              spark.sql(
+                "CALL paimon.sys.compact(table => 'T', partitions => 'p1=2024-01-14,p2=01',  order_strategy => 'order', order_by => 'a,b')"),
+              Row(true) :: Nil
+            )
+
+          } finally {
+            stream.stop()
+          }
+      }
+    }
+  }
+
   test("Paimon test: toWhere method in CompactProcedure") {
     val conditions = "f0=0,f1=0,f2=0;f0=1,f1=1,f2=1;f0=1,f1=2,f2=2;f3=3"
 

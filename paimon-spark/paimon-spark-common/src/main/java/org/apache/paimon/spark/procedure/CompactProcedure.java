@@ -320,7 +320,13 @@ public class CompactProcedure extends BaseProcedure {
                 .map(
                         a ->
                                 a.entrySet().stream()
-                                        .map(entry -> entry.getKey() + "=" + entry.getValue())
+                                        .map(
+                                                entry ->
+                                                        entry.getKey()
+                                                                + "="
+                                                                + "'"
+                                                                + entry.getValue()
+                                                                + "'")
                                         .reduce((s0, s1) -> s0 + " AND " + s1))
                 .filter(Optional::isPresent)
                 .map(Optional::get)
