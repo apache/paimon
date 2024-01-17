@@ -50,6 +50,7 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.tag.TagPreview;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -380,6 +381,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, String tagName) {
+        branchManager().createBranch(branchName, tagName);
+    }
+
+    @Override
+    public void deleteBranch(String branchName) {
+        branchManager().deleteBranch(branchName);
+    }
+
+    @Override
     public void rollbackTo(String tagName) {
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
@@ -407,6 +418,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TagManager tagManager() {
         return new TagManager(fileIO, path);
+    }
+
+    @Override
+    public BranchManager branchManager() {
+        return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
     }
 
     private RollbackHelper rollbackHelper() {

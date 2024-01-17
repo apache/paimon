@@ -76,9 +76,11 @@ public interface AvroSchemaVisitor<T> {
                     return visitInt();
 
                 case "timestamp-millis":
+                case "local-timestamp-millis":
                     return visitTimestampMillis(getPrecision(type));
 
                 case "timestamp-micros":
+                case "local-timestamp-micros":
                     return visitTimestampMicros(getPrecision(type));
 
                 case "decimal":

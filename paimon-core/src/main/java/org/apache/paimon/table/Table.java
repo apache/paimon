@@ -83,6 +83,14 @@ public interface Table extends Serializable {
     @Experimental
     void rollbackTo(String tagName);
 
+    /** Create a branch from given tag. */
+    @Experimental
+    void createBranch(String branchName, String tagName);
+
+    /** Delete a branch by branchName. */
+    @Experimental
+    void deleteBranch(String branchName);
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

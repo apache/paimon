@@ -20,6 +20,7 @@ package org.apache.paimon.tag;
 
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.CoreOptions.TagCreationPeriod;
+import org.apache.paimon.CoreOptions.TagPeriodFormatter;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
@@ -36,11 +37,11 @@ import java.time.ZoneId;
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
-import static org.apache.paimon.CoreOptions.SNAPSHOT_WATERMARK_IDLE_TIMEOUT;
 import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for tag automatic creation. */
@@ -248,22 +249,37 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
     }
 
     @Test
-    public void testWatermarkIdleTimeoutForceCreatingSnapshot() throws Exception {
+    public void testTagDatePeriodFormatter() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
+        options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        assertThat(tagManager.tags().values()).containsOnly("20230717");
+
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-19T12:12:00")));
+        assertThat(tagManager.tags().values()).contains("20230717", "20230718");
+    }
+
+    @Test
+    public void testTagHourlyPeriodFormatter() {
         Options options = new Options();
         options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
-        options.set(SINK_WATERMARK_TIME_ZONE, ZoneId.systemDefault().toString());
-        options.set(SNAPSHOT_WATERMARK_IDLE_TIMEOUT.key(), "10 s");
+        options.set(TAG_PERIOD_FORMATTER, TagPeriodFormatter.WITHOUT_DASHES);
         FileStoreTable table = this.table.copy(options.toMap());
         TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
 
-        commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:00")));
-        commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:10")));
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        assertThat(tagManager.tags().values()).containsOnly("20230718 11");
 
-        Long watermark1 = table.snapshotManager().snapshot(1).watermark();
-        Long watermark2 = table.snapshotManager().snapshot(2).watermark();
-        assertThat(watermark2 - watermark1).isEqualTo(10000);
-        commit.close();
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T13:13:00")));
+        assertThat(tagManager.tags().values()).contains("20230718 11", "20230718 12");
     }
 
     private long localZoneMills(String timestamp) {

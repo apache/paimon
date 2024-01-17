@@ -105,7 +105,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
         try {
-            catalog.createDatabase(namespace[0], false);
+            catalog.createDatabase(namespace[0], false, metadata);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new NamespaceAlreadyExistsException(namespace);
         }
@@ -142,10 +142,12 @@ public class SparkCatalog extends SparkBaseCatalog {
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
-        if (catalog.databaseExists(namespace[0])) {
-            return Collections.emptyMap();
+        String dataBaseName = namespace[0];
+        try {
+            return catalog.loadDatabaseProperties(dataBaseName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
         }
-        throw new NoSuchNamespaceException(namespace);
     }
 
     /**

@@ -28,8 +28,8 @@ import org.assertj.core.api.Assertions
 
 import java.util
 
-/** Test sort compact procedure. See [[CompactProcedure]]. */
-class CompactProcedureTest extends PaimonSparkTestBase with StreamTest {
+/** Test compact procedure. See [[CompactProcedure]]. */
+abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamTest {
 
   import testImplicits._
 

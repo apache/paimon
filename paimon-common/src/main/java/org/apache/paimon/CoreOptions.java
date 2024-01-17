@@ -408,6 +408,14 @@ public class CoreOptions implements Serializable {
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
 
+    public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
+            key("compaction.optimization-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Implying how often to perform an optimization compaction, this configuration is used to "
+                                    + "ensure the query timeliness of the read-optimized system table.");
+
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
                     .intType()
@@ -943,6 +951,12 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
+    public static final ConfigOption<TagPeriodFormatter> TAG_PERIOD_FORMATTER =
+            key("tag.period-formatter")
+                    .enumType(TagPeriodFormatter.class)
+                    .defaultValue(TagPeriodFormatter.WITH_DASHES)
+                    .withDescription("The date format for tag periods.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -1260,6 +1274,11 @@ public class CoreOptions implements Serializable {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
     }
 
+    @Nullable
+    public Duration optimizedCompactionInterval() {
+        return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
+    }
+
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
@@ -1481,6 +1500,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagCreationDelay() {
         return options.get(TAG_CREATION_DELAY);
+    }
+
+    public TagPeriodFormatter tagPeriodFormatter() {
+        return options.get(TAG_PERIOD_FORMATTER);
     }
 
     public Integer tagNumRetainedMax() {
@@ -2050,6 +2073,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The period format options for tag creation. */
+    public enum TagPeriodFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+
+        private final String value;
+        private final String description;
+
+        TagPeriodFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

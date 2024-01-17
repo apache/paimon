@@ -35,7 +35,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -1176,7 +1176,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<CommitMessage> commitMessages1 = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages1);
 
-        TableQuery query = table.newTableQuery();
+        LocalTableQuery query = table.newLocalTableQuery();
         query.withIOManager(ioManager);
 
         refreshTableService(query, commitMessages1);
@@ -1226,7 +1226,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
     }
 
-    private void refreshTableService(TableQuery query, List<CommitMessage> commitMessages) {
+    private void refreshTableService(LocalTableQuery query, List<CommitMessage> commitMessages) {
         for (CommitMessage m : commitMessages) {
             CommitMessageImpl msg = (CommitMessageImpl) m;
             query.refreshFiles(
