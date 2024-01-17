@@ -32,7 +32,7 @@ Paimon支持多种方式将数据导入Paimon表并进行模式演化。这意�
 
 1. MySQL表同步：将一个或多个MySQL表同步到一个Paimon表中。
 2. MySQL数据库同步：将整个MySQL数据库同步到一个Paimon数据库中。
-3. [程序API同步]({{< ref "/program-api/flink-api#cdc-ingestion-table" >}})：将自定义的DataStream输入同步到一个Paimon表中。
+3. Program API同步：将自定义的DataStream输入同步到一个Paimon表中。
 4. Kafka表同步：将一个Kafka主题的表同步到一个Paimon表中。
 5. Kafka数据库同步：将包含多个表的一个Kafka主题或包含一个表的多个主题同步到一个Paimon数据库中。
 6. MongoDB集合同步：将MongoDB中的一个集合同步到一个Paimon表中。

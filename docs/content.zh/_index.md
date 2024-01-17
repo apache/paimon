@@ -38,7 +38,7 @@ Paimon提供以下核心功能：
 
 ## 尝试Paimon
 
-如果您对Paimon感兴趣，可以查看我们的 快速入门指南，使用 [Flink]({{< ref "engines/flink" >}})、[Spark]({{< ref "engines/spark" >}}) 或 [Hive]({{< ref "engines/hive" >}})。它提供了逐步介绍API并指导您进行实际应用的步骤。
+如果您对Paimon感兴趣，可以查看我们的 快速入门指南，使用 Flink、Spark 或 Hive。它提供了逐步介绍API并指导您进行实际应用的步骤。
 
 <--->
 
