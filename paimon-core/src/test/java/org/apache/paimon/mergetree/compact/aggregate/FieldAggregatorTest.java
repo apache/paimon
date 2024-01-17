@@ -117,15 +117,15 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldFirstNotNullValueAgg() {
-        FieldFirstNotNullValueAgg fieldFirstNotNullValueAgg =
-                new FieldFirstNotNullValueAgg(new IntType());
-        assertThat(fieldFirstNotNullValueAgg.agg(null, null)).isNull();
-        assertThat(fieldFirstNotNullValueAgg.agg(null, 1)).isEqualTo(1);
-        assertThat(fieldFirstNotNullValueAgg.agg(1, 2)).isEqualTo(1);
+    public void testFieldFirstNonNullValueAgg() {
+        FieldFirstNonNullValueAgg fieldFirstNonNullValueAgg =
+                new FieldFirstNonNullValueAgg(new IntType());
+        assertThat(fieldFirstNonNullValueAgg.agg(null, null)).isNull();
+        assertThat(fieldFirstNonNullValueAgg.agg(null, 1)).isEqualTo(1);
+        assertThat(fieldFirstNonNullValueAgg.agg(1, 2)).isEqualTo(1);
 
-        fieldFirstNotNullValueAgg.reset();
-        assertThat(fieldFirstNotNullValueAgg.agg(1, 3)).isEqualTo(3);
+        fieldFirstNonNullValueAgg.reset();
+        assertThat(fieldFirstNonNullValueAgg.agg(1, 3)).isEqualTo(3);
     }
 
     @Test
