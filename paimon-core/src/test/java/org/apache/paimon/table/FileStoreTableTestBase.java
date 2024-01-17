@@ -46,6 +46,7 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -64,6 +65,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -910,6 +912,136 @@ public abstract class FileStoreTableTestBase {
         Snapshot tagged = tagManager.taggedSnapshot("test-tag");
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
+    }
+
+    @Test
+    public void testCreateBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // snapshot 1
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            // snapshot 2
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+        }
+
+        table.createTag("test-tag", 2);
+
+        // verify that tag file exist
+        TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+        assertThat(tagManager.tagExists("test-tag")).isTrue();
+
+        // verify that test-tag is equal to snapshot 2
+        Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+        Snapshot snapshot2 = table.snapshotManager().snapshot(2);
+        assertThat(tagged.equals(snapshot2)).isTrue();
+
+        table.createBranch("test-branch", "test-tag");
+
+        // verify that branch file exist
+        TraceableFileIO fileIO = new TraceableFileIO();
+        BranchManager branchManager =
+                new BranchManager(
+                        fileIO,
+                        tablePath,
+                        new SnapshotManager(fileIO, tablePath),
+                        new TagManager(fileIO, tablePath),
+                        new SchemaManager(fileIO, tablePath));
+        assertThat(branchManager.branchExists("test-branch")).isTrue();
+
+        // verify test-tag in test-branch is equal to snapshot 2
+        Snapshot branchTag =
+                Snapshot.fromPath(
+                        new TraceableFileIO(), tagManager.branchTagPath("test-branch", "test-tag"));
+        assertThat(branchTag.equals(snapshot2)).isTrue();
+
+        // verify snapshot in test-branch is equal to snapshot 2
+        SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+        Snapshot branchSnapshot =
+                Snapshot.fromPath(
+                        new TraceableFileIO(),
+                        snapshotManager.branchSnapshotPath("test-branch", 2));
+        assertThat(branchSnapshot.equals(snapshot2)).isTrue();
+
+        // verify schema in test-branch is equal to schema 0
+        SchemaManager schemaManager = new SchemaManager(new TraceableFileIO(), tablePath);
+        TableSchema branchSchema =
+                SchemaManager.fromPath(
+                        new TraceableFileIO(), schemaManager.branchSchemaPath("test-branch", 0));
+        TableSchema schema0 = schemaManager.schema(0);
+        assertThat(branchSchema.equals(schema0)).isTrue();
+    }
+
+    @Test
+    public void testUnsupportedBranchName() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("test-tag", 1);
+        table.createBranch("branch0", "test-tag");
+
+        assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class, "Tag name 'tag1' not exists."));
+
+        assertThatThrownBy(() -> table.createBranch("branch0", "test-tag"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'branch0' already exists."));
+
+        assertThatThrownBy(() -> table.createBranch("", "test-tag"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                String.format("Branch name '%s' is blank", "")));
+
+        assertThatThrownBy(() -> table.createBranch("10", "test-tag"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name cannot be pure numeric string but is '10'."));
+    }
+
+    @Test
+    public void testDeleteBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+        }
+
+        table.createTag("tag1", 1);
+        table.createBranch("branch1", "tag1");
+        table.deleteBranch("branch1");
+
+        // verify that branch file not exist
+        TraceableFileIO fileIO = new TraceableFileIO();
+        BranchManager branchManager =
+                new BranchManager(
+                        fileIO,
+                        tablePath,
+                        new SnapshotManager(fileIO, tablePath),
+                        new TagManager(fileIO, tablePath),
+                        new SchemaManager(fileIO, tablePath));
+        assertThat(branchManager.branchExists("branch1")).isFalse();
+
+        assertThatThrownBy(() -> table.deleteBranch("branch1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'branch1' doesn't exist."));
     }
 
     @Test

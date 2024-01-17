@@ -64,6 +64,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
+import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -462,6 +463,14 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    public static TableSchema fromPath(FileIO fileIO, Path path) {
+        try {
+            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(path), TableSchema.class);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     private Path schemaDirectory() {
         return new Path(tableRoot + "/schema");
     }
@@ -469,6 +478,11 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
+    }
+
+    public Path branchSchemaPath(String branchName, long schemaId) {
+        return new Path(
+                getBranchPath(tableRoot, branchName) + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     /**
