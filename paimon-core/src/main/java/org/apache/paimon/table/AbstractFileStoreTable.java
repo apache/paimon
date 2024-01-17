@@ -213,13 +213,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
-        // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema);
-
         if (tryTimeTravel) {
             // see if merged options contain time travel option
             newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
         }
+
+        // validate schema with new options
+        SchemaValidation.validateTableSchema(newTableSchema);
 
         return copy(newTableSchema);
     }
@@ -334,15 +334,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     /** Tag first when travelling to a version. */
     private Optional<TableSchema> travelToVersion(String version, Options options) {
-        TagManager tagManager = tagManager();
-        if (tagManager.tagExists(version)) {
+        options.remove(CoreOptions.SCAN_VERSION.key());
+        if (tagManager().tagExists(version)) {
             options.set(CoreOptions.SCAN_TAG_NAME, version);
             return travelToTag(version, options);
         } else if (version.chars().allMatch(Character::isDigit)) {
             options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
             return travelToSnapshot(Long.parseLong(version), options);
+        } else {
+            throw new RuntimeException("Cannot find a time travel version for " + version);
         }
-        return Optional.empty();
     }
 
     private Optional<TableSchema> travelToTag(String tagName, Options options) {
