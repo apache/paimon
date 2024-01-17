@@ -62,6 +62,9 @@ public class FileUtils {
 
     public static synchronized ForkJoinPool getScanIoForkJoinPool(int parallelism) {
         if (scanIoForkJoinPool == null || parallelism > scanIoForkJoinPool.getParallelism()) {
+            if (scanIoForkJoinPool != null) {
+                scanIoForkJoinPool.shutdown();
+            }
             scanIoForkJoinPool = createForkJoinPool("paimon-scan-io", parallelism);
         }
         return scanIoForkJoinPool;

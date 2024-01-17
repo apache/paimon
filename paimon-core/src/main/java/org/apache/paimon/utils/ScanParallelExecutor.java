@@ -45,13 +45,10 @@ public class ScanParallelExecutor {
             queueSize = poolCandidate.getParallelism();
         } else if (queueSize <= 0) {
             throw new NegativeArraySizeException("queue size should not be negetive");
-        } else if (queueSize > poolCandidate.getParallelism()) {
-            poolCandidate = FileUtils.getScanIoForkJoinPool(queueSize);
         }
 
-        final ForkJoinPool pool = poolCandidate;
         final Queue<List<U>> stack = new ArrayDeque<>(Lists.partition(input, queueSize));
-
+        final int settledQueueSize = queueSize;
         return () ->
                 new Iterator<T>() {
                     List<T> activeList = null;
@@ -80,7 +77,8 @@ public class ScanParallelExecutor {
                             try {
                                 activeList =
                                         CompletableFuture.supplyAsync(
-                                                        () -> processor.apply(stack.poll()), pool)
+                                                        () -> processor.apply(stack.poll()),
+                                                        getExecutePool(settledQueueSize))
                                                 .get();
                             } catch (Exception e) {
                                 throw new RuntimeException(e);
@@ -88,5 +86,11 @@ public class ScanParallelExecutor {
                         }
                     }
                 };
+    }
+
+    private static ForkJoinPool getExecutePool(int queueSize) {
+        return queueSize > FileUtils.COMMON_IO_FORK_JOIN_POOL.getParallelism()
+                ? FileUtils.getScanIoForkJoinPool(queueSize)
+                : FileUtils.COMMON_IO_FORK_JOIN_POOL;
     }
 }
