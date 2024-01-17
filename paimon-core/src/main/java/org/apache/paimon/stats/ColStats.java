@@ -21,6 +21,7 @@ package org.apache.paimon.stats;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.OptionalUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
@@ -49,12 +50,16 @@ import java.util.OptionalLong;
  */
 public class ColStats<T> {
 
+    private static final String FIELD_COL_ID = "colId";
     private static final String FIELD_DISTINCT_COUNT = "distinctCount";
     private static final String FIELD_MIN = "min";
     private static final String FIELD_MAX = "max";
     private static final String FIELD_NULL_COUNT = "nullCount";
     private static final String FIELD_AVG_LEN = "avgLen";
     private static final String FIELD_MAX_LEN = "maxLen";
+
+    @JsonProperty(FIELD_COL_ID)
+    private final int colId;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_DISTINCT_COUNT)
@@ -86,12 +91,14 @@ public class ColStats<T> {
 
     @JsonCreator
     public ColStats(
+            @JsonProperty(FIELD_COL_ID) int colId,
             @JsonProperty(FIELD_DISTINCT_COUNT) @Nullable Long distinctCount,
             @JsonProperty(FIELD_MIN) @Nullable String serializedMin,
             @JsonProperty(FIELD_MAX) @Nullable String serializedMax,
             @JsonProperty(FIELD_NULL_COUNT) @Nullable Long nullCount,
             @JsonProperty(FIELD_AVG_LEN) @Nullable Long avgLen,
             @JsonProperty(FIELD_MAX_LEN) @Nullable Long maxLen) {
+        this.colId = colId;
         this.distinctCount = distinctCount;
         this.serializedMin = serializedMin;
         this.serializedMax = serializedMax;
@@ -101,18 +108,24 @@ public class ColStats<T> {
     }
 
     public ColStats(
+            int colId,
             @Nullable Long distinctCount,
             @Nullable Comparable<T> min,
             @Nullable Comparable<T> max,
             @Nullable Long nullCount,
             @Nullable Long avgLen,
             @Nullable Long maxLen) {
+        this.colId = colId;
         this.distinctCount = distinctCount;
         this.min = min;
         this.max = max;
         this.nullCount = nullCount;
         this.avgLen = avgLen;
         this.maxLen = maxLen;
+    }
+
+    public int colId() {
+        return colId;
     }
 
     public OptionalLong distinctCount() {
@@ -166,15 +179,16 @@ public class ColStats<T> {
     }
 
     @Override
-    public boolean equals(Object object) {
-        if (this == object) {
+    public boolean equals(Object o) {
+        if (this == o) {
             return true;
         }
-        if (object == null || getClass() != object.getClass()) {
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        ColStats<?> colStats = (ColStats<?>) object;
-        return Objects.equals(distinctCount, colStats.distinctCount)
+        ColStats<?> colStats = (ColStats<?>) o;
+        return colId == colStats.colId
+                && Objects.equals(distinctCount, colStats.distinctCount)
                 && Objects.equals(serializedMin, colStats.serializedMin)
                 && Objects.equals(min, colStats.min)
                 && Objects.equals(serializedMax, colStats.serializedMax)
@@ -187,26 +201,19 @@ public class ColStats<T> {
     @Override
     public int hashCode() {
         return Objects.hash(
-                distinctCount, serializedMin, min, serializedMax, max, nullCount, avgLen, maxLen);
+                colId,
+                distinctCount,
+                serializedMin,
+                min,
+                serializedMax,
+                max,
+                nullCount,
+                avgLen,
+                maxLen);
     }
 
     @Override
     public String toString() {
-        return "ColStats{"
-                + "distinctCount="
-                + distinctCount
-                + ", min='"
-                + serializedMin
-                + '\''
-                + ", max='"
-                + serializedMax
-                + '\''
-                + ", nullCount="
-                + nullCount
-                + ", avgLen="
-                + avgLen
-                + ", maxLen="
-                + maxLen
-                + '}';
+        return JsonSerdeUtil.toJson(this);
     }
 }

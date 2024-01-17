@@ -786,12 +786,18 @@ public class FileStoreCommitTest {
         StatsFileHandler statsFileHandler = store.newStatsFileHandler();
         FileStoreCommitImpl fileStoreCommit = store.newCommit();
         store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
 
         // Analyze and check
         HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(10L, 1L, 10L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", new ColStats<>(3, 10L, 1L, 10L, 0L, 8L, 8L));
         Stats fakeStats =
-                new Stats(store.snapshotManager().latestSnapshotId(), 10L, 1000L, fakeColStatsMap);
+                new Stats(
+                        latestSnapshot.id(),
+                        latestSnapshot.schemaId(),
+                        10L,
+                        1000L,
+                        fakeColStatsMap);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         Optional<Stats> readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
@@ -813,17 +819,24 @@ public class FileStoreCommitTest {
         assertThat(readStats).isEmpty();
 
         // Then we need to analyze again
+        latestSnapshot = store.snapshotManager().latestSnapshot();
         fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(30L, 1L, 30L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", new ColStats<>(3, 30L, 1L, 30L, 0L, 8L, 8L));
         fakeStats =
-                new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L, fakeColStatsMap);
+                new Stats(
+                        latestSnapshot.id(),
+                        latestSnapshot.schemaId(),
+                        30L,
+                        3000L,
+                        fakeColStatsMap);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
         // Analyze without col stats and check
-        fakeStats = new Stats(store.snapshotManager().latestSnapshotId(), 30L, 3000L);
+        latestSnapshot = store.snapshotManager().latestSnapshot();
+        fakeStats = new Stats(latestSnapshot.id(), latestSnapshot.schemaId(), 30L, 3000L);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();

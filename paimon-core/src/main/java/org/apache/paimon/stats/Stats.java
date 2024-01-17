@@ -48,14 +48,19 @@ import java.util.OptionalLong;
  */
 public class Stats {
 
-    // SnapshotId that stats belongs to
+    // ID of the snapshot this statistics collected from
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
+    // Schema ID of the snapshot this statistics collected from
+    private static final String FIELD_SCHEMA_ID = "schemaId";
     private static final String FIELD_MERGED_RECORD_COUNT = "mergedRecordCount";
     private static final String FIELD_MERGED_RECORD_SIZE = "mergedRecordSize";
     private static final String FIELD_COL_STATS = "colStats";
 
     @JsonProperty(FIELD_SNAPSHOT_ID)
     private final long snapshotId;
+
+    @JsonProperty(FIELD_SCHEMA_ID)
+    private final long schemaId;
 
     @JsonInclude(JsonInclude.Include.NON_NULL)
     @JsonProperty(FIELD_MERGED_RECORD_COUNT)
@@ -71,21 +76,27 @@ public class Stats {
     @JsonCreator
     public Stats(
             @JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId,
+            @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
             @JsonProperty(FIELD_MERGED_RECORD_SIZE) @Nullable Long mergedRecordSize,
             @JsonProperty(FIELD_COL_STATS) Map<String, ColStats<?>> colStats) {
         this.snapshotId = snapshotId;
+        this.schemaId = schemaId;
         this.mergedRecordCount = mergedRecordCount;
         this.mergedRecordSize = mergedRecordSize;
         this.colStats = colStats;
     }
 
-    public Stats(Long snapshotId, Long mergedRecordCount, Long mergedRecordSize) {
-        this(snapshotId, mergedRecordCount, mergedRecordSize, Collections.emptyMap());
+    public Stats(long snapshotId, long schemaId, Long mergedRecordCount, Long mergedRecordSize) {
+        this(snapshotId, schemaId, mergedRecordCount, mergedRecordSize, Collections.emptyMap());
     }
 
     public long snapshotId() {
         return snapshotId;
+    }
+
+    public long schemaId() {
+        return schemaId;
     }
 
     public OptionalLong mergedRecordCount() {
@@ -164,15 +175,16 @@ public class Stats {
     }
 
     @Override
-    public boolean equals(Object object) {
-        if (this == object) {
+    public boolean equals(Object o) {
+        if (this == o) {
             return true;
         }
-        if (object == null || getClass() != object.getClass()) {
+        if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Stats stats = (Stats) object;
-        return Objects.equals(snapshotId, stats.snapshotId)
+        Stats stats = (Stats) o;
+        return snapshotId == stats.snapshotId
+                && schemaId == stats.schemaId
                 && Objects.equals(mergedRecordCount, stats.mergedRecordCount)
                 && Objects.equals(mergedRecordSize, stats.mergedRecordSize)
                 && Objects.equals(colStats, stats.colStats);
@@ -180,20 +192,11 @@ public class Stats {
 
     @Override
     public int hashCode() {
-        return Objects.hash(snapshotId, mergedRecordCount, mergedRecordSize, colStats);
+        return Objects.hash(snapshotId, schemaId, mergedRecordCount, mergedRecordSize, colStats);
     }
 
     @Override
     public String toString() {
-        return "Stats{"
-                + "snapshotId="
-                + snapshotId
-                + ", mergedRecordCount="
-                + mergedRecordCount
-                + ", mergedRecordSize="
-                + mergedRecordSize
-                + ", colStats="
-                + colStats
-                + '}';
+        return JsonSerdeUtil.toJson(this);
     }
 }

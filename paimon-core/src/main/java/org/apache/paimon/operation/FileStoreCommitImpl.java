@@ -785,11 +785,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             String statsFileName = null;
             if (newStatsFileName != null) {
                 statsFileName = newStatsFileName;
-            } else if (latestSnapshot != null && latestSnapshot.statistics() != null) {
-                if (latestSnapshot.schemaId() != latestSchemaId) {
-                    LOG.warn("Schema changed, stats will not be inherited");
-                } else {
-                    statsFileName = latestSnapshot.statistics();
+            } else if (latestSnapshot != null) {
+                Optional<Stats> previousStatistic = statsFileHandler.readStats(latestSnapshot);
+                if (previousStatistic.isPresent()) {
+                    if (previousStatistic.get().schemaId() != latestSchemaId) {
+                        LOG.warn("Schema changed, stats will not be inherited");
+                    } else {
+                        statsFileName = latestSnapshot.statistics();
+                    }
                 }
             }
 

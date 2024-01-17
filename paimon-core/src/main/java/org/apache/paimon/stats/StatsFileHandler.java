@@ -44,13 +44,7 @@ public class StatsFileHandler {
      * @return the written file name
      */
     public String writeStats(Stats stats) {
-        stats.serializeFieldsToString(
-                schemaManager
-                        .latest()
-                        .orElseThrow(
-                                () ->
-                                        new IllegalStateException(
-                                                "Unable to obtain the latest schema")));
+        stats.serializeFieldsToString(schemaManager.schema(stats.schemaId()));
         return statsFile.write(stats);
     }
 
@@ -73,12 +67,15 @@ public class StatsFileHandler {
      * @return stats
      */
     public Optional<Stats> readStats(long snapshotId) {
-        Snapshot snapshot = snapshotManager.snapshot(snapshotId);
+        return readStats(snapshotManager.snapshot(snapshotId));
+    }
+
+    public Optional<Stats> readStats(Snapshot snapshot) {
         if (snapshot.statistics() == null) {
             return Optional.empty();
         } else {
             Stats stats = statsFile.read(snapshot.statistics());
-            stats.deserializeFieldsFromString(schemaManager.schema(snapshot.schemaId()));
+            stats.deserializeFieldsFromString(schemaManager.schema(stats.schemaId()));
             return Optional.of(stats);
         }
     }
