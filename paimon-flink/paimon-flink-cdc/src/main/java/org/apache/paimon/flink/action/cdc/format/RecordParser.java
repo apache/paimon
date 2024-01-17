@@ -122,7 +122,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     // use STRING type in default when we cannot get origin data types (most cases)
-    protected LinkedHashMap<String, DataType> fillDefaultStringTypes(JsonNode record) {
+    protected LinkedHashMap<String, DataType> fillDefaultTypes(JsonNode record) {
         LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
         record.fieldNames().forEachRemaining(name -> fieldTypes.put(name, DataTypes.STRING()));
         return fieldTypes;
@@ -141,7 +141,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected Map<String, String> extractRowData(
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        paimonFieldTypes.putAll(fillDefaultStringTypes(record));
+        paimonFieldTypes.putAll(fillDefaultTypes(record));
         Map<String, Object> recordMap =
                 OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
