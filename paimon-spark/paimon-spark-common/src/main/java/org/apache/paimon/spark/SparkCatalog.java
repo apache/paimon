@@ -223,18 +223,9 @@ public class SparkCatalog extends SparkBaseCatalog {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         Table table = loadPaimonTable(ident);
-        Options dynamicOptions = new Options();
-
-        if (version.chars().allMatch(Character::isDigit)) {
-            long snapshotId = Long.parseUnsignedLong(version);
-            LOG.info("Time travel to snapshot '{}'.", snapshotId);
-            dynamicOptions.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
-        } else {
-            LOG.info("Time travel to tag '{}'.", version);
-            dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
-        }
-
-        return new SparkTable(table.copy(dynamicOptions.toMap()));
+        LOG.info("Time travel to version '{}'.", version);
+        return new SparkTable(
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)));
     }
 
     /**
