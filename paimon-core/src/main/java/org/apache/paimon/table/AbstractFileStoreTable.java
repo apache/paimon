@@ -53,6 +53,8 @@ import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
@@ -314,32 +316,45 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
             case FROM_SNAPSHOT:
             case FROM_SNAPSHOT_FULL:
                 if (coreOptions.scanSnapshotId() != null) {
-                    long snapshotId = coreOptions.scanSnapshotId();
-                    if (snapshotManager().snapshotExists(snapshotId)) {
-                        long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
-                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                    }
+                    return travelToSnapshot(coreOptions.scanSnapshotId(), options);
                 } else {
-                    String tagName = coreOptions.scanTagName();
-                    TagManager tagManager = tagManager();
-                    if (tagManager.tagExists(tagName)) {
-                        long schemaId = tagManager.taggedSnapshot(tagName).schemaId();
-                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                    }
+                    // SCAN_TAG_NAME might represent a version string
+                    return travelToVersion(coreOptions.scanTagName(), options);
                 }
-                return Optional.empty();
             case FROM_TIMESTAMP:
                 Snapshot snapshot =
                         StaticFromTimestampStartingScanner.timeTravelToTimestamp(
                                 snapshotManager(), coreOptions.scanTimestampMills());
-                if (snapshot != null) {
-                    long schemaId = snapshot.schemaId();
-                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                }
-                return Optional.empty();
+                return travelToSnapshot(snapshot, options);
             default:
                 return Optional.empty();
         }
+    }
+
+    /** Tag first when travelling to a version. */
+    private Optional<TableSchema> travelToVersion(String version, Options options) {
+        TagManager tagManager = tagManager();
+        if (tagManager.tagExists(version)) {
+            return travelToSnapshot(tagManager.taggedSnapshot(version), options);
+        } else if (version.chars().allMatch(Character::isDigit)) {
+            return travelToSnapshot(Long.parseLong(version), options);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
+        SnapshotManager snapshotManager = snapshotManager();
+        if (snapshotManager.snapshotExists(snapshotId)) {
+            return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToSnapshot(@Nullable Snapshot snapshot, Options options) {
+        if (snapshot != null) {
+            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
+        }
+        return Optional.empty();
     }
 
     @Override
