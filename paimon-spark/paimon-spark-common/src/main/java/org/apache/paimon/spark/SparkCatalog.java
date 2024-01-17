@@ -225,8 +225,8 @@ public class SparkCatalog extends SparkBaseCatalog {
         Table table = loadPaimonTable(ident);
         Options dynamicOptions = new Options();
 
-        LOG.info("Time travel to version '{}' (tag first).", version);
-        dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
+        LOG.info("Time travel to version '{}'.", version);
+        dynamicOptions.set(CoreOptions.SCAN_VERSION, version);
 
         return new SparkTable(table.copy(dynamicOptions.toMap()));
     }

@@ -315,11 +315,12 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         switch (coreOptions.startupMode()) {
             case FROM_SNAPSHOT:
             case FROM_SNAPSHOT_FULL:
-                if (coreOptions.scanSnapshotId() != null) {
+                if (coreOptions.scanVersion() != null) {
+                    return travelToVersion(coreOptions.scanVersion(), options);
+                } else if (coreOptions.scanSnapshotId() != null) {
                     return travelToSnapshot(coreOptions.scanSnapshotId(), options);
                 } else {
-                    // SCAN_TAG_NAME might represent a version string
-                    return travelToVersion(coreOptions.scanTagName(), options);
+                    return travelToTag(coreOptions.scanTagName(), options);
                 }
             case FROM_TIMESTAMP:
                 Snapshot snapshot =
@@ -335,13 +336,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     private Optional<TableSchema> travelToVersion(String version, Options options) {
         TagManager tagManager = tagManager();
         if (tagManager.tagExists(version)) {
-            return travelToSnapshot(tagManager.taggedSnapshot(version), options);
+            options.set(CoreOptions.SCAN_TAG_NAME, version);
+            return travelToTag(version, options);
         } else if (version.chars().allMatch(Character::isDigit)) {
-            options.remove(CoreOptions.SCAN_TAG_NAME.key());
             options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
             return travelToSnapshot(Long.parseLong(version), options);
         }
         return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToTag(String tagName, Options options) {
+        return travelToSnapshot(tagManager().taggedSnapshot(tagName), options);
     }
 
     private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
