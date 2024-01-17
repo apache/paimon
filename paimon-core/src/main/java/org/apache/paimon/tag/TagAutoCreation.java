@@ -103,26 +103,23 @@ public class TagAutoCreation {
 
     public boolean forceCreatingSnapshot() {
         if (timeExtractor instanceof WatermarkExtractor && idlenessTimeout != null) {
-            return checkIdleTimeout();
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot == null) {
+                return false;
+            }
+
+            LocalDateTime snapshotTime =
+                    LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(latestSnapshot.watermark()),
+                            ZoneId.systemDefault());
+
+            return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
+        } else if (timeExtractor instanceof ProcessTimeExtractor) {
+            return nextTag == null
+                    || isAfterOrEqual(
+                            LocalDateTime.now().minus(delay), periodHandler.nextTagTime(nextTag));
         }
-        return timeExtractor instanceof ProcessTimeExtractor
-                && (nextTag == null
-                        || isAfterOrEqual(
-                                LocalDateTime.now().minus(delay),
-                                periodHandler.nextTagTime(nextTag)));
-    }
-
-    private boolean checkIdleTimeout() {
-        Snapshot latestSnapshot = snapshotManager.latestSnapshot();
-        if (latestSnapshot == null) {
-            return false;
-        }
-
-        LocalDateTime snapshotTime =
-                LocalDateTime.ofInstant(
-                        Instant.ofEpochMilli(latestSnapshot.watermark()), ZoneId.systemDefault());
-
-        return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
+        return false;
     }
 
     public void run() {
