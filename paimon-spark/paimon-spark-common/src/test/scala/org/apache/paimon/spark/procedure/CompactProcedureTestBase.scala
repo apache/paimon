@@ -479,9 +479,26 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
             checkAnswer(
               spark.sql(
-                "CALL paimon.sys.compact(table => 'T', partitions => 'p1=2024-01-14,p2=01',  order_strategy => 'order', order_by => 'a,b')"),
+                "CALL paimon.sys.compact(table => 'T', partitions => 'p1=2024-01-14,p2=01',  order_strategy => 'zorder', order_by => 'a,b')"),
               Row(true) :: Nil
             )
+
+            val result2 = new util.ArrayList[Row]()
+            result2.add(0, Row("2024-01-14", "01", 0, 0))
+            result2.add(1, Row("2024-01-14", "01", 0, 1))
+            result2.add(2, Row("2024-01-14", "01", 1, 0))
+            result2.add(3, Row("2024-01-14", "01", 1, 1))
+            result2.add(4, Row("2024-01-14", "01", 0, 2))
+            result2.add(5, Row("2024-01-14", "01", 1, 2))
+            result2.add(6, Row("2024-01-14", "01", 2, 0))
+            result2.add(7, Row("2024-01-14", "01", 2, 1))
+            result2.add(8, Row("2024-01-14", "01", 2, 2))
+
+            val query00 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='01'")
+            val query11 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='02'")
+
+            Assertions.assertThat(query00().collect()).containsExactlyElementsOf(result2)
+            Assertions.assertThat(query11().collect()).containsExactlyElementsOf(result1)
 
           } finally {
             stream.stop()
