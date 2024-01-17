@@ -17,12 +17,11 @@
  */
 package org.apache.paimon.spark.sql
 
+import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GetStructField, NamedExpression, ScalarSubquery}
 import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-class PaimonOptimzationTest extends PaimonOptimzationTestBase {
-
-  import org.apache.spark.sql.catalyst.dsl.expressions._
+class PaimonOptimizationTest extends PaimonOptimizationTestBase {
 
   override def extractorExpression(
       cteIndex: Int,

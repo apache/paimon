@@ -15,22 +15,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark.sql
+package org.apache.paimon.spark.procedure
 
-import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.spark.analysis.NoSuchProcedureException
-
-import org.assertj.core.api.Assertions.assertThatThrownBy
-
-class ProcedureTest extends PaimonSparkTestBase {
-
-  test(s"test call unknown procedure") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id INT, name STRING, dt STRING)
-                 |""".stripMargin)
-
-    assertThatThrownBy(() => spark.sql("CALL unknown_procedure(table => 'test.T')"))
-      .isInstanceOf(classOf[NoSuchProcedureException])
-  }
-
-}
+class CompactProcedureTest extends CompactProcedureTestBase {}

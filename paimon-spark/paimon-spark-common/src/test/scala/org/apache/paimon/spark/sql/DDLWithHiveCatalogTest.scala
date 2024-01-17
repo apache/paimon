@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Assertions
 class DDLWithHiveCatalogTest extends PaimonHiveTestBase {
 
   test("Paimon DDL with hive catalog: create database with location and comment") {
-    Seq("spark_catalog", paimonHiveCatalog).foreach {
+    Seq("spark_catalog", paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
         withTempDir {
@@ -52,7 +52,7 @@ class DDLWithHiveCatalogTest extends PaimonHiveTestBase {
   }
 
   test("Paimon DDL with hive catalog: create database with props") {
-    Seq("spark_catalog", paimonHiveCatalog).foreach {
+    Seq("spark_catalog", paimonHiveCatalogName).foreach {
       catalogName =>
         spark.sql(s"USE $catalogName")
         withDatabase("paimon_db") {
