@@ -417,13 +417,13 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
       withTempDir {
         checkpointDir =>
           spark.sql(s"""
-                       |CREATE TABLE T (p1 STRING, p2 STRING, a INT, b INT)
+                       |CREATE TABLE T (p1 STRING, p2 INT, a INT, b INT)
                        |TBLPROPERTIES ('bucket'='-1')
                        |PARTITIONED BY (p1,p2)
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 
-          val inputData = MemoryStream[(String, String, Int, Int)]
+          val inputData = MemoryStream[(String, Int, Int, Int)]
           val stream = inputData
             .toDS()
             .toDF("p1", "p2", "a", "b")
@@ -435,43 +435,43 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
             }
             .start()
 
-          val query0 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='01'")
-          val query1 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='02'")
+          val query0 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='1'")
+          val query1 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='2'")
 
           try {
             // test zorder sort
-            inputData.addData(("2024-01-14", "01", 0, 0))
-            inputData.addData(("2024-01-14", "01", 0, 1))
-            inputData.addData(("2024-01-14", "01", 0, 2))
-            inputData.addData(("2024-01-14", "01", 1, 0))
-            inputData.addData(("2024-01-14", "01", 1, 1))
-            inputData.addData(("2024-01-14", "01", 1, 2))
-            inputData.addData(("2024-01-14", "01", 2, 0))
-            inputData.addData(("2024-01-14", "01", 2, 1))
-            inputData.addData(("2024-01-14", "01", 2, 2))
+            inputData.addData(("2024-01-14", 1, 0, 0))
+            inputData.addData(("2024-01-14", 1, 0, 1))
+            inputData.addData(("2024-01-14", 1, 0, 2))
+            inputData.addData(("2024-01-14", 1, 1, 0))
+            inputData.addData(("2024-01-14", 1, 1, 1))
+            inputData.addData(("2024-01-14", 1, 1, 2))
+            inputData.addData(("2024-01-14", 1, 2, 0))
+            inputData.addData(("2024-01-14", 1, 2, 1))
+            inputData.addData(("2024-01-14", 1, 2, 2))
 
-            inputData.addData(("2024-01-14", "02", 0, 0))
-            inputData.addData(("2024-01-14", "02", 0, 1))
-            inputData.addData(("2024-01-14", "02", 0, 2))
-            inputData.addData(("2024-01-14", "02", 1, 0))
-            inputData.addData(("2024-01-14", "02", 1, 1))
-            inputData.addData(("2024-01-14", "02", 1, 2))
-            inputData.addData(("2024-01-14", "02", 2, 0))
-            inputData.addData(("2024-01-14", "02", 2, 1))
-            inputData.addData(("2024-01-14", "02", 2, 2))
+            inputData.addData(("2024-01-14", 2, 0, 0))
+            inputData.addData(("2024-01-14", 2, 0, 1))
+            inputData.addData(("2024-01-14", 2, 0, 2))
+            inputData.addData(("2024-01-14", 2, 1, 0))
+            inputData.addData(("2024-01-14", 2, 1, 1))
+            inputData.addData(("2024-01-14", 2, 1, 2))
+            inputData.addData(("2024-01-14", 2, 2, 0))
+            inputData.addData(("2024-01-14", 2, 2, 1))
+            inputData.addData(("2024-01-14", 2, 2, 2))
 
             stream.processAllAvailable()
 
             val result0 = new util.ArrayList[Row]()
             for (a <- 0 until 3) {
               for (b <- 0 until 3) {
-                result0.add(Row("2024-01-14", "01", a, b))
+                result0.add(Row("2024-01-14", 1, a, b))
               }
             }
             val result1 = new util.ArrayList[Row]()
             for (a <- 0 until 3) {
               for (b <- 0 until 3) {
-                result1.add(Row("2024-01-14", "02", a, b))
+                result1.add(Row("2024-01-14", 2, a, b))
               }
             }
             Assertions.assertThat(query0().collect()).containsExactlyElementsOf(result0)
@@ -479,23 +479,23 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
 
             checkAnswer(
               spark.sql(
-                "CALL paimon.sys.compact(table => 'T', partitions => 'p1=2024-01-14,p2=01',  order_strategy => 'zorder', order_by => 'a,b')"),
+                "CALL paimon.sys.compact(table => 'T', partitions => 'p1=2024-01-14,p2=1',  order_strategy => 'zorder', order_by => 'a,b')"),
               Row(true) :: Nil
             )
 
             val result2 = new util.ArrayList[Row]()
-            result2.add(0, Row("2024-01-14", "01", 0, 0))
-            result2.add(1, Row("2024-01-14", "01", 0, 1))
-            result2.add(2, Row("2024-01-14", "01", 1, 0))
-            result2.add(3, Row("2024-01-14", "01", 1, 1))
-            result2.add(4, Row("2024-01-14", "01", 0, 2))
-            result2.add(5, Row("2024-01-14", "01", 1, 2))
-            result2.add(6, Row("2024-01-14", "01", 2, 0))
-            result2.add(7, Row("2024-01-14", "01", 2, 1))
-            result2.add(8, Row("2024-01-14", "01", 2, 2))
+            result2.add(0, Row("2024-01-14", 1, 0, 0))
+            result2.add(1, Row("2024-01-14", 1, 0, 1))
+            result2.add(2, Row("2024-01-14", 1, 1, 0))
+            result2.add(3, Row("2024-01-14", 1, 1, 1))
+            result2.add(4, Row("2024-01-14", 1, 0, 2))
+            result2.add(5, Row("2024-01-14", 1, 1, 2))
+            result2.add(6, Row("2024-01-14", 1, 2, 0))
+            result2.add(7, Row("2024-01-14", 1, 2, 1))
+            result2.add(8, Row("2024-01-14", 1, 2, 2))
 
-            val query00 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='01'")
-            val query11 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='02'")
+            val query00 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='1'")
+            val query11 = () => spark.sql("SELECT * FROM T WHERE p1='2024-01-14' and p2 ='2'")
 
             Assertions.assertThat(query00().collect()).containsExactlyElementsOf(result2)
             Assertions.assertThat(query11().collect()).containsExactlyElementsOf(result1)
