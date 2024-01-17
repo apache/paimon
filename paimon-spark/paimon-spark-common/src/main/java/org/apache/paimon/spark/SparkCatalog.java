@@ -223,12 +223,9 @@ public class SparkCatalog extends SparkBaseCatalog {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         Table table = loadPaimonTable(ident);
-        Options dynamicOptions = new Options();
-
         LOG.info("Time travel to version '{}'.", version);
-        dynamicOptions.set(CoreOptions.SCAN_VERSION, version);
-
-        return new SparkTable(table.copy(dynamicOptions.toMap()));
+        return new SparkTable(
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)));
     }
 
     /**
