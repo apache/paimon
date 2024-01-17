@@ -25,6 +25,6 @@ under the License.
 
 # Versions
 
-An appendix of hosted documentation for all versions of Apache Paimon.
+托管文档的附录，包括所有版本的Apache Paimon。
 
 {{< all_versions >}}

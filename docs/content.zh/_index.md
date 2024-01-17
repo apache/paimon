@@ -24,29 +24,26 @@ under the License.
 
 # Apache Paimon
 
-Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
+Apache Paimon（孵化中）是一个支持高速数据摄取、变更数据跟踪和高效实时分析的流数据湖平台。
 
-Paimon offers the following core capabilities:
+Paimon提供以下核心功能：
 
-- Unified Batch & Streaming: Paimon supports batch write and batch read, as well as streaming write changes and streaming read table changelogs.
-- Data Lake: As a data lake storage, Paimon has the following advantages: low cost, high reliability, and scalable metadata.
-- Merge Engines: Paimon supports rich Merge Engines. By default, the last entry of the primary key is reserved. You can also use the "partial-update" or "aggregation" engine.
-- Changelog producer: Paimon supports rich Changelog producers, such as "lookup" and "full-compaction". The correct changelog can simplify the construction of a streaming pipeline.
-- Append Only Tables: Paimon supports Append Only tables, automatically compact small files, and provides orderly stream reading. You can use this to replace message queues.
+* 统一批处理和流处理：Paimon支持批处理写入和批处理读取，以及流处理写入变更和流处理读取表格变更日志。
+* 数据湖：作为数据湖存储，Paimon具有以下优势：低成本、高可靠性和可伸缩的元数据。
+* 合并引擎：Paimon支持丰富的合并引擎。默认情况下，主键的最后一项被保留。您还可以使用“部分更新”或“聚合”引擎。
+* 变更日志生产者：Paimon支持丰富的变更日志生产者，例如“查找”和“完全压缩”。正确的变更日志可以简化流水线的构建。
+* 追加式表格：Paimon支持追加式表格，自动压缩小文件，并提供有序的流读取。您可以使用这个功能来替代消息队列。
 
 {{< columns >}}
 
-## Try Paimon
+## 尝试Paimon
 
-If you’re interested in playing around with Paimon, check out our
-quick start guide with [Flink]({{< ref "engines/flink" >}}), [Spark]({{< ref "engines/spark" >}}) or [Hive]({{< ref "engines/hive" >}}). It provides a step by
-step introduction to the APIs and guides you through real applications.
+如果您对Paimon感兴趣，可以查看我们的 快速入门指南，使用 [Flink]({{< ref "engines/flink" >}})、[Spark]({{< ref "engines/spark" >}}) 或 [Hive]({{< ref "engines/hive" >}})。它提供了逐步介绍API并指导您进行实际应用的步骤。
 
 <--->
 
-## Get Help with Paimon
+## 获取Paimon的帮助
 
-If you get stuck, you can subscribe User Mailing List (user-subscribe@paimon.apache.org),
-Paimon tracks issues in GitHub and prefers to receive contributions as pull requests. You can also create an issue.
+如果遇到困难，您可以订阅用户邮件列表（user-subscribe@paimon.apache.org）， Paimon在GitHub上跟踪问题并倾向于将贡献作为拉取请求接收。您还可以创建一个问题。
 
 {{< /columns >}}

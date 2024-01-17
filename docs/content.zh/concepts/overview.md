@@ -24,46 +24,34 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+# 概述
 
-Apache Paimon(incubating) is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
+Apache Paimon(incubating) 是一个支持高速数据摄取、变更数据跟踪和高效实时分析的流式数据湖平台。
 
-## Architecture
+## 架构
 
 {{< img src="/img/architecture.png">}}
 
-As shown in the architecture above:
+如上图所示：
 
-**Read/Write:** Paimon supports a versatile way to read/write data and perform OLAP queries.
-- For reads, it supports consuming data
-  - from historical snapshots (in batch mode),
-  - from the latest offset (in streaming mode), or 
-  - reading incremental snapshots in a hybrid way.
-- For writes, it supports streaming synchronization from the changelog of databases (CDC) or batch
-  insert/overwrite from offline data.
+**读写：** Paimon 支持多种读写数据和执行OLAP查询的方式。
 
-**Ecosystem:** In addition to Apache Flink, Paimon also supports read by other computation
-engines like Apache Hive, Apache Spark and Trino.
+* 对于读取操作，它支持从历史快照（批处理模式）、从最新偏移量（流处理模式）或以混合方式读取增量快照。
+* 对于写入操作，它支持从数据库的变更日志（CDC）进行流同步，或从离线数据进行批量插入/覆盖。
 
-**Internal:** Under the hood, Paimon stores the columnar files on the filesystem/object-store and uses
-the LSM tree structure to support a large volume of data updates and high-performance queries.
+**生态系统：** 除了支持Apache Flink外，Paimon还支持其他计算引擎，如Apache Hive、Apache Spark和Trino。
 
-## Unified Storage
+**内部：** 在内部，Paimon将列文件存储在文件系统/对象存储中，并使用LSM树结构来支持大量数据更新和高性能查询。
 
-For streaming engines like Apache Flink, there are typically three types of connectors:
-- Message queue, such as Apache Kafka, it is used in both source and 
-  intermediate stages in this pipeline, to guarantee the latency stay
-  within seconds.
-- OLAP system, such as ClickHouse, it receives processed data in
-  streaming fashion and serving user’s ad-hoc queries. 
-- Batch storage, such as Apache Hive, it supports various operations
-  of the traditional batch processing, including `INSERT OVERWRITE`.
+## 统一存储
 
-Paimon provides table abstraction. It is used in a way that
-does not differ from the traditional database:
-- In `batch` execution mode, it acts like a Hive table and
-  supports various operations of Batch SQL. Query it to see the
-  latest snapshot.
-- In `streaming` execution mode, it acts like a message queue.
-  Query it acts like querying a stream changelog from a message queue
-  where historical data never expires.
+对于像Apache Flink这样的流处理引擎，通常有三种类型的连接器：
+
+* 消息队列，例如Apache Kafka，在此流水线的源和中间阶段都使用它，以确保延迟保持在几秒钟内。
+* OLAP系统，例如ClickHouse，它以流式方式接收处理后的数据，并提供用户的即席查询服务。
+* 批处理存储，例如Apache Hive，它支持传统批处理的各种操作，包括`INSERT OVERWRITE`。
+
+Paimon提供表的抽象。它的使用方式与传统数据库没有区别：
+
+* 在`批处理`执行模式下，它就像一个Hive表，支持各种批处理SQL操作。查询它以查看最新的快照。
+* 在`流处理`执行模式下，它就像一个消息队列。查询它就像查询来自消息队列的流式变更日志，其中历史数据永不过期。

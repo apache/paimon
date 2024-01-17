@@ -24,57 +24,57 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# File Layouts
+# 文件布局
 
-All files of a table are stored under one base directory. Paimon files are organized in a layered style. The following image illustrates the file layout. Starting from a snapshot file, Paimon readers can recursively access all records from the table.
+所有表的文件都存储在一个基础目录下。Paimon文件以分层样式组织。以下图片说明了文件布局。从快照文件开始，Paimon读者可以递归访问表中的所有记录。
 
 {{< img src="/img/file-layout.png">}}
 
-## Snapshot Files
+## 快照文件
 
-All snapshot files are stored in the `snapshot` directory.
+所有快照文件都存储在`snapshot`目录中。
 
-A snapshot file is a JSON file containing information about this snapshot, including
+快照文件是一个包含有关此快照的信息的JSON文件，包括
 
-* the schema file in use
-* the manifest list containing all changes of this snapshot
+* 正在使用的模式文件
+* 包含此快照所有更改的清单列表
 
-## Manifest Files
+## 清单文件
 
-All manifest lists and manifest files are stored in the `manifest` directory.
+所有清单列表和清单文件都存储在`manifest`目录中。
 
-A manifest list is a list of manifest file names.
+清单列表是清单文件名称的列表。
 
-A manifest file is a file containing changes about LSM data files and changelog files. For example, which LSM data file is created and which file is deleted in the corresponding snapshot.
+清单文件是包含有关LSM数据文件和更改日志文件的更改的文件。例如，在相应的快照中创建了哪个LSM数据文件以及哪个文件被删除。
 
-## Data Files
+## 数据文件
 
-Data files are grouped by partitions and buckets. Each bucket directory contains an [LSM tree]({{< ref "concepts/file-layouts#lsm-trees" >}}) and its [changelog files]({{< ref "concepts/primary-key-table/changelog-producer" >}}).
+数据文件按分区和存储桶分组。每个存储桶目录包含一个[LSM树]({{< ref "concepts/file-layouts#lsm-trees" >}})及其[更改日志文件]({{< ref "concepts/primary-key-table/changelog-producer" >}})。
 
-Currently, Paimon supports using orc(default), parquet and avro as data file's format.
+目前，Paimon支持将orc（默认）、parquet和avro用作数据文件的格式。
 
-## LSM Trees
+## LSM树
 
-Paimon adapts the LSM tree (log-structured merge-tree) as the data structure for file storage. This documentation briefly introduces the concepts about LSM trees.
+Paimon将LSM树（日志结构合并树）作为文件存储的数据结构。本文档简要介绍了有关LSM树的概念。
 
-### Sorted Runs
+### 排序运行
 
-LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple [data files]({{< ref "concepts/file-layouts#data-files" >}}) and each data file belongs to exactly one sorted run.
+LSM树将文件组织成几个排序运行。排序运行由一个或多个[数据文件]({{< ref "concepts/file-layouts#data-files" >}})组成，每个数据文件都属于一个排序运行。
 
-Records within a data file are sorted by their primary keys. Within a sorted run, ranges of primary keys of data files never overlap.
+数据文件内部按其主键排序。在排序运行内，数据文件的主键范围永远不会重叠。
 
 {{< img src="/img/sorted-runs.png">}}
 
-As you can see, different sorted runs may have overlapping primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "concepts/primary-key-table/merge-engine" >}}) and the timestamp of each record.
+如您所见，不同的排序运行可能具有重叠的主键范围，甚至可能包含相同的主键。在查询LSM树时，必须组合所有排序运行，并根据用户指定的[合并引擎]({{< ref "concepts/primary-key-table/merge-engine" >}})和每个记录的时间戳合并所有具有相同主键的记录。
 
-New records written into the LSM tree will be first buffered in memory. When the memory buffer is full, all records in memory will be sorted and flushed to disk. A new sorted run is now created.
+写入LSM树的新记录将首先缓存在内存中。当内存缓冲区已满时，内存中的所有记录将被排序并刷新到磁盘。现在创建了一个新的排序运行。
 
-### Compaction
+### 压实
 
-When more and more records are written into the LSM tree, the number of sorted runs will increase. Because querying an LSM tree requires all sorted runs to be combined, too many sorted runs will result in a poor query performance, or even out of memory.
+当越来越多的记录写入LSM树时，排序运行的数量将增加。因为查询LSM树需要组合所有排序运行，太多的排序运行会导致查询性能不佳，甚至会导致内存不足。
 
-To limit the number of sorted runs, we have to merge several sorted runs into one big sorted run once in a while. This procedure is called compaction.
+为了限制排序运行的数量，我们必须不时地将几个排序运行合并为一个大的排序运行。这个过程称为压实。
 
-However, compaction is a resource intensive procedure which consumes a certain amount of CPU time and disk IO, so too frequent compaction may in turn result in slower writes. It is a trade-off between query and write performance. Paimon currently adapts a compaction strategy similar to Rocksdb's [universal compaction](https://github.com/facebook/rocksdb/wiki/Universal-Compaction).
+然而，压实是一个资源密集型的过程，需要消耗一定数量的CPU时间和磁盘IO，因此过于频繁的压实可能会导致写入速度变慢。这是查询性能和写入性能之间的权衡。Paimon目前采用类似Rocksdb的[通用压实](https://github.com/facebook/rocksdb/wiki/Universal-Compaction)的压实策略。
 
-By default, when Paimon appends records to the LSM tree, it will also perform compactions as needed. Users can also choose to perform all compactions in a dedicated compaction job. See [dedicated compaction job]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}}) for more info.
+默认情况下，当Paimon追加记录到LSM树时，它也会根据需要执行压实。用户还可以选择在专用的压实作业中执行所有压实。有关更多信息，请参阅[专用压实作业]({{< ref "maintenance/dedicated-compaction#dedicated-compaction-job" >}})
