@@ -32,9 +32,9 @@ under the License.
 flink-sql-connector-kafka-*.jar
 ```
 
-## Supported Formats
-Flink provides several Kafka CDC formats: Canal, Debezium, Ogg and Maxwell JSON.
-If a message in a Kafka topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Kafka CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
+## 支持的格式
+Flink 提供了多种 Kafka CDC 格式：Canal、Debezium、Ogg 和 Maxwell JSON。
+如果 Kafka 主题中的消息是使用 Change Data Capture (CDC) 工具从另一个数据库捕获的更改事件，那么您可以使用 Paimon Kafka CDC。将 INSERT、UPDATE、DELETE 消息解析为 paimon 表中的数据。
 <table class="table table-bordered">
     <thead>
       <tr>
@@ -63,20 +63,19 @@ If a message in a Kafka topic is a change event captured from another database u
 </table>
 
 {{< hint info >}}
-The JSON sources possibly missing some information. For example, Ogg and Maxwell format standards don't contain field 
-types; When you write JSON sources into Flink Kafka sink, it will only reserve data and row type and drop other information. 
-The synchronization job will try best to handle the problem as follows:
-1. If missing field types, Paimon will use 'STRING' type as default. 
-2. If missing database name or table name, you cannot do database synchronization, but you can still do table synchronization.
-3. If missing primary keys, the job might create non primary key table. You can set primary keys when submit job in table 
-synchronization.
+JSON 源可能缺少一些信息。例如，Ogg 和 Maxwell 格式标准不包含字段类型；当您将 JSON 源写入 Flink Kafka 汇流，它只会保留数据和行类型，并删除其他信息。
+同步作业将尝试尽力处理以下问题：
+
+如果缺少字段类型，Paimon 将使用 'STRING' 类型作为默认类型。
+如果缺少数据库名称或表名称，您无法进行数据库同步，但仍然可以进行表同步。
+如果缺少主键，作业可能会创建非主键表。在提交表同步作业时，您可以设置主键。
 {{< /hint >}}
 
-## Synchronizing Tables
+## 同步表
 
-By using [KafkaSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from Kafka's one topic into one Paimon table.
+通过在 Flink DataStream 作业中使用 [KafkaSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncTableAction) 或直接通过 flink run，用户可以将一个或多个表从 Kafka 的一个主题同步到一个 Paimon 表中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 `flink run` 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -96,7 +95,7 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/kafka_sync_table >}}
 
-If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified Kafka topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Kafka topic's tables.
+如果您指定的 Paimon 表不存在，此操作将自动创建该表。其架构将从所有指定的 Kafka 主题表中派生，它从主题获取最早的非 DDL 数据解析模式。如果 Paimon 表已经存在，其模式将与所有指定的 Kafka 主题表的模式进行比较。
 
 Example 1:
 
@@ -121,17 +120,11 @@ Example 1:
     --table_conf sink.parallelism=4
 ```
 
-If the kafka topic doesn't contain message when you start the synchronization job, you must manually create the table
-before submitting the job. You can define the partition keys and primary keys only, and the left columns will be added
-by the synchronization job.
-
-NOTE: In this case you shouldn't use --partition_keys or --primary_keys, because those keys are defined when creating
-the table and can not be modified. Additionally, if you specified computed columns, you should also define all the argument
-columns used for computed columns.
+如果在启动同步作业时 Kafka 主题不包含消息，您必须在提交作业之前手动创建表。您只能定义分区键和主键，剩下的列将由同步作业添加。
+注意：在这种情况下，您不应该使用 --partition_keys 或 --primary_keys，因为这些键是在创建表时定义的，不能修改。此外，如果您指定了计算列，您还应该定义用于计算列的所有参数列。
 
 Example 2:
-If you want to synchronize a table which has primary key 'id INT', and you want to compute a partition key 'part=date_format(create_time,yyyy-MM-dd)',
-you can create a such table first (the other columns can be omitted):
+如果要同步一个具有主键 'id INT' 的表，同时要计算一个分区键 'part=date_format(create_time,yyyy-MM-dd)'，您可以首先创建这样的表（其他列可以省略）：
 
 ```sql
 CREATE TABLE test_db.test_table (
@@ -142,7 +135,7 @@ CREATE TABLE test_db.test_table (
 ) PARTITIONED BY (part);
 ```
 
-Then you can submit synchronization job:
+然后，您可以提交同步作业：
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -155,11 +148,11 @@ Then you can submit synchronization job:
     ... (other conf)
 ```
 
-## Synchronizing Databases
+## 同步数据库
 
-By using [KafkaSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the multi topic or one topic into one Paimon database.
+通过在 Flink DataStream 作业中使用 [KafkaSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncDatabaseAction) 或直接通过 flink run，用户可以将多个主题或一个主题同步到一个 Paimon 数据库中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 flink run 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -179,16 +172,13 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/kafka_sync_database >}}
 
-Only tables with primary keys will be synchronized.
+只会同步带有主键的表。
 
-This action will build a single combined sink for all tables. For each Kafka topic's table to be synchronized, if the
-corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived
-from all specified Kafka topic's tables. If the Paimon table already exists and its schema is different from that parsed
-from Kafka record, this action will try to preform schema evolution.
+此操作将为所有表构建一个单一的组合汇流。对于要同步的每个 Kafka 主题的表，如果相应的 Paimon 表不存在，此操作将自动创建该表，并且其模式将从所有指定的 Kafka 主题表中派生。如果 Paimon 表已经存在并且其模式与从 Kafka 记录解析的模式不同，此操作将尝试执行模式演化。
 
 Example
 
-Synchronization from one Kafka topic to Paimon database.
+从一个 Kafka 主题同步到 Paimon 数据库。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -207,7 +197,7 @@ Synchronization from one Kafka topic to Paimon database.
     --table_conf sink.parallelism=4
 ```
 
-Synchronization from multiple Kafka topics to Paimon database.
+从多个 Kafka 主题同步到 Paimon 数据库。
 
 ```bash
 <FLINK_HOME>/bin/flink run \

@@ -32,9 +32,9 @@ under the License.
 flink-connector-pulsar-*.jar
 ```
 
-## Supported Formats
-Flink provides several Pulsar CDC formats: Canal, Debezium, Ogg and Maxwell JSON.
-If a message in a pulsar topic is a change event captured from another database using the Change Data Capture (CDC) tool, then you can use the Paimon Pulsar CDC. Write the INSERT, UPDATE, DELETE messages parsed into the paimon table.
+## 支持的格式
+
+Flink 提供了多种 Pulsar CDC 格式：Canal、Debezium、Ogg 和 Maxwell JSON。 如果 Pulsar 主题中的消息是使用 Change Data Capture (CDC) 工具从另一个数据库捕获的更改事件，那么您可以使用 Paimon Pulsar CDC。将解析为 INSERT、UPDATE、DELETE 消息的数据写入 paimon 表中。
 <table class="table table-bordered">
     <thead>
       <tr>
@@ -63,20 +63,18 @@ If a message in a pulsar topic is a change event captured from another database 
 </table>
 
 {{< hint info >}}
-The JSON sources possibly missing some information. For example, Ogg and Maxwell format standards don't contain field 
-types; When you write JSON sources into Flink Pulsar sink, it will only reserve data and row type and drop other information. 
-The synchronization job will try best to handle the problem as follows:
-1. If missing field types, Paimon will use 'STRING' type as default. 
-2. If missing database name or table name, you cannot do database synchronization, but you can still do table synchronization.
-3. If missing primary keys, the job might create non primary key table. You can set primary keys when submit job in table 
-synchronization.
+JSON 源可能缺少一些信息。例如，Ogg 和 Maxwell 格式标准不包含字段类型；当您将 JSON 源写入 Flink Pulsar 汇流器时，它只会保留数据和行类型，并删除其他信息。同步作业将尽力处理以下问题：
+
+1. 如果缺少字段类型，Paimon 将使用 'STRING' 类型作为默认类型。
+2. 如果缺少数据库名称或表名称，您无法进行数据库同步，但仍可以进行表同步。
+3. 如果缺少主键，作业可能会创建非主键表。在表同步中提交作业时，可以设置主键。
 {{< /hint >}}
 
-## Synchronizing Tables
+## 同步表
 
-By using [PulsarSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from Pulsar's one topic into one Paimon table.
+通过在 Flink DataStream 作业中使用 [PulsarSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncTableAction) 或直接通过 `flink run`，用户可以将一个或多个表从 Pulsar 的一个主题同步到一个 Paimon 表中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 `flink run` 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -96,7 +94,7 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/pulsar_sync_table >}}
 
-If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified Pulsar topic's tables,it gets the earliest non-DDL data parsing schema from topic. If the Paimon table already exists, its schema will be compared against the schema of all specified Pulsar topic's tables.
+如果您指定的 Paimon 表不存在，此操作将自动创建该表。其模式将从所有指定的 Pulsar 主题的表中派生，它获取主题的最早的非 DDL 数据解析模式。如果 Paimon 表已经存在，则其模式将与所有指定的 Pulsar 主题的表的模式进行比较。
 
 Example 1:
 
@@ -122,17 +120,11 @@ Example 1:
     --table_conf sink.parallelism=4
 ```
 
-If the Pulsar topic doesn't contain message when you start the synchronization job, you must manually create the table
-before submitting the job. You can define the partition keys and primary keys only, and the left columns will be added
-by the synchronization job.
+如果在启动同步作业时 Pulsar 主题不包含消息，您必须在提交作业之前手动创建表。您只能定义分区键和主键，其余列将由同步作业添加。
 
-NOTE: In this case you shouldn't use --partition_keys or --primary_keys, because those keys are defined when creating
-the table and can not be modified. Additionally, if you specified computed columns, you should also define all the argument
-columns used for computed columns.
+注意：在这种情况下，您不应使用 --partition_keys 或 --primary_keys，因为这些键在创建表时定义，并且不能修改。另外，如果您指定了计算列，还应定义用于计算列的所有参数列。
 
-Example 2:
-If you want to synchronize a table which has primary key 'id INT', and you want to compute a partition key 'part=date_format(create_time,yyyy-MM-dd)',
-you can create a such table first (the other columns can be omitted):
+示例 2： 如果您想要同步一个具有主键 'id INT' 的表，并且想要计算一个分区键 'part=date_format(create_time,yyyy-MM-dd)'，您可以首先创建这样一个表（其他列可以省略）：
 
 ```sql
 CREATE TABLE test_db.test_table (
@@ -143,7 +135,7 @@ CREATE TABLE test_db.test_table (
 ) PARTITIONED BY (part);
 ```
 
-Then you can submit synchronization job:
+然后，您可以提交同步作业：
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -156,11 +148,11 @@ Then you can submit synchronization job:
     ... (other conf)
 ```
 
-## Synchronizing Databases
+## 同步数据库
 
-By using [PulsarSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the multi topic or one topic into one Paimon database.
+通过在 Flink DataStream 作业中使用 [PulsarSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/pulsar/PulsarSyncDatabaseAction) 或直接通过 `flink run`，用户可以将多个主题或一个主题同步到一个 Paimon 数据库中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 `flink run` 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -180,16 +172,13 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/pulsar_sync_database >}}
 
-Only tables with primary keys will be synchronized.
+只有带有主键的表才会被同步。
 
-This action will build a single combined sink for all tables. For each Pulsar topic's table to be synchronized, if the
-corresponding Paimon table does not exist, this action will automatically create the table, and its schema will be derived
-from all specified Pulsar topic's tables. If the Paimon table already exists and its schema is different from that parsed
-from Pulsar record, this action will try to preform schema evolution.
+此操作将为所有表构建一个单一的组合接收器。对于要同步的每个 Pulsar 主题的表，如果相应的 Paimon 表不存在，此操作将自动创建该表，并且其模式将从所有指定的 Pulsar 主题的表中派生。如果 Paimon 表已经存在并且其模式与从 Pulsar 记录解析的模式不同，此操作将尝试执行模式演变。
 
-Example
+示例
 
-Synchronization from one Pulsar topic to Paimon database.
+从一个 Pulsar 主题同步到 Paimon 数据库。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -209,7 +198,7 @@ Synchronization from one Pulsar topic to Paimon database.
     --table_conf sink.parallelism=4
 ```
 
-Synchronization from multiple Pulsar topics to Paimon database.
+从多个 Pulsar 主题同步到 Paimon 数据库。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -231,7 +220,7 @@ Synchronization from multiple Pulsar topics to Paimon database.
 
 ## Additional pulsar_config
 
-There are some useful options to build Flink Pulsar Source, but they are not provided by flink-pulsar-connector document. They are:
+有一些有用的选项可用于构建 Flink Pulsar 源，但它们未在 flink-pulsar-connector 文档中提供。它们包括：
 
 <table class="table table-bordered">
     <thead>

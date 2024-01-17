@@ -31,13 +31,13 @@ under the License.
 ```
 flink-sql-connector-mongodb-cdc-*.jar
 ```
-only cdc 2.4+ is supported
+仅支持 cdc 2.4+
 
-## Synchronizing Tables
+## 同步表
 
-By using [MongoDBSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one collection from MongoDB into one Paimon table.
+通过在 Flink DataStream 作业中使用 [MongoDBSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncTableAction) 或直接通过 flink run，用户可以将 MongoDB 中的一个集合同步到 Paimon 表格中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 flink run 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -55,24 +55,15 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/mongodb_sync_table >}}
 
-Here are a few points to take note of:
+以下是一些需要注意的要点：
 
-1. The `mongodb_conf` introduces the `schema.start.mode` parameter on top of the MongoDB CDC source configuration.`schema.start.mode` provides two modes: `dynamic` (default) and `specified`.
-   In `dynamic` mode, MongoDB schema information is parsed at one level, which forms the basis for schema change evolution.
-   In `specified` mode, synchronization takes place according to specified criteria.
-   This can be done by configuring `field.name` to specify the synchronization fields and `parser.path` to specify the JSON parsing path for those fields.
-   The difference between the two is that the `specify` mode requires the user to explicitly identify the fields to be used and create a mapping table based on those fields.
-   Dynamic mode, on the other hand, ensures that Paimon and MongoDB always keep the top-level fields consistent, eliminating the need to focus on specific fields.
-   Further processing of the data table is required when using values from nested fields.
-2. The `mongodb_conf` introduces the `default.id.generation` parameter as an enhancement to the MongoDB CDC source configuration. The `default.id.generation` setting offers two distinct behaviors: when set to true and when set to false.
-   When `default.id.generation` is set to true, the MongoDB CDC source adheres to the default `_id` generation strategy, which involves stripping the outer $oid nesting to provide a more straightforward identifier. This mode simplifies the `_id` representation, making it more direct and user-friendly.
-   On the contrary, when `default.id.generation` is set to false, the MongoDB CDC source retains the original `_id` structure, without any additional processing. This mode offers users the flexibility to work with the raw `_id` format as provided by MongoDB, preserving any nested elements like `$oid`.
-   The choice between the two hinges on the user's preference: the former for a cleaner, simplified `_id` and the latter for a direct representation of MongoDB's `_id` structure.
+1. `mongodb_conf` 引入了 `schema.start.mode` 参数，除了 MongoDB CDC 源配置之外，还在其基础上提供了两种模式：`dynamic`（默认）和 `specified`。 在 `dynamic` 模式下，MongoDB 模式信息在一个级别上进行解析，这形成了模式更改演变的基础。 在 `specified` 模式下，根据指定的条件进行同步。 可以通过配置 `field.name` 来指定同步字段，通过 `parser.path` 来指定这些字段的 JSON 解析路径。 两者之间的区别在于 `specify` 模式要求用户明确标识要使用的字段并创建一个基于这些字段的映射表。 另一方面，动态模式可以确保 Paimon 和 MongoDB 始终保持顶级字段一致，消除了专注于特定字段的需求。 当使用来自嵌套字段的值时，需要进一步处理数据表。
+2. `mongodb_conf` 引入了 `default.id.generation` 参数，以增强 MongoDB CDC 源配置。 `default.id.generation` 设置提供了两种不同的行为：设置为 true 和设置为 false 时。 当 `default.id.generation` 设置为 true 时，MongoDB CDC 源遵循默认的 `_id` 生成策略，该策略涉及去除外部的 $oid 嵌套，以提供更直接的标识符。 这种模式简化了 `_id` 表示，使其更直接和用户友好。 相反，当 `default.id.generation` 设置为 false 时，MongoDB CDC 源保留了原始的 `_id` 结构，不进行任何额外的处理。 这种模式为用户提供了使用 MongoDB 提供的原始 `_id` 格式的灵活性，包括保留像 `$oid` 这样的嵌套元素。 选择两者之间的方式取决于用户的偏好：前者用于更干净、更简化的 `_id`，后者用于直接表示 MongoDB 的 `_id` 结构。
 
 {{< generated/mongodb_operator >}}
 
 
-Functions can be invoked at the tail end of a path - the input to a function is the output of the path expression. The function output is dictated by the function itself.
+函数可以在路径的末尾调用 - 函数的输入由函数本身决定。
 
 {{< generated/mongodb_functions >}}
 
@@ -119,18 +110,14 @@ Path Examples
 
 {{< generated/mongodb_path_example >}}
 
-2. The synchronized table is required to have its primary key set as `_id`.
-   This is because MongoDB's change events are recorded before updates in messages.
-   Consequently, we can only convert them into Flink's UPSERT change log stream.
-   The upstart stream demands a unique key, which is why we must declare `_id` as the primary key.
-   Declaring other columns as primary keys is not feasible, as delete operations only encompass the _id and sharding key, excluding other keys and values.
+2. 同步表格需要将其主键设置为 `_id`。 这是因为 MongoDB 的更改事件记录在消息之前。 因此，我们只能将它们转换为 Flink 的 UPSERT 更改日志流。 Upsert 流需要一个唯一的键，这就是为什么我们必须声明 `_id` 为主键。 声明其他列为主键是不可行的，因为删除操作只涵盖了 _id 和分片键，不包括其他键和值。
+    
+3. MongoDB Change Streams 旨在返回简单的 JSON 文档，不包含任何数据类型定义。 这是因为 MongoDB 是一种面向文档的数据库，其核心特性之一是动态模式，文档可以包含不同的字段，并且字段的数据类型可以灵活。 因此，Change Streams 中缺少数据类型定义是为了保持此灵活性和可扩展性。 出于这个原因，我们将同步 MongoDB 到 Paimon 的所有字段数据类型都设置为 String，以解决无法获取数据类型的问题。
+    
 
-3. MongoDB Change Streams are designed to return simple JSON documents without any data type definitions. This is because MongoDB is a document-oriented database, and one of its core features is the dynamic schema, where documents can contain different fields, and the data types of fields can be flexible. Therefore, the absence of data type definitions in Change Streams is to maintain this flexibility and extensibility.
-   For this reason, we have set all field data types for synchronizing MongoDB to Paimon as String to address the issue of not being able to obtain data types.
+如果您指定的 Paimon 表格不存在，此操作将自动创建该表格。 其模式将从 MongoDB 集合派生而来。
 
-If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from MongoDB collection.
-
-Example 1: synchronize collection into one Paimon table
+Example 1: 将集合同步到一个 Paimon 表格中
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -153,7 +140,7 @@ Example 1: synchronize collection into one Paimon table
     --table_conf sink.parallelism=4
 ```
 
-Example 2: Synchronize collection into a Paimon table according to the specified field mapping.
+Example 2: 根据指定的字段映射将集合同步到 Paimon 表格中
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -178,11 +165,11 @@ Example 2: Synchronize collection into a Paimon table according to the specified
     --table_conf sink.parallelism=4
 ```
 
-## Synchronizing Databases
+## 同步数据库
 
-By using [MongoDBSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MongoDB database into one Paimon database.
+通过在 Flink DataStream 作业中使用 [MongoDBSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBSyncDatabaseAction) 或直接通过 `flink run`，用户可以将整个 MongoDB 数据库同步到一个 Paimon 数据库中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过 `flink run` 使用此功能，请运行以下 shell 命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -201,12 +188,9 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/mongodb_sync_database >}}
 
-All collections to be synchronized need to set _id as the primary key.
-For each MongoDB collection to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table.
-Its schema will be derived from all specified MongoDB collection. If the Paimon table already exists, its schema will be compared against the schema of all specified MongoDB collection.
-Any MongoDB tables created after the commencement of the task will automatically be included.
+要同步的所有集合都需要将 _id 设置为主键。 要同步的每个 MongoDB 集合，如果相应的 Paimon 表格不存在，此操作将自动创建该表格。 其模式将从所有指定的 MongoDB 集合派生而来。 如果 Paimon 表格已经存在，其模式将与所有指定的 MongoDB 集合的模式进行比较。 在任务开始后创建的任何 MongoDB 表格将自动包含在内。
 
-Example 1: synchronize entire database
+Example 1: 同步整个数据库
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -225,7 +209,7 @@ Example 1: synchronize entire database
     --table_conf sink.parallelism=4
 ```
 
-Example 2: Synchronize the specified table.
+Example 2: 根据指定的表格同步
 
 ```bash
 <FLINK_HOME>/bin/flink run \

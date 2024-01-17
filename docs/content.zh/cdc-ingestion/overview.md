@@ -24,88 +24,77 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Overview
+# 概述
 
-Paimon supports a variety of ways to ingest data into Paimon tables with schema evolution. This means that the added
-columns are synchronized to the Paimon table in real time and the synchronization job will not be restarted for this purpose.
+Paimon支持多种方式将数据导入Paimon表并进行模式演化。这意味着新增的列会实时同步到Paimon表，并且不会为此目的重新启动同步作业。
 
-We currently support the following sync ways:
+我们目前支持以下同步方式：
 
-1. MySQL Synchronizing Table: synchronize one or multiple tables from MySQL into one Paimon table.
-2. MySQL Synchronizing Database: synchronize the whole MySQL database into one Paimon database.
-3. [Program API Sync]({{< ref "/program-api/flink-api#cdc-ingestion-table" >}}): synchronize your custom DataStream input into one Paimon table.
-4. Kafka Synchronizing Table: synchronize one Kafka topic's table into one Paimon table.
-5. Kafka Synchronizing Database: synchronize one Kafka topic containing multiple tables or multiple topics containing one table each into one Paimon database.
-6. MongoDB Synchronizing Collection: synchronize one Collection from MongoDB into one Paimon table.
-7. MongoDB Synchronizing Database: synchronize the whole MongoDB database into one Paimon database.
-8. Pulsar Synchronizing Table: synchronize one Pulsar topic's table into one Paimon table.
-9. Pulsar Synchronizing Database: synchronize one Pulsar topic containing multiple tables or multiple topics containing one table each into one Paimon database.
+1. MySQL表同步：将一个或多个MySQL表同步到一个Paimon表中。
+2. MySQL数据库同步：将整个MySQL数据库同步到一个Paimon数据库中。
+3. [程序API同步]({{< ref "/program-api/flink-api#cdc-ingestion-table" >}})：将自定义的DataStream输入同步到一个Paimon表中。
+4. Kafka表同步：将一个Kafka主题的表同步到一个Paimon表中。
+5. Kafka数据库同步：将包含多个表的一个Kafka主题或包含一个表的多个主题同步到一个Paimon数据库中。
+6. MongoDB集合同步：将MongoDB中的一个集合同步到一个Paimon表中。
+7. MongoDB数据库同步：将整个MongoDB数据库同步到一个Paimon数据库中。
+8. Pulsar表同步：将一个Pulsar主题的表同步到一个Paimon表中。
+9. Pulsar数据库同步：将包含多个表的一个Pulsar主题或包含一个表的多个主题同步到一个Paimon数据库中。
 
-## What is Schema Evolution
+## 什么是模式演化
 
-Suppose we have a MySQL table named `tableA`, it has three fields: `field_1`, `field_2`, `field_3`. When we want to load
-this MySQL table to Paimon, we can do this in Flink SQL, or use [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction).
+假设我们有一个名为`tableA`的MySQL表，它有三个字段：`field_1`、`field_2`、`field_3`。当我们想要将这个MySQL表加载到Paimon时，我们可以在Flink SQL中执行此操作，或者使用[MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction)。
 
 **Flink SQL:**
 
-In Flink SQL, if we change the table schema of the MySQL table after the ingestion, the table schema change will not be synchronized to Paimon.
+在Flink SQL中，如果在导入后更改了MySQL表的表模式，则表模式更改不会同步到Paimon。
 
 {{< img src="/img/cdc-ingestion-flinksql.png">}}
 
 **MySqlSyncTableAction:**
 
-In [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction),
-if we change the table schema of the MySQL table after the ingestion, the table schema change will be synchronized to Paimon,
-and the data of `field_4` which is newly added will be synchronized to Paimon too.
+在[MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction)中， 如果在导入后更改了MySQL表的表模式，则表模式更改将同步到Paimon，并且新添加的`field_4`的数据也将同步到Paimon。
 
 {{< img src="/img/cdc-ingestion-schema-evolution.png">}}
 
-## Schema Change Evolution
+## 模式变更演化
 
-Cdc Ingestion supports a limited number of schema changes. Currently, the framework can not rename table, drop columns, so the
-behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` will add a new column. Currently supported schema changes includes:
+Cdc Ingestion支持有限数量的模式更改。目前，该框架无法重命名表或删除列，因此`RENAME TABLE`和`DROP COLUMN`的行为将被忽略，而`RENAME COLUMN`将添加一个新列。目前支持的模式更改包括：
 
-* Adding columns.
+* 添加列。
 
 * Altering column types. More specifically,
 
-    * altering from a string type (char, varchar, text) to another string type with longer length,
-    * altering from a binary type (binary, varbinary, blob) to another binary type with longer length,
-    * altering from an integer type (tinyint, smallint, int, bigint) to another integer type with wider range,
-    * altering from a floating-point type (float, double) to another floating-point type with wider range,
+    * 从字符串类型（char、varchar、text）更改为另一种具有更长长度的字符串类型，
+    * 从二进制类型（binary、varbinary、blob）更改为具有更长长度的另一种二进制类型，
+    * 从整数类型（tinyint、smallint、int、bigint）更改为具有更宽范围的另一种整数类型，
+    * 从浮点类型（float、double）更改为具有更宽范围的另一种浮点类型，
+    
+    都得到支持。
 
-  are supported.
+## 计算函数
 
-## Computed Functions
-
-`--computed_column` are the definitions of computed columns. The argument field is from source table field name. Supported expressions are:
+`--computed_column`是计算列的定义。参数字段来自源表字段名称。支持的表达式包括：
 
 {{< generated/compute_column >}}
 
-## Special Data Type Mapping
+## 特殊数据类型映射
 
-1. MySQL TINYINT(1) type will be mapped to Boolean by default. If you want to store number (-128~127) in it like MySQL,
-   you can specify type mapping option `tinyint1-not-bool` (Use `--type_mapping`), then the column will be mapped to TINYINT in Paimon table.
-2. You can use type mapping option `to-nullable` (Use `--type_mapping`) to ignore all NOT NULL constraints (except primary keys).
-3. You can use type mapping option `to-string` (Use `--type_mapping`) to map all MySQL data type to STRING.
-4. You can use type mapping option `char-to-string` (Use `--type_mapping`) to map MySQL CHAR(length)/VARCHAR(length) types to STRING.
-5. You can use type mapping option `longtext-to-bytes` (Use `--type_mapping`) to map MySQL LONGTEXT types to BYTES.
-6. MySQL `BIGINT UNSIGNED`, `BIGINT UNSIGNED ZEROFILL`, `SERIAL` will be mapped to `DECIMAL(20, 0)` by default. You can 
-use type mapping option `bigint-unsigned-to-bigint` (Use `--type_mapping`) to map these types to Paimon `BIGINT`, but there 
-is potential data overflow because `BIGINT UNSIGNED` can store up to 20 digits integer value but Paimon `BIGINT` can only 
-store up to 19 digits integer value. So you should ensure the overflow won't occur when using this option.
-7. MySQL BIT(1) type will be mapped to Boolean.
-8. When using Hive catalog, MySQL TIME type will be mapped to STRING.
-9. MySQL BINARY will be mapped to Paimon VARBINARY. This is because the binary value is passed as bytes in binlog, so it
-   should be mapped to byte type (BYTES or VARBINARY). We choose VARBINARY because it can retain the length information.
+1. MySQL的TINYINT(1)类型将默认映射为布尔类型。如果您想要像MySQL一样在其中存储数字（-128~127），可以指定类型映射选项 `tinyint1-not-bool`（使用`--type_mapping`），然后该列将映射为Paimon表中的TINYINT。
+2. 您可以使用类型映射选项 `to-nullable`（使用`--type_mapping`）来忽略所有非NULL约束（除了主键）。
+3. 您可以使用类型映射选项 `to-string`（使用`--type_mapping`）将所有MySQL数据类型映射为STRING。
+4. 您可以使用类型映射选项 `char-to-string`（使用`--type_mapping`）将MySQL CHAR(length)/VARCHAR(length)类型映射为STRING。
+5. 您可以使用类型映射选项 `longtext-to-bytes`（使用`--type_mapping`）将MySQL LONGTEXT类型映射为BYTES。
+6. MySQL的`BIGINT UNSIGNED`、`BIGINT UNSIGNED ZEROFILL`、`SERIAL`将默认映射为`DECIMAL(20, 0)`。您可以使用类型映射选项 `bigint-unsigned-to-bigint`（使用`--type_mapping`）将这些类型映射为Paimon的`BIGINT`，但由于`BIGINT UNSIGNED`最多可以存储20位整数值，而Paimon的`BIGINT`只能存储最多19位整数值，所以在使用此选项时应确保不会发生溢出。
+7. MySQL的BIT(1)类型将映射为布尔类型。
+8. 当使用Hive目录时，MySQL的TIME类型将映射为STRING。
+9. MySQL的BINARY将映射为Paimon的VARBINARY。这是因为二进制值以字节形式传递在binlog中，因此应该映射为字节类型（BYTES或VARBINARY）。我们选择VARBINARY是因为它可以保留长度信息。
 
-## Custom Job Settings
+## 自定义作业设置
 
-### Checkpointing
+### 检查点
 
-Use `-Dexecution.checkpointing.interval=<interval>` to enable checkpointing and set interval. For 0.7 and later versions,
-if you haven't enabled checkpointing, Paimon will enable checkpointing by default and set checkpoint interval to 180 seconds.
+使用`-Dexecution.checkpointing.interval=<interval>`来启用检查点并设置间隔。对于0.7及更高版本，如果您没有启用检查点，Paimon将默认启用检查点并将检查点间隔设置为180秒。
 
-### Job Name
+### 作业名称
 
-Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.
+使用`-Dpipeline.name=<job-name>`来设置自定义同步作业名称。

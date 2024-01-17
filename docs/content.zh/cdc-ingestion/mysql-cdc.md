@@ -26,7 +26,7 @@ under the License.
 
 # MySQL CDC
 
-Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
+Paimon支持使用变更数据捕获（CDC）从不同的数据库同步更改。此功能需要Flink及其 [CDC连接器](https://ververica.github.io/flink-cdc-connectors/)。
 
 ## Prepare CDC Bundled Jar
 
@@ -34,11 +34,11 @@ Paimon supports synchronizing changes from different databases using change data
 flink-sql-connector-mysql-cdc-*.jar
 ```
 
-## Synchronizing Tables
+## 同步表
 
-By using [MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from MySQL into one Paimon table.
+通过在Flink DataStream作业中使用[MySqlSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncTableAction)或直接通过`flink run`，用户可以将一个或多个表格从MySQL同步到一个Paimon表格中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过`flink run`使用此功能，请运行以下shell命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -59,9 +59,10 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/mysql_sync_table >}}
 
-If the Paimon table you specify does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
+如果您指定的Paimon表格不存在，此操作将自动创建该表格。其架构将根据所有指定的MySQL表格派生而来。如果Paimon表格已存在，其架构将与所有指定的MySQL表格的架构进行比较。
 
-Example 1: synchronize tables into one Paimon table
+
+Example 1: 将表格同步到一个Paimon表格中
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -85,14 +86,11 @@ Example 1: synchronize tables into one Paimon table
     --table_conf sink.parallelism=4
 ```
 
-As example shows, the mysql_conf's table-name supports regular expressions to monitor multiple tables that satisfy
-the regular expressions. The schemas of all the tables will be merged into one Paimon table schema.
+如示例所示，mysql_conf的table-name支持正则表达式以监视满足正则表达式的多个表格。所有表格的架构将合并为一个Paimon表格架构。
 
-Example 2: synchronize shards into one Paimon table
+示例2：将分片同步到一个Paimon表格中
 
-You can also set 'database-name' with a regular expression to capture multiple databases. A typical scenario is that a 
-table 'source_table' is split into database 'source_db1', 'source_db2' ..., then you can synchronize data of all the 
-'source_table's into one Paimon table.
+您还可以将'database-name'设置为正则表达式，以捕获多个数据库。一个典型的情况是，一个表格'source_table'被分割成数据库'source_db1'，'source_db2'，...，然后您可以将所有'source_table'的数据同步到一个Paimon表格中。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -116,11 +114,11 @@ table 'source_table' is split into database 'source_db1', 'source_db2' ..., then
     --table_conf sink.parallelism=4
 ```
 
-## Synchronizing Databases
+## 同步数据库
 
-By using [MySqlSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction) in a Flink DataStream job or directly through `flink run`, users can synchronize the whole MySQL database into one Paimon database.
+通过在Flink DataStream作业中使用[MySqlSyncDatabaseAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/mysql/MySqlSyncDatabaseAction)或直接通过`flink run`，用户可以将整个MySQL数据库同步到一个Paimon数据库中。
 
-To use this feature through `flink run`, run the following shell command.
+要通过`flink run`使用此功能，请运行以下shell命令。
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -144,11 +142,11 @@ To use this feature through `flink run`, run the following shell command.
 
 {{< generated/mysql_sync_database >}}
 
-Only tables with primary keys will be synchronized.
+只有具有主键的表格将被同步。
 
-For each MySQL table to be synchronized, if the corresponding Paimon table does not exist, this action will automatically create the table. Its schema will be derived from all specified MySQL tables. If the Paimon table already exists, its schema will be compared against the schema of all specified MySQL tables.
+要同步的每个MySQL表格，如果相应的Paimon表格不存在，此操作将自动创建该表格。其架构将从所有指定的MySQL表格派生而来。如果Paimon表格已经存在，其架构将与所有指定的MySQL表格的架构进行比较。
 
-Example 1: synchronize entire database
+示例1：同步整个数据库
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -167,10 +165,9 @@ Example 1: synchronize entire database
     --table_conf sink.parallelism=4
 ```
 
-Example 2: synchronize newly added tables under database
+示例2：同步新增的数据库表格
 
-Let's say at first a Flink job is synchronizing tables [product, user, address] 
-under database `source_db`. The command to submit the job looks like:
+假设一开始一个Flink作业正在同步数据库`source_db`下的表格[product, user, address]。提交作业的命令如下所示：
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -190,13 +187,9 @@ under database `source_db`. The command to submit the job looks like:
     --including_tables 'product|user|address'
 ```
 
-At a later point we would like the job to also synchronize tables [order, custom], 
-which contains history data. We can achieve this by recovering from the previous
-snapshot of the job and thus reusing existing state of the job. The recovered job will 
-first snapshot newly added tables, and then continue reading changelog from previous 
-position automatically.
+在以后的某个时候，我们希望该作业还同步包含历史数据的表格[order, custom]。我们可以通过从作业的先前快照中恢复并重用作业的现有状态来实现这一点。恢复的作业将首先快照新添加的表格，然后自动从先前位置读取变更日志。
 
-The command to recover from previous snapshot and add new tables to synchronize looks like:
+从以前的快照中恢复并添加新表格以进行同步的命令如下所示：
 
 
 ```bash
@@ -217,13 +210,12 @@ The command to recover from previous snapshot and add new tables to synchronize 
 ```
 
 {{< hint info >}}
-You can set `--mode combined` to enable synchronizing newly added tables without restarting job.
+您可以设置`--mode combined`以在不重新启动作业的情况下启用同步新增的表格。
 {{< /hint >}}
 
-Example 3: synchronize and merge multiple shards
+示例3：同步和合并多个分片
 
-Let's say you have multiple database shards `db1`, `db2`, ... and each database has tables `tbl1`, `tbl2`, .... You can 
-synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... by following command:
+假设您有多个数据库分片`db1`，`db2`，...，每个数据库都有表格`tbl1`，`tbl2`，....您可以通过以下命令将所有`db.+.tbl.+`同步到表格`test_db.tbl1`，`test_db.tbl2` ... 中：
 
 ```bash
 <FLINK_HOME>/bin/flink run \
@@ -243,16 +235,14 @@ synchronize all the `db.+.tbl.+` into tables `test_db.tbl1`, `test_db.tbl2` ... 
     --including_tables 'tbl.+'
 ```
 
-By setting database-name to a regular expression, the synchronization job will capture all tables under matched databases 
-and merge tables of the same name into one table.
+通过将database-name设置为正则表达式，同步作业将捕获匹配的数据库下的所有表格，并将具有相同名称的表格合并为一个表格。
 
 {{< hint info >}}
-You can set `--merge_shards false` to prevent merging shards. The synchronized tables will be named to 'databaseName_tableName' 
-to avoid potential name conflict.
+您可以设置`--merge_shards false`以防止合并分片。同步的表格将命名为'databaseName_tableName'，以避免潜在的名称冲突。
 {{< /hint >}}
 
-## FAQ
+## 常见问题解答
 
-1. Chinese characters in records ingested from MySQL are garbled.
-* Try to set `env.java.opts: -Dfile.encoding=UTF-8` in `flink-conf.yaml`
-(the option is changed to `env.java.opts.all` since Flink-1.17).
+1. 从MySQL中摄取的记录中的中文字符显示乱码。
+
+* 尝试在`flink-conf.yaml`中设置`env.java.opts: -Dfile.encoding=UTF-8`（自Flink-1.17以来，该选项已更改为`env.java.opts.all`）。
