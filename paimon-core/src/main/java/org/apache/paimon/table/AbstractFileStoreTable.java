@@ -337,6 +337,8 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         if (tagManager.tagExists(version)) {
             return travelToSnapshot(tagManager.taggedSnapshot(version), options);
         } else if (version.chars().allMatch(Character::isDigit)) {
+            options.remove(CoreOptions.SCAN_TAG_NAME.key());
+            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
             return travelToSnapshot(Long.parseLong(version), options);
         }
         return Optional.empty();
