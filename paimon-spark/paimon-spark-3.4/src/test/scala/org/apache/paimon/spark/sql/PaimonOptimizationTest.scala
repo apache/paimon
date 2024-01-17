@@ -28,7 +28,9 @@ class PaimonOptimizationTest extends PaimonOptimizationTestBase {
       cteIndex: Int,
       output: Seq[Attribute],
       fieldIndex: Int): NamedExpression = {
-    GetStructField(ScalarSubquery(CTERelationRef(cteIndex, _resolved = true, output, isStreaming = false)), fieldIndex)
+    GetStructField(
+      ScalarSubquery(CTERelationRef(cteIndex, _resolved = true, output, isStreaming = false)),
+      fieldIndex)
       .as("scalarsubquery()")
   }
 }
