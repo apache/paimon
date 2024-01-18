@@ -390,6 +390,7 @@ public class ZIndexer implements Serializable {
         }
     }
 
+    /** Process function interface. */
     public interface ZProcessFunction
             extends BiFunction<InternalRow, ByteBuffer, byte[]>, Serializable {}
 }
