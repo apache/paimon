@@ -22,54 +22,53 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
-public class KafkaMaxwellSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
-
-    private static final String MAXWELL = "maxwell";
+public class KafkaDebeziumSyncDatabaseActionITCase extends KafkaSyncDatabaseActionITCase {
+    private static final String DEBEZIUM = "debezium";
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionMultiTopic() throws Exception {
-        testSchemaEvolutionMultiTopic(MAXWELL);
+        testSchemaEvolutionMultiTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testSchemaEvolutionOneTopic() throws Exception {
-        testSchemaEvolutionOneTopic(MAXWELL);
+        testSchemaEvolutionOneTopic(DEBEZIUM);
     }
 
     @Test
     public void testTopicIsEmpty() {
-        testTopicIsEmpty(MAXWELL);
+        testTopicIsEmpty(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixMultiTopic() throws Exception {
-        testTableAffixMultiTopic(MAXWELL);
+        testTableAffixMultiTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testTableAffixOneTopic() throws Exception {
-        testTableAffixOneTopic(MAXWELL);
+        testTableAffixOneTopic(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingTables() throws Exception {
-        testIncludingTables(MAXWELL);
+        testIncludingTables(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testExcludingTables() throws Exception {
-        testExcludingTables(MAXWELL);
+        testExcludingTables(DEBEZIUM);
     }
 
     @Test
     @Timeout(60)
     public void testIncludingAndExcludingTables() throws Exception {
-        testIncludingAndExcludingTables(MAXWELL);
+        testIncludingAndExcludingTables(DEBEZIUM);
     }
 }
