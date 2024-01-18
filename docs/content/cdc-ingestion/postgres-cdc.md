@@ -1,9 +1,9 @@
 ---
-title: "Mysql CDC"
+title: "Postgres CDC"
 weight: 2
 type: docs
 aliases:
-- /cdc-ingestion/mysql-cdc.html
+- /cdc-ingestion/ostgres-cdc.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# PostgreSQL CDC
+# Postgres CDC
 
 Paimon supports synchronizing changes from different databases using change data capture (CDC). This feature requires Flink and its [CDC connectors](https://ververica.github.io/flink-cdc-connectors/).
 

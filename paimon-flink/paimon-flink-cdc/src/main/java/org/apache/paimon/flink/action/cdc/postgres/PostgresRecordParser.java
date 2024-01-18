@@ -78,14 +78,14 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
- * A parser for PostgreSql Debezium JSON strings, converting them into a list of {@link
+ * A parser for PostgreSQL Debezium JSON strings, converting them into a list of {@link
  * RichCdcMultiplexRecord}s.
  */
 public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
 
     private static final Logger LOG = LoggerFactory.getLogger(PostgresRecordParser.class);
 
-    private final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private final ObjectMapper objectMapper = new ObjectMapper();
     private final ZoneId serverTimeZone;
     private final boolean caseSensitive;
     private final List<ComputedColumn> computedColumns;
@@ -123,7 +123,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
         this.computedColumns = computedColumns;
         this.typeMapping = typeMapping;
         this.metadataConverters = metadataConverters;
-        OBJECT_MAPPER
+        objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         String stringifyServerTimeZone = postgresConfig.get(PostgresSourceOptions.SERVER_TIME_ZONE);
@@ -135,7 +135,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
 
     @Override
     public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = OBJECT_MAPPER.readValue(rawEvent, DebeziumEvent.class);
+        root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
 
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
@@ -208,9 +208,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
             case "string":
                 return DataTypes.STRING();
             case "bytes":
-                if (field.name() == null) {
-                    return DataTypes.BYTES();
-                } else if (Decimal.LOGICAL_NAME.equals(field.name())) {
+                if (Decimal.LOGICAL_NAME.equals(field.name())) {
                     int precision = field.parameters().get("connect.decimal.precision").asInt();
                     int scale = field.parameters().get("scale").asInt();
                     return DataTypes.DECIMAL(precision, scale);
@@ -227,6 +225,8 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
                                 length == Integer.MAX_VALUE ? length / 8 : (length + 7) / 8);
                     }
                 }
+                // field.name() == null
+                return DataTypes.BYTES();
             default:
                 // default to String type
                 return DataTypes.STRING();
@@ -371,7 +371,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
                                     newArrayValues.add(element.asText());
                                 });
                 try {
-                    newValue = OBJECT_MAPPER.writer().writeValueAsString(newArrayValues);
+                    newValue = objectMapper.writer().writeValueAsString(newArrayValues);
                 } catch (JsonProcessingException e) {
                     LOG.error("Failed to convert array to JSON.", e);
                 }

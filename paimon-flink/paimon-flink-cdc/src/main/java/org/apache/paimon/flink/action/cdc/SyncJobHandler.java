@@ -41,7 +41,13 @@ import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.*;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.POSTGRES_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkOneRequiredOption;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkRequiredOptions;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Provide different function according to CDC source type. */

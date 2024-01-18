@@ -62,12 +62,15 @@ public class MySqlActionUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(MySqlActionUtils.class);
 
+    // TODO When setting the parameter scan.newly-added-table.enabled=true in version 2.4.2, the
+    // Insert data inserted after the newly created table cannot be captured. When set to false, the
+    // cdc works normally.
     public static final ConfigOption<Boolean> SCAN_NEWLY_ADDED_TABLE_ENABLED =
             ConfigOptions.key("scan.newly-added-table.enabled")
                     .booleanType()
-                    .defaultValue(true)
+                    .defaultValue(false)
                     .withDescription(
-                            "Whether capture the scan the newly added tables or not, by default is true.");
+                            "Whether capture the scan the newly added tables or not, by default is false.");
 
     static Connection getConnection(Configuration mySqlConfig, Map<String, String> jdbcProperties)
             throws Exception {
