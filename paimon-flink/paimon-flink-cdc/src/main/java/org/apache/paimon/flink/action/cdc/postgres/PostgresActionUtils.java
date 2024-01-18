@@ -155,8 +155,7 @@ public class PostgresActionUtils {
                 .ifPresent(sourceBuilder::heartbeatInterval);
 
         String startupMode = postgresConfig.get(PostgresSourceOptions.SCAN_STARTUP_MODE);
-        // see
-        // https://github.com/ververica/flink-cdc-connectors/blob/master/flink-connector-mysql-cdc/src/main/java/com/ververica/cdc/connectors/mysql/table/MySqlTableSourceFactory.java#L196
+
         if ("initial".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(StartupOptions.initial());
         } else if ("earliest-offset".equalsIgnoreCase(startupMode)) {

@@ -120,6 +120,7 @@ public class SyncJobHandler {
                         PostgresSourceOptions.USERNAME,
                         PostgresSourceOptions.PASSWORD,
                         PostgresSourceOptions.DATABASE_NAME,
+                        PostgresSourceOptions.SCHEMA_NAME,
                         PostgresSourceOptions.SLOT_NAME);
                 if (isTableSync) {
                     checkRequiredOptions(

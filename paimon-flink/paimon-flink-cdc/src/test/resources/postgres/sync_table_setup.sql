@@ -34,8 +34,6 @@ CREATE TABLE schema_evolution_1 (
     PRIMARY KEY (_id)
 );
 
-ALTER TABLE schema_evolution_1
-    REPLICA IDENTITY FULL;
 
 CREATE TABLE schema_evolution_2 (
     pt INT,
@@ -44,8 +42,6 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
-ALTER TABLE schema_evolution_2
-    REPLICA IDENTITY FULL;
 
 CREATE TABLE schema_evolution_multiple (
     _id INT,
@@ -55,292 +51,201 @@ CREATE TABLE schema_evolution_multiple (
     PRIMARY KEY (_id)
 );
 
-ALTER TABLE schema_evolution_multiple
-    REPLICA IDENTITY FULL;
 
--- CREATE TABLE all_types_table (
---     _id INT,
---     pt DECIMAL(2, 1),
---     -- BIT
---     _bit1 BIT,
---     _bit BIT(64),
---     -- TINYINT
---     _tinyint1 TINYINT(1),
---     _boolean BOOLEAN,
---     _bool BOOL,
---     _tinyint TINYINT,
---     _tinyint_unsigned TINYINT(2) UNSIGNED,
---     _tinyint_unsigned_zerofill TINYINT(2) UNSIGNED ZEROFILL,
---     -- SMALLINT
---     _smallint SMALLINT,
---     _smallint_unsigned SMALLINT UNSIGNED,
---     _smallint_unsigned_zerofill SMALLINT(4) UNSIGNED ZEROFILL,
---     -- MEDIUMINT
---     _mediumint MEDIUMINT,
---     _mediumint_unsigned MEDIUMINT UNSIGNED,
---     _mediumint_unsigned_zerofill MEDIUMINT(8) UNSIGNED ZEROFILL,
---     -- INT
---      _int INT,
---      _int_unsigned INT UNSIGNED,
---      _int_unsigned_zerofill INT(8) UNSIGNED ZEROFILL,
---     -- BIGINT
---     _bigint BIGINT,
---     _bigint_unsigned BIGINT UNSIGNED,
---     _bigint_unsigned_zerofill BIGINT(16) UNSIGNED ZEROFILL,
---     _serial SERIAL,
---     -- FLOAT
---     _float FLOAT,
---     _float_unsigned FLOAT UNSIGNED,
---     _float_unsigned_zerofill FLOAT(4) UNSIGNED ZEROFILL,
---     -- REAL
---     _real REAL,
---     _real_unsigned REAL UNSIGNED,
---     _real_unsigned_zerofill REAL(10, 7) UNSIGNED ZEROFILL,
---     -- DOUBLE
---     _double DOUBLE,
---     _double_unsigned DOUBLE UNSIGNED,
---     _double_unsigned_zerofill DOUBLE(10, 7) UNSIGNED ZEROFILL,
---     -- DOUBLE PRECISION
---     _double_precision DOUBLE PRECISION,
---     _double_precision_unsigned DOUBLE PRECISION UNSIGNED,
---     _double_precision_unsigned_zerofill DOUBLE PRECISION(10, 7) UNSIGNED ZEROFILL,
---     -- NUMERIC
---     _numeric NUMERIC(8, 3),
---     _numeric_unsigned NUMERIC(8, 3) UNSIGNED,
---     _numeric_unsigned_zerofill NUMERIC(8, 3) UNSIGNED ZEROFILL,
---     -- FIXED
---     _fixed FIXED(40, 3),
---     _fixed_unsigned FIXED(40, 3) UNSIGNED,
---     _fixed_unsigned_zerofill FIXED(40, 3) UNSIGNED ZEROFILL,
---     -- DECIMAL
---     _decimal DECIMAL(8),
---     _decimal_unsigned DECIMAL(8) UNSIGNED,
---     _decimal_unsigned_zerofill DECIMAL(8) UNSIGNED ZEROFILL,
---     _big_decimal DECIMAL(38,10),
---     -- DATE
---     _date DATE,
---     -- DATETIME
---     _datetime DATETIME,
---     _datetime3 DATETIME(3),
---     _datetime6 DATETIME(6),
---     -- DATETIME precision test
---     _datetime_p DATETIME,
---     _datetime_p2 DATETIME(2),
---     -- TIMESTAMP
---     _timestamp TIMESTAMP(6) DEFAULT NULL,
---     _timestamp0 TIMESTAMP,
---     -- string
---     _char CHAR(10),
---     _varchar VARCHAR(20),
---     _tinytext TINYTEXT,
---     _text TEXT,
---     _mediumtext MEDIUMTEXT,
---     _longtext LONGTEXT,
---     -- BINARY
---     _bin BINARY(10),
---     _varbin VARBINARY(20),
---     _tinyblob TINYBLOB,
---     _blob BLOB,
---     _mediumblob MEDIUMBLOB,
---     _longblob LONGBLOB,
---     -- json
---     _json JSON,
---     -- enum
---     _enum ENUM ('value1','value2','value3'),
---     -- YEAR
---     _year YEAR,
---     _time TIME,
---     _point POINT,
---     _geometry GEOMETRY,
---     _linestring LINESTRING,
---     _polygon  POLYGON,
---     _multipoint  MULTIPOINT,
---     _multiline  MULTILINESTRING,
---     _multipolygon  MULTIPOLYGON,
---     _geometrycollection GEOMETRYCOLLECTION,
---     _set SET('a', 'b', 'c', 'd'),
---     PRIMARY KEY (_id)
--- );
---
---
--- INSERT INTO all_types_table VALUES (
---     1, 1.1,
---     -- BIT
---     1, B'11111000111',
---     -- TINYINT
---     true, true, false, 1, 2, 3,
---     -- SMALLINT
---     1000, 2000, 3000,
---     -- MEDIUMINT
---     100000, 200000, 300000,
---     -- INT
---     1000000, 2000000, 3000000,
---     -- BIGINT
---     10000000000, 20000000000, 30000000000, 40000000000,
---     -- FLOAT
---     1.5, 2.5, 3.5,
---     -- REAL
---     1.000001, 2.000002, 3.000003,
---     -- DOUBLE
---     1.000011, 2.000022, 3.000033,
---     -- DOUBLE PRECISION
---     1.000111, 2.000222, 3.000333,
---     -- NUMERIC
---     12345.11, 12345.22, 12345.33,
---     -- FIXED
---     123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33,
---     -- DECIMAL
---     11111, 22222, 33333, 2222222222222222300000001111.1234567890,
---     -- DATE
---     '2023-03-23',
---     -- DATETIME
---     '2023-03-23 14:30:05', '2023-03-23 14:30:05.123', '2023-03-23 14:30:05.123456',
---     -- DATETIME precision test
---     '2023-03-24 14:30', '2023-03-24 14:30:05.12',
---     -- TIMESTAMP
---     '2023-03-23 15:00:10.123456', '2023-03-23 00:10',
---     -- string
---     'Paimon', 'Apache Paimon','Apache Paimon MySQL TINYTEXT Test Data', 'Apache Paimon MySQL Test Data','Apache Paimon MySQL MEDIUMTEXT Test Data','Apache Paimon MySQL Long Test Data',
---     -- BINARY
---     'bytes', 'more bytes', 'TINYBLOB type test data', 'BLOB type test data' , 'MEDIUMBLOB type test data' , 'LONGBLOB  bytes test data',
---     -- json
---     '{"a":"b"}',
---     -- enum
---     'value1',
---      -- YEAR
---      2023,
---      -- TIME,
---      '10:13:23',
---     ST_GeomFromText('POINT(1 1)'),
---     ST_GeomFromText('POLYGON((1 1, 2 1, 2 2,  1 2, 1 1))'),
---     ST_GeomFromText('LINESTRING(3 0, 3 3, 3 5)'),
---     ST_GeomFromText('POLYGON((1 1, 2 1, 2 2,  1 2, 1 1))'),
---     ST_GeomFromText('MULTIPOINT((1 1),(2 2))'),
---     ST_GeomFromText('MultiLineString((1 1,2 2,3 3),(4 4,5 5))'),
---     ST_GeomFromText('MULTIPOLYGON(((0 0, 10 0, 10 10, 0 10, 0 0)), ((5 5, 7 5, 7 7, 5 7, 5 5)))'),
---     ST_GeomFromText('GEOMETRYCOLLECTION(POINT(10 10), POINT(30 30), LINESTRING(15 15, 20 20))'),
---     'a,b'
--- ), (
---     2, 2.2,
---     NULL, NULL,
---     NULL, NULL, NULL, NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL, 50000000000, -- SERIAL is never NULL
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL,
---     NULL, NULL, NULL, NULL,
---     NULL,
---     NULL, NULL, NULL,
---     NULL, NULL,
---     NULL, NULL,
---     NULL, NULL, NULL, NULL,NULL, NULL,
---     NULL, NULL, NULL, NULL,NULL, NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL,
---     NULL
--- );
---
--- CREATE TABLE incompatible_field_1 (
---     _id INT,
---     v1 DATETIME,
---     PRIMARY KEY (_id)
--- );
---
--- CREATE TABLE incompatible_field_2 (
---     _id INT,
---     v1 INT,
---     PRIMARY KEY (_id)
--- );
---
--- CREATE TABLE incompatible_pk_1 (
---     a INT,
---     b BIGINT,
---     c VARCHAR(20),
---     PRIMARY KEY (a, b)
--- );
---
--- CREATE TABLE incompatible_pk_2 (
---     a INT,
---     b BIGINT,
---     c VARCHAR(20),
---     PRIMARY KEY (a)
--- );
---
--- CREATE TABLE test_computed_column (
---     pk INT,
---     _date DATE,
---     _datetime DATETIME,
---     _timestamp TIMESTAMP,
---     PRIMARY KEY (pk)
--- );
---
--- CREATE TABLE test_options_change (
---    pk INT,
---    _date DATE,
---    _datetime DATETIME,
---    _timestamp TIMESTAMP,
---    PRIMARY KEY (pk)
--- );
---
--- -- ################################################################################
--- --  testSyncShard
--- -- ################################################################################
---
--- CREATE DATABASE shard_1;
--- \c shard_1;
---
--- CREATE TABLE t1 (
---     pk INT,
---     _date VARCHAR(10),
---     PRIMARY KEY (pk)
--- );
---
--- CREATE TABLE t2 (
---     pk INT,
---     _date VARCHAR(10),
---     PRIMARY KEY (pk)
--- );
---
--- CREATE DATABASE shard_2;
--- \c shard_2;
---
--- CREATE TABLE t1 (
---     pk INT,
---     _date VARCHAR(10),
---     PRIMARY KEY (pk)
--- );
---
--- CREATE TABLE t2 (
---     pk INT,
---     _date VARCHAR(10),
---     PRIMARY KEY (pk)
--- );
---
--- -- ################################################################################
--- --  testMetadataColumns
--- -- ################################################################################
---
--- CREATE DATABASE metadata;
--- \c metadata;
---
--- CREATE TABLE test_metadata_columns (
---     pk INT,
---     _date VARCHAR(10),
---     PRIMARY KEY (pk)
--- );
+CREATE TYPE ENUM_TYPE AS ENUM ('value1','value2','value3');
+CREATE TABLE all_types_table (
+    _id INT,
+    pt DECIMAL(2, 1),
+    -- BIT
+    _bit1 BIT,
+    _bit BIT(11),
+    _bit_varying BIT VARYING,
+    _bit_varying1 BIT VARYING(64),
+    -- BOOLEAN
+    _boolean BOOLEAN,
+    _bool BOOL,
+    -- SMALLINT
+    _smallint SMALLINT,
+    -- INT
+     _int INT,
+    -- BIGINT
+    _bigint BIGINT,
+    _small_serial SMALLSERIAL,
+    _serial SERIAL,
+    _big_serial BIGSERIAL,
+    -- FLOAT
+    _float FLOAT,
+    -- REAL
+    _real REAL,
+    -- DOUBLE PRECISION
+    _double_precision DOUBLE PRECISION,
+    -- NUMERIC
+    _numeric NUMERIC(8, 3),
+    -- DECIMAL
+    _decimal DECIMAL(8),
+    _big_decimal DECIMAL(38,10),
+    -- DATE
+    _date DATE,
+    -- TIMESTAMP
+    _timestamp TIMESTAMP(6) DEFAULT NULL,
+    _timestamp0 TIMESTAMP,
+    -- TIME
+    _time TIME(6) DEFAULT NULL,
+    _time0 TIME,
+    -- string
+    _char CHAR(10),
+    _varchar VARCHAR(20),
+    _text TEXT,
+    -- BYTEA
+    _bin BYTEA,
+    -- json
+    _json JSON,
+    _array VARCHAR[],
+    PRIMARY KEY (_id)
+);
+
+INSERT INTO all_types_table (
+    _id, pt,
+    _bit1, _bit, _bit_varying, _bit_varying1,
+    _boolean, _bool,
+    _smallint,
+    _int,
+    _bigint, _small_serial, _serial, _big_serial,
+    _float,
+    _real,
+    _double_precision,
+    _numeric,
+    _decimal, _big_decimal,
+    _date,
+    _timestamp, _timestamp0,
+    _time, _time0,
+    _char, _varchar, _text,
+    _bin,
+    _json,
+    _array
+) VALUES (
+    1, 1.1,
+    '1', B'11111000111', B'101', B'010',
+    true, true,
+    1000,
+    1000000,
+    10000000000, 1, 2, 3,
+    1.5,
+    1.000001,
+    1.000111,
+    12345.11,
+    11111, 2222222222222222300000001111.1234567890,
+    '2023-03-23'::DATE,
+    '2023-03-23 14:30:05'::TIMESTAMP, '2023-03-23'::TIMESTAMP,
+    '10:13:23'::TIME, '10:13:23'::TIME,
+    'Paimon', 'Apache Paimon', 'Apache Paimon PostgreSQL Test Data',
+    'bytes',
+    '{"a": "b"}'::JSON,
+    ARRAY['item1', 'item2']::VARCHAR[]
+    ), (
+    2, 2.2,
+    NULL, NULL, NULL, NULL,
+    NULL, NULL,
+    NULL,
+    NULL,
+    NULL, 4, 5, 6,
+    NULL,
+    NULL,
+    NULL,
+    NULL,
+    NULL, NULL,
+    NULL,
+    NULL, NULL,
+    NULL, NULL,
+    NULL, NULL, NULL,
+    NULL,
+    NULL,
+    NULL
+    );
+
+
+CREATE TABLE incompatible_field_1 (
+    _id INT,
+    v1 TIMESTAMP,
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE incompatible_field_2 (
+    _id INT,
+    v1 INT,
+    PRIMARY KEY (_id)
+);
+
+CREATE TABLE incompatible_pk_1 (
+    a INT,
+    b BIGINT,
+    c VARCHAR(20),
+    PRIMARY KEY (a, b)
+);
+
+CREATE TABLE incompatible_pk_2 (
+    a INT,
+    b BIGINT,
+    c VARCHAR(20),
+    PRIMARY KEY (a)
+);
+
+CREATE TABLE test_computed_column (
+    pk INT,
+    _date DATE,
+    _timestamp TIMESTAMP,
+    PRIMARY KEY (pk)
+);
+
+CREATE TABLE test_options_change (
+   pk INT,
+   _date DATE,
+   _timestamp TIMESTAMP,
+   PRIMARY KEY (pk)
+);
+
+-- ################################################################################
+--  testMetadataColumns
+-- ################################################################################
+
+CREATE TABLE test_metadata_columns (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
+-- ################################################################################
+--  testSyncShard
+-- ################################################################################
+
+DROP SCHEMA IF EXISTS shard_1 CASCADE;
+CREATE SCHEMA shard_1;
+SET search_path TO shard_1;
+
+CREATE TABLE t1 (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
+CREATE TABLE t2 (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
+DROP SCHEMA IF EXISTS shard_2 CASCADE;
+CREATE SCHEMA shard_2;
+SET search_path TO shard_2;
+
+CREATE TABLE t1 (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);
+
+CREATE TABLE t2 (
+    pk INT,
+    _date VARCHAR(10),
+    PRIMARY KEY (pk)
+);

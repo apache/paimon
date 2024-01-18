@@ -38,7 +38,7 @@ import java.util.Map;
 import java.util.Random;
 import java.util.stream.Stream;
 
-/** Base test class for {@link org.apache.paimon.flink.action.Action}s related to MySQL. */
+/** Base test class for {@link org.apache.paimon.flink.action.Action}s related to PostgreSQL. */
 public class PostgresActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(PostgresActionITCaseBase.class);
@@ -50,10 +50,6 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
 
     // use newer version of postgresql image to support pgoutput plugin
     // when testing postgres 13, only 13-alpine supports both amd64 and arm64
-    //    protected static final DockerImageName PG_IMAGE =
-    //
-    // DockerImageName.parse("debezium/postgres:9.6").asCompatibleSubstituteFor("postgres");
-
     protected static final DockerImageName PG_IMAGE =
             DockerImageName.parse("postgres:13").asCompatibleSubstituteFor("postgres");
 
@@ -99,15 +95,6 @@ public class PostgresActionITCaseBase extends CdcActionITCaseBase {
         Connection conn =
                 DriverManager.getConnection(
                         jdbcUrl,
-                        POSTGRES_CONTAINER.getUsername(),
-                        POSTGRES_CONTAINER.getPassword());
-        return conn.createStatement();
-    }
-
-    protected Statement getStatement() throws SQLException {
-        Connection conn =
-                DriverManager.getConnection(
-                        POSTGRES_CONTAINER.getJdbcUrl(),
                         POSTGRES_CONTAINER.getUsername(),
                         POSTGRES_CONTAINER.getPassword());
         return conn.createStatement();

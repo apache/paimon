@@ -30,6 +30,9 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_
 
 /** Converts from Postgres type to {@link DataType}. */
 public class PostgresTypeUtils {
+
+    private static final String PG_BIT = "bit";
+    private static final String PG_VARBIT = "varbit";
     private static final String PG_SMALLSERIAL = "smallserial";
     private static final String PG_SERIAL = "serial";
     private static final String PG_BIGSERIAL = "bigserial";
@@ -65,6 +68,8 @@ public class PostgresTypeUtils {
     private static final String PG_CHARACTER_ARRAY = "_character";
     private static final String PG_CHARACTER_VARYING = "varchar";
     private static final String PG_CHARACTER_VARYING_ARRAY = "_varchar";
+    private static final String PG_JSON = "json";
+    private static final String PG_ENUM = "enum";
 
     public static DataType toDataType(
             String typeName,
@@ -77,6 +82,15 @@ public class PostgresTypeUtils {
         precision = precision == null ? 0 : precision;
         scale = scale == null ? 0 : scale;
         switch (typeName) {
+            case PG_BIT:
+            case PG_VARBIT:
+                if (precision <= 1) {
+                    return DataTypes.BOOLEAN();
+                } else {
+                    int length =
+                            precision == Integer.MAX_VALUE ? precision / 8 : (precision + 7) / 8;
+                    return DataTypes.BINARY(length);
+                }
             case PG_BOOLEAN:
                 return DataTypes.BOOLEAN();
             case PG_BOOLEAN_ARRAY:
@@ -131,6 +145,8 @@ public class PostgresTypeUtils {
             case PG_CHARACTER_VARYING_ARRAY:
                 return DataTypes.ARRAY(DataTypes.VARCHAR(precision));
             case PG_TEXT:
+            case PG_JSON:
+            case PG_ENUM:
                 return DataTypes.STRING();
             case PG_TEXT_ARRAY:
                 return DataTypes.ARRAY(DataTypes.STRING());

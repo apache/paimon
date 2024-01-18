@@ -50,6 +50,7 @@ public class DebeziumEvent {
     private static final String FIELD_TYPE = "type";
     private static final String FIELD_FIELD = "field";
     private static final String FIELD_OPTIONAL = "optional";
+    private static final String FIELD_PARAMETERS = "parameters";
 
     @JsonProperty(FIELD_PAYLOAD)
     private final Payload payload;
@@ -164,18 +165,23 @@ public class DebeziumEvent {
         @JsonProperty(FIELD_FIELDS)
         private final List<Field> fields;
 
+        @JsonProperty(FIELD_PARAMETERS)
+        private final JsonNode parameters;
+
         @JsonCreator
         public Field(
                 @JsonProperty(FIELD_FIELD) String field,
                 @JsonProperty(FIELD_TYPE) String type,
                 @JsonProperty(FIELD_NAME) String name,
                 @JsonProperty(FIELD_OPTIONAL) Boolean optional,
-                @JsonProperty(FIELD_FIELDS) List<Field> fields) {
+                @JsonProperty(FIELD_FIELDS) List<Field> fields,
+                @JsonProperty(FIELD_PARAMETERS) JsonNode parameters) {
             this.field = field;
             this.type = type;
             this.name = name;
             this.optional = optional;
             this.fields = fields;
+            this.parameters = parameters;
         }
 
         @JsonGetter(FIELD_FIELD)
@@ -201,6 +207,11 @@ public class DebeziumEvent {
         @JsonGetter(FIELD_FIELDS)
         public List<Field> fields() {
             return fields;
+        }
+
+        @JsonGetter(FIELD_PARAMETERS)
+        public JsonNode parameters() {
+            return parameters;
         }
 
         public Map<String, Field> beforeAndAfterFields() {

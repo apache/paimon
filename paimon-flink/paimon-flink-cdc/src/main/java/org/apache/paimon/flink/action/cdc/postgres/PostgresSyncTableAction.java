@@ -61,10 +61,10 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       <ul>
  *         <li>altering from a string type (char, varchar, text) to another string type with longer
  *             length,
- *         <li>altering from a binary type (binary, varbinary, blob) to another binary type with
- *             longer length,
- *         <li>altering from an integer type (tinyint, smallint, int, bigint) to another integer
- *             type with wider range,
+ *         <li>altering from a binary type (binary, varbinary) to another binary type with longer
+ *             length,
+ *         <li>altering from an integer type (smallint, int, bigint) to another integer type with
+ *             wider range,
  *         <li>altering from a floating-point type (float, double) to another floating-point type
  *             with wider range,
  *       </ul>
