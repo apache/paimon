@@ -50,6 +50,7 @@ import org.apache.paimon.utils.ZOrderByteUtils;
 
 import java.io.Serializable;
 import java.nio.ByteBuffer;
+import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
@@ -145,48 +146,57 @@ public class ZIndexer implements Serializable {
         private final int fieldIndex;
         private final int varTypeSize;
 
+        private final byte[] nullVarBytes;
+
         public TypeVisitor(int index, int varTypeSize) {
             this.fieldIndex = index;
             this.varTypeSize = varTypeSize;
+
+            if (varTypeSize == PRIMITIVE_BUFFER_SIZE) {
+                nullVarBytes = NULL_BYTES;
+            } else {
+                nullVarBytes = new byte[varTypeSize];
+                Arrays.fill(nullVarBytes, (byte) 0x00);
+            }
         }
 
         @Override
         public ZProcessFunction visit(CharType charType) {
             return (row, reuse) -> {
-                BinaryString binaryString = row.getString(fieldIndex);
+                if (row.isNullAt(fieldIndex)) {
+                    return nullVarBytes;
+                } else {
+                    BinaryString binaryString = row.getString(fieldIndex);
 
-                return row.isNullAt(fieldIndex)
-                        ? NULL_BYTES
-                        : ZOrderByteUtils.byteTruncateOrFill(
-                                        MemorySegmentUtils.getBytes(
-                                                binaryString.getSegments(),
-                                                binaryString.getOffset(),
-                                                Math.min(
-                                                        varTypeSize,
-                                                        binaryString.getSizeInBytes())),
-                                        varTypeSize,
-                                        reuse)
-                                .array();
+                    return ZOrderByteUtils.byteTruncateOrFill(
+                                    MemorySegmentUtils.getBytes(
+                                            binaryString.getSegments(),
+                                            binaryString.getOffset(),
+                                            Math.min(varTypeSize, binaryString.getSizeInBytes())),
+                                    varTypeSize,
+                                    reuse)
+                            .array();
+                }
             };
         }
 
         @Override
         public ZProcessFunction visit(VarCharType varCharType) {
             return (row, reuse) -> {
-                BinaryString binaryString = row.getString(fieldIndex);
+                if (row.isNullAt(fieldIndex)) {
+                    return nullVarBytes;
+                } else {
+                    BinaryString binaryString = row.getString(fieldIndex);
 
-                return row.isNullAt(fieldIndex)
-                        ? NULL_BYTES
-                        : ZOrderByteUtils.byteTruncateOrFill(
-                                        MemorySegmentUtils.getBytes(
-                                                binaryString.getSegments(),
-                                                binaryString.getOffset(),
-                                                Math.min(
-                                                        varTypeSize,
-                                                        binaryString.getSizeInBytes())),
-                                        varTypeSize,
-                                        reuse)
-                                .array();
+                    return ZOrderByteUtils.byteTruncateOrFill(
+                                    MemorySegmentUtils.getBytes(
+                                            binaryString.getSegments(),
+                                            binaryString.getOffset(),
+                                            Math.min(varTypeSize, binaryString.getSizeInBytes())),
+                                    varTypeSize,
+                                    reuse)
+                            .array();
+                }
             };
         }
 
@@ -206,7 +216,7 @@ public class ZIndexer implements Serializable {
         public ZProcessFunction visit(BinaryType binaryType) {
             return (row, reuse) ->
                     row.isNullAt(fieldIndex)
-                            ? NULL_BYTES
+                            ? nullVarBytes
                             : ZOrderByteUtils.byteTruncateOrFill(
                                             row.getBinary(fieldIndex), varTypeSize, reuse)
                                     .array();
@@ -216,7 +226,7 @@ public class ZIndexer implements Serializable {
         public ZProcessFunction visit(VarBinaryType varBinaryType) {
             return (row, reuse) ->
                     row.isNullAt(fieldIndex)
-                            ? NULL_BYTES
+                            ? nullVarBytes
                             : ZOrderByteUtils.byteTruncateOrFill(
                                             row.getBinary(fieldIndex), varTypeSize, reuse)
                                     .array();
@@ -380,5 +390,6 @@ public class ZIndexer implements Serializable {
         }
     }
 
-    interface ZProcessFunction extends BiFunction<InternalRow, ByteBuffer, byte[]>, Serializable {}
+    public interface ZProcessFunction
+            extends BiFunction<InternalRow, ByteBuffer, byte[]>, Serializable {}
 }
