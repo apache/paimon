@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.PipelineOptions;
@@ -44,6 +46,10 @@ public abstract class ProcedureBase implements Procedure, Factory {
     public ProcedureBase withCatalog(Catalog catalog) {
         this.catalog = catalog;
         return this;
+    }
+
+    protected Table table(String tableId) throws Catalog.TableNotExistException {
+        return catalog.getTable(Identifier.fromString(tableId));
     }
 
     @Nullable
