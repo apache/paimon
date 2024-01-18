@@ -28,7 +28,7 @@ import org.apache.flink.table.procedure.ProcedureContext;
  * Create branch procedure for given tag. Usage:
  *
  * <pre><code>
- *  CALL sys.create_tag('tableId', 'branchName', 'tagName')
+ *  CALL sys.create_branch('tableId', 'branchName', 'tagName')
  * </code></pre>
  */
 public class CreateBranchProcedure extends ProcedureBase {
