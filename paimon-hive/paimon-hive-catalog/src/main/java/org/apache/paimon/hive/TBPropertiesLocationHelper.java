@@ -49,6 +49,10 @@ public final class TBPropertiesLocationHelper implements LocationHelper {
     @Override
     public void specifyTableLocation(Table table, String location) {
         table.getParameters().put(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY, location);
+        // sd location is a necessary setting for the hms table object
+        if (table.getSd() != null) {
+            table.getSd().setLocation(location);
+        }
     }
 
     @Override
