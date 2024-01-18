@@ -567,8 +567,19 @@ s
     <tbody style="font-size: 12px; ">
     <tr>
       <td>compact</td>
-      <td>identifier: the target table identifier. Cannot be empty.<br><br><nobr>partitions: partition filter. Left empty for all partitions.<br> "," means "AND"<br>";" means "OR"</nobr><br><br>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'. <br><br><nobr>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'. </nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
-      <td><nobr>SET spark.sql.shuffle.partitions=10; --set the compact parallelism</nobr><br><nobr>CALL sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')</nobr></td>
+      <td>
+         To compact files. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>partitions: partition filter. "," means "AND"<br>";" means "OR".If you want to compact one partition with date=01 and day=01, you need to write 'date=01,day=01'. Left empty for all partitions. (Can't be used together with "where")</li>
+            <li>where: partition predicate. Left empty for all partitions. (Can't be used together with "partitions")</li>          
+            <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
+            <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
+      </td>
+      <td>
+         SET spark.sql.shuffle.partitions=10; --set the compact parallelism <br/>
+         CALL sys.compact(table => 'T', partitions => 'p=0;p=1',  order_strategy => 'zorder', order_by => 'a,b') <br/>
+         CALL sys.compact(table => 'T', where => 'p>0 and p<3', order_strategy => 'zorder', order_by => 'a,b')
+      </td>
     </tr>
     <tr>
       <td>expire_snapshots</td>

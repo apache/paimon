@@ -26,9 +26,9 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.SparkUtils;
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
@@ -44,7 +44,6 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
-import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
 
@@ -53,7 +52,11 @@ import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
+import org.apache.spark.sql.Utils;
 import org.apache.spark.sql.catalyst.InternalRow;
+import org.apache.spark.sql.catalyst.expressions.Expression;
+import org.apache.spark.sql.catalyst.plans.logical.Filter;
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.DataTypes;
@@ -74,13 +77,14 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.spark.sql.types.DataTypes.StringType;
 
 /**
  * Compact procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.compact(table => 'tableId', [partitions => 'p1;p2'], [order_strategy => 'xxx'], [order_by => 'xxx'])
+ *  CALL sys.compact(table => 'tableId', [partitions => 'p1=0,p2=0;p1=0,p2=1'], [order_strategy => 'xxx'], [order_by => 'xxx'], [where => 'p1>0'])
  * </code></pre>
  */
 public class CompactProcedure extends BaseProcedure {
@@ -91,6 +95,7 @@ public class CompactProcedure extends BaseProcedure {
                 ProcedureParameter.optional("partitions", StringType),
                 ProcedureParameter.optional("order_strategy", StringType),
                 ProcedureParameter.optional("order_by", StringType),
+                ProcedureParameter.optional("where", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -115,7 +120,6 @@ public class CompactProcedure extends BaseProcedure {
 
     @Override
     public InternalRow[] call(InternalRow args) {
-        Preconditions.checkArgument(args.numFields() >= 1);
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String partitions = blank(args, 1) ? null : args.getString(1);
         String sortType = blank(args, 2) ? TableSorter.OrderType.NONE.name() : args.getString(2);
@@ -123,22 +127,40 @@ public class CompactProcedure extends BaseProcedure {
                 blank(args, 3)
                         ? Collections.emptyList()
                         : Arrays.asList(args.getString(3).split(","));
+        String where = blank(args, 4) ? null : args.getString(4);
         if (TableSorter.OrderType.NONE.name().equals(sortType) && !sortColumns.isEmpty()) {
             throw new IllegalArgumentException(
                     "order_strategy \"none\" cannot work with order_by columns.");
         }
-
+        checkArgument(
+                partitions == null || where == null,
+                "partitions and where cannot be used together.");
+        String finalWhere = partitions != null ? toWhere(partitions) : where;
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    Preconditions.checkArgument(table instanceof FileStoreTable);
+                    checkArgument(table instanceof FileStoreTable);
+                    LogicalPlan relation = createRelation(tableIdent);
+                    Expression condition = null;
+                    if (!StringUtils.isBlank(finalWhere)) {
+                        condition = ExpressionHelper.resolveFilter(spark(), relation, finalWhere);
+                        checkArgument(
+                                ExpressionHelper.onlyHasPartitionPredicate(
+                                        spark(),
+                                        condition,
+                                        table.partitionKeys().toArray(new String[0])),
+                                "Only partition predicate is supported, your predicate is %s, but partition keys are %s",
+                                condition,
+                                table.partitionKeys());
+                    }
                     InternalRow internalRow =
                             newInternalRow(
                                     execute(
                                             (FileStoreTable) table,
                                             sortType,
                                             sortColumns,
-                                            partitions));
+                                            relation,
+                                            condition));
                     return new InternalRow[] {internalRow};
                 });
     }
@@ -156,18 +178,18 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             String sortType,
             List<String> sortColumns,
-            @Nullable String partitions) {
+            LogicalPlan relation,
+            @Nullable Expression condition) {
         table = table.copy(Collections.singletonMap(CoreOptions.WRITE_ONLY.key(), "false"));
         BucketMode bucketMode = table.bucketMode();
         TableSorter.OrderType orderType = TableSorter.OrderType.of(sortType);
-
         if (orderType.equals(TableSorter.OrderType.NONE)) {
             JavaSparkContext javaSparkContext = new JavaSparkContext(spark().sparkContext());
             Predicate filter =
-                    StringUtils.isBlank(partitions)
+                    condition == null
                             ? null
-                            : PredicateBuilder.partitions(
-                                    ParameterUtils.getPartitions(partitions), table.rowType());
+                            : ExpressionHelper.convertConditionToPaimonPredicate(
+                                    condition, relation.output(), table.rowType());
             switch (bucketMode) {
                 case FIXED:
                 case DYNAMIC:
@@ -183,7 +205,8 @@ public class CompactProcedure extends BaseProcedure {
         } else {
             switch (bucketMode) {
                 case UNAWARE:
-                    sortCompactUnAwareBucketTable(table, orderType, sortColumns, partitions);
+                    sortCompactUnAwareBucketTable(
+                            table, orderType, sortColumns, relation, condition);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -336,10 +359,11 @@ public class CompactProcedure extends BaseProcedure {
             FileStoreTable table,
             TableSorter.OrderType orderType,
             List<String> sortColumns,
-            @Nullable String partitions) {
+            LogicalPlan relation,
+            @Nullable Expression condition) {
         Dataset<Row> row =
-                spark().read().format("paimon").load(table.coreOptions().path().toString());
-        row = StringUtils.isBlank(partitions) ? row : row.where(toWhere(partitions));
+                Utils.createDataset(
+                        spark(), condition == null ? relation : new Filter(condition, relation));
         new WriteIntoPaimonTable(
                         table,
                         DynamicOverWrite$.MODULE$,
