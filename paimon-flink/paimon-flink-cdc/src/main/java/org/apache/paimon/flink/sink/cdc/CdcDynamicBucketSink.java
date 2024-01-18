@@ -19,12 +19,12 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.DynamicBucketSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.utils.SerializableFunction;
 

@@ -45,4 +45,14 @@ public final class BooleanSerializer extends SerializerSingleton<Boolean> {
     public Boolean deserialize(DataInputView source) throws IOException {
         return source.readBoolean();
     }
+
+    @Override
+    public String serializeToString(Boolean record) {
+        return record.toString();
+    }
+
+    @Override
+    public Boolean deserializeFromString(String s) {
+        return Boolean.valueOf(s);
+    }
 }

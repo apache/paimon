@@ -50,8 +50,11 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
 import org.apache.paimon.tag.TagPreview;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -211,13 +214,13 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         // copy a new table schema to contain dynamic options
         TableSchema newTableSchema = tableSchema.copy(newOptions.toMap());
 
-        // validate schema with new options
-        SchemaValidation.validateTableSchema(newTableSchema);
-
         if (tryTimeTravel) {
             // see if merged options contain time travel option
             newTableSchema = tryTimeTravel(newOptions).orElse(newTableSchema);
         }
+
+        // validate schema with new options
+        SchemaValidation.validateTableSchema(newTableSchema);
 
         return copy(newTableSchema);
     }
@@ -313,33 +316,54 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         switch (coreOptions.startupMode()) {
             case FROM_SNAPSHOT:
             case FROM_SNAPSHOT_FULL:
-                if (coreOptions.scanSnapshotId() != null) {
-                    long snapshotId = coreOptions.scanSnapshotId();
-                    if (snapshotManager().snapshotExists(snapshotId)) {
-                        long schemaId = snapshotManager().snapshot(snapshotId).schemaId();
-                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                    }
+                if (coreOptions.scanVersion() != null) {
+                    return travelToVersion(coreOptions.scanVersion(), options);
+                } else if (coreOptions.scanSnapshotId() != null) {
+                    return travelToSnapshot(coreOptions.scanSnapshotId(), options);
                 } else {
-                    String tagName = coreOptions.scanTagName();
-                    TagManager tagManager = tagManager();
-                    if (tagManager.tagExists(tagName)) {
-                        long schemaId = tagManager.taggedSnapshot(tagName).schemaId();
-                        return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                    }
+                    return travelToTag(coreOptions.scanTagName(), options);
                 }
-                return Optional.empty();
             case FROM_TIMESTAMP:
                 Snapshot snapshot =
                         StaticFromTimestampStartingScanner.timeTravelToTimestamp(
                                 snapshotManager(), coreOptions.scanTimestampMills());
-                if (snapshot != null) {
-                    long schemaId = snapshot.schemaId();
-                    return Optional.of(schemaManager().schema(schemaId).copy(options.toMap()));
-                }
-                return Optional.empty();
+                return travelToSnapshot(snapshot, options);
             default:
                 return Optional.empty();
         }
+    }
+
+    /** Tag first when travelling to a version. */
+    private Optional<TableSchema> travelToVersion(String version, Options options) {
+        options.remove(CoreOptions.SCAN_VERSION.key());
+        if (tagManager().tagExists(version)) {
+            options.set(CoreOptions.SCAN_TAG_NAME, version);
+            return travelToTag(version, options);
+        } else if (version.chars().allMatch(Character::isDigit)) {
+            options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
+            return travelToSnapshot(Long.parseLong(version), options);
+        } else {
+            throw new RuntimeException("Cannot find a time travel version for " + version);
+        }
+    }
+
+    private Optional<TableSchema> travelToTag(String tagName, Options options) {
+        return travelToSnapshot(tagManager().taggedSnapshot(tagName), options);
+    }
+
+    private Optional<TableSchema> travelToSnapshot(long snapshotId, Options options) {
+        SnapshotManager snapshotManager = snapshotManager();
+        if (snapshotManager.snapshotExists(snapshotId)) {
+            return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToSnapshot(@Nullable Snapshot snapshot, Options options) {
+        if (snapshot != null) {
+            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -380,6 +404,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createBranch(String branchName, String tagName) {
+        branchManager().createBranch(branchName, tagName);
+    }
+
+    @Override
+    public void deleteBranch(String branchName) {
+        branchManager().deleteBranch(branchName);
+    }
+
+    @Override
     public void rollbackTo(String tagName) {
         TagManager tagManager = tagManager();
         checkArgument(tagManager.tagExists(tagName), "Rollback tag '%s' doesn't exist.", tagName);
@@ -409,6 +443,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         return new TagManager(fileIO, path);
     }
 
+    @Override
+    public BranchManager branchManager() {
+        return new BranchManager(fileIO, path, snapshotManager(), tagManager(), schemaManager());
+    }
+
     private RollbackHelper rollbackHelper() {
         return new RollbackHelper(
                 snapshotManager(),
@@ -416,5 +455,17 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 fileIO,
                 store().newSnapshotDeletion(),
                 store().newTagDeletion());
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        AbstractFileStoreTable that = (AbstractFileStoreTable) o;
+        return Objects.equals(path, that.path) && Objects.equals(tableSchema, that.tableSchema);
     }
 }

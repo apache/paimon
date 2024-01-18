@@ -29,10 +29,9 @@ public class WriterMetrics {
     private static final String GROUP_NAME = "writer";
 
     private static final int WINDOW_SAMPLE_SIZE = 100;
+
     private static final String WRITE_RECORD_NUM = "writeRecordCount";
-
     private static final String FLUSH_COST_MILLIS = "flushCostMillis";
-
     public static final String PREPARE_COMMIT_COST_MILLIS = "prepareCommitCostMillis";
 
     private final Counter writeRecordNumCounter;
@@ -41,14 +40,12 @@ public class WriterMetrics {
 
     private final Histogram prepareCommitCostMillis;
 
-    private MetricGroup metricGroup;
+    private final MetricGroup metricGroup;
 
-    public WriterMetrics(MetricRegistry registry, String tableName, String parition, int bucket) {
-        metricGroup = registry.bucketMetricGroup(GROUP_NAME, tableName, parition, bucket);
+    public WriterMetrics(MetricRegistry registry, String tableName, String partition, int bucket) {
+        metricGroup = registry.bucketMetricGroup(GROUP_NAME, tableName, partition, bucket);
         writeRecordNumCounter = metricGroup.counter(WRITE_RECORD_NUM);
-
         bufferFlushCostMillis = metricGroup.histogram(FLUSH_COST_MILLIS, WINDOW_SAMPLE_SIZE);
-
         prepareCommitCostMillis =
                 metricGroup.histogram(PREPARE_COMMIT_COST_MILLIS, WINDOW_SAMPLE_SIZE);
     }

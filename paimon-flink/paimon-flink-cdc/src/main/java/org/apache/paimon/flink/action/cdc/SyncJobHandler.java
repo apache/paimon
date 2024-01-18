@@ -95,7 +95,6 @@ public class SyncJobHandler {
                         cdcSourceConfig,
                         MYSQL_CONF,
                         MySqlSourceOptions.HOSTNAME,
-                        MySqlSourceOptions.PORT,
                         MySqlSourceOptions.USERNAME,
                         MySqlSourceOptions.PASSWORD,
                         MySqlSourceOptions.DATABASE_NAME);

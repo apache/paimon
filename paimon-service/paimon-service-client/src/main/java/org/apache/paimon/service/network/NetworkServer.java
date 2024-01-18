@@ -149,7 +149,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
         ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
-                        .setNameFormat("Flink " + getServerName() + " Thread %d")
+                        .setNameFormat("Paimon " + getServerName() + " Thread %d")
                         .build();
         return Executors.newFixedThreadPool(numQueryThreads, threadFactory);
     }
@@ -233,7 +233,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
         final ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
-                        .setNameFormat("Flink " + serverName + " EventLoop Thread %d")
+                        .setNameFormat("Paimon " + serverName + " EventLoop Thread %d")
                         .build();
 
         final NioEventLoopGroup nioGroup =

@@ -18,15 +18,25 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
+import org.apache.paimon.codegen.CodeGenUtils;
+import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.GenericArray;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashSet;
+import java.util.List;
+import java.util.function.BiFunction;
 
 /** Collect elements into an ARRAY. */
 public class FieldCollectAgg extends FieldAggregator {
@@ -35,11 +45,41 @@ public class FieldCollectAgg extends FieldAggregator {
 
     private final boolean distinct;
     private final InternalArray.ElementGetter elementGetter;
+    @Nullable private final BiFunction<Object, Object, Boolean> equaliser;
 
     public FieldCollectAgg(ArrayType dataType, boolean distinct) {
         super(dataType);
         this.distinct = distinct;
         this.elementGetter = InternalArray.createElementGetter(dataType.getElementType());
+
+        if (distinct
+                && dataType.getElementType()
+                        .getTypeRoot()
+                        .getFamilies()
+                        .contains(DataTypeFamily.CONSTRUCTED)) {
+            DataType elementType = dataType.getElementType();
+            List<DataType> fieldTypes =
+                    elementType instanceof RowType
+                            ? ((RowType) elementType).getFieldTypes()
+                            : Collections.singletonList(elementType);
+            RecordEqualiser elementEqualiser =
+                    CodeGenUtils.generateRecordEqualiser(fieldTypes, "elementEqualiser")
+                            .newInstance(FieldCollectAgg.class.getClassLoader());
+            this.equaliser =
+                    (o1, o2) -> {
+                        InternalRow row1, row2;
+                        if (elementType instanceof RowType) {
+                            row1 = (InternalRow) o1;
+                            row2 = (InternalRow) o2;
+                        } else {
+                            row1 = GenericRow.of(o1);
+                            row2 = GenericRow.of(o2);
+                        }
+                        return elementEqualiser.equals(row1, row2);
+                    };
+        } else {
+            equaliser = null;
+        }
     }
 
     @Override
@@ -57,12 +97,17 @@ public class FieldCollectAgg extends FieldAggregator {
             return accumulator == null ? inputField : accumulator;
         }
 
-        Collection<Object> collection = distinct ? new HashSet<>() : new ArrayList<>();
-
-        collect(collection, accumulator);
-        collect(collection, inputField);
-
-        return new GenericArray(collection.toArray());
+        if (equaliser != null) {
+            List<Object> collection = new ArrayList<>();
+            collectWithEqualiser(collection, accumulator);
+            collectWithEqualiser(collection, inputField);
+            return new GenericArray(collection.toArray());
+        } else {
+            Collection<Object> collection = distinct ? new HashSet<>() : new ArrayList<>();
+            collect(collection, accumulator);
+            collect(collection, inputField);
+            return new GenericArray(collection.toArray());
+        }
     }
 
     private void collect(Collection<Object> collection, @Nullable Object data) {
@@ -74,5 +119,32 @@ public class FieldCollectAgg extends FieldAggregator {
         for (int i = 0; i < array.size(); i++) {
             collection.add(elementGetter.getElementOrNull(array, i));
         }
+    }
+
+    private void collectWithEqualiser(List<Object> list, Object data) {
+        if (data == null) {
+            return;
+        }
+
+        InternalArray array = (InternalArray) data;
+        for (int i = 0; i < array.size(); i++) {
+            Object element = elementGetter.getElementOrNull(array, i);
+            if (!contains(list, element)) {
+                list.add(element);
+            }
+        }
+    }
+
+    private boolean contains(List<Object> list, @Nullable Object element) {
+        if (element == null) {
+            return list.contains(null);
+        }
+
+        for (Object o : list) {
+            if (equaliser.apply(o, element)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

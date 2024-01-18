@@ -50,6 +50,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SnapshotManager;
@@ -158,6 +159,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public TagManager tagManager() {
         return dataTable.tagManager();
+    }
+
+    @Override
+    public BranchManager branchManager() {
+        return dataTable.branchManager();
     }
 
     @Override

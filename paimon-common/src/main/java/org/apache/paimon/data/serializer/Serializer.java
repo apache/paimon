@@ -65,4 +65,26 @@ public interface Serializer<T> extends Serializable {
      *     it reads.
      */
     T deserialize(DataInputView source) throws IOException;
+
+    /**
+     * Serializes the given record to string.
+     *
+     * @param record The record to serialize.
+     * @return The serialized element.
+     */
+    default String serializeToString(T record) {
+        throw new UnsupportedOperationException(
+                String.format("serialize %s to string is unsupported", record));
+    }
+
+    /**
+     * De-serializes a record from string.
+     *
+     * @param s The string to de-serialize.
+     * @return The deserialized element.
+     */
+    default T deserializeFromString(String s) {
+        throw new UnsupportedOperationException(
+                String.format("deserialize %s from string is unsupported", s));
+    }
 }

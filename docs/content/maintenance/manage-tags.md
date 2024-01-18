@@ -92,7 +92,7 @@ See [Query Tables]({{< ref "how-to/querying-tables" >}}) to see more query for e
 
 ## Create Tags
 
-You can create a tag with given name (cannot be number) and snapshot ID.
+You can create a tag with given name and snapshot ID.
 
 {{< tabs "create-tag" >}}
 

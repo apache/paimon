@@ -327,6 +327,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "This option only works for append-only table. Whether the write use write buffer to avoid out-of-memory error.");
 
+    public static final ConfigOption<Integer> WRITE_MAX_WRITERS_TO_SPILL =
+            key("write-max-writers-to-spill")
+                    .intType()
+                    .defaultValue(5)
+                    .withDescription(
+                            "When in batch append inserting, if the writer number is greater than this option, we open the buffer cache and spill function to avoid out-of-memory. ");
+
     public static final ConfigOption<MemorySize> WRITE_MANIFEST_CACHE =
             key("write-manifest-cache")
                     .memoryType()
@@ -400,6 +407,14 @@ public class CoreOptions implements Serializable {
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
+
+    public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
+            key("compaction.optimization-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Implying how often to perform an optimization compaction, this configuration is used to "
+                                    + "ensure the query timeliness of the read-optimized system table.");
 
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
@@ -513,6 +528,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Optional tag name used in case of \"from-snapshot\" scan mode.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> SCAN_VERSION =
+            key("scan.version")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the time travel version string used in 'VERSION AS OF' syntax. "
+                                    + "We will use tag when both tag and snapshot of that version exist.");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
@@ -936,6 +960,12 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
+    public static final ConfigOption<TagPeriodFormatter> TAG_PERIOD_FORMATTER =
+            key("tag.period-formatter")
+                    .enumType(TagPeriodFormatter.class)
+                    .defaultValue(TagPeriodFormatter.WITH_DASHES)
+                    .withDescription("The date format for tag periods.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
@@ -1207,6 +1237,10 @@ public class CoreOptions implements Serializable {
         return options.get(WRITE_BUFFER_FOR_APPEND);
     }
 
+    public int writeMaxWritersToSpill() {
+        return options.get(WRITE_MAX_WRITERS_TO_SPILL);
+    }
+
     public long sortSpillBufferSize() {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
@@ -1240,6 +1274,11 @@ public class CoreOptions implements Serializable {
 
     public int numSortedRunCompactionTrigger() {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
+    }
+
+    @Nullable
+    public Duration optimizedCompactionInterval() {
+        return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
     }
 
     public int numSortedRunStopTrigger() {
@@ -1304,7 +1343,8 @@ public class CoreOptions implements Serializable {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
-                    || options.getOptional(SCAN_TAG_NAME).isPresent()) {
+                    || options.getOptional(SCAN_TAG_NAME).isPresent()
+                    || options.getOptional(SCAN_VERSION).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
                 return StartupMode.FROM_FILE_CREATION_TIME;
@@ -1339,6 +1379,10 @@ public class CoreOptions implements Serializable {
 
     public String scanTagName() {
         return options.get(SCAN_TAG_NAME);
+    }
+
+    public String scanVersion() {
+        return options.get(SCAN_VERSION);
     }
 
     public Pair<String, String> incrementalBetween() {
@@ -1463,6 +1507,10 @@ public class CoreOptions implements Serializable {
 
     public Duration tagCreationDelay() {
         return options.get(TAG_CREATION_DELAY);
+    }
+
+    public TagPeriodFormatter tagPeriodFormatter() {
+        return options.get(TAG_PERIOD_FORMATTER);
     }
 
     public Integer tagNumRetainedMax() {
@@ -2028,6 +2076,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The period format options for tag creation. */
+    public enum TagPeriodFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+
+        private final String value;
+        private final String description;
+
+        TagPeriodFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

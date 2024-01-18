@@ -75,7 +75,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
 
-    private WriterMetrics writerMetrics;
+    private final WriterMetrics writerMetrics;
 
     public MergeTreeWriter(
             boolean writeBufferSpillable,

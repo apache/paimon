@@ -81,18 +81,13 @@ public abstract class FileFormat {
 
     /** Create a {@link FileFormat} from format identifier and format options. */
     public static FileFormat fromIdentifier(String identifier, FormatContext context) {
-        Optional<FileFormat> format =
-                fromIdentifier(identifier, context, FileFormat.class.getClassLoader());
-        return format.orElseGet(
-                () ->
-                        fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
-                                .orElseThrow(
-                                        () ->
-                                                new RuntimeException(
-                                                        String.format(
-                                                                "Could not find any factories that implement '%s' in the classpath.",
-                                                                FileFormatFactory.class
-                                                                        .getName()))));
+        return fromIdentifier(identifier, context, FileFormat.class.getClassLoader())
+                .orElseThrow(
+                        () ->
+                                new RuntimeException(
+                                        String.format(
+                                                "Could not find a FileFormatFactory implementation class for %s format",
+                                                identifier)));
     }
 
     private static Optional<FileFormat> fromIdentifier(

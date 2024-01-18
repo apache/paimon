@@ -16,4 +16,4 @@
  * limitations under the License.
  */
 
-{"table":"OGG.EVENT","pos":"00000000000000000000157","primary_keys":["id"],"before":{"id":103,"name":"scooter","description":"Big 2-wheel scooter ","weight":5.179999828338623},"after":{"id":103,"name":"scooter","description":"Big 2-wheel scooter ","weight":8.170000076293945},"op_type":"U","op_ts":"2020-05-13 17:32:10.904000"}
+{"table":"OGG.EVENT","pos":"00000000000000000000157","primary_keys":["id"],"before":{"id":103,"name":"scooter","description":"Big 2-wheel scooter ","weight":5.1},"after":{"id":103,"name":"scooter","description":"Big 2-wheel scooter ","weight":8.1},"op_type":"U","op_ts":"2020-05-13 17:32:10.904000"}

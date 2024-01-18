@@ -76,6 +76,8 @@ public class PaimonObjectInspectorFactory {
                 return new PaimonTimeObjectInspector();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 return new PaimonTimestampObjectInspector();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return new PaimonTimestampLocalTZObjectInspector();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) logicalType;
                 return new PaimonListObjectInspector(arrayType.getElementType());

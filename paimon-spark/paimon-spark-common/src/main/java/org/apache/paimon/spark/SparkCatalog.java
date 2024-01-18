@@ -105,7 +105,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
         try {
-            catalog.createDatabase(namespace[0], false);
+            catalog.createDatabase(namespace[0], false, metadata);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new NamespaceAlreadyExistsException(namespace);
         }
@@ -142,10 +142,12 @@ public class SparkCatalog extends SparkBaseCatalog {
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
-        if (catalog.databaseExists(namespace[0])) {
-            return Collections.emptyMap();
+        String dataBaseName = namespace[0];
+        try {
+            return catalog.loadDatabaseProperties(dataBaseName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
         }
-        throw new NoSuchNamespaceException(namespace);
     }
 
     /**
@@ -221,18 +223,9 @@ public class SparkCatalog extends SparkBaseCatalog {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         Table table = loadPaimonTable(ident);
-        Options dynamicOptions = new Options();
-
-        if (version.chars().allMatch(Character::isDigit)) {
-            long snapshotId = Long.parseUnsignedLong(version);
-            LOG.info("Time travel to snapshot '{}'.", snapshotId);
-            dynamicOptions.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
-        } else {
-            LOG.info("Time travel to tag '{}'.", version);
-            dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
-        }
-
-        return new SparkTable(table.copy(dynamicOptions.toMap()));
+        LOG.info("Time travel to version '{}'.", version);
+        return new SparkTable(
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)));
     }
 
     /**
@@ -293,7 +286,7 @@ public class SparkCatalog extends SparkBaseCatalog {
             throws TableAlreadyExistsException, NoSuchNamespaceException {
         try {
             catalog.createTable(
-                    toIdentifier(ident), toUpdateSchema(schema, partitions, properties), false);
+                    toIdentifier(ident), toInitialSchema(schema, partitions, properties), false);
             return loadTable(ident);
         } catch (Catalog.TableAlreadyExistException e) {
             throw new TableAlreadyExistsException(ident);
@@ -318,11 +311,19 @@ public class SparkCatalog extends SparkBaseCatalog {
         if (change instanceof TableChange.SetProperty) {
             TableChange.SetProperty set = (TableChange.SetProperty) change;
             validateAlterProperty(set.property());
-            return SchemaChange.setOption(set.property(), set.value());
+            if (set.property().equals(TableCatalog.PROP_COMMENT)) {
+                return SchemaChange.updateComment(set.value());
+            } else {
+                return SchemaChange.setOption(set.property(), set.value());
+            }
         } else if (change instanceof TableChange.RemoveProperty) {
             TableChange.RemoveProperty remove = (TableChange.RemoveProperty) change;
             validateAlterProperty(remove.property());
-            return SchemaChange.removeOption(remove.property());
+            if (remove.property().equals(TableCatalog.PROP_COMMENT)) {
+                return SchemaChange.updateComment(null);
+            } else {
+                return SchemaChange.removeOption(remove.property());
+            }
         } else if (change instanceof TableChange.AddColumn) {
             TableChange.AddColumn add = (TableChange.AddColumn) change;
             validateAlterNestedField(add.fieldNames());
@@ -375,7 +376,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         return move;
     }
 
-    private Schema toUpdateSchema(
+    private Schema toInitialSchema(
             StructType schema, Transform[] partitions, Map<String, String> properties) {
         Preconditions.checkArgument(
                 Arrays.stream(partitions)
@@ -387,6 +388,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                                 }));
         Map<String, String> normalizedProperties = new HashMap<>(properties);
         normalizedProperties.remove(PRIMARY_KEY_IDENTIFIER);
+        normalizedProperties.remove(TableCatalog.PROP_COMMENT);
         String pkAsString = properties.get(PRIMARY_KEY_IDENTIFIER);
         List<String> primaryKeys =
                 pkAsString == null
@@ -402,7 +404,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                                 Arrays.stream(partitions)
                                         .map(partition -> partition.references()[0].describe())
                                         .collect(Collectors.toList()))
-                        .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, ""));
+                        .comment(properties.getOrDefault(TableCatalog.PROP_COMMENT, null));
 
         for (StructField field : schema.fields()) {
             schemaBuilder.column(

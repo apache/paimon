@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
@@ -38,6 +39,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
@@ -47,6 +49,9 @@ import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
 import java.io.IOException;
+import java.time.Instant;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -73,7 +78,9 @@ public class PartitionsTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "partition", SerializationUtils.newStringType(true)),
                             new DataField(1, "record_count", new BigIntType(false)),
-                            new DataField(2, "file_size_in_bytes", new BigIntType(false))));
+                            new DataField(2, "file_size_in_bytes", new BigIntType(false)),
+                            new DataField(3, "file_count", new BigIntType(false)),
+                            new DataField(4, "last_update_time", DataTypes.TIMESTAMP_MILLIS())));
 
     private final FileStoreTable storeTable;
 
@@ -241,7 +248,10 @@ public class PartitionsTable implements ReadonlyTable {
             @SuppressWarnings("unchecked")
             Supplier<Object>[] fields =
                     new Supplier[] {
-                        () -> partitionId, dataFileMeta::rowCount, dataFileMeta::fileSize
+                        () -> partitionId,
+                        dataFileMeta::rowCount,
+                        dataFileMeta::fileSize,
+                        dataFileMeta::creationTimeEpochMillis
                     };
 
             return new LazyGenericRow(fields);
@@ -270,13 +280,17 @@ public class PartitionsTable implements ReadonlyTable {
                 BinaryString partitionId = row.getString(0);
                 long recordCount = row.getLong(1);
                 long fileSizeInBytes = row.getLong(2);
+                long lastFileCreationTime = row.getLong(3);
 
                 // Grouping and summing
                 Partition rowData =
                         groupedData.computeIfAbsent(
-                                partitionId, key -> new Partition(partitionId, 0, 0));
+                                partitionId, key -> new Partition(partitionId, 0, 0, 0, -1));
                 rowData.recordCount += recordCount;
                 rowData.fileSizeInBytes += fileSizeInBytes;
+                rowData.fileCount++;
+                rowData.lastFileCreationTime =
+                        Math.max(rowData.lastFileCreationTime, lastFileCreationTime);
             }
             resultIterator = groupedData.values().iterator();
         }
@@ -291,7 +305,14 @@ public class PartitionsTable implements ReadonlyTable {
             if (hasNext()) {
                 Partition partition = resultIterator.next();
                 return GenericRow.of(
-                        partition.partition, partition.recordCount, partition.fileSizeInBytes);
+                        partition.partition,
+                        partition.recordCount,
+                        partition.fileSizeInBytes,
+                        partition.fileCount,
+                        Timestamp.fromLocalDateTime(
+                                LocalDateTime.ofInstant(
+                                        Instant.ofEpochMilli(partition.lastFileCreationTime),
+                                        ZoneId.systemDefault())));
             } else {
                 throw new NoSuchElementException("No more elements in the iterator.");
             }
@@ -303,10 +324,21 @@ public class PartitionsTable implements ReadonlyTable {
         private long recordCount;
         private long fileSizeInBytes;
 
-        Partition(BinaryString partition, long recordCount, long fileSizeInBytes) {
+        private long fileCount;
+
+        private long lastFileCreationTime;
+
+        Partition(
+                BinaryString partition,
+                long recordCount,
+                long fileSizeInBytes,
+                long fileCount,
+                long lastFileCreationTime) {
             this.partition = partition;
             this.recordCount = recordCount;
             this.fileSizeInBytes = fileSizeInBytes;
+            this.lastFileCreationTime = lastFileCreationTime;
+            this.fileCount = fileCount;
         }
 
         public long recordCount() {
@@ -315,6 +347,14 @@ public class PartitionsTable implements ReadonlyTable {
 
         public long fileSize() {
             return fileSizeInBytes;
+        }
+
+        public long getFileCount() {
+            return fileCount;
+        }
+
+        public long getLastFileCreationTime() {
+            return lastFileCreationTime;
         }
     }
 }

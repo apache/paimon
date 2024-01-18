@@ -31,7 +31,6 @@ import org.apache.flink.streaming.api.transformations.OneInputTransformation;
 import org.apache.flink.streaming.api.transformations.PartitionTransformation;
 import org.junit.jupiter.api.Test;
 
-import java.util.Collections;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -60,7 +59,7 @@ public class FlinkCdcMultiTableSinkTest {
                         () -> FlinkCatalogFactory.createPaimonCatalog(new Options()),
                         FlinkConnectorOptions.SINK_COMMITTER_CPU.defaultValue(),
                         null);
-        DataStreamSink<?> dataStreamSink = sink.sinkFrom(input, Collections.emptyMap());
+        DataStreamSink<?> dataStreamSink = sink.sinkFrom(input);
 
         // check the transformation graph
         LegacySinkTransformation<?> end =

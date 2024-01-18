@@ -86,6 +86,10 @@ public class Levels {
                 "Number of files stored in Levels does not equal to the size of inputFiles. This is unexpected.");
     }
 
+    public TreeSet<DataFileMeta> level0() {
+        return level0;
+    }
+
     public void addDropFileCallback(DropFileCallback callback) {
         dropFileCallbacks.add(callback);
     }

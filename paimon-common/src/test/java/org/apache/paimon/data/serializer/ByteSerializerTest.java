@@ -18,6 +18,10 @@
 
 package org.apache.paimon.data.serializer;
 
+import org.apache.paimon.utils.Pair;
+
+import java.util.Arrays;
+import java.util.List;
 import java.util.Random;
 
 /** Test for {@link ByteSerializer}. */
@@ -39,5 +43,15 @@ public class ByteSerializerTest extends SerializerTestBase<Byte> {
         byte rndShort = (byte) rnd.nextInt();
 
         return new Byte[] {0, 1, -1, Byte.MAX_VALUE, Byte.MIN_VALUE, rndShort, (byte) -rndShort};
+    }
+
+    @Override
+    protected List<Pair<Byte, String>> getSerializableToStringTestData() {
+        return Arrays.asList(
+                Pair.of((byte) 0, "0"),
+                Pair.of((byte) 1, "1"),
+                Pair.of((byte) -1, "-1"),
+                Pair.of(Byte.MAX_VALUE, "127"),
+                Pair.of(Byte.MIN_VALUE, "-128"));
     }
 }

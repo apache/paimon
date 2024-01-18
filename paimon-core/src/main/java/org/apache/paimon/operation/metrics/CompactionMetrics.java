@@ -44,6 +44,7 @@ public class CompactionMetrics {
 
     private Histogram durationHistogram;
     private CompactionStats latestCompaction;
+    private long level0FileCount = -1;
 
     @VisibleForTesting static final String LAST_COMPACTION_DURATION = "lastCompactionDuration";
     @VisibleForTesting static final String COMPACTION_DURATION = "compactionDuration";
@@ -65,6 +66,8 @@ public class CompactionMetrics {
 
     @VisibleForTesting
     static final String LAST_REWRITE_CHANGELOG_FILE_SIZE = "lastRewriteChangelogFileSize";
+
+    @VisibleForTesting static final String LEVEL_0_FILE_COUNT = "level0FileCount";
 
     private void registerGenericCompactionMetrics() {
         metricGroup.gauge(
@@ -98,11 +101,16 @@ public class CompactionMetrics {
                         latestCompaction == null
                                 ? 0L
                                 : latestCompaction.getRewriteChangelogFileSize());
+        metricGroup.gauge(LEVEL_0_FILE_COUNT, () -> level0FileCount);
     }
 
     public void reportCompaction(CompactionStats compactionStats) {
         latestCompaction = compactionStats;
         durationHistogram.update(compactionStats.getDuration());
+    }
+
+    public void reportLevel0FileCount(long count) {
+        this.level0FileCount = count;
     }
 
     public void close() {

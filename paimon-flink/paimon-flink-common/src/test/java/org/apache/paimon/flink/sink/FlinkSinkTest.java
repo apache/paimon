@@ -48,8 +48,8 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.state.StateInitializationContextImpl;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
@@ -231,8 +231,8 @@ public class FlinkSinkTest {
         DataStreamSource<InternalRow> source =
                 streamExecutionEnvironment.fromCollection(
                         Collections.singletonList(GenericRow.of(1, 1)));
-        FlinkSink<InternalRow> flinkSink = new FileStoreSink(fileStoreTable, null, null);
-        SingleOutputStreamOperator<Committable> written = flinkSink.doWrite(source, "123", 1);
+        FlinkSink<InternalRow> flinkSink = new FixedBucketSink(fileStoreTable, null, null);
+        DataStream<Committable> written = flinkSink.doWrite(source, "123", 1);
         RowDataStoreWriteOperator operator =
                 ((RowDataStoreWriteOperator)
                         ((SimpleOperatorFactory)

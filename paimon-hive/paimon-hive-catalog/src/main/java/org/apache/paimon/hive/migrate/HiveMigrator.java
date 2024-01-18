@@ -305,7 +305,7 @@ public class HiveMigrator implements Migrator {
 
     private String parseFormat(String serder) {
         if (serder.contains("avro")) {
-            throw new UnsupportedOperationException("Can't support format avro yet.");
+            return "avro";
         } else if (serder.contains("parquet")) {
             return "parquet";
         } else if (serder.contains("orc")) {

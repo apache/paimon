@@ -29,10 +29,10 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffset;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffsetBuilder;
-import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
+import com.ververica.cdc.debezium.utils.JdbcUrlUtils;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -55,6 +55,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils.toPaimonTypeVisitor;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for MySQL Action. */
 public class MySqlActionUtils {
@@ -212,14 +213,9 @@ public class MySqlActionUtils {
         sourceBuilder.jdbcProperties(jdbcProperties);
 
         Properties debeziumProperties = new Properties();
-        for (Map.Entry<String, String> entry : mySqlConfig.toMap().entrySet()) {
-            String key = entry.getKey();
-            String value = entry.getValue();
-            if (key.startsWith(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX)) {
-                debeziumProperties.put(
-                        key.substring(DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX.length()), value);
-            }
-        }
+        debeziumProperties.putAll(
+                convertToPropertiesPrefixKey(
+                        mySqlConfig.toMap(), DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX));
         sourceBuilder.debeziumProperties(debeziumProperties);
 
         Map<String, Object> customConverterConfigs = new HashMap<>();
@@ -242,16 +238,7 @@ public class MySqlActionUtils {
     private static Map<String, String> getJdbcProperties(
             TypeMapping typeMapping, Configuration mySqlConfig) {
         Map<String, String> jdbcProperties =
-                mySqlConfig.toMap().entrySet().stream()
-                        .filter(e -> e.getKey().startsWith(JdbcUrlUtils.PROPERTIES_PREFIX))
-                        .collect(
-                                Collectors.toMap(
-                                        e ->
-                                                e.getKey()
-                                                        .substring(
-                                                                JdbcUrlUtils.PROPERTIES_PREFIX
-                                                                        .length()),
-                                        Map.Entry::getValue));
+                convertToPropertiesPrefixKey(mySqlConfig.toMap(), JdbcUrlUtils.PROPERTIES_PREFIX);
 
         if (typeMapping.containsMode(TINYINT1_NOT_BOOL)) {
             String tinyInt1isBit = jdbcProperties.get("tinyInt1isBit");

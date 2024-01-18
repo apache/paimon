@@ -27,7 +27,7 @@ import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 
 import java.time.LocalDateTime;
 
-/** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. */
+/** {@link AbstractPrimitiveJavaObjectInspector} for TIMESTAMP type. The precision is maintained. */
 public class PaimonTimestampObjectInspector extends AbstractPrimitiveJavaObjectInspector
         implements TimestampObjectInspector, WriteableObjectInspector {
 

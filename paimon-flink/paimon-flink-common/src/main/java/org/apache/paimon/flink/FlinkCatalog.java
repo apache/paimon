@@ -191,6 +191,7 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException, CatalogException {
+        // todo: flink hive catalog support create db with props
         if (database != null) {
             if (database.getProperties().size() > 0) {
                 throw new UnsupportedOperationException(
@@ -927,7 +928,9 @@ public class FlinkCatalog extends AbstractCatalog {
             throws PartitionNotExistException, CatalogException {
 
         if (!partitionExists(tablePath, partitionSpec)) {
-            throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            if (!ignoreIfNotExists) {
+                throw new PartitionNotExistException(getName(), tablePath, partitionSpec);
+            }
         }
 
         try {

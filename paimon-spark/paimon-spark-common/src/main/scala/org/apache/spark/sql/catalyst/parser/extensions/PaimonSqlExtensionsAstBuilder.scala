@@ -23,13 +23,14 @@ import org.apache.paimon.spark.catalyst.plans.logical.{PaimonCallArgument, Paimo
 import org.antlr.v4.runtime._
 import org.antlr.v4.runtime.misc.Interval
 import org.antlr.v4.runtime.tree.{ParseTree, TerminalNode}
+import org.apache.spark.QueryContext
 import org.apache.spark.internal.Logging
 import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.ParserInterface
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonParserUtils.withOrigin
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser._
 import org.apache.spark.sql.catalyst.plans.logical._
-import org.apache.spark.sql.catalyst.trees.{CurrentOrigin, Origin}
+import org.apache.spark.sql.catalyst.trees.SQLQueryContext
 
 import scala.collection.JavaConverters._
 
@@ -133,3 +134,23 @@ object PaimonParserUtils {
     stream.getText(Interval.of(0, stream.size() - 1))
   }
 }
+
+case class Origin(
+    line: Option[Int] = None,
+    startPosition: Option[Int] = None,
+    startIndex: Option[Int] = None,
+    stopIndex: Option[Int] = None,
+    sqlText: Option[String] = None,
+    objectType: Option[String] = None,
+    objectName: Option[String] = None) {}
+
+object CurrentOrigin {
+  private val value = new ThreadLocal[Origin]() {
+    override def initialValue: Origin = Origin()
+  }
+
+  def get: Origin = value.get()
+  def set(o: Origin): Unit = value.set(o)
+  def reset(): Unit = value.set(Origin())
+}
+/* Apache Spark copy end */

@@ -19,8 +19,8 @@
 package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 /** {@link ChannelComputer} for {@link CdcRecord}. */
