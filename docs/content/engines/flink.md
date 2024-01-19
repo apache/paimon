@@ -502,5 +502,18 @@ table options syntax: we use string to represent table options. The format is 'k
       </td>
       <td>CALL sys.rollback_to('default.T', 10)</td>
    </tr>
+   <tr>
+      <td>expire_snapshots</td>
+      <td>
+         -- expires snapshot<br/>
+         CALL sys.expire_snapshots('identifier', retainMax)<br/><br/>
+      </td>
+      <td>
+         To expire snapshots. Argument:
+            <li>identifier: the target table identifier. Cannot be empty.</li>
+            <li>retainMax: the maximum number of completed snapshots to retain.</li>
+      </td>
+      <td>CALL sys.expire_snapshots('default.T', 2)</td>
+   </tr>
    </tbody>
 </table>
