@@ -51,8 +51,8 @@ import java.util.function.Supplier;
 import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
-/** Implementation for {@link TableQuery}. */
-public class TableQueryImpl implements TableQuery {
+/** Implementation for {@link TableQuery} for caching data and file in local. */
+public class LocalTableQuery implements TableQuery {
 
     private final Map<BinaryRow, Map<Integer, LookupLevels>> tableView;
 
@@ -68,7 +68,7 @@ public class TableQueryImpl implements TableQuery {
 
     private IOManager ioManager;
 
-    public TableQueryImpl(FileStoreTable table) {
+    public LocalTableQuery(FileStoreTable table) {
         this.options = table.coreOptions();
         this.tableView = new HashMap<>();
         FileStore<?> tableStore = table.store();
@@ -105,7 +105,6 @@ public class TableQueryImpl implements TableQuery {
         }
     }
 
-    @Override
     public void refreshFiles(
             BinaryRow partition,
             int bucket,
@@ -148,9 +147,11 @@ public class TableQueryImpl implements TableQuery {
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
 
+    /** TODO remove synchronized and supports multiple thread to lookup. */
     @Nullable
     @Override
-    public InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException {
+    public synchronized InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
+            throws IOException {
         Map<Integer, LookupLevels> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;
@@ -169,13 +170,12 @@ public class TableQueryImpl implements TableQuery {
     }
 
     @Override
-    public TableQuery withValueProjection(int[][] projection) {
+    public LocalTableQuery withValueProjection(int[][] projection) {
         this.readerFactoryBuilder.withValueProjection(projection);
         return this;
     }
 
-    @Override
-    public TableQuery withIOManager(IOManager ioManager) {
+    public LocalTableQuery withIOManager(IOManager ioManager) {
         this.ioManager = ioManager;
         return this;
     }

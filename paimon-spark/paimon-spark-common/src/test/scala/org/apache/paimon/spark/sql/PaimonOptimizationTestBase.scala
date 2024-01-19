@@ -25,14 +25,17 @@ import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan,
 import org.apache.spark.sql.catalyst.rules.RuleExecutor
 import org.apache.spark.sql.functions._
 
-abstract class PaimonOptimzationTestBase extends PaimonSparkTestBase {
+import scala.collection.immutable
+
+abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
 
   import org.apache.spark.sql.catalyst.dsl.expressions._
   import org.apache.spark.sql.catalyst.dsl.plans._
   import testImplicits._
 
   private object Optimize extends RuleExecutor[LogicalPlan] {
-    val batches = Batch("MergePaimonScalarSubqueries", Once, MergePaimonScalarSubqueriers) :: Nil
+    val batches: immutable.Seq[Batch] =
+      Batch("MergePaimonScalarSubqueries", Once, MergePaimonScalarSubqueriers) :: Nil
   }
 
   test("Paimon Optimization: merge scalar subqueries") {

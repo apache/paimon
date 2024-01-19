@@ -87,6 +87,12 @@ SELECT * FROM t TIMESTAMP AS OF 1678883047;
 SELECT * FROM t VERSION AS OF 'my-tag';
 ```
 
+{{< hint warning >}}
+If tag's name is a number and equals to a snapshot id, the VERSION AS OF syntax will consider tag first. For example, if 
+you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM t VERSION AS OF '1'` actually queries snapshot 2 
+instead of snapshot 1.
+{{< /hint >}}
+
 {{< /tab >}}
 
 {{< tab "Spark3-DF" >}}

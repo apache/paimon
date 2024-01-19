@@ -23,11 +23,13 @@ import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.FormatWriterFactory;
+import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
@@ -39,6 +41,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 
 import static org.apache.avro.file.DataFileConstants.SNAPPY_CODEC;
 
@@ -69,6 +72,12 @@ public class AvroFileFormat extends FileFormat {
     @Override
     public FormatWriterFactory createWriterFactory(RowType type) {
         return new RowAvroWriterFactory(type, formatOptions.get(AVRO_OUTPUT_CODEC));
+    }
+
+    @Override
+    public Optional<TableStatsExtractor> createStatsExtractor(
+            RowType type, FieldStatsCollector.Factory[] statsCollectors) {
+        return Optional.of(new AvroTableStatsExtractor(type, statsCollectors));
     }
 
     @Override

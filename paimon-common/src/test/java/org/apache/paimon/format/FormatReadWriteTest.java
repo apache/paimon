@@ -149,6 +149,8 @@ public abstract class FormatReadWriteTest {
                         .field("bytes", DataTypes.BYTES())
                         .field("timestamp", DataTypes.TIMESTAMP())
                         .field("timestamp_3", DataTypes.TIMESTAMP(3))
+                        .field("timestamp_ltz", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE())
+                        .field("timestamp_ltz_3", DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3))
                         .field("date", DataTypes.DATE())
                         .field("decimal", DataTypes.DECIMAL(2, 2))
                         .field("decimal2", DataTypes.DECIMAL(38, 2))
@@ -200,6 +202,8 @@ public abstract class FormatReadWriteTest {
                         (short) 6,
                         12304L,
                         new byte[] {1, 5, 2},
+                        Timestamp.fromMicros(123123123),
+                        Timestamp.fromEpochMillis(123123123),
                         Timestamp.fromMicros(123123123),
                         Timestamp.fromEpochMillis(123123123),
                         2456,

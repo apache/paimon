@@ -38,6 +38,7 @@ import java.util.TreeMap;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -66,14 +67,15 @@ public class TagManager {
         return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    /** Return the path of a tag in branch. */
+    public Path branchTagPath(String branchName, String tagName) {
+        return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
-        checkArgument(
-                !tagName.chars().allMatch(Character::isDigit),
-                "Tag name cannot be pure numeric string but is '%s'.",
-                tagName);
 
         Path newTagPath = tagPath(tagName);
         try {

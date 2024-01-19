@@ -126,4 +126,20 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support rollbackTo tag.",
                         this.getClass().getSimpleName()));
     }
+
+    @Override
+    default void createBranch(String branchName, String tagName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support createBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default void deleteBranch(String branchName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support deleteBranch.",
+                        this.getClass().getSimpleName()));
+    }
 }

@@ -94,11 +94,13 @@ import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
-    // we don't include paimon-hive-connector as dependencies because it depends on
-    // hive-exec
+    // Reserved properties
+    public static final String DB_COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
+    // we don't include paimon-hive-connector as dependencies because it depends on
+    // hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
@@ -208,7 +210,10 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
         try {
-            return getDatabase(databaseName) != null;
+            client.getDatabase(databaseName);
+            return true;
+        } catch (NoSuchObjectException e) {
+            return false;
         } catch (TException e) {
             throw new RuntimeException(
                     "Failed to determine if database " + databaseName + " exists", e);
@@ -216,49 +221,69 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
+    protected void createDatabaseImpl(String name, Map<String, String> properties) {
         try {
-            Database database = getDatabase(name);
-            if (database == null) {
-                Path databasePath = newDatabasePath(name);
-                locationHelper.createPathIfRequired(databasePath, fileIO);
-
-                database = new Database();
-                database.setName(name);
-                locationHelper.specifyDatabaseLocation(databasePath, database);
-                client.createDatabase(database);
-            } else {
-                throw new DatabaseAlreadyExistException(name);
-            }
+            Database database = convertToHiveDatabase(name, properties);
+            Path databasePath =
+                    database.getLocationUri() == null
+                            ? newDatabasePath(name)
+                            : new Path(database.getLocationUri());
+            locationHelper.createPathIfRequired(databasePath, fileIO);
+            locationHelper.specifyDatabaseLocation(databasePath, database);
+            client.createDatabase(database);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
 
+    private Database convertToHiveDatabase(String name, Map<String, String> properties) {
+        Database database = new Database();
+        database.setName(name);
+        Map<String, String> parameter = new HashMap<>();
+        properties.forEach(
+                (key, value) -> {
+                    if (key.equals(DB_COMMENT_PROP)) {
+                        database.setDescription(value);
+                    } else if (key.equals(DB_LOCATION_PROP)) {
+                        database.setLocationUri(value);
+                    } else if (value != null) {
+                        parameter.put(key, value);
+                    }
+                });
+        database.setParameters(parameter);
+        return database;
+    }
+
     @Override
-    protected void dropDatabaseImpl(String name) throws DatabaseNotExistException {
+    public Map<String, String> loadDatabasePropertiesImpl(String name) {
         try {
-            Database database = getDatabase(name);
-            if (database != null) {
-                String location = locationHelper.getDatabaseLocation(database);
-                locationHelper.dropPathIfRequired(new Path(location), fileIO);
-                client.dropDatabase(name, true, false, true);
-            } else {
-                throw new DatabaseNotExistException(name);
-            }
-        } catch (TException | IOException e) {
-            throw new RuntimeException("Failed to drop database " + name, e);
+            return convertToProperties(client.getDatabase(name));
+        } catch (TException e) {
+            throw new RuntimeException(
+                    String.format("Failed to get database %s properties", name), e);
         }
     }
 
-    private Database getDatabase(String databaseName) throws TException {
+    private Map<String, String> convertToProperties(Database database) {
+        Map<String, String> properties = new HashMap<>(database.getParameters());
+        if (database.getLocationUri() != null) {
+            properties.put(DB_LOCATION_PROP, database.getLocationUri());
+        }
+        if (database.getDescription() != null) {
+            properties.put(DB_COMMENT_PROP, database.getDescription());
+        }
+        return properties;
+    }
+
+    @Override
+    protected void dropDatabaseImpl(String name) {
         try {
-            return client.getDatabase(databaseName);
-        } catch (NoSuchObjectException e) {
-            return null;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Failed to determine if database " + databaseName + " exists", e);
+            Database database = client.getDatabase(name);
+            String location = locationHelper.getDatabaseLocation(database);
+            locationHelper.dropPathIfRequired(new Path(location), fileIO);
+            client.dropDatabase(name, true, false, true);
+        } catch (TException | IOException e) {
+            throw new RuntimeException("Failed to drop database " + name, e);
         }
     }
 
