@@ -15,17 +15,23 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.utils;
+package org.apache.paimon.reader;
 
-/**
- * constant.
- */
-public class Constants {
+import java.io.IOException;
+import java.io.Serializable;
+import java.util.List;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableWrite;
 
-    private Constants() {
-        throw new IllegalStateException(Constants.class.getName());
-    }
+public interface WriteStrategy extends Serializable {
 
-    public static final int NETTY_SERVER_HEART_BEAT_TIME = 1000 * 60 * 3 + 1000;
+    void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
+            throws Exception;
+
+    Schema retrieveSchema() throws Exception;
 
 }

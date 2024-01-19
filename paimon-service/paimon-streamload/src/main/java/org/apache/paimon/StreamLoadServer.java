@@ -19,14 +19,10 @@
 package org.apache.paimon;
 
 import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import io.netty.handler.timeout.IdleStateHandler;
-import org.apache.flink.shaded.netty4.io.netty.buffer.PooledByteBufAllocator;
-import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
+import java.util.concurrent.TimeUnit;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpObjectAggregator;
-import org.apache.flink.shaded.netty4.io.netty.handler.logging.LogLevel;
-import org.apache.flink.shaded.netty4.io.netty.handler.logging.LoggingHandler;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpContentDecompressor;
+import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateHandler;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -35,7 +31,6 @@ import org.apache.paimon.exception.RemoteException;
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
 import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll;
 import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollEventLoopGroup;
@@ -44,16 +39,14 @@ import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocke
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpServerCodec;
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.server.LoadHttpHandler2;
+import org.apache.paimon.server.handler.LoadHttpHandler;
 import org.apache.paimon.utils.Constants;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.apache.paimon.server.LoadHttpHandler;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** dsds. */
@@ -110,10 +103,10 @@ public class StreamLoadServer {
 //                    .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
 //                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childHandler(
-                            new ChannelInitializer<Channel>() {
+                            new ChannelInitializer<SocketChannel>() {
 
                                 @Override
-                                protected void initChannel(Channel ch) {
+                                protected void initChannel(SocketChannel ch) {
                                     initNettyChannel(ch);
                                 }
                             });
@@ -154,14 +147,14 @@ public class StreamLoadServer {
         }
     }
 
-    private void initNettyChannel(Channel ch) {
+    private void initNettyChannel(SocketChannel ch) {
         ch.pipeline()
-                //.addLast("idleStateHandler", (ChannelHandler) new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME, TimeUnit.MILLISECONDS))
+                .addLast("idleStateHandler", new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME,
+                        TimeUnit.MILLISECONDS))
+                .addLast("httpContentDecompressor",new HttpContentDecompressor())
                 .addLast("encoder-decoder", new HttpServerCodec())
-//                .addLast(new LoggingHandler(LogLevel.INFO))
-                .addLast(new HttpObjectAggregator(512 * 1024))
                 .addLast("chunkedWriteHandler", new ChunkedWriteHandler())
-                .addLast("yourBusinessLogicHandler", new LoadHttpHandler2());
+                .addLast("loadHttpHandler", new LoadHttpHandler(getTableCatalogInfo("/Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data")));
     }
 
     public void close() {
@@ -179,6 +172,14 @@ public class StreamLoadServer {
             }
             LOG.info("netty org.apache.paimon.server closed");
         }
+    }
+
+    public Catalog getTableCatalogInfo(String path) {
+        Options options = new Options();
+        options.set(
+                "warehouse", path);
+        CatalogContext context = CatalogContext.create(options);
+        return CatalogFactory.createCatalog(context);
     }
 
         public static void main(String[] args) throws Exception {

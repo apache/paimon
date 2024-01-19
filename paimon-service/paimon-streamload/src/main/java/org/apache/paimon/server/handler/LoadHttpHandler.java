@@ -16,24 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.server;
+package org.apache.paimon.server.handler;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.table.sink.StreamTableCommit;
-import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.types.DataTypes;
-
+import java.util.List;
+import java.util.Optional;
 import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
 import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelConfig;
@@ -44,17 +30,34 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpContent;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpObject;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpRequest;
 import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateEvent;
+import org.apache.flink.shaded.netty4.io.netty.util.AttributeKey;
 import org.apache.flink.shaded.netty4.io.netty.util.CharsetUtil;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.reader.ExcelWriteStrategy;
+import org.apache.paimon.reader.WriteStrategy;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-
-import java.util.List;
 
 /** sds. */
 @ChannelHandler.Sharable
 public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private static final Logger LOG = LoggerFactory.getLogger(LoadHttpHandler.class);
+    private static final AttributeKey<HttpRequest> REQUEST_KEY = AttributeKey.valueOf("HttpRequest");
+    private final Catalog catalog;
+
+
+    public LoadHttpHandler(Catalog catalog) {
+        this.catalog = catalog;
+    }
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
@@ -111,78 +114,56 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
         if (msg instanceof HttpRequest) {
             HttpRequest request = (HttpRequest) msg;
-            // 处理HttpRequest的开始部分（例如检查URI和方法）
             LOG.info("Received HttpRequest: {}", request.uri());
+            ctx.channel().attr(REQUEST_KEY).set(request);
         } else if (msg instanceof HttpContent) {
+            HttpRequest request = ctx.channel().attr(REQUEST_KEY).get();
+            String columnSeparator = request.headers().get("column_separator");
+            Optional<String[]> names =extractDbAndTable(request.uri());
             HttpContent content = (HttpContent) msg;
             ByteBuf buf = content.content();
             String receivedContent = buf.toString(CharsetUtil.UTF_8);
-            String[] split = receivedContent.split(",");
-            Options options = new Options();
-            options.set(
-                    "warehouse", "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");
-            CatalogContext context = CatalogContext.create(options);
-            Catalog catalog = CatalogFactory.createCatalog(context);
-            Identifier tableIdentifier = Identifier.create("my_db", "my_table");
-            if (!catalog.tableExists(tableIdentifier)) {
-                Schema schema =
-                        Schema.newBuilder()
-                                .column("address", DataTypes.STRING())
-                                .column("data", DataTypes.STRING())
-                                .build();
-                catalog.createDatabase("my_db", false);
-                catalog.createTable(tableIdentifier, schema, false);
-            }
 
+            String dbName = names.get()[0];
+            String tableName = names.get()[1];
+            Identifier tableIdentifier = Identifier.create(dbName, tableName);
+
+            WriteStrategy writeStrategy = new ExcelWriteStrategy();
+            // Check if table exists before trying to get or create it
+            Schema schema = writeStrategy.retrieveSchema();
+            if (!catalog.tableExists(tableIdentifier)) {
+                if (!catalog.databaseExists(dbName)){
+                    catalog.createDatabase(dbName, false);
+                }
+                if (!catalog.tableExists(tableIdentifier)){
+                    catalog.createTable(tableIdentifier, schema, false);
+                }
+            }
+            Table table = catalog.getTable(tableIdentifier);
             // 1. Create a WriteBuilder (Serializable)
-            Table table = GetTable.getTable();
-            StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
+            BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder().withOverwrite();
 
             // 2. Write records in distributed tasks
-            StreamTableWrite write = writeBuilder.newWrite();
-            // commitIdentifier like Flink checkpointId
-            long commitIdentifier = 0;
+            BatchTableWrite write = writeBuilder.newWrite();
+            writeStrategy.writer(write, receivedContent, columnSeparator);
 
-            while (true) {
-                GenericRow record1 =
-                        GenericRow.of(
-                                BinaryString.fromString("address"),
-                                BinaryString.fromString(split[0]));
-                GenericRow record2 =
-                        GenericRow.of(
-                                BinaryString.fromString("data"), BinaryString.fromString(split[1]));
-                write.write(record1);
-                write.write(record2);
-                List<CommitMessage> messages = write.prepareCommit(false, commitIdentifier);
-                commitIdentifier++;
+            List<CommitMessage> messages = write.prepareCommit();
 
-                // 3. Collect all CommitMessages to a global node and commit
-                StreamTableCommit commit = writeBuilder.newCommit();
-                commit.commit(commitIdentifier, messages);
+            // 3. Collect all CommitMessages to a global node and commit
+            BatchTableCommit commit = writeBuilder.newCommit();
+            commit.commit(messages);
+        }
+    }
 
-                // 4. When failure occurs and you're not sure if the commit process is successful,
-                //    you can use `filterAndCommit` to retry the commit process.
-                //    Succeeded commits will be automatically skipped.
-                /*
-                Map<Long, List<CommitMessage>> commitIdentifiersAndMessages = new HashMap<>();
-                commitIdentifiersAndMessages.put(commitIdentifier, messages);
-                commit.filterAndCommit(commitIdentifiersAndMessages);
-                */
+    private static Optional<String[]> extractDbAndTable(String path) {
+        List<String> parts = Splitter.on('/')
+                .omitEmptyStrings()
+                .splitToList(path);
 
-                Thread.sleep(1000);
-            }
-
-            //            // 打印接收到的数据
-            //            LOG.info("Received content chunk: {}", receivedContent);
-            //
-            //            // 这里可以处理数据，例如写入文件或数据库
-            //
-            //            if (content instanceof LastHttpContent) {
-            //                // 处理请求的结束部分
-            //                // 发送响应
-            //                //sendJsonContent(ctx, HttpResponseStatus.OK, "Data processed");
-            //                LOG.info("Finished processing request.");
-            //            }
+        if (parts.size() >= 4) {
+            return Optional.of(new String[]{parts.get(1), parts.get(2)});
+        } else {
+            return Optional.empty();
         }
     }
 }
