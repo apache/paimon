@@ -24,7 +24,7 @@ import org.apache.paimon.mergetree.LevelSortedRun;
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link CompactStrategy} to force compacting all level 0 files. */
+/** A {@link CompactStrategy} to force compacting level 0 files. */
 public class ForceUpLevel0Compaction implements CompactStrategy {
 
     private final UniversalCompaction universal;
