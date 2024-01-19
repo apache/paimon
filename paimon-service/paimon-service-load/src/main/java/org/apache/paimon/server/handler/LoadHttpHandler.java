@@ -18,8 +18,19 @@
 
 package org.apache.paimon.server.handler;
 
-import java.util.List;
-import java.util.Optional;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.reader.ExcelWriteStrategy;
+import org.apache.paimon.reader.WriteStrategy;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.Table;
+import org.apache.paimon.table.sink.BatchTableCommit;
+import org.apache.paimon.table.sink.BatchTableWrite;
+import org.apache.paimon.table.sink.BatchWriteBuilder;
+import org.apache.paimon.table.sink.CommitMessage;
+
+import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
+
 import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
 import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelConfig;
@@ -32,28 +43,20 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpRequest;
 import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateEvent;
 import org.apache.flink.shaded.netty4.io.netty.util.AttributeKey;
 import org.apache.flink.shaded.netty4.io.netty.util.CharsetUtil;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.reader.ExcelWriteStrategy;
-import org.apache.paimon.reader.WriteStrategy;
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
-import org.apache.paimon.table.Table;
-import org.apache.paimon.table.sink.BatchTableCommit;
-import org.apache.paimon.table.sink.BatchTableWrite;
-import org.apache.paimon.table.sink.BatchWriteBuilder;
-import org.apache.paimon.table.sink.CommitMessage;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import java.util.List;
+import java.util.Optional;
 
 /** sds. */
 @ChannelHandler.Sharable
 public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     private static final Logger LOG = LoggerFactory.getLogger(LoadHttpHandler.class);
-    private static final AttributeKey<HttpRequest> REQUEST_KEY = AttributeKey.valueOf("HttpRequest");
+    private static final AttributeKey<HttpRequest> REQUEST_KEY =
+            AttributeKey.valueOf("HttpRequest");
     private final Catalog catalog;
-
 
     public LoadHttpHandler(Catalog catalog) {
         this.catalog = catalog;
@@ -61,7 +64,7 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
     @Override
     public void handlerAdded(ChannelHandlerContext ctx) throws Exception {
-        LOG.info(ctx.channel().remoteAddress()+"请求连接上来了");
+        LOG.info(ctx.channel().remoteAddress() + "请求连接上来了");
         super.handlerAdded(ctx);
     }
 
@@ -119,7 +122,7 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
         } else if (msg instanceof HttpContent) {
             HttpRequest request = ctx.channel().attr(REQUEST_KEY).get();
             String columnSeparator = request.headers().get("column_separator");
-            Optional<String[]> names =extractDbAndTable(request.uri());
+            Optional<String[]> names = extractDbAndTable(request.uri());
             HttpContent content = (HttpContent) msg;
             ByteBuf buf = content.content();
             String receivedContent = buf.toString(CharsetUtil.UTF_8);
@@ -132,10 +135,10 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             // Check if table exists before trying to get or create it
             Schema schema = writeStrategy.retrieveSchema();
             if (!catalog.tableExists(tableIdentifier)) {
-                if (!catalog.databaseExists(dbName)){
+                if (!catalog.databaseExists(dbName)) {
                     catalog.createDatabase(dbName, false);
                 }
-                if (!catalog.tableExists(tableIdentifier)){
+                if (!catalog.tableExists(tableIdentifier)) {
                     catalog.createTable(tableIdentifier, schema, false);
                 }
             }
@@ -156,12 +159,10 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     private static Optional<String[]> extractDbAndTable(String path) {
-        List<String> parts = Splitter.on('/')
-                .omitEmptyStrings()
-                .splitToList(path);
+        List<String> parts = Splitter.on('/').omitEmptyStrings().splitToList(path);
 
         if (parts.size() >= 4) {
-            return Optional.of(new String[]{parts.get(1), parts.get(2)});
+            return Optional.of(new String[] {parts.get(1), parts.get(2)});
         } else {
             return Optional.empty();
         }

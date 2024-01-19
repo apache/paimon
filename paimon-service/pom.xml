@@ -36,5 +36,6 @@ under the License.
     <modules>
         <module>paimon-service-client</module>
         <module>paimon-service-runtime</module>
+        <module>paimon-service-load</module>
     </modules>
 </project>

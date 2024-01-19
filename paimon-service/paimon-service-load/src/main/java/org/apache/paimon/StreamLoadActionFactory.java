@@ -1,4 +1,4 @@
-///*
+/// *
 // * Licensed to the Apache Software Foundation (ASF) under one
 // * or more contributor license agreements.  See the NOTICE file
 // * distributed with this work for additional information
@@ -16,28 +16,28 @@
 // * limitations under the License.
 // */
 //
-//package org.apache.paimon;
+// package org.apache.paimon;
 //
-//import com.beust.jcommander.JCommander;
-//import com.beust.jcommander.Parameter;
-//import java.io.File;
-//import java.net.InetSocketAddress;
-//import lombok.AllArgsConstructor;
-//import lombok.Builder;
-//import lombok.Data;
-//import lombok.NoArgsConstructor;
-//import org.apache.commons.lang3.StringUtils;
-//import org.apache.paimon.config.NettyServerConfig;
-//import org.slf4j.Logger;
-//import org.slf4j.LoggerFactory;
+// import com.beust.jcommander.JCommander;
+// import com.beust.jcommander.Parameter;
+// import java.io.File;
+// import java.net.InetSocketAddress;
+// import lombok.AllArgsConstructor;
+// import lombok.Builder;
+// import lombok.Data;
+// import lombok.NoArgsConstructor;
+// import org.apache.commons.lang3.StringUtils;
+// import org.apache.paimon.config.NettyServerConfig;
+// import org.slf4j.Logger;
+// import org.slf4j.LoggerFactory;
 //
-///** fddfd. */
+/// ** fddfd. */
 //
-//@Data
-//@Builder
-//@NoArgsConstructor
-//@AllArgsConstructor
-//public class StreamLoadActionFactory {
+// @Data
+// @Builder
+// @NoArgsConstructor
+// @AllArgsConstructor
+// public class StreamLoadActionFactory {
 //
 //    public StreamLoadServer buildNettyRemotingServer(NettyServerConfig nettyServerConfig) {
 //        return new StreamLoadServer(nettyServerConfig);
@@ -152,4 +152,4 @@
 //    protected static void addShutdownHook(StreamLoadServer server) {
 //        Runtime.getRuntime().addShutdownHook(new Thread(server::close));
 //    }
-//}
+// }

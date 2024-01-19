@@ -9,7 +9,7 @@
         <version>0.7-SNAPSHOT</version>
     </parent>
 
-    <artifactId>paimon-streamload</artifactId>
+    <artifactId>paimon-service-load</artifactId>
 
     <properties>
         <flink.shaded.version>17.0</flink.shaded.version>

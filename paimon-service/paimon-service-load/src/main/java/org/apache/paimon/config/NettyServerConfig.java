@@ -117,7 +117,7 @@ public class NettyServerConfig {
         this.listenPort = listenPort;
     }
 
-    /** Builder class.*/
+    /** Builder class. */
     public static class NettyServerConfigBuilder {
         private String serverName;
         private int soBacklog = 1024;

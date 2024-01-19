@@ -30,14 +30,12 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpVersion;
 
 /** sdsd. */
 public class HttpServerResponseUtil {
-    public static void response(ChannelHandlerContext ctx, String content){
+    public static void response(ChannelHandlerContext ctx, String content) {
         ByteBuf buf = Unpooled.copiedBuffer(content, CharsetUtil.UTF_8);
-        DefaultFullHttpResponse response = new DefaultFullHttpResponse(
-                HttpVersion.HTTP_1_1,
-                HttpResponseStatus.OK, buf);
+        DefaultFullHttpResponse response =
+                new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK, buf);
         response.headers().set(HttpHeaderNames.CONTENT_TYPE, "text/html;charset=UTF-8");
         response.headers().set(HttpHeaderNames.CONTENT_LENGTH, buf.readableBytes());
         ctx.writeAndFlush(response).addListener(ChannelFutureListener.CLOSE);
     }
-
 }

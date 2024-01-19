@@ -18,16 +18,17 @@
 
 package org.apache.paimon;
 
-import com.google.common.util.concurrent.ThreadFactoryBuilder;
-import java.util.concurrent.TimeUnit;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpContentDecompressor;
-import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateHandler;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.config.NettyServerConfig;
 import org.apache.paimon.exception.RemoteException;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.server.handler.LoadHttpHandler;
+import org.apache.paimon.utils.Constants;
+
+import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
@@ -35,18 +36,19 @@ import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll;
 import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
+import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpContentDecompressor;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpServerCodec;
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
-import org.apache.paimon.options.Options;
-import org.apache.paimon.server.handler.LoadHttpHandler;
-import org.apache.paimon.utils.Constants;
+import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /** dsds. */
@@ -95,13 +97,19 @@ public class StreamLoadServer {
             this.serverBootstrap
                     .group(this.bossGroup, this.workGroup)
                     .channel(NioServerSocketChannel.class)
-//                    .option(ChannelOption.SO_REUSEADDR, true)
-//                    .option(ChannelOption.SO_BACKLOG, serverConfig.getSoBacklog())
-//                    .childOption(ChannelOption.SO_KEEPALIVE, serverConfig.isSoKeepalive())
-//                    .childOption(ChannelOption.TCP_NODELAY, serverConfig.isTcpNoDelay())
-//                    .childOption(ChannelOption.SO_SNDBUF, serverConfig.getSendBufferSize())
-//                    .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
-//                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
+                    //                    .option(ChannelOption.SO_REUSEADDR, true)
+                    //                    .option(ChannelOption.SO_BACKLOG,
+                    // serverConfig.getSoBacklog())
+                    //                    .childOption(ChannelOption.SO_KEEPALIVE,
+                    // serverConfig.isSoKeepalive())
+                    //                    .childOption(ChannelOption.TCP_NODELAY,
+                    // serverConfig.isTcpNoDelay())
+                    //                    .childOption(ChannelOption.SO_SNDBUF,
+                    // serverConfig.getSendBufferSize())
+                    //                    .childOption(ChannelOption.SO_RCVBUF,
+                    // serverConfig.getReceiveBufferSize())
+                    //                    .childOption(ChannelOption.ALLOCATOR,
+                    // PooledByteBufAllocator.DEFAULT)
                     .childHandler(
                             new ChannelInitializer<SocketChannel>() {
 
@@ -113,9 +121,14 @@ public class StreamLoadServer {
 
             ChannelFuture future;
             try {
-                future = serverBootstrap.bind(serverConfig.getListenPort()).sync().addListener(f -> {
-                    LOG.info("ftp server is started and listening ");
-                });
+                future =
+                        serverBootstrap
+                                .bind(serverConfig.getListenPort())
+                                .sync()
+                                .addListener(
+                                        f -> {
+                                            LOG.info("ftp server is started and listening ");
+                                        });
             } catch (Exception e) {
                 LOG.error("{} bind fail {}, exit", serverConfig.getServerName(), e.getMessage(), e);
                 throw new RemoteException(
@@ -149,12 +162,21 @@ public class StreamLoadServer {
 
     private void initNettyChannel(SocketChannel ch) {
         ch.pipeline()
-                .addLast("idleStateHandler", new IdleStateHandler(0, 0, Constants.NETTY_SERVER_HEART_BEAT_TIME,
-                        TimeUnit.MILLISECONDS))
-                .addLast("httpContentDecompressor",new HttpContentDecompressor())
-                .addLast("encoder-decoder", new HttpServerCodec())
+                .addLast(
+                        "idleStateHandler",
+                        new IdleStateHandler(
+                                0,
+                                0,
+                                Constants.NETTY_SERVER_HEART_BEAT_TIME,
+                                TimeUnit.MILLISECONDS))
+                .addLast("httpContentDecompressor", new HttpContentDecompressor())
+                .addLast("httpServerCodec", new HttpServerCodec())
                 .addLast("chunkedWriteHandler", new ChunkedWriteHandler())
-                .addLast("loadHttpHandler", new LoadHttpHandler(getTableCatalogInfo("/Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data")));
+                .addLast(
+                        "loadHttpHandler",
+                        new LoadHttpHandler(
+                                getTableCatalogInfo(
+                                        "/Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data")));
     }
 
     public void close() {
@@ -176,24 +198,22 @@ public class StreamLoadServer {
 
     public Catalog getTableCatalogInfo(String path) {
         Options options = new Options();
-        options.set(
-                "warehouse", path);
+        options.set("warehouse", path);
         CatalogContext context = CatalogContext.create(options);
         return CatalogFactory.createCatalog(context);
     }
 
-        public static void main(String[] args) throws Exception {
-            int port = 8888;
-            Options options = new Options();
-            options.set("warehouse",
-     "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");
-            CatalogContext context = CatalogContext.create(options);
-            Catalog catalog = CatalogFactory.createCatalog(context);
-            NettyServerConfig nettyServerConfig = new NettyServerConfig();
-            nettyServerConfig.setListenPort(port);
-            nettyServerConfig.setServerName("test");
-            new StreamLoadServer(nettyServerConfig).start();
-// 阻止主线程结束
-            Thread.currentThread().join();
-        }
+    public static void main(String[] args) throws Exception {
+        int port = 8888;
+        Options options = new Options();
+        options.set("warehouse", "file:///Users/zhuoyuchen/Documents/GitHub/incubator-paimon/data");
+        CatalogContext context = CatalogContext.create(options);
+        Catalog catalog = CatalogFactory.createCatalog(context);
+        NettyServerConfig nettyServerConfig = new NettyServerConfig();
+        nettyServerConfig.setListenPort(port);
+        nettyServerConfig.setServerName("test");
+        new StreamLoadServer(nettyServerConfig).start();
+        // 阻止主线程结束
+        Thread.currentThread().join();
+    }
 }

@@ -17,21 +17,16 @@
 
 package org.apache.paimon.reader;
 
-import java.io.IOException;
-import java.io.Serializable;
-import java.util.List;
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableWrite;
 
+import java.io.Serializable;
+
+/** dsds. */
 public interface WriteStrategy extends Serializable {
 
     void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
             throws Exception;
 
     Schema retrieveSchema() throws Exception;
-
 }

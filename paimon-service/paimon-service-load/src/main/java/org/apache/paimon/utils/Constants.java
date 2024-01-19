@@ -17,9 +17,7 @@
 
 package org.apache.paimon.utils;
 
-/**
- * constant.
- */
+/** constant. */
 public class Constants {
 
     private Constants() {
@@ -27,5 +25,4 @@ public class Constants {
     }
 
     public static final int NETTY_SERVER_HEART_BEAT_TIME = 1000 * 60 * 3 + 1000;
-
 }
