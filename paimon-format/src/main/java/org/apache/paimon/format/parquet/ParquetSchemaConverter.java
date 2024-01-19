@@ -154,12 +154,18 @@ public class ParquetSchemaConverter {
             String name, int precision, Type.Repetition repetition, boolean isAdjustToUTC) {
         if (precision <= 3) {
             return Types.primitive(INT64, repetition)
-                    .as(LogicalTypeAnnotation.timestampType(isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MILLIS)).named(name);
+                    .as(
+                            LogicalTypeAnnotation.timestampType(
+                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MILLIS))
+                    .named(name);
         } else if (precision > 6) {
             return Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition).named(name);
         } else {
             return Types.primitive(INT64, repetition)
-                    .as(LogicalTypeAnnotation.timestampType(isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MICROS)).named(name);
+                    .as(
+                            LogicalTypeAnnotation.timestampType(
+                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MICROS))
+                    .named(name);
         }
     }
 
