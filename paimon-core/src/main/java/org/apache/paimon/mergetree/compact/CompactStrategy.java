@@ -41,8 +41,8 @@ public interface CompactStrategy {
     /** Pick a compaction unit consisting of all existing files. */
     static Optional<CompactUnit> pickFullCompaction(int numLevels, List<LevelSortedRun> runs) {
         int maxLevel = numLevels - 1;
-        if (runs.size() == 1 && runs.get(0).level() == maxLevel) {
-            // only 1 sorted run on the max level, nothing to compact
+        if (runs.isEmpty() || (runs.size() == 1 && runs.get(0).level() == maxLevel)) {
+            // no sorted run or only 1 sorted run on the max level, no need to compact
             return Optional.empty();
         } else {
             return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
