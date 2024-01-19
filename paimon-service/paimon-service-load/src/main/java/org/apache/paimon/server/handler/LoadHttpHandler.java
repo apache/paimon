@@ -49,7 +49,9 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Optional;
 
-/** sds. */
+/**
+ * An HTTP handler for loading data into a catalog, handling various HTTP events and requests.
+ */
 @ChannelHandler.Sharable
 public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
 
