@@ -211,7 +211,7 @@ Run the following command:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    rollback-to \
+    rollback_to \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
