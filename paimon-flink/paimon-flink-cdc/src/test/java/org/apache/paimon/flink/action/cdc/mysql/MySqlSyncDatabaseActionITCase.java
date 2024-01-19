@@ -23,7 +23,10 @@ import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.schema.SchemaChange;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -1314,6 +1317,298 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     table,
                     rowType,
                     Collections.singletonList("k"));
+        }
+    }
+
+    @Test
+    @Timeout(120)
+    public void testAllTypes() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", "all_types");
+
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            testAllTypesImpl(statement);
+        }
+    }
+
+    private void testAllTypesImpl(Statement statement) throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), // _id
+                            DataTypes.DECIMAL(2, 1), // pt
+                            DataTypes.BOOLEAN(), // _bit1
+                            DataTypes.BINARY(8), // _bit
+                            DataTypes.BOOLEAN(), // _tinyint1
+                            DataTypes.BOOLEAN(), // _boolean
+                            DataTypes.BOOLEAN(), // _bool
+                            DataTypes.TINYINT(), // _tinyint
+                            DataTypes.SMALLINT(), // _tinyint_unsigned
+                            DataTypes.SMALLINT(), // _tinyint_unsigned_zerofill
+                            DataTypes.SMALLINT(), // _smallint
+                            DataTypes.INT(), // _smallint_unsigned
+                            DataTypes.INT(), // _smallint_unsigned_zerofill
+                            DataTypes.INT(), // _mediumint
+                            DataTypes.BIGINT(), // _mediumint_unsigned
+                            DataTypes.BIGINT(), // _mediumint_unsigned_zerofill
+                            DataTypes.INT(), // _int
+                            DataTypes.BIGINT(), // _int_unsigned
+                            DataTypes.BIGINT(), // _int_unsigned_zerofill
+                            DataTypes.BIGINT(), // _bigint
+                            DataTypes.DECIMAL(20, 0), // _bigint_unsigned
+                            DataTypes.DECIMAL(20, 0), // _bigint_unsigned_zerofill
+                            DataTypes.DECIMAL(20, 0).notNull(), // _serial
+                            DataTypes.FLOAT(), // _float
+                            DataTypes.FLOAT(), // _float_unsigned
+                            DataTypes.FLOAT(), // _float_unsigned_zerofill
+                            DataTypes.DOUBLE(), // _real
+                            DataTypes.DOUBLE(), // _real_unsigned
+                            DataTypes.DOUBLE(), // _real_unsigned_zerofill
+                            DataTypes.DOUBLE(), // _double
+                            DataTypes.DOUBLE(), // _double_unsigned
+                            DataTypes.DOUBLE(), // _double_unsigned_zerofill
+                            DataTypes.DOUBLE(), // _double_precision
+                            DataTypes.DOUBLE(), // _double_precision_unsigned
+                            DataTypes.DOUBLE(), // _double_precision_unsigned_zerofill
+                            DataTypes.DECIMAL(8, 3), // _numeric
+                            DataTypes.DECIMAL(8, 3), // _numeric_unsigned
+                            DataTypes.DECIMAL(8, 3), // _numeric_unsigned_zerofill
+                            DataTypes.STRING(), // _fixed
+                            DataTypes.STRING(), // _fixed_unsigned
+                            DataTypes.STRING(), // _fixed_unsigned_zerofill
+                            DataTypes.DECIMAL(8, 0), // _decimal
+                            DataTypes.DECIMAL(8, 0), // _decimal_unsigned
+                            DataTypes.DECIMAL(8, 0), // _decimal_unsigned_zerofill
+                            DataTypes.DECIMAL(38, 10), // _big_decimal
+                            DataTypes.DATE(), // _date
+                            DataTypes.TIMESTAMP(0), // _datetime
+                            DataTypes.TIMESTAMP(3), // _datetime3
+                            DataTypes.TIMESTAMP(6), // _datetime6
+                            DataTypes.TIMESTAMP(0), // _datetime_p
+                            DataTypes.TIMESTAMP(2), // _datetime_p2
+                            DataTypes.TIMESTAMP(6), // _timestamp
+                            DataTypes.TIMESTAMP(0), // _timestamp0
+                            DataTypes.CHAR(10), // _char
+                            DataTypes.VARCHAR(20), // _varchar
+                            DataTypes.STRING(), // _tinytext
+                            DataTypes.STRING(), // _text
+                            DataTypes.STRING(), // _mediumtext
+                            DataTypes.STRING(), // _longtext
+                            DataTypes.VARBINARY(10), // _bin
+                            DataTypes.VARBINARY(20), // _varbin
+                            DataTypes.BYTES(), // _tinyblob
+                            DataTypes.BYTES(), // _blob
+                            DataTypes.BYTES(), // _mediumblob
+                            DataTypes.BYTES(), // _longblob
+                            DataTypes.STRING(), // _json
+                            DataTypes.STRING(), // _enum
+                            DataTypes.INT(), // _year
+                            DataTypes.TIME(), // _time
+                            DataTypes.STRING(), // _point
+                            DataTypes.STRING(), // _geometry
+                            DataTypes.STRING(), // _linestring
+                            DataTypes.STRING(), // _polygon
+                            DataTypes.STRING(), // _multipoint
+                            DataTypes.STRING(), // _multiline
+                            DataTypes.STRING(), // _multipolygon
+                            DataTypes.STRING(), // _geometrycollection
+                            DataTypes.ARRAY(DataTypes.STRING()) // _set
+                        },
+                        new String[] {
+                            "_id",
+                            "pt",
+                            "_bit1",
+                            "_bit",
+                            "_tinyint1",
+                            "_boolean",
+                            "_bool",
+                            "_tinyint",
+                            "_tinyint_unsigned",
+                            "_tinyint_unsigned_zerofill",
+                            "_smallint",
+                            "_smallint_unsigned",
+                            "_smallint_unsigned_zerofill",
+                            "_mediumint",
+                            "_mediumint_unsigned",
+                            "_mediumint_unsigned_zerofill",
+                            "_int",
+                            "_int_unsigned",
+                            "_int_unsigned_zerofill",
+                            "_bigint",
+                            "_bigint_unsigned",
+                            "_bigint_unsigned_zerofill",
+                            "_serial",
+                            "_float",
+                            "_float_unsigned",
+                            "_float_unsigned_zerofill",
+                            "_real",
+                            "_real_unsigned",
+                            "_real_unsigned_zerofill",
+                            "_double",
+                            "_double_unsigned",
+                            "_double_unsigned_zerofill",
+                            "_double_precision",
+                            "_double_precision_unsigned",
+                            "_double_precision_unsigned_zerofill",
+                            "_numeric",
+                            "_numeric_unsigned",
+                            "_numeric_unsigned_zerofill",
+                            "_fixed",
+                            "_fixed_unsigned",
+                            "_fixed_unsigned_zerofill",
+                            "_decimal",
+                            "_decimal_unsigned",
+                            "_decimal_unsigned_zerofill",
+                            "_big_decimal",
+                            "_date",
+                            "_datetime",
+                            "_datetime3",
+                            "_datetime6",
+                            "_datetime_p",
+                            "_datetime_p2",
+                            "_timestamp",
+                            "_timestamp0",
+                            "_char",
+                            "_varchar",
+                            "_tinytext",
+                            "_text",
+                            "_mediumtext",
+                            "_longtext",
+                            "_bin",
+                            "_varbin",
+                            "_tinyblob",
+                            "_blob",
+                            "_mediumblob",
+                            "_longblob",
+                            "_json",
+                            "_enum",
+                            "_year",
+                            "_time",
+                            "_point",
+                            "_geometry",
+                            "_linestring",
+                            "_polygon",
+                            "_multipoint",
+                            "_multiline",
+                            "_multipolygon",
+                            "_geometrycollection",
+                            "_set",
+                        });
+        // BIT(64) data: 0B11111000111 -> 0B00000111_11000111
+        String bits =
+                Arrays.toString(
+                        new byte[] {0, 0, 0, 0, 0, 0, (byte) 0B00000111, (byte) 0B11000111});
+
+        FileStoreTable table1 = getFileStoreTable("all_types_table1");
+        FileStoreTable table2 = getFileStoreTable("all_types_table2");
+
+        List<String> expected =
+                Arrays.asList(
+                        "+I["
+                                + "1, 1.1, "
+                                + String.format("true, %s, ", bits)
+                                + "true, true, false, 1, 2, 3, "
+                                + "1000, 2000, 3000, "
+                                + "100000, 200000, 300000, "
+                                + "1000000, 2000000, 3000000, "
+                                + "10000000000, 20000000000, 30000000000, 40000000000, "
+                                + "1.5, 2.5, 3.5, "
+                                + "1.000001, 2.000002, 3.000003, "
+                                + "1.000011, 2.000022, 3.000033, "
+                                + "1.000111, 2.000222, 3.000333, "
+                                + "12345.110, 12345.220, 12345.330, "
+                                + "123456789876543212345678987654321.11, 123456789876543212345678987654321.22, 123456789876543212345678987654321.33, "
+                                + "11111, 22222, 33333, 2222222222222222300000001111.1234567890, "
+                                + "19439, "
+                                // display value of datetime is not affected by timezone
+                                + "2023-03-23T14:30:05, 2023-03-23T14:30:05.123, 2023-03-23T14:30:05.123456, "
+                                + "2023-03-24T14:30, 2023-03-24T14:30:05.120, "
+                                // display value of timestamp is affected by timezone
+                                // we store 2023-03-23T15:00:10.123456 in UTC-8 system timezone
+                                // and query this timestamp in UTC-5 MySQL server timezone
+                                // so the display value should increase by 3 hour
+                                + "2023-03-23T18:00:10.123456, 2023-03-23T03:10, "
+                                + "Paimon, Apache Paimon, Apache Paimon MySQL TINYTEXT Test Data, Apache Paimon MySQL Test Data, Apache Paimon MySQL MEDIUMTEXT Test Data, Apache Paimon MySQL Long Test Data, "
+                                + "[98, 121, 116, 101, 115, 0, 0, 0, 0, 0], "
+                                + "[109, 111, 114, 101, 32, 98, 121, 116, 101, 115], "
+                                + "[84, 73, 78, 89, 66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[77, 69, 68, 73, 85, 77, 66, 76, 79, 66, 32, 116, 121, 112, 101, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "[76, 79, 78, 71, 66, 76, 79, 66, 32, 32, 98, 121, 116, 101, 115, 32, 116, 101, 115, 116, 32, 100, 97, 116, 97], "
+                                + "{\"a\": \"b\"}, "
+                                + "value1, "
+                                + "2023, "
+                                + "36803000, "
+                                + "{\"coordinates\":[1,1],\"type\":\"Point\",\"srid\":0}, "
+                                + "{\"coordinates\":[[[1,1],[2,1],[2,2],[1,2],[1,1]]],\"type\":\"Polygon\",\"srid\":0}, "
+                                + "{\"coordinates\":[[3,0],[3,3],[3,5]],\"type\":\"LineString\",\"srid\":0}, "
+                                + "{\"coordinates\":[[[1,1],[2,1],[2,2],[1,2],[1,1]]],\"type\":\"Polygon\",\"srid\":0}, "
+                                + "{\"coordinates\":[[1,1],[2,2]],\"type\":\"MultiPoint\",\"srid\":0}, "
+                                + "{\"coordinates\":[[[1,1],[2,2],[3,3]],[[4,4],[5,5]]],\"type\":\"MultiLineString\",\"srid\":0}, "
+                                + "{\"coordinates\":[[[[0,0],[10,0],[10,10],[0,10],[0,0]]],[[[5,5],[7,5],[7,7],[5,7],[5,5]]]],\"type\":\"MultiPolygon\",\"srid\":0}, "
+                                + "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}, "
+                                + "[a, b]"
+                                + "]",
+                        "+I["
+                                + "2, 2.2, "
+                                + "NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, 50000000000, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, "
+                                + "NULL, "
+                                + "NULL, NULL, NULL, "
+                                + "NULL, NULL, "
+                                + "NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, NULL, NULL, NULL, NULL, NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL, "
+                                + "NULL"
+                                + "]");
+        waitForResult(expected, table1, rowType, Arrays.asList("_id"));
+        waitForResult(expected, table2, rowType, Arrays.asList("_id"));
+
+        // test all types during schema evolution
+        try {
+            statement.executeUpdate("USE all_types");
+            statement.executeUpdate("ALTER TABLE all_types_table1 ADD COLUMN v INT");
+            List<DataField> newFields = new ArrayList<>(rowType.getFields());
+            newFields.add(new DataField(rowType.getFieldCount(), "v", DataTypes.INT()));
+            RowType newRowType = new RowType(newFields);
+            List<String> newExpected =
+                    expected.stream()
+                            .map(s -> s.substring(0, s.length() - 1) + ", NULL]")
+                            .collect(Collectors.toList());
+            waitForResult(newExpected, table1, newRowType, Arrays.asList("_id"));
+        } finally {
+            statement.executeUpdate("ALTER TABLE all_types_table1 DROP COLUMN v");
+            SchemaManager schemaManager = new SchemaManager(table1.fileIO(), table1.location());
+            schemaManager.commitChanges(SchemaChange.dropColumn("v"));
         }
     }
 
