@@ -570,7 +570,7 @@ s
          To expire snapshots. Argument:
             <li>table: the target table identifier. Cannot be empty.</li>
             <li>retainMax: the maximum number of completed snapshots to retain.</li>
-            <li>retainMin: the min number of completed snapshots to retain.</li>
+            <li>retainMin: the minimum number of completed snapshots to retain.</li>
             <li>older_than: timestamp before which snapshots will be removed.</li>
             <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
       </td>
