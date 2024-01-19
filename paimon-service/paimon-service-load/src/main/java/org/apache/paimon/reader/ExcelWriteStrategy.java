@@ -20,9 +20,7 @@ package org.apache.paimon.reader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableWrite;
 
-/**
- * Strategy implementation for writing data to Excel format using batch table writes.
- */
+/** Strategy implementation for writing data to Excel format using batch table writes. */
 public class ExcelWriteStrategy implements WriteStrategy {
 
     @Override

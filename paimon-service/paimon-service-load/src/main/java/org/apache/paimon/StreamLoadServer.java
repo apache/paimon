@@ -52,7 +52,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
- * A server for stream loading data over Netty, handling initialization, configuration, and lifecycle management.
+ * A server for stream loading data over Netty, handling initialization, configuration, and
+ * lifecycle management.
  */
 public class StreamLoadServer {
 

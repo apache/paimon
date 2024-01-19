@@ -22,9 +22,7 @@ import org.apache.paimon.table.sink.BatchTableWrite;
 
 import java.io.Serializable;
 
-/**
- * Defines a strategy for writing data and retrieving schema.
- */
+/** Defines a strategy for writing data and retrieving schema. */
 public interface WriteStrategy extends Serializable {
 
     void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
