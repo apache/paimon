@@ -25,7 +25,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** sdsd. */
+/** Parsing and managing request parameters from an HttpRequest. */
 public class RequestParameterUtil {
 
     private HttpRequest request;

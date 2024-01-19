@@ -28,7 +28,7 @@ import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseSt
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpVersion;
 import org.apache.flink.shaded.netty4.io.netty.util.CharsetUtil;
 
-/** sdsd. */
+/** Construct and send HTTP responses. */
 public class HttpServerResponseUtil {
     public static void response(ChannelHandlerContext ctx, String content) {
         ByteBuf buf = Unpooled.copiedBuffer(content, CharsetUtil.UTF_8);
