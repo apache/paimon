@@ -947,6 +947,49 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testHistoryPartitionsCascadeToUpdate() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    k INT,",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k) NOT ENFORCED",
+                        ") WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.tag-to-partition' = 'dt'",
+                        ")"));
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+
+        // TODO modify to CALL after Flink 1.18
+        Table table =
+                ((DataCatalogTable)
+                                tEnv.getCatalog(tEnv.getCurrentCatalog())
+                                        .get()
+                                        .getTable(new ObjectPath(tEnv.getCurrentDatabase(), "t")))
+                        .table();
+        table.createTag("2023-10-16", 1);
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10\t2023-10-16", "2\t20\t2023-10-16");
+
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
+        table.createTag("2023-10-17", 2);
+
+        tEnv.executeSql("ALTER TABLE t ADD z INT");
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30, 5), (4, 40, 6)").await();
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10\tNULL\t2023-10-16", "2\t20\tNULL\t2023-10-16");
+    }
+
+    @Test
     public void testAddPartitionsForTagPreview() throws Exception {
         tEnv.executeSql(
                 String.join(
