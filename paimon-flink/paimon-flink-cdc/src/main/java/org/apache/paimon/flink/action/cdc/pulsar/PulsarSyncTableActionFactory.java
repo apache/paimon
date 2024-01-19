@@ -18,24 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.SyncTableActionFactoryBase;
 
-import org.apache.flink.api.java.tuple.Tuple3;
-
-import java.util.ArrayList;
-import java.util.Optional;
-
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PRIMARY_KEYS;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Factory to create {@link PulsarSyncTableAction}. */
-public class PulsarSyncTableActionFactory implements ActionFactory {
+public class PulsarSyncTableActionFactory extends SyncTableActionFactoryBase {
 
     public static final String IDENTIFIER = "pulsar_sync_table";
 
@@ -45,38 +33,18 @@ public class PulsarSyncTableActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        checkRequiredArgument(params, PULSAR_CONF);
+    public String cdcConfigIdentifier() {
+        return PULSAR_CONF;
+    }
 
-        PulsarSyncTableAction action =
-                new PulsarSyncTableAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        optionalConfigMap(params, CATALOG_CONF),
-                        optionalConfigMap(params, PULSAR_CONF));
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
-
-        if (params.has(PARTITION_KEYS)) {
-            action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
-        }
-
-        if (params.has(PRIMARY_KEYS)) {
-            action.withPrimaryKeys(params.get(PRIMARY_KEYS).split(","));
-        }
-
-        if (params.has(COMPUTED_COLUMN)) {
-            action.withComputedColumnArgs(
-                    new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
-        }
-
-        if (params.has(TYPE_MAPPING)) {
-            String[] options = params.get(TYPE_MAPPING).split(",");
-            action.withTypeMapping(TypeMapping.parse(options));
-        }
-
-        return Optional.of(action);
+    @Override
+    public PulsarSyncTableAction createAction() {
+        return new PulsarSyncTableAction(
+                this.tablePath.f0,
+                this.tablePath.f1,
+                this.tablePath.f2,
+                this.catalogConfig,
+                this.cdcSourceConfig);
     }
 
     @Override

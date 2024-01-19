@@ -98,8 +98,6 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     private String databaseName;
     private final CdcMetadataConverter[] metadataConverters;
 
-    private final Set<String> nonPkTables = new HashSet<>();
-
     public PostgresRecordParser(
             Configuration postgresConfig,
             boolean caseSensitive,
@@ -234,9 +232,6 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
     }
 
     private List<RichCdcMultiplexRecord> extractRecords() {
-        if (nonPkTables.contains(currentTable)) {
-            return Collections.emptyList();
-        }
         List<RichCdcMultiplexRecord> records = new ArrayList<>();
 
         Map<String, String> before = extractRow(root.payload().before());

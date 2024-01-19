@@ -34,6 +34,8 @@ CREATE TABLE schema_evolution_1 (
     PRIMARY KEY (_id)
 );
 
+ALTER TABLE schema_evolution_1
+    REPLICA IDENTITY FULL;
 
 CREATE TABLE schema_evolution_2 (
     pt INT,
@@ -42,6 +44,8 @@ CREATE TABLE schema_evolution_2 (
     PRIMARY KEY (_id)
 );
 
+ALTER TABLE schema_evolution_2
+    REPLICA IDENTITY FULL;
 
 CREATE TABLE schema_evolution_multiple (
     _id INT,
@@ -51,8 +55,9 @@ CREATE TABLE schema_evolution_multiple (
     PRIMARY KEY (_id)
 );
 
+ALTER TABLE schema_evolution_multiple
+    REPLICA IDENTITY FULL;
 
-CREATE TYPE ENUM_TYPE AS ENUM ('value1','value2','value3');
 CREATE TABLE all_types_table (
     _id INT,
     pt DECIMAL(2, 1),
@@ -103,6 +108,9 @@ CREATE TABLE all_types_table (
     _array VARCHAR[],
     PRIMARY KEY (_id)
 );
+
+ALTER TABLE all_types_table
+    REPLICA IDENTITY FULL;
 
 INSERT INTO all_types_table (
     _id, pt,
@@ -163,18 +171,23 @@ INSERT INTO all_types_table (
     NULL
     );
 
-
 CREATE TABLE incompatible_field_1 (
     _id INT,
     v1 TIMESTAMP,
     PRIMARY KEY (_id)
 );
 
+ALTER TABLE incompatible_field_1
+    REPLICA IDENTITY FULL;
+
 CREATE TABLE incompatible_field_2 (
     _id INT,
     v1 INT,
     PRIMARY KEY (_id)
 );
+
+ALTER TABLE incompatible_field_2
+    REPLICA IDENTITY FULL;
 
 CREATE TABLE incompatible_pk_1 (
     a INT,
@@ -183,12 +196,18 @@ CREATE TABLE incompatible_pk_1 (
     PRIMARY KEY (a, b)
 );
 
+ALTER TABLE incompatible_pk_1
+    REPLICA IDENTITY FULL;
+
 CREATE TABLE incompatible_pk_2 (
     a INT,
     b BIGINT,
     c VARCHAR(20),
     PRIMARY KEY (a)
 );
+
+ALTER TABLE incompatible_pk_2
+    REPLICA IDENTITY FULL;
 
 CREATE TABLE test_computed_column (
     pk INT,
@@ -197,12 +216,18 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
+ALTER TABLE test_computed_column
+    REPLICA IDENTITY FULL;
+
 CREATE TABLE test_options_change (
    pk INT,
    _date DATE,
    _timestamp TIMESTAMP,
    PRIMARY KEY (pk)
 );
+
+ALTER TABLE test_options_change
+    REPLICA IDENTITY FULL;
 
 -- ################################################################################
 --  testMetadataColumns
@@ -213,6 +238,9 @@ CREATE TABLE test_metadata_columns (
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+ALTER TABLE test_metadata_columns
+    REPLICA IDENTITY FULL;
 
 -- ################################################################################
 --  testSyncShard
@@ -228,11 +256,17 @@ CREATE TABLE t1 (
     PRIMARY KEY (pk)
 );
 
+ALTER TABLE t1
+    REPLICA IDENTITY FULL;
+
 CREATE TABLE t2 (
     pk INT,
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+ALTER TABLE t2
+    REPLICA IDENTITY FULL;
 
 DROP SCHEMA IF EXISTS shard_2 CASCADE;
 CREATE SCHEMA shard_2;
@@ -244,8 +278,14 @@ CREATE TABLE t1 (
     PRIMARY KEY (pk)
 );
 
+ALTER TABLE t1
+    REPLICA IDENTITY FULL;
+
 CREATE TABLE t2 (
     pk INT,
     _date VARCHAR(10),
     PRIMARY KEY (pk)
 );
+
+ALTER TABLE t2
+    REPLICA IDENTITY FULL;

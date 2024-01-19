@@ -135,9 +135,9 @@ public class PostgresActionUtils {
                 .getOptional(PostgresSourceOptions.DECODING_PLUGIN_NAME)
                 .ifPresent(sourceBuilder::decodingPluginName);
 
-        // PostgreSQL CDC using increment snapshot, splitSize is used instead of fetchSize (as in
-        // JDBC
-        // connector). splitSize is the number of records in each snapshot split.
+        // Postgres CDC using increment snapshot, splitSize is used instead of fetchSize (as in JDBC
+        // connector). splitSize is the number of records in each snapshot split. see
+        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#incremental-snapshot-options
         postgresConfig
                 .getOptional(PostgresSourceOptions.SCAN_INCREMENTAL_SNAPSHOT_CHUNK_SIZE)
                 .ifPresent(sourceBuilder::splitSize);
@@ -158,21 +158,8 @@ public class PostgresActionUtils {
 
         if ("initial".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(StartupOptions.initial());
-        } else if ("earliest-offset".equalsIgnoreCase(startupMode)) {
-            sourceBuilder.startupOptions(StartupOptions.earliest());
         } else if ("latest-offset".equalsIgnoreCase(startupMode)) {
             sourceBuilder.startupOptions(StartupOptions.latest());
-        } else if ("specific-offset".equalsIgnoreCase(startupMode)) {
-            String file =
-                    postgresConfig.get(PostgresSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_FILE);
-            Integer pos =
-                    postgresConfig.get(PostgresSourceOptions.SCAN_STARTUP_SPECIFIC_OFFSET_POS);
-            sourceBuilder.startupOptions(StartupOptions.specificOffset(file, pos));
-        } else if ("timestamp".equalsIgnoreCase(startupMode)) {
-            sourceBuilder.startupOptions(
-                    StartupOptions.timestamp(
-                            postgresConfig.get(
-                                    PostgresSourceOptions.SCAN_STARTUP_TIMESTAMP_MILLIS)));
         }
 
         Properties debeziumProperties = new Properties();

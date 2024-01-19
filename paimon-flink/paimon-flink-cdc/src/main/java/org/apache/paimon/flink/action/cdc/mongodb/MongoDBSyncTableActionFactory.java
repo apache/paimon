@@ -18,21 +18,18 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
-
-import org.apache.flink.api.java.tuple.Tuple3;
+import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
+import org.apache.paimon.flink.action.cdc.SyncTableActionFactoryBase;
 
 import java.util.ArrayList;
-import java.util.Optional;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
 
 /** Factory to create {@link MongoDBSyncTableAction}. */
-public class MongoDBSyncTableActionFactory implements ActionFactory {
+public class MongoDBSyncTableActionFactory extends SyncTableActionFactoryBase {
 
     public static final String IDENTIFIER = "mongodb_sync_table";
 
@@ -42,20 +39,22 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        Tuple3<String, String, String> tablePath = getTablePath(params);
-        checkRequiredArgument(params, MONGODB_CONF);
+    public String cdcConfigIdentifier() {
+        return MONGODB_CONF;
+    }
 
-        MongoDBSyncTableAction action =
-                new MongoDBSyncTableAction(
-                        tablePath.f0,
-                        tablePath.f1,
-                        tablePath.f2,
-                        optionalConfigMap(params, CATALOG_CONF),
-                        optionalConfigMap(params, MONGODB_CONF));
+    @Override
+    public SyncTableActionBase createAction() {
+        return new MongoDBSyncTableAction(
+                this.tablePath.f0,
+                this.tablePath.f1,
+                this.tablePath.f2,
+                this.catalogConfig,
+                this.cdcSourceConfig);
+    }
 
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
-
+    @Override
+    protected void withParams(MultipleParameterToolAdapter params, SyncTableActionBase action) {
         if (params.has(PARTITION_KEYS)) {
             action.withPartitionKeys(params.get(PARTITION_KEYS).split(","));
         }
@@ -64,8 +63,6 @@ public class MongoDBSyncTableActionFactory implements ActionFactory {
             action.withComputedColumnArgs(
                     new ArrayList<>(params.getMultiParameter(COMPUTED_COLUMN)));
         }
-
-        return Optional.of(action);
     }
 
     @Override

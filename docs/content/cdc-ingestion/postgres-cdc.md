@@ -3,7 +3,7 @@ title: "Postgres CDC"
 weight: 2
 type: docs
 aliases:
-- /cdc-ingestion/ostgres-cdc.html
+- /cdc-ingestion/postgres-cdc.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
