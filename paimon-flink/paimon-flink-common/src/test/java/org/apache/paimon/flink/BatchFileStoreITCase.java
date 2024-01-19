@@ -233,7 +233,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         FileStoreTable table = (FileStoreTable) paimonTable("T");
-        table.copy(expireOptions).store().newExpire().expire();
+        table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag1') */"))

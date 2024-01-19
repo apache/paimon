@@ -266,7 +266,8 @@ public class UniversalCompactionTest {
 
     @Test
     public void testLookup() {
-        LookupCompaction compaction = new LookupCompaction(new UniversalCompaction(25, 1, 3));
+        ForceUpLevel0Compaction compaction =
+                new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
 
         // level 0 to max level
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 2, 2));

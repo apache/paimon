@@ -195,7 +195,7 @@ public class OrphanFilesCleanTest {
         expireOptions.set(CoreOptions.SNAPSHOT_EXPIRE_LIMIT, snapshotCount);
         expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, snapshotCount - expired);
         expireOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, snapshotCount - expired);
-        table.copy(expireOptions.toMap()).store().newExpire().expire();
+        table.copy(expireOptions.toMap()).newCommit("").expireSnapshots();
 
         // randomly delete tags
         List<String> deleteTags = Collections.emptyList();
