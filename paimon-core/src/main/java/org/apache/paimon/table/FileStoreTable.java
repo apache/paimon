@@ -97,6 +97,8 @@ public interface FileStoreTable extends DataTable {
     @Override
     TableCommitImpl newCommit(String commitUser);
 
+    TableCommitImpl newCommit(String commitUser, String branchName);
+
     LocalTableQuery newLocalTableQuery();
 
     default BinaryTableStats getSchemaFieldStats(DataFileMeta dataFileMeta) {

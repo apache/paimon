@@ -85,6 +85,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     private final Integer scanManifestParallelism;
 
     private ScanMetrics scanMetrics = null;
+    private String branchName;
 
     public AbstractFileStoreScan(
             RowType partitionType,
@@ -95,7 +96,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
             boolean checkNumOfBuckets,
-            Integer scanManifestParallelism) {
+            Integer scanManifestParallelism,
+            String branchName) {
         this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionType = partitionType;
         this.bucketKeyFilter = bucketKeyFilter;
@@ -107,6 +109,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         this.checkNumOfBuckets = checkNumOfBuckets;
         this.tableSchemas = new ConcurrentHashMap<>();
         this.scanManifestParallelism = scanManifestParallelism;
+        this.branchName = branchName;
     }
 
     @Override
@@ -247,7 +250,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         if (manifests == null) {
             snapshot =
                     specifiedSnapshot == null
-                            ? snapshotManager.latestSnapshot()
+                            ? snapshotManager.latestSnapshot(branchName)
                             : specifiedSnapshot;
             if (snapshot == null) {
                 manifests = Collections.emptyList();

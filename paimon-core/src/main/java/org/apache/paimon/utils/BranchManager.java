@@ -36,6 +36,7 @@ public class BranchManager {
     private static final Logger LOG = LoggerFactory.getLogger(BranchManager.class);
 
     public static final String BRANCH_PREFIX = "branch-";
+    public static final String MAIN_BRANCH = "main";
 
     private final FileIO fileIO;
     private final Path tablePath;

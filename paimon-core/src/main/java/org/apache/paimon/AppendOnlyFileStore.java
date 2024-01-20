@@ -69,7 +69,11 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public AppendOnlyFileStoreScan newScan() {
-        return newScan(false);
+        return newScan("main");
+    }
+
+    public AppendOnlyFileStoreScan newScan(String branchName) {
+        return newScan(false, branchName);
     }
 
     @Override
@@ -99,12 +103,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
+                newScan(true, "main").withManifestCacheFilter(manifestFilter),
                 options,
                 tableName);
     }
 
-    private AppendOnlyFileStoreScan newScan(boolean forWrite) {
+    private AppendOnlyFileStoreScan newScan(boolean forWrite, String branchName) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
@@ -138,7 +142,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                branchName);
     }
 
     @Override
