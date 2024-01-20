@@ -80,8 +80,6 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreCommit newCommit(String commitUser, String branchName);
 
-    FileStoreExpire newExpire();
-
     SnapshotDeletion newSnapshotDeletion();
 
     TagManager newTagManager();
