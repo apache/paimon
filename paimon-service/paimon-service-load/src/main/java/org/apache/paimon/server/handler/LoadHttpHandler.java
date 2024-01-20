@@ -157,20 +157,22 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             BatchTableCommit commit = writeBuilder.newCommit();
             commit.commit(messages);
 
-            response(ctx,"{\n" +
-                    "    \"Status\": \"Success\",\n" +
-                    "    \"NumberTotalRows\": 1000000,\n" +
-                    "    \"NumberLoadedRows\": 1000000,\n" +
-                    "    \"NumberFilteredRows\": 1,\n" +
-                    "    \"NumberUnselectedRows\": 0,\n" +
-                    "    \"LoadBytes\": 40888898,\n" +
-                    "    \"LoadTimeMs\": 2144,\n" +
-                    "    \"BeginTxnTimeMs\": 1,\n" +
-                    "    \"StreamLoadPutTimeMs\": 2,\n" +
-                    "    \"ReadDataTimeMs\": 325,\n" +
-                    "    \"WriteDataTimeMs\": 1933,\n" +
-                    "    \"CommitAndPublishTimeMs\": 106\n" +
-                    "}");
+            response(
+                    ctx,
+                    "{\n"
+                            + "    \"Status\": \"Success\",\n"
+                            + "    \"NumberTotalRows\": 1000000,\n"
+                            + "    \"NumberLoadedRows\": 1000000,\n"
+                            + "    \"NumberFilteredRows\": 1,\n"
+                            + "    \"NumberUnselectedRows\": 0,\n"
+                            + "    \"LoadBytes\": 40888898,\n"
+                            + "    \"LoadTimeMs\": 2144,\n"
+                            + "    \"BeginTxnTimeMs\": 1,\n"
+                            + "    \"StreamLoadPutTimeMs\": 2,\n"
+                            + "    \"ReadDataTimeMs\": 325,\n"
+                            + "    \"WriteDataTimeMs\": 1933,\n"
+                            + "    \"CommitAndPublishTimeMs\": 106\n"
+                            + "}");
         }
     }
 
