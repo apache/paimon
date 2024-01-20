@@ -43,8 +43,8 @@ import java.util.function.BinaryOperator;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.BRANCH_PREFIX;
 import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -83,18 +83,12 @@ public class SnapshotManager implements Serializable {
     }
 
     public Path branchSnapshotDirectory(String branchName) {
-        return new Path(tablePath + "/branch/" + BRANCH_PREFIX + branchName + "/snapshot");
+        return new Path(getBranchPath(tablePath, branchName) + "/snapshot");
     }
 
     public Path branchSnapshotPath(String branchName, long snapshotId) {
         return new Path(
-                tablePath
-                        + "/branch/"
-                        + BRANCH_PREFIX
-                        + branchName
-                        + "/snapshot/"
-                        + SNAPSHOT_PREFIX
-                        + snapshotId);
+                getBranchPath(tablePath, branchName) + "/snapshot/" + SNAPSHOT_PREFIX + snapshotId);
     }
 
     public Snapshot snapshot(long snapshotId) {
