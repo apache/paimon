@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.IndexManifestEntry;
-import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -60,7 +59,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpiration() throws Exception {
         prepareExpireTable();
-        FileStoreExpireImpl expire = (FileStoreExpireImpl) table.store().newExpire();
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
@@ -89,7 +88,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpirationWithTag() throws Exception {
         prepareExpireTable();
-        FileStoreExpireImpl expire = (FileStoreExpireImpl) table.store().newExpire();
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
         table.createTag("tag3", 3);
         table.createTag("tag5", 5);
@@ -115,7 +114,7 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpirationWhenDeletingTag() throws Exception {
         prepareExpireTable();
-        FileStoreExpireImpl expire = (FileStoreExpireImpl) table.store().newExpire();
+        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
         table.createTag("tag3", 3);
         table.createTag("tag5", 5);

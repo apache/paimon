@@ -37,7 +37,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
-import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.FileStoreTestUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -843,7 +842,7 @@ public abstract class FileStoreTableTestBase {
             Options options = new Options();
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
-            table.copy(options.toMap()).store().newExpire().expire();
+            table.copy(options.toMap()).newCommit("").expireSnapshots();
         }
 
         table.rollbackTo("test1");
@@ -1180,7 +1179,7 @@ public abstract class FileStoreTableTestBase {
         TableCommitImpl commit =
                 table.copy(Collections.singletonMap(WRITE_ONLY.key(), "true"))
                         .newCommit(commitUser);
-        FileStoreExpire expire = table.store().newExpire();
+        TableCommitImpl expire = table.newCommit(commitUser);
 
         try (StreamTableWrite write = table.newWrite(commitUser)) {
             for (int i = 0; i < 10; i++) {
@@ -1196,7 +1195,7 @@ public abstract class FileStoreTableTestBase {
         int index = 0;
 
         // trigger the first expire and the first two snapshots expired
-        expire.expire();
+        expire.expireSnapshots();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         for (int i = index; i < remainingSnapshot.size(); i++) {
@@ -1206,7 +1205,7 @@ public abstract class FileStoreTableTestBase {
                 .isEqualTo(remainingSnapshot.get(index).id());
 
         // trigger the second expire and the second two snapshots expired
-        expire.expire();
+        expire.expireSnapshots();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         assertThat(snapshotManager.snapshotExists(remainingSnapshot.get(index++).id())).isFalse();
         for (int i = index; i < remainingSnapshot.size(); i++) {
@@ -1217,7 +1216,7 @@ public abstract class FileStoreTableTestBase {
 
         // trigger all remaining expires and only the last snapshot remaining
         for (int i = 0; i < 5; i++) {
-            expire.expire();
+            expire.expireSnapshots();
         }
 
         for (int i = 0; i < remainingSnapshot.size() - 1; i++) {

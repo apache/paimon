@@ -28,7 +28,6 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
@@ -184,19 +183,6 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
                 branchName);
-    }
-
-    @Override
-    public FileStoreExpireImpl newExpire() {
-        return new FileStoreExpireImpl(
-                options.snapshotNumRetainMin(),
-                options.snapshotNumRetainMax(),
-                options.snapshotTimeRetain().toMillis(),
-                snapshotManager(),
-                newSnapshotDeletion(),
-                newTagManager(),
-                options.snapshotExpireLimit(),
-                options.snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
