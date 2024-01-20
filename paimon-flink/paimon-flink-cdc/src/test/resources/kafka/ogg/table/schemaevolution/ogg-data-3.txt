@@ -17,7 +17,7 @@
  */
 
 {"table":"OGG.TBL_TEST","pos":"00000000000000000000147","primary_keys":["id"],"after":{"id":105,"name":"hammer","description":"14oz carpenter's hammer","weight":0.875,"address":"Shanghai"},"op_type":"I","op_ts":"2020-05-13 15:40:07.000000"}
-{"table":"OGG.TBL_TEST","pos":"00000000000000000000158","primary_keys":["id"],"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":3.140000104904175},"after":null,"op_type":"D","op_ts":"2020-05-13 17:32:24.455000"}
+{"table":"OGG.TBL_TEST","pos":"00000000000000000000158","primary_keys":["id"],"before":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":3.14},"after":null,"op_type":"D","op_ts":"2020-05-13 17:32:24.455000"}
 {"table":"OGG.TBL_TEST","pos":"00000000000000000000152","primary_keys":["id"],"before":{"id":105,"name":"hammer","description":"14oz carpenter's hammer","weight":0.875,"address":"Shanghai"},"after":{"id":105,"name":"hammer","description":"14oz carpenter's hammer","weight":0.875,"address":"Beijing"},"op_type":"U","op_ts":"2020-05-13 17:26:27.936000"}
-{"table":"OGG.TBL_TEST","pos":"00000000000000000000149","primary_keys":["id"],"after":{"id":107,"name":"rocks","description":"box of assorted rocks","weight":5.300000190734863},"op_type":"I","op_ts":"2020-05-13 15:40:07.000000"}
+{"table":"OGG.TBL_TEST","pos":"00000000000000000000149","primary_keys":["id"],"after":{"id":107,"name":"rocks","description":"box of assorted rocks","weight":5.3},"op_type":"I","op_ts":"2020-05-13 15:40:07.000000"}
 

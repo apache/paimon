@@ -91,6 +91,8 @@ public interface Table extends Serializable {
     @Experimental
     void deleteBranch(String branchName);
 
+    ExpireSnapshots newExpireSnapshots();
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */
