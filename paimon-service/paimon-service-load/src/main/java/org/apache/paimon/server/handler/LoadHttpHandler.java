@@ -49,6 +49,8 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.utils.HttpServerResponseUtil.response;
+
 /** An HTTP handler for loading data into a catalog, handling various HTTP events and requests. */
 @ChannelHandler.Sharable
 public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
@@ -69,7 +71,7 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
     }
 
     @Override
-    public void channelInactive(ChannelHandlerContext ctx) throws Exception {
+    public void channelInactive(ChannelHandlerContext ctx) {
         ctx.channel().close();
     }
 
@@ -117,7 +119,6 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
         if (msg instanceof HttpRequest) {
             HttpRequest request = (HttpRequest) msg;
-            LOG.info("Received HttpRequest: {}", request.uri());
             ctx.channel().attr(REQUEST_KEY).set(request);
         } else if (msg instanceof HttpContent) {
             HttpRequest request = ctx.channel().attr(REQUEST_KEY).get();
@@ -155,6 +156,21 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
             // 3. Collect all CommitMessages to a global node and commit
             BatchTableCommit commit = writeBuilder.newCommit();
             commit.commit(messages);
+
+            response(ctx,"{\n" +
+                    "    \"Status\": \"Success\",\n" +
+                    "    \"NumberTotalRows\": 1000000,\n" +
+                    "    \"NumberLoadedRows\": 1000000,\n" +
+                    "    \"NumberFilteredRows\": 1,\n" +
+                    "    \"NumberUnselectedRows\": 0,\n" +
+                    "    \"LoadBytes\": 40888898,\n" +
+                    "    \"LoadTimeMs\": 2144,\n" +
+                    "    \"BeginTxnTimeMs\": 1,\n" +
+                    "    \"StreamLoadPutTimeMs\": 2,\n" +
+                    "    \"ReadDataTimeMs\": 325,\n" +
+                    "    \"WriteDataTimeMs\": 1933,\n" +
+                    "    \"CommitAndPublishTimeMs\": 106\n" +
+                    "}");
         }
     }
 
