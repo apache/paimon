@@ -233,6 +233,14 @@ public class JsonSerdeUtil {
         return true;
     }
 
+    public static <T> T convertValue(Object fromValue, TypeReference<T> toValueTypeRef) {
+        return OBJECT_MAPPER_INSTANCE.convertValue(fromValue, toValueTypeRef);
+    }
+
+    public static String writeValueAsString(Object value) throws JsonProcessingException {
+        return OBJECT_MAPPER_INSTANCE.writer().writeValueAsString(value);
+    }
+
     public static boolean isNull(JsonNode jsonNode) {
         return jsonNode == null || jsonNode.isNull();
     }
