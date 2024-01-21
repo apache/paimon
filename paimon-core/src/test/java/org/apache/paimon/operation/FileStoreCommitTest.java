@@ -790,7 +790,7 @@ public class FileStoreCommitTest {
 
         // Analyze and check
         HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(3, 10L, 1L, 10L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 10L, 1L, 10L, 0L, 8L, 8L));
         Stats fakeStats =
                 new Stats(
                         latestSnapshot.id(),
@@ -821,7 +821,7 @@ public class FileStoreCommitTest {
         // Then we need to analyze again
         latestSnapshot = store.snapshotManager().latestSnapshot();
         fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(3, 30L, 1L, 30L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 30L, 1L, 30L, 0L, 8L, 8L));
         fakeStats =
                 new Stats(
                         latestSnapshot.id(),
