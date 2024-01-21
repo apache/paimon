@@ -22,6 +22,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.operation.metrics.CommitMetrics;
+import org.apache.paimon.stats.Stats;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.utils.FileStorePathFactory;
 
@@ -84,6 +85,12 @@ public interface FileStoreCommit {
 
     /** With metrics to measure commits. */
     FileStoreCommit withMetrics(CommitMetrics metrics);
+
+    /**
+     * Commit new statistics. The {@link Snapshot.CommitKind} of generated snapshot is {@link
+     * Snapshot.CommitKind#ANALYZE}.
+     */
+    void commitStatistics(Stats stats, long commitIdentifier);
 
     FileStorePathFactory pathFactory();
 

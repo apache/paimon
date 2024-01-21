@@ -40,6 +40,8 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.RowType;
@@ -119,6 +121,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     private CommitMetrics commitMetrics;
 
+    private final StatsFileHandler statsFileHandler;
+
     public FileStoreCommitImpl(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -136,7 +140,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int manifestMergeMinCount,
             boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator,
-            String branchName) {
+            String branchName,
+            StatsFileHandler statsFileHandler) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.commitUser = commitUser;
@@ -159,6 +164,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.lock = null;
         this.ignoreEmptyCommit = true;
         this.commitMetrics = null;
+        this.statsFileHandler = statsFileHandler;
     }
 
     @Override
@@ -254,7 +260,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.APPEND,
                                 safeLatestSnapshotId,
-                                branchName);
+                                branchName,
+                                null);
                 generatedSnapshot += 1;
             }
 
@@ -283,7 +290,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 safeLatestSnapshotId,
-                                branchName);
+                                branchName,
+                                null);
                 generatedSnapshot += 1;
             }
         } finally {
@@ -429,7 +437,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 null,
-                                branchName);
+                                branchName,
+                                null);
                 generatedSnapshot += 1;
             }
         } finally {
@@ -513,6 +522,21 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
+    public void commitStatistics(Stats stats, long commitIdentifier) {
+        String statsFileName = statsFileHandler.writeStats(stats);
+        tryCommit(
+                Collections.emptyList(),
+                Collections.emptyList(),
+                Collections.emptyList(),
+                commitIdentifier,
+                null,
+                Collections.emptyMap(),
+                Snapshot.CommitKind.ANALYZE,
+                null,
+                statsFileName);
+    }
+
+    @Override
     public FileStorePathFactory pathFactory() {
         return pathFactory;
     }
@@ -581,8 +605,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
-            Long safeLatestSnapshotId,
-            String branchName) {
+            @Nullable Long safeLatestSnapshotId,
+            String branchName,
+            @Nullable String statsFileName) {
         int cnt = 0;
         while (true) {
             Snapshot latestSnapshot = snapshotManager.latestSnapshot(branchName);
@@ -597,7 +622,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     commitKind,
                     latestSnapshot,
                     safeLatestSnapshotId,
-                    branchName)) {
+                    branchName,
+                    statsFileName)) {
                 break;
             }
         }
@@ -661,7 +687,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshot,
                     null,
-                    branchName)) {
+                    branchName,
+                    null)) {
                 break;
             }
         }
@@ -677,9 +704,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
-            Snapshot latestSnapshot,
-            Long safeLatestSnapshotId,
-            String branchName) {
+            @Nullable Snapshot latestSnapshot,
+            @Nullable Long safeLatestSnapshotId,
+            String branchName,
+            @Nullable String newStatsFileName) {
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
         Path newSnapshotPath =
@@ -767,6 +795,23 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 newIndexManifest = indexManifest;
             }
 
+            long latestSchemaId = schemaManager.latest().get().id();
+
+            // write new stats or inherit from the previous snapshot
+            String statsFileName = null;
+            if (newStatsFileName != null) {
+                statsFileName = newStatsFileName;
+            } else if (latestSnapshot != null) {
+                Optional<Stats> previousStatistic = statsFileHandler.readStats(latestSnapshot);
+                if (previousStatistic.isPresent()) {
+                    if (previousStatistic.get().schemaId() != latestSchemaId) {
+                        LOG.warn("Schema changed, stats will not be inherited");
+                    } else {
+                        statsFileName = latestSnapshot.statistics();
+                    }
+                }
+            }
+
             // prepare snapshot file
             newSnapshot =
                     new Snapshot(
@@ -784,7 +829,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             totalRecordCount,
                             deltaRecordCount,
                             Snapshot.recordCount(changelogFiles),
-                            currentWatermark);
+                            currentWatermark,
+                            statsFileName);
         } catch (Throwable e) {
             // fails when preparing for commit, we should clean up
             cleanUpTmpManifests(

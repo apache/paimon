@@ -724,7 +724,8 @@ public class FileDeletionTest {
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
                         null,
-                        MAIN_BRANCH);
+                        MAIN_BRANCH,
+                        null);
     }
 
     private void createTag(Snapshot snapshot, String tagName) {

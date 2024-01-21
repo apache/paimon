@@ -198,7 +198,9 @@ public class SchemaManager implements Serializable {
                     }
                     Preconditions.checkArgument(
                             addColumn.dataType().isNullable(),
-                            "ADD COLUMN cannot specify NOT NULL.");
+                            "Column %s cannot specify NOT NULL in the %s table.",
+                            addColumn.fieldName(),
+                            fromPath(tableRoot.toString(), true).getFullName());
                     int id = highestFieldId.incrementAndGet();
                     DataType dataType =
                             ReassignFieldId.reassign(addColumn.dataType(), highestFieldId);

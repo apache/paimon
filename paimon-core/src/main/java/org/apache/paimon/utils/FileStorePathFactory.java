@@ -56,6 +56,7 @@ public class FileStorePathFactory {
     private final AtomicInteger manifestListCount;
     private final AtomicInteger indexManifestCount;
     private final AtomicInteger indexFileCount;
+    private final AtomicInteger statsFileCount;
 
     public FileStorePathFactory(Path root) {
         this(
@@ -78,6 +79,7 @@ public class FileStorePathFactory {
         this.manifestListCount = new AtomicInteger(0);
         this.indexManifestCount = new AtomicInteger(0);
         this.indexFileCount = new AtomicInteger(0);
+        this.statsFileCount = new AtomicInteger(0);
     }
 
     public Path root() {
@@ -204,6 +206,25 @@ public class FileStorePathFactory {
             @Override
             public Path toPath(String fileName) {
                 return new Path(root + "/index/" + fileName);
+            }
+        };
+    }
+
+    public PathFactory statsFileFactory() {
+        return new PathFactory() {
+            @Override
+            public Path newPath() {
+                return new Path(
+                        root
+                                + "/statistics/stats-"
+                                + uuid
+                                + "-"
+                                + statsFileCount.getAndIncrement());
+            }
+
+            @Override
+            public Path toPath(String fileName) {
+                return new Path(root + "/statistics/" + fileName);
             }
         };
     }
