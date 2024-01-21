@@ -533,6 +533,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
                 null,
+                branchName,
                 statsFileName);
     }
 
@@ -795,7 +796,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 newIndexManifest = indexManifest;
             }
 
-            long latestSchemaId = schemaManager.latest().get().id();
+            long latestSchemaId = schemaManager.latest(branchName).get().id();
 
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;
@@ -816,7 +817,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             newSnapshot =
                     new Snapshot(
                             newSnapshotId,
-                            schemaManager.latest(branchName).get().id(),
+                            latestSchemaId,
                             previousChangesListName,
                             newChangesListName,
                             changelogListName,
