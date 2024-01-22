@@ -36,6 +36,7 @@ import java.util.SortedMap;
 
 import static org.apache.paimon.Snapshot.FIRST_SNAPSHOT_ID;
 import static org.apache.paimon.shade.guava30.com.google.common.base.MoreObjects.firstNonNull;
+import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** A manager to create tags automatically. */
 public class TagAutoCreation {
@@ -72,7 +73,7 @@ public class TagAutoCreation {
 
         this.periodHandler.validateDelay(delay);
 
-        SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
+        SortedMap<Snapshot, List<String>> tags = tagManager.tags(periodHandler::isAutoTag);
 
         if (tags.isEmpty()) {
             this.nextSnapshot =
@@ -81,17 +82,9 @@ public class TagAutoCreation {
             Snapshot lastTag = tags.lastKey();
             this.nextSnapshot = lastTag.id() + 1;
 
-            LocalDateTime time = periodHandler.tagToTime(tags.get(lastTag));
+            String tagName = checkAndGetOneAutoTag(tags.get(lastTag));
+            LocalDateTime time = periodHandler.tagToTime(tagName);
             this.nextTag = periodHandler.nextTagTime(time);
-        }
-    }
-
-    private boolean isAutoTag(String tag) {
-        try {
-            periodHandler.tagToTime(tag);
-            return true;
-        } catch (Exception e) {
-            return false;
         }
     }
 
@@ -136,12 +129,14 @@ public class TagAutoCreation {
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
-                SortedMap<Snapshot, String> tags = tagManager.tags(this::isAutoTag);
+                // only handle auto created tags here
+                SortedMap<Snapshot, List<String>> tags = tagManager.tags(periodHandler::isAutoTag);
                 if (tags.size() > numRetainedMax) {
                     int toDelete = tags.size() - numRetainedMax;
                     int i = 0;
-                    for (String tag : tags.values()) {
-                        tagManager.deleteTag(tag, tagDeletion, snapshotManager);
+                    for (List<String> tag : tags.values()) {
+                        tagManager.deleteTag(
+                                checkAndGetOneAutoTag(tag), tagDeletion, snapshotManager);
                         i++;
                         if (i == toDelete) {
                             break;
@@ -154,6 +149,15 @@ public class TagAutoCreation {
 
     private boolean isAfterOrEqual(LocalDateTime t1, LocalDateTime t2) {
         return t1.isAfter(t2) || t1.isEqual(t2);
+    }
+
+    public static String checkAndGetOneAutoTag(List<String> autoTags) {
+        checkState(
+                autoTags.size() == 1,
+                "There are more than 1 auto-created tags of the same snapshot: %s. This is unexpected.",
+                String.join(",", autoTags));
+
+        return autoTags.get(0);
     }
 
     @Nullable

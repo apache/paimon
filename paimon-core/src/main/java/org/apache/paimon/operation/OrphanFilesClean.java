@@ -50,7 +50,6 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.SortedMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -146,8 +145,7 @@ public class OrphanFilesClean {
             throws IOException, ExecutionException, InterruptedException {
         // safely get all snapshots to be read
         Set<Snapshot> readSnapshots = new HashSet<>(snapshotManager.safelyGetAllSnapshots());
-        SortedMap<Snapshot, String> tags = tagManager.tags();
-        List<Snapshot> taggedSnapshots = new ArrayList<>(tags.keySet());
+        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
         readSnapshots.addAll(taggedSnapshots);
 
         return FileUtils.COMMON_IO_FORK_JOIN_POOL
