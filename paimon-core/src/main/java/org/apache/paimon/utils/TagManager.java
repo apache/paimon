@@ -74,6 +74,26 @@ public class TagManager {
         return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    public String branchTag(String branchName) {
+        try {
+            List<Path> tagPaths =
+                    listVersionedFileStatus(
+                                    fileIO,
+                                    new Path(getBranchPath(tablePath, branchName) + "/tag/"),
+                                    TAG_PREFIX)
+                            .map(FileStatus::getPath)
+                            .collect(Collectors.toList());
+            checkArgument(
+                    tagPaths.size() == 1,
+                    String.format(
+                            "There are multiple tags %s for branch %s",
+                            tagPaths.size(), branchName));
+            return tagPaths.get(0).getName().substring(TAG_PREFIX.length());
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
