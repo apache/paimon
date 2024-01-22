@@ -129,7 +129,7 @@ public class TagAutoCreation {
             nextTag = periodHandler.nextTagTime(thisTag);
 
             if (numRetainedMax != null) {
-                // only handle auto created tags here
+                // only handle auto-created tags here
                 SortedMap<Snapshot, List<String>> tags = tagManager.tags(periodHandler::isAutoTag);
                 if (tags.size() > numRetainedMax) {
                     int toDelete = tags.size() - numRetainedMax;

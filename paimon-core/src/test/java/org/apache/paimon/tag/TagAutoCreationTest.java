@@ -238,11 +238,13 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test newCommit create
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
-        assertThat(tagManager.allTagNames()).contains("2023-07-18 11", "2023-07-18 13");
+        assertThat(tagManager.allTagNames())
+                .containsOnly("savepoint-11", "2023-07-18 11", "2023-07-18 13");
 
         // test expire old tag
         commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:00:00")));
         commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
+        // only handle auto-created tags
         assertThat(tagManager.allTagNames())
                 .containsOnly("savepoint-11", "2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
     }
