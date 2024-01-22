@@ -25,6 +25,7 @@ import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableScan;
@@ -210,6 +211,8 @@ public class ContinuousFileSplitEnumerator
                 LOG.debug("Catching EndOfStreamException, the stream is finished.");
                 finished = true;
                 assignSplits();
+            } else if (error instanceof OutOfRangeException) {
+                throw (RuntimeException) error;
             } else {
                 LOG.error("Failed to enumerate files", error);
             }
