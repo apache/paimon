@@ -55,7 +55,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testOnlyTimestamp() {
+    public void testOnlyTimestampMillis() {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.SCAN_MODE.key(), CoreOptions.StartupMode.FROM_TIMESTAMP.toString());
         options.put(
@@ -66,7 +66,7 @@ class SchemaValidationTest {
     }
 
     @Test
-    public void testOnlyDatetime() {
+    public void testOnlyTimestamp() {
         String timestampString =
                 LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss.SSS"));
         Map<String, String> options = new HashMap<>();
