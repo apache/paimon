@@ -153,6 +153,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                                 break;
                             }
                         }
+                        break;
                     }
                 }
             }

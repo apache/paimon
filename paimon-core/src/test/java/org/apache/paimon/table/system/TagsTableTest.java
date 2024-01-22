@@ -78,6 +78,7 @@ public class TagsTableTest extends TableTestBase {
                                 .getMillisecond()));
         tagsTable = (TagsTable) catalog.getTable(identifier(tableName + "$tags"));
         tagManager = table.store().newTagManager();
+        table.createTag("many-tags-test");
     }
 
     @Test
