@@ -270,17 +270,41 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public ExpireSnapshots newExpireSnapshots() {
+        return new ExpireSnapshotsImpl(
+                snapshotManager(),
+                store().newSnapshotDeletion(),
+                store().newTagManager(),
+                coreOptions().snapshotExpireCleanEmptyDirectories());
+    }
+
+    @Override
     public TableCommitImpl newCommit(String commitUser) {
+        CoreOptions options = coreOptions();
+        Runnable snapshotExpire = null;
+        if (!options.writeOnly()) {
+            ExpireSnapshots expireSnapshots =
+                    newExpireSnapshots()
+                            .retainMax(options.snapshotNumRetainMax())
+                            .retainMin(options.snapshotNumRetainMin())
+                            .maxDeletes(options.snapshotExpireLimit());
+            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
+            snapshotExpire =
+                    () ->
+                            expireSnapshots
+                                    .olderThanMills(System.currentTimeMillis() - snapshotTimeRetain)
+                                    .expire();
+        }
         return new TableCommitImpl(
                 store().newCommit(commitUser),
                 createCommitCallbacks(),
-                coreOptions().writeOnly() ? null : store().newExpire(),
-                coreOptions().writeOnly() ? null : store().newPartitionExpire(commitUser),
-                coreOptions().writeOnly() ? null : store().newTagCreationManager(),
+                snapshotExpire,
+                options.writeOnly() ? null : store().newPartitionExpire(commitUser),
+                options.writeOnly() ? null : store().newTagCreationManager(),
                 catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path),
-                coreOptions().snapshotExpireExecutionMode(),
+                options.snapshotExpireExecutionMode(),
                 name());
     }
 

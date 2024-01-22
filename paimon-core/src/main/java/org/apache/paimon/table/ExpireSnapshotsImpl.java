@@ -16,112 +16,99 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
-import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Callable;
 import java.util.function.Predicate;
 
-/**
- * Default implementation of {@link FileStoreExpire}. It retains a certain number or period of
- * latest snapshots.
- *
- * <p>NOTE: This implementation will keep at least one snapshot so that users will not accidentally
- * clear all snapshots.
- *
- * <p>TODO: add concurrent tests.
- */
-public class FileStoreExpireImpl implements FileStoreExpire {
+/** An implementation for {@link ExpireSnapshots}. */
+public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
-    private static final Logger LOG = LoggerFactory.getLogger(FileStoreExpireImpl.class);
-
-    private final int numRetainedMin;
-    // snapshots exceeding any constraint will be expired
-    private final int numRetainedMax;
-    private final long millisRetained;
+    private static final Logger LOG = LoggerFactory.getLogger(ExpireSnapshotsImpl.class);
 
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
     private final SnapshotDeletion snapshotDeletion;
-
     private final TagManager tagManager;
-    private final int expireLimit;
-    private final boolean snapshotExpireCleanEmptyDirectories;
+    private final boolean cleanEmptyDirectories;
 
-    private Lock lock;
+    private int retainMax = Integer.MAX_VALUE;
+    private int retainMin = 1;
+    private long olderThanMills = 0;
+    private int maxDeletes = Integer.MAX_VALUE;
 
-    public FileStoreExpireImpl(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
+    public ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
-            int expireLimit,
-            boolean snapshotExpireCleanEmptyDirectories) {
-        Preconditions.checkArgument(
-                numRetainedMin >= 1,
-                "The minimum number of completed snapshots to retain should be >= 1.");
-        Preconditions.checkArgument(
-                numRetainedMax >= numRetainedMin,
-                "The maximum number of snapshots to retain should be >= the minimum number.");
-        Preconditions.checkArgument(
-                expireLimit > 1,
-                String.format("The %s should be > 1.", CoreOptions.SNAPSHOT_EXPIRE_LIMIT.key()));
-        this.numRetainedMin = numRetainedMin;
-        this.numRetainedMax = numRetainedMax;
-        this.millisRetained = millisRetained;
+            boolean cleanEmptyDirectories) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
         this.snapshotDeletion = snapshotDeletion;
         this.tagManager = tagManager;
-        this.expireLimit = expireLimit;
-        this.snapshotExpireCleanEmptyDirectories = snapshotExpireCleanEmptyDirectories;
+        this.cleanEmptyDirectories = cleanEmptyDirectories;
     }
 
     @Override
-    public FileStoreExpire withLock(Lock lock) {
-        this.lock = lock;
+    public ExpireSnapshotsImpl retainMax(int retainMax) {
+        this.retainMax = retainMax;
         return this;
     }
 
     @Override
-    public void expire() {
+    public ExpireSnapshotsImpl retainMin(int retainMin) {
+        this.retainMin = retainMin;
+        return this;
+    }
+
+    @Override
+    public ExpireSnapshotsImpl olderThanMills(long olderThanMills) {
+        this.olderThanMills = olderThanMills;
+        return this;
+    }
+
+    @Override
+    public ExpireSnapshotsImpl maxDeletes(int maxDeletes) {
+        this.maxDeletes = maxDeletes;
+        return this;
+    }
+
+    @Override
+    public int expire() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
-            return;
+            return 0;
         }
-
-        long currentMillis = System.currentTimeMillis();
 
         Long earliest = snapshotManager.earliestSnapshotId();
         if (earliest == null) {
-            return;
+            return 0;
         }
 
         // the min snapshot to retain from 'snapshot.num-retained.max'
         // (the maximum number of snapshots to retain)
-        long min = Math.max(latestSnapshotId - numRetainedMax + 1, earliest);
+        long min = Math.max(latestSnapshotId - retainMax + 1, earliest);
 
         // the max exclusive snapshot to expire until
         // protected by 'snapshot.num-retained.min'
         // (the minimum number of completed snapshots to retain)
-        long maxExclusive = latestSnapshotId - numRetainedMin + 1;
+        long maxExclusive = latestSnapshotId - retainMin + 1;
 
         // the snapshot being read by the consumer cannot be deleted
         maxExclusive =
@@ -129,24 +116,22 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         // protected by 'snapshot.expire.limit'
         // (the maximum number of snapshots allowed to expire at a time)
-        maxExclusive = Math.min(maxExclusive, earliest + expireLimit);
+        maxExclusive = Math.min(maxExclusive, earliest + maxDeletes);
 
         for (long id = min; id < maxExclusive; id++) {
             // Early exit the loop for 'snapshot.time-retained'
             // (the maximum time of snapshots to retain)
             if (snapshotManager.snapshotExists(id)
-                    && currentMillis - snapshotManager.snapshot(id).timeMillis()
-                            <= millisRetained) {
-                expireUntil(earliest, id);
-                return;
+                    && olderThanMills <= snapshotManager.snapshot(id).timeMillis()) {
+                return expireUntil(earliest, id);
             }
         }
 
-        expireUntil(earliest, maxExclusive);
+        return expireUntil(earliest, maxExclusive);
     }
 
     @VisibleForTesting
-    public void expireUntil(long earliestId, long endExclusiveId) {
+    public int expireUntil(long earliestId, long endExclusiveId) {
         if (endExclusiveId <= earliestId) {
             // No expire happens:
             // write the hint file in order to see the earliest snapshot directly next time
@@ -156,7 +141,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
             }
 
             // fast exit
-            return;
+            return 0;
         }
 
         // find first snapshot to expire
@@ -214,7 +199,7 @@ public class FileStoreExpireImpl implements FileStoreExpire {
 
         // data files and changelog files in bucket directories has been deleted
         // then delete changed bucket directories if they are empty
-        if (snapshotExpireCleanEmptyDirectories) {
+        if (cleanEmptyDirectories) {
             snapshotDeletion.cleanDataDirectories();
         }
 
@@ -237,30 +222,19 @@ public class FileStoreExpireImpl implements FileStoreExpire {
         }
 
         writeEarliestHint(endExclusiveId);
+        return (int) (endExclusiveId - beginInclusiveId);
     }
 
     private void writeEarliestHint(long earliest) {
-        // update earliest hint file
-
-        Callable<Void> callable =
-                () -> {
-                    snapshotManager.commitEarliestHint(earliest);
-                    return null;
-                };
-
         try {
-            if (lock != null) {
-                lock.runWithLock(callable);
-            } else {
-                callable.call();
-            }
-        } catch (Exception e) {
-            throw new RuntimeException(e);
+            snapshotManager.commitEarliestHint(earliest);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
         }
     }
 
     @VisibleForTesting
-    SnapshotDeletion snapshotDeletion() {
+    public SnapshotDeletion snapshotDeletion() {
         return snapshotDeletion;
     }
 }

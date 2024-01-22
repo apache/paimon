@@ -142,4 +142,12 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support deleteBranch.",
                         this.getClass().getSimpleName()));
     }
+
+    @Override
+    default ExpireSnapshots newExpireSnapshots() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support expireSnapshots.",
+                        this.getClass().getSimpleName()));
+    }
 }
