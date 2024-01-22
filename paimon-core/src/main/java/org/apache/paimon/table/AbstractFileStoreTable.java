@@ -34,7 +34,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
@@ -99,13 +99,11 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public Optional<Stats> statistics() {
+    public Optional<Statistics> statistics() {
         // todo: support time travel
-        if (coreOptions().startupMode().equals(CoreOptions.StartupMode.LATEST_FULL)) {
-            Snapshot latestSnapshot = snapshotManager().latestSnapshot();
-            if (latestSnapshot != null) {
-                return store().newStatsFileHandler().readStats(latestSnapshot);
-            }
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        if (latestSnapshot != null) {
+            return store().newStatsFileHandler().readStats(latestSnapshot);
         }
         return Optional.empty();
     }

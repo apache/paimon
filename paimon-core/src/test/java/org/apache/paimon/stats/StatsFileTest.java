@@ -55,7 +55,7 @@ public class StatsFileTest {
         StatsFile file = new StatsFile(LocalFileIO.create(), pathFactory);
         HashMap<String, ColStats<?>> colStatsMap = new HashMap<>();
         colStatsMap.put("orderId", new ColStats<>(0, 10L, "111", "222", 0L, 8L, 8L));
-        Stats stats = new Stats(1L, 0L, 10L, 1000L, colStatsMap);
+        Statistics stats = new Statistics(1L, 0L, 10L, 1000L, colStatsMap);
         String fileName = file.write(stats);
 
         assertThat(file.exists(fileName)).isTrue();

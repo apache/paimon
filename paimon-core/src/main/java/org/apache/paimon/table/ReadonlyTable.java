@@ -18,7 +18,7 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
@@ -49,7 +49,7 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default Optional<Stats> statistics() {
+    default Optional<Statistics> statistics() {
         return Optional.empty();
     }
 

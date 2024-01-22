@@ -94,6 +94,7 @@ object Utils {
     CommandUtils.computeColumnStats(sparkSession, relation, columns)
   }
 
+  /** [[IntegralType]] is private in spark, therefore we need add it here. */
   def analyzeSupportsType(dataType: DataType): Boolean = dataType match {
     case _: IntegralType => true
     case _: DecimalType => true

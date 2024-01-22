@@ -20,7 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
-import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -60,7 +60,8 @@ public interface Table extends Serializable {
     Optional<String> comment();
 
     /** Optional statistics of this table. */
-    Optional<Stats> statistics();
+    @Experimental
+    Optional<Statistics> statistics();
 
     // ================= Table Operations ====================
 

@@ -20,7 +20,7 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.schema.TableSchema
 import org.apache.paimon.spark.SparkTable
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
-import org.apache.paimon.stats.{ColStats, Stats}
+import org.apache.paimon.stats.{ColStats, Statistics}
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 
@@ -76,7 +76,7 @@ case class PaimonAnalyzeTableColumnCommand(
       colStatsMap.put(attr.name, toPaimonColStats(attr, stats, tableSchema))
     }
 
-    val stats = new Stats(
+    val stats = new Statistics(
       currentSnapshot.id(),
       currentSnapshot.schemaId(),
       mergedRecordCount,

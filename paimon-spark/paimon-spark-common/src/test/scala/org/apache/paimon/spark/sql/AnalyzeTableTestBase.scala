@@ -26,7 +26,7 @@ import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
 
-class AnalyzeTableTest extends PaimonSparkTestBase {
+abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
   test("Paimon analyze: analyze table only") {
     spark.sql(s"""

@@ -50,7 +50,7 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
         PaimonTruncateTableCommand(table, Map.empty)
 
       case a @ AnalyzeTable(
-            ResolvedTable(catalog: TableCatalog, identifier: Identifier, table: SparkTable, _),
+            ResolvedTable(catalog, identifier, table: SparkTable, _),
             partitionSpec,
             noScan) if a.resolved =>
         if (partitionSpec.nonEmpty) {
@@ -67,9 +67,9 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
         }
 
       case a @ AnalyzeColumn(
-            ResolvedTable(catalog: TableCatalog, identifier: Identifier, table: SparkTable, _),
-            columnNames: Option[Seq[String]],
-            allColumns: Boolean) if a.resolved =>
+            ResolvedTable(catalog, identifier, table: SparkTable, _),
+            columnNames,
+            allColumns) if a.resolved =>
         PaimonAnalyzeTableColumnCommand(catalog, identifier, table, columnNames, allColumns)
 
       case _ => plan
