@@ -270,19 +270,16 @@ public class TagManager {
 
     public List<String> sortTagsOfOneSnapshot(List<String> tagNames) {
         return tagNames.stream()
-                .map(this::tagPath)
                 .map(
-                        p -> {
+                        name -> {
                             try {
-                                return fileIO.getFileStatus(p);
+                                return fileIO.getFileStatus(tagPath(name));
                             } catch (IOException e) {
                                 throw new RuntimeException(e);
                             }
                         })
                 .sorted(Comparator.comparingLong(FileStatus::getModificationTime))
-                .map(FileStatus::getPath)
-                .map(Path::getName)
-                .map(name -> name.substring(TAG_PREFIX.length()))
+                .map(fileStatus -> fileStatus.getPath().getName().substring(TAG_PREFIX.length()))
                 .collect(Collectors.toList());
     }
 
