@@ -52,5 +52,13 @@ public final class HiveCatalogOptions {
                                     + "If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss\n"
                                     + "you can set this option to true.\n");
 
+    public static final ConfigOption<Boolean> TABLE_STATS_SKIP =
+            ConfigOptions.key("table-stats-skip")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to skip this table's stats calculated in metastore.\n"
+                                    + "When the value is false, alter table or partition will trigger Hive Metastore calculates statistics on table location information.\n");
+
     private HiveCatalogOptions() {}
 }
