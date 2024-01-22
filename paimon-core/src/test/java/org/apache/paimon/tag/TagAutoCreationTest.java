@@ -33,6 +33,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Objects;
 
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
@@ -239,7 +240,8 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test newCommit create
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
-        assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-18 13");
+        assertThat(tagManager.tags(name -> !Objects.equals("savepoint-11", name)).values())
+                .contains("2023-07-18 11", "2023-07-18 13");
 
         // test expire old tag
         commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:00:00")));
