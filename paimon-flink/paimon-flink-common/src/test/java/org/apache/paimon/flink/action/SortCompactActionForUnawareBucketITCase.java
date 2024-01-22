@@ -258,6 +258,22 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         Assertions.assertThat(files.size()).isEqualTo(3);
     }
 
+    @Test
+    public void testSortCompactionOnEmptyData() throws Exception {
+        createTable();
+        SortCompactAction sortCompactAction =
+                new SortCompactAction(
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.emptyMap(),
+                                Collections.emptyMap())
+                        .withOrderStrategy("zorder")
+                        .withOrderColumns(Collections.singletonList("f0"));
+
+        sortCompactAction.run();
+    }
+
     private void zorder(List<String> columns) throws Exception {
         if (RANDOM.nextBoolean()) {
             createAction("zorder", columns).run();
