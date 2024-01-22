@@ -18,6 +18,7 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.types.DataType;
@@ -48,6 +49,7 @@ import java.util.OptionalLong;
  *
  * @param <T> col internal data type
  */
+@Experimental
 public class ColStats<T> {
 
     private static final String FIELD_COL_ID = "colId";

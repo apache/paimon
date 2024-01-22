@@ -18,6 +18,7 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.TableSchema;
@@ -46,6 +47,7 @@ import java.util.OptionalLong;
  *   <li>colStats: column stats map
  * </ul>
  */
+@Experimental
 public class Statistics {
 
     // ID of the snapshot this statistics collected from
