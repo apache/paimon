@@ -264,7 +264,10 @@ public class SchemaEvolutionTest {
                                                         null,
                                                         null))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessage("ADD COLUMN cannot specify NOT NULL.");
+                .hasMessage(
+                        String.format(
+                                "Column %s cannot specify NOT NULL in the %s table.",
+                                "f4", identifier.getFullName()));
     }
 
     @Test

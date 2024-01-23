@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
@@ -61,6 +62,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
@@ -139,10 +141,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            try {
+            if (isRemoteServiceAvailable(storeTable)) {
                 this.lookupTable =
-                        new PrimaryKeyPartialLookupTable(storeTable, projection, path, joinKeys);
-            } catch (UnsupportedOperationException ignore) {
+                        PrimaryKeyPartialLookupTable.createRemoteTable(
+                                storeTable, projection, joinKeys);
+            } else {
+                try {
+                    this.lookupTable =
+                            PrimaryKeyPartialLookupTable.createLocalTable(
+                                    storeTable, projection, path, joinKeys);
+                } catch (UnsupportedOperationException ignore2) {
+                }
             }
         }
 
@@ -217,6 +226,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         refresh();
 
         nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+    }
+
+    @VisibleForTesting
+    LookupTable lookupTable() {
+        return lookupTable;
     }
 
     private void refresh() throws Exception {

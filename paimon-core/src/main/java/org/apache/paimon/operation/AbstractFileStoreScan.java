@@ -39,7 +39,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.ParallellyExecuteUtils;
+import org.apache.paimon.utils.ScanParallelExecutor;
 import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
@@ -261,7 +261,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
         AtomicLong cntEntries = new AtomicLong(0);
         Iterable<ManifestEntry> entries =
-                ParallellyExecuteUtils.parallelismBatchIterable(
+                ScanParallelExecutor.parallelismBatchIterable(
                         files -> {
                             List<ManifestEntry> entryList =
                                     files.parallelStream()

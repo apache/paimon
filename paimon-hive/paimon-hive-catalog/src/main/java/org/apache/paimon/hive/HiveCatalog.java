@@ -94,11 +94,13 @@ import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
-    // we don't include paimon-hive-connector as dependencies because it depends on
-    // hive-exec
+    // Reserved properties
+    public static final String COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
+    // we don't include paimon-hive-connector as dependencies because it depends on
+    // hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
@@ -219,18 +221,58 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) {
+    protected void createDatabaseImpl(String name, Map<String, String> properties) {
         try {
-            Path databasePath = newDatabasePath(name);
+            Database database = convertToHiveDatabase(name, properties);
+            Path databasePath =
+                    database.getLocationUri() == null
+                            ? newDatabasePath(name)
+                            : new Path(database.getLocationUri());
             locationHelper.createPathIfRequired(databasePath, fileIO);
-
-            Database database = new Database();
-            database.setName(name);
             locationHelper.specifyDatabaseLocation(databasePath, database);
             client.createDatabase(database);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
+    }
+
+    private Database convertToHiveDatabase(String name, Map<String, String> properties) {
+        Database database = new Database();
+        database.setName(name);
+        Map<String, String> parameter = new HashMap<>();
+        properties.forEach(
+                (key, value) -> {
+                    if (key.equals(COMMENT_PROP)) {
+                        database.setDescription(value);
+                    } else if (key.equals(DB_LOCATION_PROP)) {
+                        database.setLocationUri(value);
+                    } else if (value != null) {
+                        parameter.put(key, value);
+                    }
+                });
+        database.setParameters(parameter);
+        return database;
+    }
+
+    @Override
+    public Map<String, String> loadDatabasePropertiesImpl(String name) {
+        try {
+            return convertToProperties(client.getDatabase(name));
+        } catch (TException e) {
+            throw new RuntimeException(
+                    String.format("Failed to get database %s properties", name), e);
+        }
+    }
+
+    private Map<String, String> convertToProperties(Database database) {
+        Map<String, String> properties = new HashMap<>(database.getParameters());
+        if (database.getLocationUri() != null) {
+            properties.put(DB_LOCATION_PROP, database.getLocationUri());
+        }
+        if (database.getDescription() != null) {
+            properties.put(COMMENT_PROP, database.getDescription());
+        }
+        return properties;
     }
 
     @Override
@@ -514,6 +556,9 @@ public class HiveCatalog extends AbstractCatalog {
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
+        if (schema.comment() != null) {
+            table.getParameters().put(COMMENT_PROP, schema.comment());
+        }
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());

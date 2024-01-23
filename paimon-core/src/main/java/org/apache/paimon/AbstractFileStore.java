@@ -28,13 +28,14 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.service.ServiceManager;
+import org.apache.paimon.stats.StatsFile;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
@@ -144,6 +145,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
+    public StatsFileHandler newStatsFileHandler() {
+        return new StatsFileHandler(
+                snapshotManager(),
+                schemaManager,
+                new StatsFile(fileIO, pathFactory().statsFileFactory()));
+    }
+
+    @Override
     public RowType partitionType() {
         return partitionType;
     }
@@ -176,20 +185,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFullCompactionThresholdSize(),
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                newKeyComparator());
-    }
-
-    @Override
-    public FileStoreExpireImpl newExpire() {
-        return new FileStoreExpireImpl(
-                options.snapshotNumRetainMin(),
-                options.snapshotNumRetainMax(),
-                options.snapshotTimeRetain().toMillis(),
-                snapshotManager(),
-                newSnapshotDeletion(),
-                newTagManager(),
-                options.snapshotExpireLimit(),
-                options.snapshotExpireCleanEmptyDirectories());
+                newKeyComparator(),
+                newStatsFileHandler());
     }
 
     @Override

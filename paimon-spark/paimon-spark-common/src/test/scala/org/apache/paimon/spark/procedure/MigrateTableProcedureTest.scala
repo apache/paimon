@@ -22,7 +22,7 @@ import org.apache.paimon.spark.PaimonHiveTestBase
 import org.apache.spark.sql.Row
 
 class MigrateTableProcedureTest extends PaimonHiveTestBase {
-  Seq("parquet", "orc").foreach(
+  Seq("parquet", "orc", "avro").foreach(
     format => {
       test(s"Paimon migrate table procedure: migrate $format non-partitioned table") {
         withTable("hive_tbl") {
@@ -44,7 +44,7 @@ class MigrateTableProcedureTest extends PaimonHiveTestBase {
       }
     })
 
-  Seq("parquet", "orc").foreach(
+  Seq("parquet", "orc", "avro").foreach(
     format => {
       test(s"Paimon migrate table procedure: migrate $format partitioned table") {
         withTable("hive_tbl") {

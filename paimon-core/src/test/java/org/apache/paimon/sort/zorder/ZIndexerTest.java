@@ -103,6 +103,39 @@ public class ZIndexerTest {
         }
     }
 
+    @Test
+    public void testZIndexerForVarcharWithNull() {
+        RowType rowType = RowType.of(new VarCharType(), new VarCharType());
+
+        int varTypeSize = 10;
+        ZIndexer zIndexer = new ZIndexer(rowType, Arrays.asList("f0", "f1"), varTypeSize);
+        zIndexer.open();
+
+        byte[] nullBytes = new byte[varTypeSize];
+        Arrays.fill(nullBytes, (byte) 0x00);
+        for (int i = 0; i < 1000; i++) {
+            BinaryString a = BinaryString.fromString(randomString(varTypeSize + 1));
+
+            InternalRow internalRow = GenericRow.of(a, null);
+
+            byte[] zOrder = zIndexer.index(internalRow);
+
+            byte[][] zCache = new byte[2][];
+            ByteBuffer byteBuffer = ByteBuffer.allocate(varTypeSize);
+            ZOrderByteUtils.stringToOrderedBytes(a.toString(), varTypeSize, byteBuffer);
+            zCache[0] = Arrays.copyOf(byteBuffer.array(), varTypeSize);
+
+            zCache[1] = nullBytes;
+
+            byte[] expectedZOrder =
+                    ZOrderByteUtils.interleaveBits(zCache, zCache.length * varTypeSize);
+
+            for (int j = 0; j < zCache.length * varTypeSize; j++) {
+                Assertions.assertThat(zOrder[j]).isEqualTo(expectedZOrder[j]);
+            }
+        }
+    }
+
     public static String randomString(int length) {
         byte[] buffer = new byte[length];
 

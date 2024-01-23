@@ -23,15 +23,12 @@ package org.apache.paimon.table.query;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
-import java.util.List;
 
 /** A query of Table to perform lookup. */
 public interface TableQuery extends Closeable {
@@ -42,15 +39,7 @@ public interface TableQuery extends Closeable {
 
     TableQuery withValueProjection(int[][] projection);
 
-    TableQuery withIOManager(IOManager ioManager);
-
     InternalRowSerializer createValueSerializer();
-
-    void refreshFiles(
-            BinaryRow partition,
-            int bucket,
-            List<DataFileMeta> beforeFiles,
-            List<DataFileMeta> dataFiles);
 
     @Nullable
     InternalRow lookup(BinaryRow partition, int bucket, InternalRow key) throws IOException;

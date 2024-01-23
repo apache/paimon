@@ -128,9 +128,11 @@ INSERT INTO MyTable SELECT ...
 {{< /tabs >}}
 
 ## Overwriting 
+
 Note :If `spark.sql.sources.partitionOverwriteMode` is set to `dynamic` by default in Spark, 
 in order to ensure that the insert overwrite function of the Paimon table can be used normally,
 `spark.sql.extensions` should be set to `org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions`.
+
 ### Overwriting the Whole Table
 
 For unpartitioned tables, Paimon supports overwriting the whole table.

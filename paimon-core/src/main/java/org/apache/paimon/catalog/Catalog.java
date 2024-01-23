@@ -72,16 +72,36 @@ public interface Catalog extends AutoCloseable {
     boolean databaseExists(String databaseName);
 
     /**
-     * Create a database.
+     * Create a database, see {@link Catalog#createDatabase(String name, boolean ignoreIfExists, Map
+     * properties)}.
+     */
+    default void createDatabase(String name, boolean ignoreIfExists)
+            throws DatabaseAlreadyExistException {
+        createDatabase(name, ignoreIfExists, Collections.emptyMap());
+    }
+
+    /**
+     * Create a database with properties.
      *
      * @param name Name of the database to be created
      * @param ignoreIfExists Flag to specify behavior when a database with the given name already
      *     exists: if set to false, throw a DatabaseAlreadyExistException, if set to true, do
      *     nothing.
+     * @param properties properties to be associated with the database
      * @throws DatabaseAlreadyExistException if the given database already exists and ignoreIfExists
      *     is false
      */
-    void createDatabase(String name, boolean ignoreIfExists) throws DatabaseAlreadyExistException;
+    void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
+            throws DatabaseAlreadyExistException;
+
+    /**
+     * Load database properties.
+     *
+     * @param name Database name
+     * @return The requested database's properties
+     * @throws DatabaseNotExistException if the requested database does not exist
+     */
+    Map<String, String> loadDatabaseProperties(String name) throws DatabaseNotExistException;
 
     /**
      * Drop a database.

@@ -194,7 +194,7 @@ public class HiveCatalogTest extends CatalogTestBase {
                             Collections.emptyList(),
                             Collections.emptyList(),
                             options,
-                            "");
+                            "this is a hive table");
 
             catalog.createTable(
                     Identifier.create(databaseName, tableName),
@@ -210,6 +210,7 @@ public class HiveCatalogTest extends CatalogTestBase {
             // Verify the transformed parameters
             assertThat(tableProperties).containsEntry("table.owner", "Jon");
             assertThat(tableProperties).containsEntry("storage.format", "ORC");
+            assertThat(tableProperties).containsEntry("comment", "this is a hive table");
             assertThat(tableProperties)
                     .containsEntry(
                             TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase(Locale.ROOT));
