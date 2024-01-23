@@ -72,6 +72,11 @@ The synchronization job will try best to handle the problem as follows:
 synchronization.
 {{< /hint >}}
 
+{{< hint info >}}
+When processing Debezium CDC data, there are two types of data formats: one without a schema and the other with a schema.
+If your dataset uses the format that includes a schema, ensure to set value.format=debezium-json-schema-include.
+{{< /hint >}}
+
 ## Synchronizing Tables
 
 By using [KafkaSyncTableAction](/docs/{{< param Branch >}}/api/java/org/apache/paimon/flink/action/cdc/kafka/KafkaSyncTableAction) in a Flink DataStream job or directly through `flink run`, users can synchronize one or multiple tables from Kafka's one topic into one Paimon table.

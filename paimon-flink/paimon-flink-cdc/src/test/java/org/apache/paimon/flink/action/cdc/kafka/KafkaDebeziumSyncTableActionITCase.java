@@ -95,7 +95,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
     @Test
     @Timeout(60)
-    public void testSchemaIncludeRecord1() throws Exception {
+    public void testSchemaIncludeRecord() throws Exception {
         testSchemaIncludeRecord(DEBEZIUM_JSON_SCHEMA_INCLUDE);
     }
 }

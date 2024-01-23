@@ -28,8 +28,10 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import java.io.UncheckedIOException;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import static io.debezium.pipeline.signal.SchemaChanges.FIELD_SCHEMA;
 
@@ -40,6 +42,20 @@ import static io.debezium.pipeline.signal.SchemaChanges.FIELD_SCHEMA;
  * accurate interpretation of the CDC data.
  */
 public class DebeziumSchemaIncludeRecordParser extends DebeziumRecordParser {
+
+    private static final Map<String, DataType> TYPE_MAP = new HashMap<>();
+
+    static {
+        TYPE_MAP.put("int8", DataTypes.TINYINT());
+        TYPE_MAP.put("int16", DataTypes.SMALLINT());
+        TYPE_MAP.put("int32", DataTypes.INT());
+        TYPE_MAP.put("int64", DataTypes.BIGINT());
+        TYPE_MAP.put("string", DataTypes.STRING());
+        TYPE_MAP.put("float32", DataTypes.FLOAT());
+        TYPE_MAP.put("float64", DataTypes.DOUBLE());
+        TYPE_MAP.put("double", DataTypes.DOUBLE());
+        TYPE_MAP.put("bytes", DataTypes.BYTES());
+    }
 
     private JsonNode schema;
 
@@ -66,24 +82,12 @@ public class DebeziumSchemaIncludeRecordParser extends DebeziumRecordParser {
     }
 
     public static DataType toDataType(String type) {
-        switch (type) {
-            case "int32":
-                return DataTypes.INT();
-            case "int64":
-                return DataTypes.BIGINT();
-            case "string":
-                return DataTypes.STRING();
-            case "float32":
-            case "float64":
-                return DataTypes.FLOAT();
-            case "double":
-                return DataTypes.DOUBLE();
-            case "bytes":
-                return DataTypes.BYTES();
-            default:
-                throw new UnsupportedOperationException(
-                        String.format("Don't support type '%s' yet.", type));
+        DataType dataType = TYPE_MAP.get(type);
+        if (dataType == null) {
+            throw new UnsupportedOperationException(
+                    String.format("Don't support type '%s' yet.", type));
         }
+        return dataType;
     }
 
     @Override
