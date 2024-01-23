@@ -33,9 +33,10 @@ import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
 import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
+import org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll;
+import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.slf4j.Logger;
@@ -52,6 +53,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+import static org.apache.paimon.service.network.NetworkUtils.getServerSocketChannelClass;
 
 /**
  * The base class for every server. It is using pure netty to send and receive messages of type
@@ -236,14 +239,16 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
                         .setNameFormat("Paimon " + serverName + " EventLoop Thread %d")
                         .build();
 
-        final NioEventLoopGroup nioGroup =
-                new NioEventLoopGroup(numEventLoopThreads, threadFactory);
+        EventLoopGroup group =
+                Epoll.isAvailable()
+                        ? new EpollEventLoopGroup(numEventLoopThreads, threadFactory)
+                        : new NioEventLoopGroup(numEventLoopThreads, threadFactory);
 
         this.bootstrap =
                 new ServerBootstrap()
                         .localAddress(bindAddress, port)
-                        .group(nioGroup)
-                        .channel(NioServerSocketChannel.class)
+                        .group(group)
+                        .channel(getServerSocketChannelClass())
                         .option(ChannelOption.ALLOCATOR, bufferPool)
                         .childOption(ChannelOption.ALLOCATOR, bufferPool)
                         .childHandler(new ServerChannelInitializer<>(handler));

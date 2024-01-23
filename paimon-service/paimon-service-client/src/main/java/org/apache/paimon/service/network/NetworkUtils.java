@@ -18,6 +18,11 @@
 
 package org.apache.paimon.service.network;
 
+import org.apache.flink.shaded.netty4.io.netty.channel.ServerChannel;
+import org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll;
+import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollServerSocketChannel;
+import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
+
 import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.net.NetworkInterface;
@@ -64,5 +69,9 @@ public class NetworkUtils {
             }
         }
         return localAddress;
+    }
+
+    public static Class<? extends ServerChannel> getServerSocketChannelClass() {
+        return Epoll.isAvailable() ? EpollServerSocketChannel.class : NioServerSocketChannel.class;
     }
 }
