@@ -54,7 +54,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 public class DebeziumRecordParser extends RecordParser {
 
     private static final String FIELD_SCHEMA = "schema";
-    private static final String FIELD_PAYLOAD = "payload";
+    protected static final String FIELD_PAYLOAD = "payload";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_SOURCE = "source";

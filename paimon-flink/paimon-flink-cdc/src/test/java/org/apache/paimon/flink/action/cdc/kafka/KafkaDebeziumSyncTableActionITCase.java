@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Timeout;
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
 
     private static final String DEBEZIUM = "debezium";
+    private static final String DEBEZIUM_JSON_SCHEMA_INCLUDE = "debezium_json_schema_include";
 
     @Test
     @Timeout(60)
@@ -90,5 +91,11 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
     @Timeout(60)
     public void testKafkaBuildSchemaWithDelete() throws Exception {
         testKafkaBuildSchemaWithDelete(DEBEZIUM);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testSchemaIncludeRecord1() throws Exception {
+        testSchemaIncludeRecord(DEBEZIUM_JSON_SCHEMA_INCLUDE);
     }
 }

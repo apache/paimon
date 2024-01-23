@@ -177,7 +177,7 @@ public class CanalRecordParser extends RecordParser {
                 rowData.put(fieldName, newValue);
             }
         } else {
-            paimonFieldTypes.putAll(fillDefaultStringTypes(record));
+            paimonFieldTypes.putAll(fillDefaultTypes(record));
             for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
                 rowData.put(entry.getKey(), Objects.toString(entry.getValue(), null));
             }
