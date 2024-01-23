@@ -212,7 +212,7 @@ public class ContinuousFileSplitEnumerator
                 assignSplits();
             } else {
                 LOG.error("Failed to enumerate files", error);
-                throw (RuntimeException) error;
+                throw new RuntimeException(error);
             }
             return;
         }
