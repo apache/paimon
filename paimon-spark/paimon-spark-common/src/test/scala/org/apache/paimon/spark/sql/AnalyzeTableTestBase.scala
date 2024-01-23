@@ -18,6 +18,7 @@
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.Decimal
+import org.apache.paimon.fs.{FileIO, Path}
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.utils.DateTimeUtils
@@ -25,6 +26,8 @@ import org.apache.paimon.utils.DateTimeUtils
 import org.apache.spark.sql.Row
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
+
+import java.util.concurrent.TimeUnit
 
 abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
@@ -243,5 +246,44 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     checkAnswer(
       spark.sql(s"SELECT * from T ORDER BY id"),
       Row("1", "a", 1, 1) :: Row("2", "aaa", 1, 2) :: Nil)
+  }
+
+  test("Paimon analyze: statistics expire and clean") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    val table = loadTable("T")
+    val tableLocation = table.location()
+    val fileIO = table.fileIO()
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a')")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    spark.sql(s"INSERT INTO T VALUES ('2', 'b')")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+    Assertions.assertEquals(2, statsFileCount(tableLocation, fileIO))
+
+    // test expire statistic
+    spark.sql("CALL sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+    Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
+
+    val orphanStats = new Path(tableLocation, "statistics/stats-orphan-0")
+    fileIO.writeFileUtf8(orphanStats, "x")
+    Assertions.assertEquals(2, statsFileCount(tableLocation, fileIO))
+
+    // test clean orhan statistic
+    Thread.sleep(1001)
+    val older_than = DateTimeUtils.formatLocalDateTime(
+      DateTimeUtils.toLocalDateTime(System.currentTimeMillis()),
+      3)
+    spark.sql(s"CALL sys.remove_orphan_files(table => 'T', older_than => '$older_than')")
+    Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
+  }
+
+  private def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
+    fileIO.listStatus(new Path(tableLocation, "statistics")).length
   }
 }

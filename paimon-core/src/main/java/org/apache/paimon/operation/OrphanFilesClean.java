@@ -229,6 +229,11 @@ public class OrphanFilesClean {
                         .map(IndexFileMeta::fileName)
                         .forEach(files::add);
             }
+
+            // try to read statistic
+            if (snapshot.statistics() != null) {
+                files.add(snapshot.statistics());
+            }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -315,6 +320,7 @@ public class OrphanFilesClean {
 
         paimonFileDirs.add(new Path(location, "manifest"));
         paimonFileDirs.add(new Path(location, "index"));
+        paimonFileDirs.add(new Path(location, "statistics"));
         paimonFileDirs.addAll(listAndCleanDataDirs(location, partitionKeysNum));
 
         return paimonFileDirs;
