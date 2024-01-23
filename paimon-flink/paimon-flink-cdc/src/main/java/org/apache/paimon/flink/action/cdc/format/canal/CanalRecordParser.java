@@ -25,6 +25,7 @@ import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -135,7 +136,7 @@ public class CanalRecordParser extends RecordParser {
             return null;
         }
 
-        return OBJECT_MAPPER.convertValue(
+        return JsonSerdeUtil.convertValue(
                 schema, new TypeReference<LinkedHashMap<String, String>>() {});
     }
 
@@ -163,7 +164,7 @@ public class CanalRecordParser extends RecordParser {
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
         LinkedHashMap<String, String> originalFieldTypes = tryExtractOriginalFieldTypes();
         Map<String, Object> recordMap =
-                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
+                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData = new HashMap<>();
 
         if (originalFieldTypes != null) {
