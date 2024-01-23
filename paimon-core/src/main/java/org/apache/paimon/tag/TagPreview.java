@@ -27,7 +27,9 @@ import org.apache.paimon.utils.TagManager;
 import javax.annotation.Nullable;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -84,6 +86,7 @@ public class TagPreview {
 
         Optional<String> findTag =
                 tagManager.tags().values().stream()
+                        .map(this::toOneAutoTag)
                         .filter(t -> t.compareTo(tag) <= 0)
                         .max(Comparator.naturalOrder());
         if (findTag.isPresent()) {
@@ -91,5 +94,15 @@ public class TagPreview {
         }
 
         throw new RuntimeException("Cannot find snapshot or tag for tag name: " + tag);
+    }
+
+    private String toOneAutoTag(List<String> tags) {
+        List<String> autoTags = new ArrayList<>();
+        for (String tag : tags) {
+            if (periodHandler.isAutoTag(tag)) {
+                autoTags.add(tag);
+            }
+        }
+        return TagAutoCreation.checkAndGetOneAutoTag(autoTags);
     }
 }

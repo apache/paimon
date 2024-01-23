@@ -59,20 +59,20 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test normal creation
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         // test not creation
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T12:59:00")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         // test just in time
         commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T13:00:00")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11", "2023-07-18 12");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11", "2023-07-18 12");
 
         // test expire old tag
         commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T14:00:00")));
         commit.commit(new ManifestCommittable(4, utcMills("2023-07-18T15:00:00")));
-        assertThat(tagManager.tags().values())
+        assertThat(tagManager.allTagNames())
                 .containsOnly("2023-07-18 12", "2023-07-18 13", "2023-07-18 14");
 
         // test restore with snapshot expiration
@@ -92,7 +92,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // check tags
         commit.commit(new ManifestCommittable(9, utcMills("2023-07-18T16:00:00")));
-        assertThat(tagManager.tags().values())
+        assertThat(tagManager.allTagNames())
                 .containsOnly("2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
         commit.close();
     }
@@ -109,15 +109,15 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test first create tag anyway
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:00:09")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         // test not create due to delay
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T13:00:09")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         // test create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T13:00:10")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11", "2023-07-18 12");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11", "2023-07-18 12");
         commit.close();
     }
 
@@ -133,11 +133,11 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test first create
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:09")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         // test second create
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T13:00:10")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11", "2023-07-18 12");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11", "2023-07-18 12");
         commit.close();
     }
 
@@ -152,15 +152,15 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test first create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:00:01")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 10");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 10");
 
         // test no create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T13:00:01")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 10");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 10");
 
         // test second create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T14:00:09")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 10", "2023-07-18 12");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 10", "2023-07-18 12");
         commit.close();
     }
 
@@ -175,18 +175,17 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test first create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:00:01")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-17");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-17");
 
         // test second create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-19T12:00:01")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-17", "2023-07-18");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-17", "2023-07-18");
 
         // test newCommit create
         commit.close();
         commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
-        assertThat(tagManager.tags().values())
-                .containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-17", "2023-07-18", "2023-07-19");
         commit.close();
     }
 
@@ -205,7 +204,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test first create
         commit.commit(new ManifestCommittable(0, localZoneMills("2023-07-18T12:00:09")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         options.set(TAG_CREATION_PERIOD, TagCreationPeriod.DAILY);
         table = table.copy(options.toMap());
@@ -214,7 +213,7 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test newCommit create
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-20T12:00:01")));
-        assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-19");
+        assertThat(tagManager.allTagNames()).contains("2023-07-18 11", "2023-07-19");
     }
 
     @Test
@@ -233,18 +232,20 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
 
         // test normal creation
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
-        assertThat(tagManager.tags().values()).containsOnly("2023-07-18 11");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11");
 
         table.createTag("savepoint-11", 1);
 
         // test newCommit create
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
-        assertThat(tagManager.tags().values()).contains("2023-07-18 11", "2023-07-18 13");
+        assertThat(tagManager.allTagNames())
+                .containsOnly("savepoint-11", "2023-07-18 11", "2023-07-18 13");
 
         // test expire old tag
         commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:00:00")));
         commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
-        assertThat(tagManager.tags().values())
+        // only handle auto-created tags
+        assertThat(tagManager.allTagNames())
                 .containsOnly("savepoint-11", "2023-07-18 13", "2023-07-18 14", "2023-07-18 15");
     }
 
@@ -259,10 +260,10 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         TagManager tagManager = table.store().newTagManager();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
-        assertThat(tagManager.tags().values()).containsOnly("20230717");
+        assertThat(tagManager.allTagNames()).containsOnly("20230717");
 
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-19T12:12:00")));
-        assertThat(tagManager.tags().values()).contains("20230717", "20230718");
+        assertThat(tagManager.allTagNames()).contains("20230717", "20230718");
     }
 
     @Test
@@ -276,10 +277,28 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         TagManager tagManager = table.store().newTagManager();
 
         commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
-        assertThat(tagManager.tags().values()).containsOnly("20230718 11");
+        assertThat(tagManager.allTagNames()).containsOnly("20230718 11");
 
         commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T13:13:00")));
-        assertThat(tagManager.tags().values()).contains("20230718 11", "20230718 12");
+        assertThat(tagManager.allTagNames()).contains("20230718 11", "20230718 12");
+    }
+
+    @Test
+    public void testOnlyExpireAutoCreatedTag() {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_NUM_RETAINED_MAX, 1);
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        table.createTag("many-tags-test");
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 11", "many-tags-test");
+
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T13:13:00")));
+        assertThat(tagManager.allTagNames()).contains("2023-07-18 12", "many-tags-test");
     }
 
     private long localZoneMills(String timestamp) {
