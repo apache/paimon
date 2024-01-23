@@ -40,8 +40,6 @@ import javax.annotation.Nullable;
 import java.util.Iterator;
 import java.util.Map;
 
-import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
-
 /**
  * Base {@link FileStoreWrite} implementation which supports using shared memory and preempting
  * memory from other writers.
@@ -74,10 +72,7 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 pathFactory,
                 options.writeMaxWritersToSpill());
         this.options = options;
-        this.cacheManager =
-                new CacheManager(
-                        options.pageSize(),
-                        options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE));
+        this.cacheManager = new CacheManager(options.lookupCacheMaxMemory());
     }
 
     @Override
