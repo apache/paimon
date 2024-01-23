@@ -24,17 +24,19 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.config.NettyServerConfig;
 import org.apache.paimon.exception.RemoteException;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.server.handler.LoadHttpHandler;
-import org.apache.paimon.utils.Constants;
+import org.apache.paimon.handler.LoadHttpHandler;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
 import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
+import org.apache.flink.shaded.netty4.io.netty.buffer.PooledByteBufAllocator;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
 import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
+import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
 import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll;
+import org.apache.flink.shaded.netty4.io.netty.channel.ServerChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollEventLoopGroup;
+import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollServerSocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
@@ -51,6 +53,8 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
+import static org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll.isAvailable;
+
 /**
  * A server for stream loading data over Netty, handling initialization, configuration, and
  * lifecycle management.
@@ -58,6 +62,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class StreamLoadServer {
 
     private static final Logger LOG = LoggerFactory.getLogger(StreamLoadServer.class);
+
+    public static final int NETTY_SERVER_HEART_BEAT_TIME = 1000 * 60 * 3 + 1000;
 
     private final ServerBootstrap serverBootstrap = new ServerBootstrap();
 
@@ -84,7 +90,7 @@ public class StreamLoadServer {
                         .setDaemon(true)
                         .setNameFormat(serverConfig.getServerName() + "WorkerThread_%s")
                         .build();
-        if (Epoll.isAvailable()) {
+        if (isAvailable()) {
             this.bossGroup = new EpollEventLoopGroup(1, bossThreadFactory);
             this.workGroup =
                     new EpollEventLoopGroup(serverConfig.getWorkerThread(), workerThreadFactory);
@@ -99,20 +105,14 @@ public class StreamLoadServer {
         if (isStarted.compareAndSet(false, true)) {
             this.serverBootstrap
                     .group(this.bossGroup, this.workGroup)
-                    .channel(NioServerSocketChannel.class)
-                    //                    .option(ChannelOption.SO_REUSEADDR, true)
-                    //                    .option(ChannelOption.SO_BACKLOG,
-                    // serverConfig.getSoBacklog())
-                    //                    .childOption(ChannelOption.SO_KEEPALIVE,
-                    // serverConfig.isSoKeepalive())
-                    //                    .childOption(ChannelOption.TCP_NODELAY,
-                    // serverConfig.isTcpNoDelay())
-                    //                    .childOption(ChannelOption.SO_SNDBUF,
-                    // serverConfig.getSendBufferSize())
-                    //                    .childOption(ChannelOption.SO_RCVBUF,
-                    // serverConfig.getReceiveBufferSize())
-                    //                    .childOption(ChannelOption.ALLOCATOR,
-                    // PooledByteBufAllocator.DEFAULT)
+                    .channel(getServerSocketChannelClass())
+                    .option(ChannelOption.SO_REUSEADDR, true)
+                    .option(ChannelOption.SO_BACKLOG, serverConfig.getSoBacklog())
+                    .childOption(ChannelOption.SO_KEEPALIVE, serverConfig.isSoKeepalive())
+                    .childOption(ChannelOption.TCP_NODELAY, serverConfig.isTcpNoDelay())
+                    .childOption(ChannelOption.SO_SNDBUF, serverConfig.getSendBufferSize())
+                    .childOption(ChannelOption.SO_RCVBUF, serverConfig.getReceiveBufferSize())
+                    .childOption(ChannelOption.ALLOCATOR, PooledByteBufAllocator.DEFAULT)
                     .childHandler(
                             new ChannelInitializer<SocketChannel>() {
 
@@ -126,12 +126,13 @@ public class StreamLoadServer {
             try {
                 future =
                         serverBootstrap
-                                .bind(serverConfig.getListenPort())
+                                .bind(8888)
                                 .sync()
                                 .addListener(
                                         f -> {
-                                            LOG.info("ftp server is started and listening ");
+                                            LOG.info("load server is started and listening ");
                                         });
+                future.channel().closeFuture().sync();
             } catch (Exception e) {
                 LOG.error("{} bind fail {}, exit", serverConfig.getServerName(), e.getMessage(), e);
                 throw new RemoteException(
@@ -165,14 +166,11 @@ public class StreamLoadServer {
 
     private void initNettyChannel(SocketChannel ch) {
         ch.pipeline()
-                .addLast(
-                        "idleStateHandler",
-                        new IdleStateHandler(
-                                0,
-                                0,
-                                Constants.NETTY_SERVER_HEART_BEAT_TIME,
-                                TimeUnit.MILLISECONDS))
-                .addLast("httpContentDecompressor", new HttpContentDecompressor())
+//                .addLast(
+//                        "idleStateHandler",
+//                        new IdleStateHandler(
+//                                0, 0, NETTY_SERVER_HEART_BEAT_TIME, TimeUnit.MILLISECONDS))
+                //.addLast("httpContentDecompressor", new HttpContentDecompressor())
                 .addLast("httpServerCodec", new HttpServerCodec())
                 .addLast("chunkedWriteHandler", new ChunkedWriteHandler())
                 .addLast(
@@ -199,6 +197,13 @@ public class StreamLoadServer {
         }
     }
 
+    public static Class<? extends ServerChannel> getServerSocketChannelClass() {
+        if (isAvailable()) {
+            return EpollServerSocketChannel.class;
+        }
+        return NioServerSocketChannel.class;
+    }
+
     public Catalog getTableCatalogInfo(String path) {
         Options options = new Options();
         options.set("warehouse", path);
@@ -217,6 +222,6 @@ public class StreamLoadServer {
         nettyServerConfig.setServerName("test");
         new StreamLoadServer(nettyServerConfig).start();
         // 阻止主线程结束
-        Thread.currentThread().join();
+//        Thread.currentThread().join();
     }
 }

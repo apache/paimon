@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.server.handler;
+package org.apache.paimon.handler;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
