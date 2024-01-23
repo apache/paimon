@@ -237,6 +237,10 @@ under the License.
                     <groupId>log4j</groupId>
                     <artifactId>log4j</artifactId>
                 </exclusion>
+                <exclusion>
+                    <groupId>org.testcontainers</groupId>
+                    <artifactId>testcontainers</artifactId>
+                </exclusion>
             </exclusions>
         </dependency>
 
