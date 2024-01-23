@@ -356,6 +356,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
+    public static final ConfigOption<MemorySize> CACHE_PAGE_SIZE =
+            key("cache-page-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("16 kb"))
+                    .withDescription("Memory page size for caching.");
+
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
             key("target-file-size")
                     .memoryType()
@@ -1259,6 +1265,14 @@ public class CoreOptions implements Serializable {
 
     public int pageSize() {
         return (int) options.get(PAGE_SIZE).getBytes();
+    }
+
+    public int cachePageSize() {
+        return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public MemorySize lookupCacheMaxMemory() {
+        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
     }
 
     public long targetFileSize() {

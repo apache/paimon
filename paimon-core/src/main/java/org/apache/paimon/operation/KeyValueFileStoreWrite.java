@@ -276,6 +276,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
@@ -297,6 +298,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));

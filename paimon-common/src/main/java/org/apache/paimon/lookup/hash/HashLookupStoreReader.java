@@ -62,7 +62,8 @@ public class HashLookupStoreReader
     // Buffers
     private final byte[] slotBuffer;
 
-    HashLookupStoreReader(CacheManager cacheManager, File file) throws IOException {
+    HashLookupStoreReader(CacheManager cacheManager, int cachePageSize, File file)
+            throws IOException {
         // File path
         if (!file.exists()) {
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
@@ -127,7 +128,7 @@ public class HashLookupStoreReader
         }
 
         // Create Mapped file in read-only mode
-        inputView = new CachedRandomInputView(file, cacheManager);
+        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
 
         // logging
         DecimalFormat integerFormat = new DecimalFormat("#,##0.00");

@@ -62,7 +62,7 @@ public class HashLookupStoreFactoryTest {
     public void setUp() throws IOException {
         this.factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(1024, MemorySize.ofMebiBytes(1)), 0.75d);
+                        new CacheManager(MemorySize.ofMebiBytes(1)), 1024, 0.75d);
         this.file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         if (!file.createNewFile()) {
             throw new IOException("Can not create file: " + file);
@@ -178,9 +178,8 @@ public class HashLookupStoreFactoryTest {
         // Read
         factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(
-                                MathUtils.roundDownToPowerOf2(byteSize - 100),
-                                MemorySize.ofMebiBytes(1)),
+                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        MathUtils.roundDownToPowerOf2(byteSize - 100),
                         0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < keys.length; i++) {
@@ -209,9 +208,8 @@ public class HashLookupStoreFactoryTest {
         // Read
         factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(
-                                MathUtils.roundDownToPowerOf2(byteSize + sizeSize + 3),
-                                MemorySize.ofMebiBytes(1)),
+                        new CacheManager(MemorySize.ofMebiBytes(1)),
+                        MathUtils.roundDownToPowerOf2(byteSize + sizeSize + 3),
                         0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < keys.length; i++) {
@@ -279,7 +277,7 @@ public class HashLookupStoreFactoryTest {
         writeStore(file, keys, values);
 
         // Read
-        factory = new HashLookupStoreFactory(new CacheManager(1024, new MemorySize(8096)), 0.75d);
+        factory = new HashLookupStoreFactory(new CacheManager(new MemorySize(8096)), 1024, 0.75d);
         HashLookupStoreReader reader = factory.createReader(file);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
