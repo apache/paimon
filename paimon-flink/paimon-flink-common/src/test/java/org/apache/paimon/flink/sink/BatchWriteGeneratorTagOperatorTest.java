@@ -90,6 +90,7 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
 
         // test tag expiration
         table.createTag("many-tags-test1");
+        Thread.sleep(1_000);
         table.createTag("many-tags-test2");
         assertThat(tagManager.tagCount()).isEqualTo(3);
 
