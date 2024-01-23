@@ -183,7 +183,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
      *   <li>outputLevel == maxLevel, no previous records
      * </ul>
      */
-    protected boolean canSkipRewriteCompactFile(int outputLevel) {
+    private boolean canSkipRewriteCompactFile(int outputLevel) {
         return mergeEngine == CoreOptions.MergeEngine.DEDUPLICATE || outputLevel == maxLevel;
     }
 }
