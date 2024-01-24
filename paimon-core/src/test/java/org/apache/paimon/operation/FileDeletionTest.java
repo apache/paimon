@@ -722,6 +722,7 @@ public class FileDeletionTest {
                         Collections.emptyMap(),
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
+                        null,
                         null);
     }
 

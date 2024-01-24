@@ -65,8 +65,8 @@ public class CachedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        CacheManager cacheManager = new CacheManager(1024, MemorySize.ofKibiBytes(128));
-        CachedRandomInputView view = new CachedRandomInputView(file, cacheManager);
+        CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
+        CachedRandomInputView view = new CachedRandomInputView(file, cacheManager, 1024);
 
         // read first one
         // this assertThatCode check the ConcurrentModificationException is not threw.

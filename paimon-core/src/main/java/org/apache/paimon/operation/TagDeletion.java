@@ -26,6 +26,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.slf4j.Logger;
@@ -51,8 +52,9 @@ public class TagDeletion extends FileDeletionBase {
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler) {
-        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler);
+            IndexFileHandler indexFileHandler,
+            StatsFileHandler statsFileHandler) {
+        super(fileIO, pathFactory, manifestFile, manifestList, indexFileHandler, statsFileHandler);
     }
 
     @Override

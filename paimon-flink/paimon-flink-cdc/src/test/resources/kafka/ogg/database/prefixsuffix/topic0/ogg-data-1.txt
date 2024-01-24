@@ -16,5 +16,5 @@
  * limitations under the License.
  */
 
-{"table":"PAIMON_SYNC_DATABASE_AFFIX.T1","pos":"00000000000000000000143","primary_keys":["id"],"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":3.140000104904175},"op_type":"I", "current_ts":"2020-05-13T13:39:35.766000", "op_ts":"2020-05-13 15:40:06.000000"}
-{"table":"PAIMON_SYNC_DATABASE_AFFIX.T1","pos":"00000000000000000000144","primary_keys":["id"],"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.100000381469727},"op_type":"I","op_ts":"2020-05-13 15:40:07.000000"}
+{"table":"PAIMON_SYNC_DATABASE_AFFIX.t1","pos":"00000000000000000000143","primary_keys":["id"],"after":{"id":101,"name":"scooter","description":"Small 2-wheel scooter","weight":3.14},"op_type":"I", "current_ts":"2020-05-13T13:39:35.766000", "op_ts":"2020-05-13 15:40:06.000000"}
+{"table":"PAIMON_SYNC_DATABASE_AFFIX.t1","pos":"00000000000000000000144","primary_keys":["id"],"after":{"id":102,"name":"car battery","description":"12V car battery","weight":8.1},"op_type":"I","op_ts":"2020-05-13 15:40:07.000000"}

@@ -66,7 +66,7 @@ public class CdcTimestampExtractorFactory implements Serializable {
 
         @Override
         public long extractTimestamp(String record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(record, Long.class, "payload", "ts_ms");
+            return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
         }
     }
 
@@ -109,7 +109,7 @@ public class CdcTimestampExtractorFactory implements Serializable {
 
         @Override
         public long extractTimestamp(String record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(record, Long.class, "source", "ts_ms");
+            return JsonSerdeUtil.extractValue(record, Long.class, "payload", "ts_ms");
         }
     }
 

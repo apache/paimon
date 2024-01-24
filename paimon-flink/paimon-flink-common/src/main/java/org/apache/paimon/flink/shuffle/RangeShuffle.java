@@ -54,6 +54,7 @@ import org.apache.flink.util.XORShiftRandom;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -257,9 +258,10 @@ public class RangeShuffle {
                     T record = sampledData.get((int) (i * avgRange));
                     boundaries[i - 1] = record;
                 }
+                collector.collect(Arrays.asList(boundaries));
+            } else {
+                collector.collect(Collections.emptyList());
             }
-
-            collector.collect(Arrays.asList(boundaries));
         }
     }
 

@@ -74,8 +74,9 @@ public class OrcSplitReaderUtil {
             case DATE:
                 return TypeDescription.createDate();
             case TIMESTAMP_WITHOUT_TIME_ZONE:
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return TypeDescription.createTimestamp();
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
+                return TypeDescription.createTimestampInstant();
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return TypeDescription.createList(toOrcType(arrayType.getElementType()));

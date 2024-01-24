@@ -48,7 +48,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
@@ -82,9 +81,8 @@ public class LocalTableQuery implements TableQuery {
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.hashLookupStoreFactory =
                 new HashLookupStoreFactory(
-                        new CacheManager(
-                                options.pageSize(),
-                                options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE)),
+                        new CacheManager(options.lookupCacheMaxMemory()),
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR));
 
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP) {

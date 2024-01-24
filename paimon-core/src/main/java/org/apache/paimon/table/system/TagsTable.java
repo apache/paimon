@@ -50,6 +50,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -191,9 +192,16 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            SortedMap<Snapshot, String> tags = new TagManager(fileIO, location).tags();
+            SortedMap<Snapshot, List<String>> tags = new TagManager(fileIO, location).tags();
+            Map<String, Snapshot> nameToSnapshot = new LinkedHashMap<>();
+            for (Map.Entry<Snapshot, List<String>> tag : tags.entrySet()) {
+                for (String tagName : tag.getValue()) {
+                    nameToSnapshot.put(tagName, tag.getKey());
+                }
+            }
+
             Iterator<InternalRow> rows =
-                    Iterators.transform(tags.entrySet().iterator(), this::toRow);
+                    Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -202,10 +210,10 @@ public class TagsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Map.Entry<Snapshot, String> tag) {
-            Snapshot snapshot = tag.getKey();
+        private InternalRow toRow(Map.Entry<String, Snapshot> tag) {
+            Snapshot snapshot = tag.getValue();
             return GenericRow.of(
-                    BinaryString.fromString(tag.getValue()),
+                    BinaryString.fromString(tag.getKey()),
                     snapshot.id(),
                     snapshot.schemaId(),
                     Timestamp.fromLocalDateTime(

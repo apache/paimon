@@ -356,6 +356,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
+    public static final ConfigOption<MemorySize> CACHE_PAGE_SIZE =
+            key("cache-page-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("16 kb"))
+                    .withDescription("Memory page size for caching.");
+
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
             key("target-file-size")
                     .memoryType()
@@ -528,6 +534,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Optional tag name used in case of \"from-snapshot\" scan mode.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> SCAN_VERSION =
+            key("scan.version")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the time travel version string used in 'VERSION AS OF' syntax. "
+                                    + "We will use tag when both tag and snapshot of that version exist.");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
@@ -1259,6 +1274,14 @@ public class CoreOptions implements Serializable {
         return (int) options.get(PAGE_SIZE).getBytes();
     }
 
+    public int cachePageSize() {
+        return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public MemorySize lookupCacheMaxMemory() {
+        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
     public long targetFileSize() {
         return options.get(TARGET_FILE_SIZE).getBytes();
     }
@@ -1341,7 +1364,8 @@ public class CoreOptions implements Serializable {
             if (options.getOptional(SCAN_TIMESTAMP_MILLIS).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
-                    || options.getOptional(SCAN_TAG_NAME).isPresent()) {
+                    || options.getOptional(SCAN_TAG_NAME).isPresent()
+                    || options.getOptional(SCAN_VERSION).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
                 return StartupMode.FROM_FILE_CREATION_TIME;
@@ -1376,6 +1400,10 @@ public class CoreOptions implements Serializable {
 
     public String scanTagName() {
         return options.get(SCAN_TAG_NAME);
+    }
+
+    public String scanVersion() {
+        return options.get(SCAN_VERSION);
     }
 
     public Pair<String, String> incrementalBetween() {

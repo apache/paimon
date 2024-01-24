@@ -16,14 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.table;
 
-/** Expire operation which provides snapshots expire. */
-public interface FileStoreExpire {
+/** Expire snapshots. */
+public interface ExpireSnapshots {
 
-    /** With global lock. */
-    FileStoreExpire withLock(Lock lock);
+    ExpireSnapshots retainMax(int retainMax);
 
-    /** Expire snapshots. */
-    void expire();
+    ExpireSnapshots retainMin(int retainMin);
+
+    ExpireSnapshots olderThanMills(long olderThanMills);
+
+    ExpireSnapshots maxDeletes(int maxDeletes);
+
+    int expire();
 }
