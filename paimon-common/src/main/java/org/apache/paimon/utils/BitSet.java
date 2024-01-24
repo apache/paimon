@@ -18,13 +18,15 @@
  *
  */
 
-package org.apache.paimon.lookup.bloom;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.memory.MemorySegment;
-import org.apache.paimon.utils.Preconditions;
 
-/** BitSet util. Copied from Apache Flink Project. */
+import static org.apache.paimon.utils.Preconditions.checkArgument;
+
+/** BitSet based on {@link MemorySegment}. */
 public class BitSet {
+
     private static final int BYTE_INDEX_MASK = 0x00000007;
 
     private MemorySegment memorySegment;
@@ -33,25 +35,33 @@ public class BitSet {
     private int offset;
 
     // The BitSet byte size.
-    private int byteLength;
+    private final int byteLength;
 
     // The BitSet bit size.
-    private int bitLength;
+    private final int bitLength;
 
     public BitSet(int byteSize) {
-        Preconditions.checkArgument(byteSize > 0, "bits size should be greater than 0.");
+        checkArgument(byteSize > 0, "bits size should be greater than 0.");
         this.byteLength = byteSize;
         this.bitLength = byteSize << 3;
     }
 
     public void setMemorySegment(MemorySegment memorySegment, int offset) {
-        Preconditions.checkArgument(memorySegment != null, "MemorySegment can not be null.");
-        Preconditions.checkArgument(offset >= 0, "Offset should be positive integer.");
-        Preconditions.checkArgument(
+        checkArgument(memorySegment != null, "MemorySegment can not be null.");
+        checkArgument(offset >= 0, "Offset should be positive integer.");
+        checkArgument(
                 offset + byteLength <= memorySegment.size(),
                 "Could not set MemorySegment, the remain buffers is not enough.");
         this.memorySegment = memorySegment;
         this.offset = offset;
+    }
+
+    public void unsetMemorySegment() {
+        this.memorySegment = null;
+    }
+
+    public MemorySegment getMemorySegment() {
+        return this.memorySegment;
     }
 
     /**
@@ -60,7 +70,7 @@ public class BitSet {
      * @param index - position
      */
     public void set(int index) {
-        Preconditions.checkArgument(index < bitLength && index >= 0);
+        checkArgument(index < bitLength && index >= 0);
 
         int byteIndex = index >>> 3;
         byte current = memorySegment.get(offset + byteIndex);
@@ -75,7 +85,7 @@ public class BitSet {
      * @return - value at the bit position
      */
     public boolean get(int index) {
-        Preconditions.checkArgument(index < bitLength && index >= 0);
+        checkArgument(index < bitLength && index >= 0);
 
         int byteIndex = index >>> 3;
         byte current = memorySegment.get(offset + byteIndex);
@@ -102,11 +112,15 @@ public class BitSet {
 
     @Override
     public String toString() {
-        StringBuilder output = new StringBuilder();
-        output.append("BitSet:\n");
-        output.append("\tMemorySegment:").append(memorySegment.size()).append("\n");
-        output.append("\tOffset:").append(offset).append("\n");
-        output.append("\tLength:").append(byteLength).append("\n");
-        return output.toString();
+        return "BitSet:\n"
+                + "\tMemorySegment:"
+                + memorySegment.size()
+                + "\n"
+                + "\tOffset:"
+                + offset
+                + "\n"
+                + "\tLength:"
+                + byteLength
+                + "\n";
     }
 }

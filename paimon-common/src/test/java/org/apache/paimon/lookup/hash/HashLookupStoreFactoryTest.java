@@ -24,8 +24,8 @@ package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
@@ -76,11 +76,11 @@ public class HashLookupStoreFactoryTest {
         return new Object[] {false, true};
     }
 
-    private BloomFilterBuilder createBloomFiler(boolean enabled) {
+    private BloomFilter.Builder createBloomFiler(boolean enabled) {
         if (!enabled) {
             return null;
         }
-        return BloomFilterBuilder.bfBuilder(100, 0.01);
+        return BloomFilter.builder(100, 0.01);
     }
 
     private byte[] toBytes(Object o) {
@@ -95,7 +95,7 @@ public class HashLookupStoreFactoryTest {
     @MethodSource(value = "enableBloomFilter")
     public void testEmpty(boolean enableBloomFilter) throws IOException {
         HashLookupStoreWriter writer =
-                factory.createWriter(file, () -> createBloomFiler(enableBloomFilter));
+                factory.createWriter(file, createBloomFiler(enableBloomFilter));
         writer.close();
 
         assertThat(file.exists()).isTrue();
@@ -111,7 +111,7 @@ public class HashLookupStoreFactoryTest {
     @MethodSource(value = "enableBloomFilter")
     public void testOneKey(boolean enableBloomFilter) throws IOException {
         HashLookupStoreWriter writer =
-                factory.createWriter(file, () -> createBloomFiler(enableBloomFilter));
+                factory.createWriter(file, createBloomFiler(enableBloomFilter));
         writer.put(toBytes(1), toBytes("foo"));
         writer.close();
 
@@ -393,8 +393,7 @@ public class HashLookupStoreFactoryTest {
             Object[] keys,
             Object[] values)
             throws IOException {
-        HashLookupStoreWriter writer =
-                factory.createWriter(location, () -> createBloomFiler(enableBf));
+        HashLookupStoreWriter writer = factory.createWriter(location, createBloomFiler(enableBf));
         for (int i = 0; i < keys.length; i++) {
             writer.put(toBytes(keys[i]), toBytes(values[i]));
         }

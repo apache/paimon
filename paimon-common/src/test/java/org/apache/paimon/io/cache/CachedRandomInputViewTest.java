@@ -65,9 +65,8 @@ public class CachedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        int pageSize = 1024;
         CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
-        CachedRandomInputView view = new CachedRandomInputView(file, cacheManager, pageSize);
+        CachedRandomInputView view = new CachedRandomInputView(file, cacheManager, 1024);
 
         // read first one
         // this assertThatCode check the ConcurrentModificationException is not threw.
@@ -93,21 +92,6 @@ public class CachedRandomInputViewTest {
             assertThatCode(() -> view.setReadPosition(position)).doesNotThrowAnyException();
             assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(position));
         }
-
-        byte[] expected = new byte[100];
-        System.arraycopy(segment.getArray(), 0, expected, 0, 100);
-        assertThat(view.read(0, 100, (page, length) -> {}).getArray()).isEqualTo(expected);
-
-        // Read not aligned
-        expected = new byte[100];
-        System.arraycopy(segment.getArray(), 1, expected, 0, 100);
-        assertThat(view.read(1, 100, (page, length) -> {}).getArray()).isEqualTo(expected);
-
-        // Read cross pagesize
-        expected = new byte[pageSize * 2 + 1];
-        System.arraycopy(segment.getArray(), pageSize * 2, expected, 0, pageSize * 2 + 1);
-        assertThat(view.read(pageSize * 2, pageSize * 2 + 1, (page, length) -> {}).getArray())
-                .isEqualTo(expected);
 
         view.close();
         assertThat(cacheManager.cache().asMap().size()).isEqualTo(0);

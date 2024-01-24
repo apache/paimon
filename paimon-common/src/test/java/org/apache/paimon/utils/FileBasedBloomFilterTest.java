@@ -18,13 +18,11 @@
  *
  */
 
-package org.apache.paimon.lookup.bloom;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.CachedRandomInputView;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
-import org.apache.paimon.utils.CommonTestUtils;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -32,35 +30,35 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
 import java.util.Arrays;
 import java.util.UUID;
 
-/** Test for {@link BloomFilterTester}. */
-public class BloomFilterTesterTest {
+/** Test for {@link FileBasedBloomFilter}. */
+public class FileBasedBloomFilterTest {
 
     @TempDir Path tempDir;
 
     @Test
     public void testProbe() throws IOException {
-
         MemorySegment segment = MemorySegment.wrap(new byte[1000]);
-        BloomFilterBuilder filter = new BloomFilterBuilder(segment, 100);
+        BloomFilter.Builder builder = new BloomFilter.Builder(segment, 100);
         int[] inputs = CommonTestUtils.generateRandomInts(100);
-        Arrays.stream(inputs).forEach(i -> filter.addHash(Integer.hashCode(i)));
+        Arrays.stream(inputs).forEach(i -> builder.addHash(Integer.hashCode(i)));
         File file = writeFile(segment.getArray());
 
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
-        BloomFilterTester tester =
-                new BloomFilterTester(
-                        100, 0, 1000, new CachedRandomInputView(file, cacheManager, 1024));
+        FileBasedBloomFilter filter =
+                new FileBasedBloomFilter(
+                        new RandomAccessFile(file, "r"), cacheManager, 100, 0, 1000);
 
         Arrays.stream(inputs)
-                .forEach(i -> Assertions.assertThat(tester.testHash(Integer.hashCode(i))).isTrue());
+                .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
         cacheManager.cache().invalidateAll();
-        Assertions.assertThat(tester.getSegments()[0]).isNull();
+        Assertions.assertThat(filter.bloomFilter().getMemorySegment()).isNull();
     }
 
     private File writeFile(byte[] bytes) throws IOException {

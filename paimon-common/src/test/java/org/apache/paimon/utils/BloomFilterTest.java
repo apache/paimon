@@ -18,7 +18,7 @@
  *
  */
 
-package org.apache.paimon.lookup.bloom;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.memory.MemorySegment;
 
@@ -30,8 +30,39 @@ import java.util.Arrays;
 import static org.apache.paimon.utils.CommonTestUtils.generateRandomInts;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 
-/** Test for {@link BloomFilter}. */
+/** Test for {@link org.apache.paimon.utils.BloomFilter}. */
 public class BloomFilterTest {
+
+    @Test
+    public void testOneSegmentBuilder() {
+        BloomFilter.Builder builder = BloomFilter.builder(100, 0.01);
+        int[] inputs = generateRandomInts(100);
+        for (int input : inputs) {
+            builder.addHash(Integer.hashCode(input));
+        }
+
+        for (int input : inputs) {
+            Assertions.assertThat(builder.testHash(Integer.hashCode(input))).isTrue();
+        }
+    }
+
+    @Test
+    public void testEstimatedHashFunctions() {
+        Assertions.assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions)
+                .isEqualTo(7);
+        Assertions.assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions)
+                .isEqualTo(7);
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions)
+                .isEqualTo(7);
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions)
+                .isEqualTo(7);
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions)
+                .isEqualTo(4);
+        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.01).getFilter().numHashFunctions)
+                .isEqualTo(7);
+        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.05).getFilter().numHashFunctions)
+                .isEqualTo(4);
+    }
 
     @Test
     public void testBloomNumBits() {
@@ -79,7 +110,7 @@ public class BloomFilterTest {
 
         // segment1
         MemorySegment segment1 = MemorySegment.wrap(new byte[1024]);
-        filter.setBitsLocation(segment1, 0);
+        filter.setMemorySegment(segment1, 0);
         int[] inputs1 = generateRandomInts(100);
         Arrays.stream(inputs1).forEach(i -> filter.addHash(Integer.hashCode(i)));
         Arrays.stream(inputs1)
@@ -87,14 +118,14 @@ public class BloomFilterTest {
 
         // segments 2
         MemorySegment segment2 = MemorySegment.wrap(new byte[1024]);
-        filter.setBitsLocation(segment2, 0);
+        filter.setMemorySegment(segment2, 0);
         int[] inputs2 = generateRandomInts(100);
         Arrays.stream(inputs2).forEach(i -> filter.addHash(Integer.hashCode(i)));
         Arrays.stream(inputs2)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
 
         // switch to segment1
-        filter.setBitsLocation(segment1, 0);
+        filter.setMemorySegment(segment1, 0);
         Arrays.stream(inputs1)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
 
@@ -104,7 +135,7 @@ public class BloomFilterTest {
                 .forEach(
                         i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isFalse());
         // clear segment2
-        filter.setBitsLocation(segment2, 0);
+        filter.setMemorySegment(segment2, 0);
         filter.reset();
         Arrays.stream(inputs2)
                 .forEach(

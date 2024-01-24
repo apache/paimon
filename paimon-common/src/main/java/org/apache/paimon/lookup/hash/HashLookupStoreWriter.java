@@ -19,7 +19,7 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.lookup.LookupStoreWriter;
-import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
@@ -45,7 +45,6 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
-import java.util.function.Supplier;
 
 /** Internal write implementation for hash kv store. */
 public class HashLookupStoreWriter implements LookupStoreWriter {
@@ -80,9 +79,9 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int valueCount;
     // Number of collisions
     private int collisions;
-    @Nullable private final BloomFilterBuilder bloomFilter;
+    @Nullable private final BloomFilter.Builder bloomFilter;
 
-    HashLookupStoreWriter(double loadFactor, File file, Supplier<BloomFilterBuilder> bfProvider)
+    HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
             throws IOException {
         this.loadFactor = loadFactor;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
@@ -90,21 +89,21 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
                     "Illegal load factor = " + loadFactor + ", should be between 0.0 and 1.0.");
         }
 
-        tempFolder = new File(file.getParentFile(), UUID.randomUUID().toString());
+        this.tempFolder = new File(file.getParentFile(), UUID.randomUUID().toString());
         if (!tempFolder.mkdir()) {
             throw new IOException("Can not create temp folder: " + tempFolder);
         }
-        outputStream = new BufferedOutputStream(new FileOutputStream(file));
-        indexStreams = new DataOutputStream[0];
-        dataStreams = new DataOutputStream[0];
-        indexFiles = new File[0];
-        dataFiles = new File[0];
-        lastValues = new byte[0][];
-        lastValuesLength = new int[0];
-        dataLengths = new long[0];
-        maxOffsetLengths = new int[0];
-        keyCounts = new int[0];
-        bloomFilter = bfProvider.get();
+        this.outputStream = new BufferedOutputStream(new FileOutputStream(file));
+        this.indexStreams = new DataOutputStream[0];
+        this.dataStreams = new DataOutputStream[0];
+        this.indexFiles = new File[0];
+        this.dataFiles = new File[0];
+        this.lastValues = new byte[0][];
+        this.lastValuesLength = new int[0];
+        this.dataLengths = new long[0];
+        this.maxOffsetLengths = new int[0];
+        this.keyCounts = new int[0];
+        this.bloomFilter = bloomFilter;
     }
 
     @Override
