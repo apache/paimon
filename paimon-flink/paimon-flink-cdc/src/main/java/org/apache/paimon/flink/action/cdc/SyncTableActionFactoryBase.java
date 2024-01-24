@@ -77,10 +77,6 @@ public abstract class SyncTableActionFactoryBase implements ActionFactory {
         }
 
         if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
-        }
-
-        if (params.has(METADATA_COLUMN)) {
             List<String> metadataColumns =
                     new ArrayList<>(params.getMultiParameter(METADATA_COLUMN));
             if (metadataColumns.size() == 1) {
