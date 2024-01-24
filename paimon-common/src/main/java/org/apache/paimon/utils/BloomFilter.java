@@ -18,31 +18,14 @@
  *
  */
 
-package org.apache.paimon.lookup.bloom;
+package org.apache.paimon.utils;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/**
- * BloomFilter is a probabilistic data structure for set membership check. BloomFilters are highly
- * space efficient when compared to using a HashSet. Because of the probabilistic nature of bloom
- * filter false positive (element not present in bloom filter but test() says true) are possible but
- * false negatives are not possible (if element is present then test() will never say false). The
- * false positive probability is configurable depending on which storage requirement may increase or
- * decrease. Lower the false positive probability greater is the space requirement. Bloom filters
- * are sensitive to number of elements that will be inserted in the bloom filter. During the
- * creation of bloom filter expected number of entries must be specified. If the number of
- * insertions exceed the specified initial number of entries then false positive probability will
- * increase accordingly.
- *
- * <p>Internally, this implementation of bloom filter uses MemorySegment to store BitSet,
- * BloomFilter and BitSet are designed to be able to switch between different MemorySegments, so
- * that Flink can share the same BloomFilter/BitSet object instance for different bloom filters.
- *
- * <p>Part of this class refers to the implementation from Apache Hive project
- * https://github.com/apache/hive/blob/master/common/src/java/org/apache/hive/common/util/BloomFilter.java
- */
+/** Bloom filter based on one memory segment. */
 public class BloomFilter {
 
     protected BitSet bitSet;
@@ -52,57 +35,43 @@ public class BloomFilter {
     public BloomFilter(long expectedEntries, int byteSize) {
         checkArgument(expectedEntries > 0, "expectedEntries should be > 0");
         this.expectedEntries = expectedEntries;
-        this.numHashFunctions = optimalNumOfHashFunctions(expectedEntries, byteSize << 3);
+        this.numHashFunctions = optimalNumOfHashFunctions(expectedEntries, (long) byteSize << 3);
         this.bitSet = new BitSet(byteSize);
     }
 
-    public void setBitsLocation(MemorySegment memorySegment, int offset) {
+    public void setMemorySegment(MemorySegment memorySegment, int offset) {
         this.bitSet.setMemorySegment(memorySegment, offset);
+    }
+
+    public void unsetMemorySegment() {
+        this.bitSet.unsetMemorySegment();
+    }
+
+    public MemorySegment getMemorySegment() {
+        return this.bitSet.getMemorySegment();
     }
 
     /**
      * Compute optimal bits number with given input entries and expected false positive probability.
      *
-     * @param inputEntries
-     * @param fpp
      * @return optimal bits number
      */
     public static int optimalNumOfBits(long inputEntries, double fpp) {
-        int numBits = (int) (-inputEntries * Math.log(fpp) / (Math.log(2) * Math.log(2)));
-        return numBits;
-    }
-
-    /**
-     * Compute the false positive probability based on given input entries and bits size. Note: this
-     * is just the math expected value, you should not expect the fpp in real case would under the
-     * return value for certain.
-     *
-     * @param inputEntries
-     * @param bitSize
-     * @return
-     */
-    public static double estimateFalsePositiveProbability(long inputEntries, int bitSize) {
-        int numFunction = optimalNumOfHashFunctions(inputEntries, bitSize);
-        double p = Math.pow(Math.E, -(double) numFunction * inputEntries / bitSize);
-        double estimatedFPP = Math.pow(1 - p, numFunction);
-        return estimatedFPP;
+        return (int) (-inputEntries * Math.log(fpp) / (Math.log(2) * Math.log(2)));
     }
 
     /**
      * compute the optimal hash function number with given input entries and bits size, which would
      * make the false positive probability lowest.
      *
-     * @param expectEntries
-     * @param bitSize
      * @return hash function number
      */
     static int optimalNumOfHashFunctions(long expectEntries, long bitSize) {
         return Math.max(1, (int) Math.round((double) bitSize / expectEntries * Math.log(2)));
     }
 
-    public void addHash(int hash32) {
-        int hash1 = hash32;
-        int hash2 = hash32 >>> 16;
+    public void addHash(int hash1) {
+        int hash2 = hash1 >>> 16;
 
         for (int i = 1; i <= numHashFunctions; i++) {
             int combinedHash = hash1 + (i * hash2);
@@ -115,9 +84,8 @@ public class BloomFilter {
         }
     }
 
-    public boolean testHash(int hash32) {
-        int hash1 = hash32;
-        int hash2 = hash32 >>> 16;
+    public boolean testHash(int hash1) {
+        int hash2 = hash1 >>> 16;
 
         for (int i = 1; i <= numHashFunctions; i++) {
             int combinedHash = hash1 + (i * hash2);
@@ -139,10 +107,52 @@ public class BloomFilter {
 
     @Override
     public String toString() {
-        StringBuilder output = new StringBuilder();
-        output.append("BloomFilter:\n");
-        output.append("\thash function number:").append(numHashFunctions).append("\n");
-        output.append(bitSet);
-        return output.toString();
+        return "BloomFilter:\n" + "\thash function number:" + numHashFunctions + "\n" + bitSet;
+    }
+
+    public static Builder builder(long expectedRow, double fpp) {
+        int numBytes = (int) Math.ceil(BloomFilter.optimalNumOfBits(expectedRow, fpp) / 8D);
+        Preconditions.checkArgument(
+                numBytes > 0,
+                "The optimal bits should > 0. expectedRow: %s, fpp: %s",
+                expectedRow,
+                fpp);
+        return new Builder(MemorySegment.wrap(new byte[numBytes]), expectedRow);
+    }
+
+    /** Bloom filter based on one memory segment. */
+    public static class Builder {
+
+        private final MemorySegment buffer;
+        private final BloomFilter filter;
+        private final long numRecords;
+
+        Builder(MemorySegment buffer, long numRecords) {
+            this.buffer = buffer;
+            this.filter = new BloomFilter(numRecords, buffer.size());
+            filter.setMemorySegment(buffer, 0);
+            this.numRecords = numRecords;
+        }
+
+        public boolean testHash(int hash) {
+            return filter.testHash(hash);
+        }
+
+        public void addHash(int hash) {
+            filter.addHash(hash);
+        }
+
+        public MemorySegment getBuffer() {
+            return buffer;
+        }
+
+        public long getNumRecords() {
+            return numRecords;
+        }
+
+        @VisibleForTesting
+        public BloomFilter getFilter() {
+            return filter;
+        }
     }
 }

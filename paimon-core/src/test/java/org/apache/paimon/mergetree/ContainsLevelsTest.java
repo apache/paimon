@@ -31,7 +31,6 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -43,6 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -189,7 +189,7 @@ public class ContainsLevelsTest {
                 new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
                 Duration.ofHours(1),
                 maxDiskSize,
-                rowCount -> BloomFilterBuilder.bfBuilder(rowCount, 0.01));
+                rowCount -> BloomFilter.builder(rowCount, 0.01));
     }
 
     private KeyValue kv(int key, int value) {

@@ -18,7 +18,7 @@
  *
  */
 
-package org.apache.paimon.lookup.bloom;
+package org.apache.paimon.utils;
 
 import org.apache.paimon.memory.MemorySegment;
 
@@ -27,7 +27,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.stream.IntStream;
 
-/** Test for {@link BitSet}. */
+/** Test for {@link org.apache.paimon.utils.BitSet}. */
 public class BitSetTest {
 
     @Test

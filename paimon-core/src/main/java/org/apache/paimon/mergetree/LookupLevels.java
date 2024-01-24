@@ -27,12 +27,12 @@ import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
-import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
@@ -67,7 +67,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
     private final Cache<String, LookupFile> lookupFiles;
-    private final Function<Long, BloomFilterBuilder> bfGenerator;
+    private final Function<Long, BloomFilter.Builder> bfGenerator;
 
     public LookupLevels(
             Levels levels,
@@ -79,7 +79,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             LookupStoreFactory lookupStoreFactory,
             Duration fileRetention,
             MemorySize maxDiskSize,
-            Function<Long, BloomFilterBuilder> bfGenerator) {
+            Function<Long, BloomFilter.Builder> bfGenerator) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -167,14 +167,13 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     }
 
     private LookupFile createLookupFile(DataFileMeta file) throws IOException {
-
         File localFile = localFileFactory.get();
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
         try (LookupStoreWriter kvWriter =
                         lookupStoreFactory.createWriter(
-                                localFile, () -> bfGenerator.apply(file.rowCount()));
+                                localFile, bfGenerator.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             DataOutputSerializer valueOut = new DataOutputSerializer(32);
             RecordReader.RecordIterator<KeyValue> batch;

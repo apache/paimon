@@ -33,8 +33,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Objects;
-import java.util.function.BiConsumer;
 
 /**
  * A {@link SeekableDataInputView} to read bytes from {@link RandomAccessFile}, the bytes can be
@@ -46,7 +44,7 @@ public class CachedRandomInputView extends AbstractPagedInputView
     private final RandomAccessFile file;
     private final long fileLength;
     private final CacheManager cacheManager;
-    private final Map<CacheKey, MemorySegment> segments;
+    private final Map<Integer, MemorySegment> segments;
     private final int segmentSize;
     private final int segmentSizeBits;
     private final int segmentSizeMask;
@@ -75,13 +73,12 @@ public class CachedRandomInputView extends AbstractPagedInputView
     }
 
     private MemorySegment getCurrentPage() {
-        long position = segmentIndexToPosition(currentSegmentIndex);
-        int length = (int) Math.min(segmentSize, fileLength - position);
-        CacheKey cacheKey = new CacheKey(position, length);
-        MemorySegment segment = segments.get(cacheKey);
+        MemorySegment segment = segments.get(currentSegmentIndex);
         if (segment == null) {
-            segment = cacheManager.getPage(file, position, length, this::invalidPage);
-            segments.put(cacheKey, segment);
+            long offset = segmentIndexToPosition(currentSegmentIndex);
+            int length = (int) Math.min(segmentSize, fileLength - offset);
+            segment = cacheManager.getPage(file, offset, length, this::invalidPage);
+            segments.put(currentSegmentIndex, segment);
         }
         return segment;
     }
@@ -102,46 +99,18 @@ public class CachedRandomInputView extends AbstractPagedInputView
     }
 
     private void invalidPage(long position, int length) {
-        segments.remove(new CacheKey(position, length));
-    }
-
-    /**
-     * Read a continuous segment of the specified length at a given position.
-     *
-     * @param position The start reading position.
-     * @param length The length to read.
-     * @return The wrapped segment. NOTE: this segment should not be cached outside this class.
-     */
-    public MemorySegment read(int position, int length, BiConsumer<Long, Integer> cleanCallback) {
-        final int offset = position & this.segmentSizeMask;
-        length = (int) Math.min(length, fileLength - offset);
-        CacheKey cacheKey = new CacheKey(position, length);
-        MemorySegment segment = segments.get(cacheKey);
-        if (segment == null) {
-            segment =
-                    cacheManager.getPage(
-                            file,
-                            position,
-                            length,
-                            new BiConsumer<Long, Integer>() {
-                                @Override
-                                public void accept(Long position, Integer length) {
-                                    invalidPage(position, length);
-                                    cleanCallback.accept(position, length);
-                                }
-                            });
-            segments.put(cacheKey, segment);
-        }
-        return segment;
+        segments.remove(positionToSegmentIndex(position));
     }
 
     @Override
     public void close() throws IOException {
         // copy out to avoid ConcurrentModificationException
-        List<CacheKey> pages = new ArrayList<>(segments.keySet());
+        List<Integer> pages = new ArrayList<>(segments.keySet());
         pages.forEach(
                 page -> {
-                    cacheManager.invalidPage(file, page.readOffset, page.readLength);
+                    long offset = segmentIndexToPosition(page);
+                    int length = (int) Math.min(segmentSize, fileLength - offset);
+                    cacheManager.invalidPage(file, offset, length);
                 });
 
         file.close();
@@ -155,30 +124,7 @@ public class CachedRandomInputView extends AbstractPagedInputView
         return (long) segmentIndex << segmentSizeBits;
     }
 
-    private static class CacheKey {
-        private final long readOffset;
-        private final int readLength;
-
-        public CacheKey(long readOffset, int readLength) {
-            this.readOffset = readOffset;
-            this.readLength = readLength;
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (!(o instanceof CacheKey)) {
-                return false;
-            }
-            CacheKey cacheKey = (CacheKey) o;
-            return readOffset == cacheKey.readOffset && readLength == cacheKey.readLength;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(readOffset, readLength);
-        }
+    public RandomAccessFile file() {
+        return file;
     }
 }

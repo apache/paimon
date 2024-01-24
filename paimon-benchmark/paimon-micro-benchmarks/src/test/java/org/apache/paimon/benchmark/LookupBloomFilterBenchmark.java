@@ -21,11 +21,11 @@
 package org.apache.paimon.benchmark;
 
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.lookup.bloom.BloomFilterBuilder;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.lookup.hash.HashLookupStoreReader;
 import org.apache.paimon.lookup.hash.HashLookupStoreWriter;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.utils.BloomFilter;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -105,8 +105,7 @@ public class LookupBloomFilterBenchmark {
                     });
 
             HashLookupStoreReader reader2 =
-                    writeData(
-                            BloomFilterBuilder.bfBuilder(inputs.length, 0.05), inputs, valueLength);
+                    writeData(BloomFilter.builder(inputs.length, 0.05), inputs, valueLength);
 
             benchmark.addCase(
                     String.format("bf-enabled-%dB-value", valueLength),
@@ -126,7 +125,7 @@ public class LookupBloomFilterBenchmark {
     }
 
     private HashLookupStoreReader writeData(
-            BloomFilterBuilder filter, byte[][] inputs, int valueLength) throws IOException {
+            BloomFilter.Builder filter, byte[][] inputs, int valueLength) throws IOException {
         byte[] value = new byte[valueLength];
         Arrays.fill(value, (byte) 1);
         HashLookupStoreFactory factory =
@@ -134,7 +133,7 @@ public class LookupBloomFilterBenchmark {
                         new CacheManager(MemorySize.ofMebiBytes(10)), 16 * 1024, 0.75);
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
-        HashLookupStoreWriter writer = factory.createWriter(file, () -> filter);
+        HashLookupStoreWriter writer = factory.createWriter(file, filter);
         for (byte[] input : inputs) {
             writer.put(input, value);
         }

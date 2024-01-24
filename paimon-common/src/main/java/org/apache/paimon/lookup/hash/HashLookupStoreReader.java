@@ -21,7 +21,7 @@ package org.apache.paimon.lookup.hash;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.CachedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
-import org.apache.paimon.lookup.bloom.BloomFilterTester;
+import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
@@ -64,7 +64,7 @@ public class HashLookupStoreReader
     private CachedRandomInputView inputView;
     // Buffers
     private final byte[] slotBuffer;
-    @Nullable private BloomFilterTester bloomFilter;
+    @Nullable private FileBasedBloomFilter bloomFilter;
 
     HashLookupStoreReader(CacheManager cacheManager, int cachePageSize, File file)
             throws IOException {
@@ -104,7 +104,9 @@ public class HashLookupStoreReader
                 int bfStartIndex = dataInputStream.readInt();
                 // Skip bloom filter buffers
                 dataInputStream.skipBytes(bfBytes);
-                bloomFilter = new BloomFilterTester(recordCount, bfStartIndex, bfBytes, inputView);
+                bloomFilter =
+                        new FileBasedBloomFilter(
+                                inputView.file(), cacheManager, recordCount, bfStartIndex, bfBytes);
             }
 
             // Read offset counts and keys
