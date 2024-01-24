@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -35,10 +36,9 @@ import java.util.List;
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final int maxLevel;
-
     public FullChangelogMergeTreeCompactRewriter(
             int maxLevel,
+            CoreOptions.MergeEngine mergeEngine,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
@@ -47,6 +47,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             RecordEqualiser valueComparator,
             boolean changelogRowDeduplicate) {
         super(
+                maxLevel,
+                mergeEngine,
                 readerFactory,
                 writerFactory,
                 keyComparator,
@@ -54,7 +56,6 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mergeSorter,
                 valueComparator,
                 changelogRowDeduplicate);
-        this.maxLevel = maxLevel;
     }
 
     @Override

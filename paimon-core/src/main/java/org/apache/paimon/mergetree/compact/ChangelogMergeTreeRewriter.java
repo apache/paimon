@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
@@ -35,14 +36,21 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.Collectors;
 
-/** A {@link MergeTreeCompactRewriter} which produces changelog files for the compaction. */
+/**
+ * A {@link MergeTreeCompactRewriter} which produces changelog files while performing compaction.
+ */
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
 
+    protected final int maxLevel;
+    protected final CoreOptions.MergeEngine mergeEngine;
     protected final RecordEqualiser valueEqualiser;
     protected final boolean changelogRowDeduplicate;
 
     public ChangelogMergeTreeRewriter(
+            int maxLevel,
+            CoreOptions.MergeEngine mergeEngine,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
@@ -51,6 +59,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+        this.maxLevel = maxLevel;
+        this.mergeEngine = mergeEngine;
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
@@ -83,14 +93,20 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         if (rewriteChangelog(outputLevel, dropDelete, sections)) {
-            return rewriteChangelogCompaction(outputLevel, sections);
+            return rewriteChangelogCompaction(outputLevel, sections, true);
         } else {
             return rewriteCompaction(outputLevel, dropDelete, sections);
         }
     }
 
+    /**
+     * Rewrite and produce changelog at the same time.
+     *
+     * @param rewriteCompactFile whether to rewrite compact file
+     */
     private CompactResult rewriteChangelogCompaction(
-            int outputLevel, List<List<SortedRun>> sections) throws Exception {
+            int outputLevel, List<List<SortedRun>> sections, boolean rewriteCompactFile)
+            throws Exception {
         List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             sectionReaders.add(
@@ -109,12 +125,14 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
         try {
             iterator = new RecordReaderIterator<>(ConcatRecordReader.create(sectionReaders));
-            compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+            if (rewriteCompactFile) {
+                compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
+            }
             changelogFileWriter = writerFactory.createRollingChangelogFileWriter(outputLevel);
 
             while (iterator.hasNext()) {
                 ChangelogResult result = iterator.next();
-                if (result.result() != null) {
+                if (rewriteCompactFile && result.result() != null) {
                     compactFileWriter.write(result.result());
                 }
                 for (KeyValue kv : result.changelogs()) {
@@ -133,10 +151,15 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             }
         }
 
-        return new CompactResult(
-                extractFilesFromSections(sections),
-                compactFileWriter.result(),
-                changelogFileWriter.result());
+        List<DataFileMeta> before = extractFilesFromSections(sections);
+        List<DataFileMeta> after =
+                rewriteCompactFile
+                        ? compactFileWriter.result()
+                        : before.stream()
+                                .map(x -> x.upgrade(outputLevel))
+                                .collect(Collectors.toList());
+
+        return new CompactResult(before, after, changelogFileWriter.result());
     }
 
     @Override
@@ -145,9 +168,22 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             return rewriteChangelogCompaction(
                     outputLevel,
                     Collections.singletonList(
-                            Collections.singletonList(SortedRun.fromSingle(file))));
+                            Collections.singletonList(SortedRun.fromSingle(file))),
+                    !rewriteCompactFileForUpgrade(outputLevel));
         } else {
             return super.upgrade(outputLevel, file);
         }
+    }
+
+    /**
+     * For upgrade, there are two scenarios can skip rewrite compact file.
+     *
+     * <ul>
+     *   <li>mergeEngine == DEDUPLICATE, no need to consider previous records
+     *   <li>outputLevel == maxLevel, no previous records
+     * </ul>
+     */
+    private boolean rewriteCompactFileForUpgrade(int outputLevel) {
+        return mergeEngine == CoreOptions.MergeEngine.DEDUPLICATE || outputLevel == maxLevel;
     }
 }

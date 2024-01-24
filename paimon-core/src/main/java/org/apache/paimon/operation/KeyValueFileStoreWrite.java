@@ -214,10 +214,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
+        int maxLevel = options.numLevels() - 1;
+        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
                 return new FullChangelogMergeTreeCompactRewriter(
-                        options.numLevels() - 1,
+                        maxLevel,
+                        mergeEngine,
                         readerFactory,
                         writerFactory,
                         keyComparator,
@@ -226,7 +229,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             case LOOKUP:
-                if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
                     KeyValueFileReaderFactory keyOnlyReader =
                             readerFactoryBuilder
                                     .copyWithoutProjection()
@@ -234,6 +237,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                     .build(partition, bucket);
                     ContainsLevels containsLevels = createContainsLevels(levels, keyOnlyReader);
                     return new FirstRowMergeTreeCompactRewriter(
+                            maxLevel,
+                            mergeEngine,
                             containsLevels,
                             readerFactory,
                             writerFactory,
@@ -245,6 +250,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 }
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
+                        maxLevel,
+                        mergeEngine,
                         lookupLevels,
                         readerFactory,
                         writerFactory,
