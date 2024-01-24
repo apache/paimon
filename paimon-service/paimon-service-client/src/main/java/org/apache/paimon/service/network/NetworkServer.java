@@ -54,6 +54,7 @@ import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
+import static org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption.SO_REUSEADDR;
 import static org.apache.paimon.service.network.NetworkUtils.getServerSocketChannelClass;
 
 /**
@@ -249,6 +250,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
                         .localAddress(bindAddress, port)
                         .group(group)
                         .channel(getServerSocketChannelClass())
+                        .option(SO_REUSEADDR,true)
                         .option(ChannelOption.ALLOCATOR, bufferPool)
                         .childOption(ChannelOption.ALLOCATOR, bufferPool)
                         .childHandler(new ServerChannelInitializer<>(handler));
