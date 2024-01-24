@@ -25,6 +25,8 @@ import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
 import org.apache.flink.api.java.tuple.Tuple3;
 
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -75,7 +77,18 @@ public abstract class SyncTableActionFactoryBase implements ActionFactory {
         }
 
         if (params.has(METADATA_COLUMN)) {
-            action.withMetadataColumns(new ArrayList<>(params.getMultiParameter(METADATA_COLUMN)));
+            action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
+        }
+
+        if (params.has(METADATA_COLUMN)) {
+            List<String> metadataColumns =
+                    new ArrayList<>(params.getMultiParameter(METADATA_COLUMN));
+            if (metadataColumns.size() == 1) {
+                action.withMetadataColumns(Arrays.asList(metadataColumns.get(0).split(",")));
+            } else {
+                action.withMetadataColumns(
+                        new ArrayList<>(params.getMultiParameter(METADATA_COLUMN)));
+            }
         }
 
         if (params.has(TYPE_MAPPING)) {
