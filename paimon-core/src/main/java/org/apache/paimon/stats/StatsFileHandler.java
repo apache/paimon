@@ -87,4 +87,8 @@ public class StatsFileHandler {
             statsFile.delete(snapshot.statistics());
         }
     }
+
+    public void deleteStats(String statistic) {
+        statsFile.delete(statistic);
+    }
 }
