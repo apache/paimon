@@ -36,9 +36,9 @@ import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
-import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeChangelog.CHANGELOG_NO_REWRITE;
-import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeChangelog.CHANGELOG_WITH_REWRITE;
-import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeChangelog.NO_CHANGELOG;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -80,7 +80,7 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
     }
 
     @Override
-    protected UpgradeChangelog upgradeChangelog(int outputLevel, DataFileMeta file) {
+    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
         if (file.level() != 0) {
             return NO_CHANGELOG;
         }

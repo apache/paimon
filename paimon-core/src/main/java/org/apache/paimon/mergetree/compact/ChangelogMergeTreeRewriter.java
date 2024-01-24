@@ -68,7 +68,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     protected abstract boolean rewriteChangelog(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections);
 
-    protected abstract UpgradeChangelog upgradeChangelog(int outputLevel, DataFileMeta file);
+    protected abstract UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file);
 
     protected abstract MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel);
 
@@ -164,7 +164,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
     @Override
     public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
-        UpgradeChangelog strategy = upgradeChangelog(outputLevel, file);
+        UpgradeStrategy strategy = upgradeChangelog(outputLevel, file);
         if (strategy.changelog) {
             return rewriteChangelogCompaction(
                     outputLevel,
@@ -177,7 +177,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     }
 
     /** Strategy for upgrade. */
-    protected enum UpgradeChangelog {
+    protected enum UpgradeStrategy {
         NO_CHANGELOG(false, false),
         CHANGELOG_NO_REWRITE(true, false),
         CHANGELOG_WITH_REWRITE(true, true);
@@ -185,7 +185,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
         private final boolean changelog;
         private final boolean rewrite;
 
-        UpgradeChangelog(boolean changelog, boolean rewrite) {
+        UpgradeStrategy(boolean changelog, boolean rewrite) {
             this.changelog = changelog;
             this.rewrite = rewrite;
         }
