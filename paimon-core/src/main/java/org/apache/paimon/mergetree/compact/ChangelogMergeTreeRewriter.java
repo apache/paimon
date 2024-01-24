@@ -18,7 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
@@ -44,13 +44,13 @@ import java.util.stream.Collectors;
 public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewriter {
 
     protected final int maxLevel;
-    protected final CoreOptions.MergeEngine mergeEngine;
+    protected final MergeEngine mergeEngine;
     protected final RecordEqualiser valueEqualiser;
     protected final boolean changelogRowDeduplicate;
 
     public ChangelogMergeTreeRewriter(
             int maxLevel,
-            CoreOptions.MergeEngine mergeEngine,
+            MergeEngine mergeEngine,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
@@ -68,7 +68,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     protected abstract boolean rewriteChangelog(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections);
 
-    protected abstract boolean upgradeChangelog(int outputLevel, DataFileMeta file);
+    protected abstract UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file);
 
     protected abstract MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel);
 
@@ -164,26 +164,30 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
     @Override
     public CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception {
-        if (upgradeChangelog(outputLevel, file)) {
+        UpgradeStrategy strategy = upgradeChangelog(outputLevel, file);
+        if (strategy.changelog) {
             return rewriteChangelogCompaction(
                     outputLevel,
                     Collections.singletonList(
                             Collections.singletonList(SortedRun.fromSingle(file))),
-                    !rewriteCompactFileForUpgrade(outputLevel));
+                    strategy.rewrite);
         } else {
             return super.upgrade(outputLevel, file);
         }
     }
 
-    /**
-     * For upgrade, there are two scenarios can skip rewrite compact file.
-     *
-     * <ul>
-     *   <li>mergeEngine == DEDUPLICATE, no need to consider previous records
-     *   <li>outputLevel == maxLevel, no previous records
-     * </ul>
-     */
-    private boolean rewriteCompactFileForUpgrade(int outputLevel) {
-        return mergeEngine == CoreOptions.MergeEngine.DEDUPLICATE || outputLevel == maxLevel;
+    /** Strategy for upgrade. */
+    protected enum UpgradeStrategy {
+        NO_CHANGELOG(false, false),
+        CHANGELOG_NO_REWRITE(true, false),
+        CHANGELOG_WITH_REWRITE(true, true);
+
+        private final boolean changelog;
+        private final boolean rewrite;
+
+        UpgradeStrategy(boolean changelog, boolean rewrite) {
+            this.changelog = changelog;
+            this.rewrite = rewrite;
+        }
     }
 }
