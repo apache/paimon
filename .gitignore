@@ -20,4 +20,4 @@ target
 dependency-reduced-pom.xml
 rui-test/*
 *.keytab
-/rui-test/
+/rui-test/*
