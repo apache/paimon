@@ -19,3 +19,4 @@ target
 *.iws
 dependency-reduced-pom.xml
 rui-test/*
+*.keytab
