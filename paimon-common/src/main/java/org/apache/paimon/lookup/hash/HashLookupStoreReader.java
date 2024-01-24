@@ -178,18 +178,19 @@ public class HashLookupStoreReader
             return null;
         }
 
-        if (bloomFilter != null && !bloomFilter.testHash(MurmurHashUtils.hashBytes(key))) {
+        int hashcode = MurmurHashUtils.hashBytes(key);
+        if (bloomFilter != null && !bloomFilter.testHash(hashcode)) {
             return null;
         }
 
-        long hash = MurmurHashUtils.hashBytesPositive(key);
+        long hashPositive = hashcode & 0x7fffffff;
         int numSlots = slots[keyLength];
         int slotSize = slotSizes[keyLength];
         int indexOffset = indexOffsets[keyLength];
         long dataOffset = dataOffsets[keyLength];
 
         for (int probe = 0; probe < numSlots; probe++) {
-            long slot = (hash + probe) % numSlots;
+            long slot = (hashPositive + probe) % numSlots;
             inputView.setReadPosition(indexOffset + slot * slotSize);
             inputView.readFully(slotBuffer, 0, slotSize);
 
