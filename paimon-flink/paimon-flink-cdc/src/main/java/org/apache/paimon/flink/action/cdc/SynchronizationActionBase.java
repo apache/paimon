@@ -52,7 +52,7 @@ import static org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractor
 /** Base {@link Action} for table/database synchronizing job. */
 public abstract class SynchronizationActionBase extends ActionBase {
 
-    private static final long DEFAULT_CHECKPOINT_INTERVAL = 3 * 60 * 1000;
+    private static final long DEFAULT_CHECKPOINT_INTERVAL = 10 * 1000;
 
     protected final String database;
     protected final Configuration cdcSourceConfig;

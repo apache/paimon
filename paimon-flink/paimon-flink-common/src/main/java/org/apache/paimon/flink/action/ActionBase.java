@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.flink.api.common.ExecutionConfig;
+import org.apache.flink.configuration.Configuration;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
@@ -60,7 +62,9 @@ public abstract class ActionBase implements Action {
         flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
 
         // use the default env if user doesn't pass one
-        initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment());
+        Configuration configuration = new Configuration();
+        configuration.setLong("heartbeat.timeout",10000000000L);
+        initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment(configuration));
     }
 
     public ActionBase withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
