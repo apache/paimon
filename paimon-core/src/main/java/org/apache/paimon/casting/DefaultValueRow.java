@@ -27,7 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.RowKind;
 
 /**
- * An implementation of {@link InternalRow} which provides a default volue for the underlying {@link
+ * An implementation of {@link InternalRow} which provides a default value for the underlying {@link
  * InternalRow}.
  */
 public class DefaultValueRow implements InternalRow {

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql;
+package org.apache.paimon.flink.action.cdc.postgres;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
@@ -26,12 +26,14 @@ import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.flink.action.cdc.schema.JdbcTableInfo;
 import org.apache.paimon.schema.Schema;
 
-import com.ververica.cdc.connectors.mysql.source.MySqlSource;
-import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import com.ververica.cdc.connectors.base.source.jdbc.JdbcIncrementalSource;
+import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -39,15 +41,15 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize one or multiple MySQL tables into one Paimon table.
+ * An {@link Action} which synchronize one or multiple PostgreSQL tables into one Paimon table.
  *
- * <p>You should specify MySQL source table in {@code mySqlConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/mysql-cdc.html#connector-options">document
+ * <p>You should specify PostgreSQL source table in {@code postgresConfig}. See <a
+ * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
  * <p>If the specified Paimon table does not exist, this action will automatically create the table.
- * Its schema will be derived from all specified MySQL tables. If the Paimon table already exists,
- * its schema will be compared against the schema of all specified MySQL tables.
+ * Its schema will be derived from all specified PostgreSQL tables. If the Paimon table already
+ * exists, its schema will be compared against the schema of all specified PostgreSQL tables.
  *
  * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
  * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
@@ -59,73 +61,77 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       <ul>
  *         <li>altering from a string type (char, varchar, text) to another string type with longer
  *             length,
- *         <li>altering from a binary type (binary, varbinary, blob) to another binary type with
- *             longer length,
- *         <li>altering from an integer type (tinyint, smallint, int, bigint) to another integer
- *             type with wider range,
+ *         <li>altering from a binary type (binary, varbinary) to another binary type with longer
+ *             length,
+ *         <li>altering from an integer type (smallint, int, bigint) to another integer type with
+ *             wider range,
  *         <li>altering from a floating-point type (float, double) to another floating-point type
  *             with wider range,
  *       </ul>
  *       are supported.
  * </ul>
  */
-public class MySqlSyncTableAction extends SyncTableActionBase {
+public class PostgresSyncTableAction extends SyncTableActionBase {
 
-    private JdbcSchemasInfo mySqlSchemasInfo;
+    private JdbcSchemasInfo postgresSchemasInfo;
 
-    public MySqlSyncTableAction(
+    public PostgresSyncTableAction(
             String warehouse,
             String database,
             String table,
             Map<String, String> catalogConfig,
-            Map<String, String> mySqlConfig) {
+            Map<String, String> postgresConfig) {
         super(
                 warehouse,
                 database,
                 table,
                 catalogConfig,
-                mySqlConfig,
-                SyncJobHandler.SourceType.MYSQL);
+                postgresConfig,
+                SyncJobHandler.SourceType.POSTGRES);
     }
 
     @Override
     protected Schema retrieveSchema() throws Exception {
-        this.mySqlSchemasInfo =
-                MySqlActionUtils.getMySqlTableInfos(
+        this.postgresSchemasInfo =
+                PostgresActionUtils.getPostgresTableInfos(
                         cdcSourceConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
-        validateMySqlTableInfos(mySqlSchemasInfo);
-        JdbcTableInfo tableInfo = mySqlSchemasInfo.mergeAll();
+        validatePostgresTableInfos(postgresSchemasInfo);
+        JdbcTableInfo tableInfo = postgresSchemasInfo.mergeAll();
         return tableInfo.schema();
     }
 
     @Override
-    protected MySqlSource<String> buildSource() {
-        String tableList =
-                mySqlSchemasInfo.pkTables().stream()
-                        .map(JdbcSchemasInfo.JdbcSchemaInfo::identifier)
-                        .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
-                        .collect(Collectors.joining("|"));
-        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
+    protected JdbcIncrementalSource<String> buildSource() {
+        List<JdbcSchemasInfo.JdbcSchemaInfo> pkTables = postgresSchemasInfo.pkTables();
+        Set<String> schemaList = new HashSet<>();
+        String[] tableList = new String[pkTables.size()];
+        for (int i = 0; i < pkTables.size(); i++) {
+            JdbcSchemasInfo.JdbcSchemaInfo pkTable = pkTables.get(i);
+            tableList[i] = pkTable.schemaName() + "." + pkTable.identifier().getObjectName();
+            schemaList.add(pkTable.schemaName());
+        }
+        return PostgresActionUtils.buildPostgresSource(
+                cdcSourceConfig, schemaList.toArray(new String[0]), tableList);
     }
 
-    private void validateMySqlTableInfos(JdbcSchemasInfo mySqlSchemasInfo) {
-        List<Identifier> nonPkTables = mySqlSchemasInfo.nonPkTables();
+    private void validatePostgresTableInfos(JdbcSchemasInfo jdbcSchemasInfo) {
+        List<Identifier> nonPkTables = jdbcSchemasInfo.nonPkTables();
         checkArgument(
                 nonPkTables.isEmpty(),
-                "Source tables of MySQL table synchronization job cannot contain table "
+                "Source tables of PostgreSQL table synchronization job cannot contain table "
                         + "which doesn't have primary keys.\n"
                         + "They are: %s",
                 nonPkTables.stream().map(Identifier::getFullName).collect(Collectors.joining(",")));
 
         checkArgument(
-                !mySqlSchemasInfo.pkTables().isEmpty(),
+                !jdbcSchemasInfo.pkTables().isEmpty(),
                 "No table satisfies the given database name and table name.");
     }
 
     private Predicate<String> monitorTablePredication() {
         return tableName -> {
             Pattern tableNamePattern =
-                    Pattern.compile(cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME));
+                    Pattern.compile(cdcSourceConfig.get(PostgresSourceOptions.TABLE_NAME));
             return tableNamePattern.matcher(tableName).matches();
         };
     }
