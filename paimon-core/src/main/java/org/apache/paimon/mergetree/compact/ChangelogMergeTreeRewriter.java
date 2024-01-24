@@ -169,7 +169,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                     outputLevel,
                     Collections.singletonList(
                             Collections.singletonList(SortedRun.fromSingle(file))),
-                    !canSkipRewriteCompactFile(outputLevel));
+                    !rewriteCompactFileForUpgrade(outputLevel));
         } else {
             return super.upgrade(outputLevel, file);
         }
@@ -183,7 +183,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
      *   <li>outputLevel == maxLevel, no previous records
      * </ul>
      */
-    private boolean canSkipRewriteCompactFile(int outputLevel) {
+    private boolean rewriteCompactFileForUpgrade(int outputLevel) {
         return mergeEngine == CoreOptions.MergeEngine.DEDUPLICATE || outputLevel == maxLevel;
     }
 }
