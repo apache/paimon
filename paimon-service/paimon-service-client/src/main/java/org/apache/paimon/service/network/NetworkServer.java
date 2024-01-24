@@ -250,7 +250,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
                         .localAddress(bindAddress, port)
                         .group(group)
                         .channel(getServerSocketChannelClass())
-                        .option(SO_REUSEADDR,true)
+                        .option(SO_REUSEADDR, true)
                         .option(ChannelOption.ALLOCATOR, bufferPool)
                         .childOption(ChannelOption.ALLOCATOR, bufferPool)
                         .childHandler(new ServerChannelInitializer<>(handler));
