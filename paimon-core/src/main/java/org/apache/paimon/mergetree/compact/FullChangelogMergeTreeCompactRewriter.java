@@ -36,8 +36,6 @@ import java.util.List;
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final int maxLevel;
-
     public FullChangelogMergeTreeCompactRewriter(
             int maxLevel,
             CoreOptions.MergeEngine mergeEngine,
@@ -58,7 +56,6 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mergeSorter,
                 valueComparator,
                 changelogRowDeduplicate);
-        this.maxLevel = maxLevel;
     }
 
     @Override

@@ -30,7 +30,7 @@ class LookupCompactionTest extends PaimonSparkTestBase {
     CoreOptions.MergeEngine.values().foreach {
       mergeEngine =>
         withTable("T") {
-          val extraOptions = if ("aggregation".equals(mergeEngine.toString)) {
+          val extraOptions = if (mergeEngine == CoreOptions.MergeEngine.AGGREGATE) {
             s", 'fields.count.aggregate-function' = 'sum'"
           } else {
             ""
