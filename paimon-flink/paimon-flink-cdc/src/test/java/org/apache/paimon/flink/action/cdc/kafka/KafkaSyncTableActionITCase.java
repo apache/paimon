@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -652,8 +651,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
         runActionWithDefaultEnv(action);
 
-        AbstractFileStoreTable table =
-                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(new Identifier(database, tableName));
         while (true) {
             if (table.snapshotManager().snapshotCount() > 0
                     && table.snapshotManager().latestSnapshot().watermark()

@@ -33,7 +33,7 @@ import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -104,14 +104,12 @@ public class FileMetaUtils {
         try {
             FieldStatsCollector.Factory[] factories =
                     StatsCollectorFactories.createStatsFactories(
-                            ((AbstractFileStoreTable) table).coreOptions(),
+                            ((FileStoreTable) table).coreOptions(),
                             table.rowType().getFieldNames());
 
             TableStatsExtractor tableStatsExtractor =
                     FileFormat.getFileFormat(
-                                    ((AbstractFileStoreTable) table)
-                                            .coreOptions()
-                                            .toConfiguration(),
+                                    ((FileStoreTable) table).coreOptions().toConfiguration(),
                                     format)
                             .createStatsExtractor(table.rowType(), factories)
                             .orElseThrow(
@@ -167,7 +165,7 @@ public class FileMetaUtils {
                 stats,
                 0,
                 0,
-                ((AbstractFileStoreTable) table).schema().id());
+                ((FileStoreTable) table).schema().id());
     }
 
     public static BinaryRow writePartitionValue(

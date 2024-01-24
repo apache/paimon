@@ -22,7 +22,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -42,7 +42,7 @@ public abstract class PrimaryKeyTableTestBase {
 
     @TempDir protected java.nio.file.Path tempPath;
 
-    protected AbstractFileStoreTable table;
+    protected FileStoreTable table;
     protected String commitUser;
 
     @BeforeEach
@@ -63,7 +63,7 @@ public abstract class PrimaryKeyTableTestBase {
                         .options(tableOptions().toMap())
                         .build();
         catalog.createTable(identifier, schema, true);
-        table = (AbstractFileStoreTable) catalog.getTable(identifier);
+        table = (FileStoreTable) catalog.getTable(identifier);
         commitUser = UUID.randomUUID().toString();
     }
 
