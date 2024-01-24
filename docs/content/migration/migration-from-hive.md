@@ -35,8 +35,7 @@ Now, we can use paimon hive catalog with Migrate Table Procedure and Migrate Fil
 * Migrate Table Procedure: Paimon table does not exist, use the procedure upgrade hive table to paimon table. Hive table will disappear after action done.
 * Migrate File Procedure:  Paimon table already exists, use the procedure to migrate files from hive table to paimon table. **Notice that, Hive table will also disappear after action done.**
 
-These two actions now only support file format of hive "orc" and "parquet", if your table file is formatted in other format like avro, these procedures will fail.
-But we will support avro format in the future. Please make sure your table file format is in "orc" and "parquet" now.
+These two actions now support file format of hive "orc" and "parquet" and "avro".
 
 <span style="color: red; "> **We highly recommend to back up hive table data before migrating, because migrating action is not atomic. If been interrupted while migrating, you may lose your data.** </span>
 

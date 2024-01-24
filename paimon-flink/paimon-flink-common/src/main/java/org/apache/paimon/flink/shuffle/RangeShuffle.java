@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.shuffle;
 
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SerializableSupplier;
 
 import org.apache.flink.annotation.Internal;
@@ -53,6 +54,7 @@ import org.apache.flink.util.XORShiftRandom;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.Comparator;
 import java.util.Iterator;
 import java.util.List;
@@ -256,9 +258,10 @@ public class RangeShuffle {
                     T record = sampledData.get((int) (i * avgRange));
                     boundaries[i - 1] = record;
                 }
+                collector.collect(Arrays.asList(boundaries));
+            } else {
+                collector.collect(Collections.emptyList());
             }
-
-            collector.collect(Arrays.asList(boundaries));
         }
     }
 
@@ -276,7 +279,7 @@ public class RangeShuffle {
 
         private final SerializableSupplier<Comparator<T>> keyComparatorSupplier;
 
-        private transient List<T> boundaries;
+        private transient List<Pair<T, RandomList>> keyIndex;
         private transient Collector<Tuple2<Integer, Tuple2<T, RowData>>> collector;
         private transient Comparator<T> keyComparator;
 
@@ -293,13 +296,28 @@ public class RangeShuffle {
 
         @Override
         public void processElement1(StreamRecord<List<T>> streamRecord) {
-            this.boundaries = streamRecord.getValue();
+            keyIndex = new ArrayList<>();
+
+            T last = null;
+            int index = 0;
+            for (T t : streamRecord.getValue()) {
+                if (last != null && keyComparator.compare(last, t) == 0) {
+                    keyIndex.get(keyIndex.size() - 1).getRight().add(index++);
+                } else {
+                    Pair<T, RandomList> pair = Pair.of(t, new RandomList());
+                    pair.getRight().add(index++);
+                    keyIndex.add(pair);
+
+                    last = t;
+                }
+            }
         }
 
         @Override
         public void processElement2(StreamRecord<Tuple2<T, RowData>> streamRecord) {
-            if (boundaries == null) {
-                throw new RuntimeException("There should be one data from the first input.");
+            if (keyIndex == null || keyIndex.isEmpty()) {
+                throw new RuntimeException(
+                        "There should be one data from the first input. And boundaries should not be empty.");
             }
             Tuple2<T, RowData> row = streamRecord.getValue();
             collector.collect(new Tuple2<>(binarySearch(row.f0), row));
@@ -307,28 +325,33 @@ public class RangeShuffle {
 
         @Override
         public InputSelection nextSelection() {
-            return boundaries == null ? InputSelection.FIRST : InputSelection.ALL;
+            return keyIndex == null ? InputSelection.FIRST : InputSelection.ALL;
         }
 
         private int binarySearch(T key) {
+            int lastIndex = this.keyIndex.size() - 1;
             int low = 0;
-            int high = this.boundaries.size() - 1;
+            int high = lastIndex;
 
             while (low <= high) {
                 final int mid = (low + high) >>> 1;
-                final int result = keyComparator.compare(key, this.boundaries.get(mid));
+                final Pair<T, RandomList> indexPair = keyIndex.get(mid);
+                final int result = keyComparator.compare(key, indexPair.getLeft());
 
                 if (result > 0) {
                     low = mid + 1;
                 } else if (result < 0) {
                     high = mid - 1;
                 } else {
-                    return mid;
+                    return indexPair.getRight().get();
                 }
             }
+
             // key not found, but the low index is the target
             // bucket, since the boundaries are the upper bound
-            return low;
+            return low > lastIndex
+                    ? keyIndex.get(lastIndex).getRight().get()
+                    : keyIndex.get(low).getRight().get();
         }
 
         /** A {@link KeySelector} to select by f0 of tuple2. */
@@ -447,6 +470,22 @@ public class RangeShuffle {
 
         Iterator<Tuple2<Double, T>> sample() {
             return queue.iterator();
+        }
+    }
+
+    /** Contains integers and randomly get one. */
+    private static class RandomList {
+
+        private static final Random RANDOM = new Random();
+
+        private final List<Integer> list = new ArrayList<>();
+
+        public void add(int i) {
+            list.add(i);
+        }
+
+        public int get() {
+            return list.get(RANDOM.nextInt(list.size()));
         }
     }
 }

@@ -18,13 +18,24 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
-import org.apache.paimon.flink.lookup.LookupTable.TableBulkLoader;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBStateFactory;
+import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.disk.IOManagerImpl;
+import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
@@ -36,6 +47,7 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.testcontainers.shaded.com.google.common.collect.ImmutableList;
 
 import java.io.IOException;
 import java.nio.file.Path;
@@ -49,43 +61,60 @@ import java.util.Random;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
-import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Test for {@link LookupTable}. */
-public class LookupTableTest {
+public class LookupTableTest extends TableTestBase {
 
     @TempDir Path tempDir;
 
-    private RocksDBStateFactory stateFactory;
-
     private RowType rowType;
+
+    private IOManager ioManager;
+
+    private FullCacheLookupTable table;
 
     @BeforeEach
     public void before() throws IOException {
-        this.stateFactory = new RocksDBStateFactory(tempDir.toString(), new Options(), null);
         this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
+        this.ioManager = new IOManagerImpl(tempDir.toString());
     }
 
     @AfterEach
     public void after() throws IOException {
-        if (stateFactory != null) {
-            stateFactory.close();
+        if (table != null) {
+            table.close();
         }
     }
 
+    private FileStoreTable createTable(List<String> primaryKeys, Options options) throws Exception {
+        Identifier identifier = new Identifier("default", "t");
+        Schema schema =
+                new Schema(
+                        rowType.getFields(),
+                        Collections.emptyList(),
+                        primaryKeys,
+                        options.toMap(),
+                        null);
+        catalog.createTable(identifier, schema, false);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
     @Test
-    public void testPkTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        singletonList("f0"),
-                        singletonList("f0"),
+    public void testPkTable() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f0"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load error
         {
@@ -132,14 +161,18 @@ public class LookupTableTest {
 
     @Test
     public void testPkTableWithSequenceField() throws Exception {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
-                        singletonList("f0"),
-                        singletonList("f0"),
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_FIELD, "f1");
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f0"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
@@ -157,31 +190,33 @@ public class LookupTableTest {
         table.refresh(singletonList(sequence(row(1, 22, 222), 1L)).iterator(), true);
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222, 1);
+        assertRow(result.get(0), 1, 22, 222);
 
         // refresh with old sequence
         table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator(), true);
         result = table.get(row(1));
         assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222, 1);
+        assertRow(result.get(0), 1, 22, 222);
 
         // test refresh delete data with old sequence
         table.refresh(
                 singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), true);
         assertThat(table.get(row(1))).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222, 1);
+        assertRow(result.get(0), 1, 22, 222);
     }
 
     @Test
-    public void testPkTablePkFilter() throws IOException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        singletonList("f0"),
-                        singletonList("f0"),
+    public void testPkTablePkFilter() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f0"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
@@ -202,15 +237,17 @@ public class LookupTableTest {
     }
 
     @Test
-    public void testPkTableNonPkFilter() throws IOException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        singletonList("f0"),
-                        singletonList("f0"),
+    public void testPkTableNonPkFilter() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> r.getInt(1) < 22,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f0"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(1));
@@ -223,15 +260,17 @@ public class LookupTableTest {
     }
 
     @Test
-    public void testSecKeyTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        singletonList("f0"),
-                        singletonList("f1"),
+    public void testSecKeyTable() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f1"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -264,14 +303,18 @@ public class LookupTableTest {
 
     @Test
     public void testSecKeyTableWithSequenceField() throws Exception {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT()),
-                        singletonList("f0"),
-                        singletonList("f1"),
+        Options options = new Options();
+        options.set(CoreOptions.SEQUENCE_FIELD, "f1");
+        FileStoreTable storeTable = createTable(singletonList("f0"), options);
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f1"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         Random rnd = new Random();
@@ -303,7 +346,7 @@ public class LookupTableTest {
                 true);
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
-        assertThat(result.stream().map(InternalRow::getFieldCount)).allMatch(n -> n == 4);
+        assertThat(result.stream().map(InternalRow::getFieldCount)).allMatch(n -> n == 3);
 
         // refresh with old value
         table.refresh(
@@ -315,15 +358,17 @@ public class LookupTableTest {
     }
 
     @Test
-    public void testSecKeyTablePkFilter() throws IOException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        singletonList("f0"),
-                        singletonList("f1"),
+    public void testSecKeyTablePkFilter() throws Exception {
+        FileStoreTable storeTable = createTable(singletonList("f0"), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> r.getInt(0) < 3,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f1"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
@@ -353,15 +398,17 @@ public class LookupTableTest {
     }
 
     @Test
-    public void testNoPrimaryKeyTable() throws IOException, BulkLoader.WriteException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        Collections.emptyList(),
-                        singletonList("f1"),
+    public void testNoPrimaryKeyTable() throws Exception {
+        FileStoreTable storeTable = createTable(emptyList(), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> true,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f1"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -393,15 +440,17 @@ public class LookupTableTest {
     }
 
     @Test
-    public void testNoPrimaryKeyTableFilter() throws IOException {
-        LookupTable table =
-                LookupTable.create(
-                        stateFactory,
-                        rowType,
-                        Collections.emptyList(),
-                        singletonList("f1"),
+    public void testNoPrimaryKeyTableFilter() throws Exception {
+        FileStoreTable storeTable = createTable(emptyList(), new Options());
+        FullCacheLookupTable.Context context =
+                new FullCacheLookupTable.Context(
+                        storeTable,
+                        new int[] {0, 1, 2},
+                        null,
+                        tempDir.toFile(),
                         r -> r.getInt(2) < 222,
-                        ThreadLocalRandom.current().nextInt(2) * 10);
+                        singletonList("f1"));
+        table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
         table.refresh(singletonList(row(1, 11, 333)).iterator(), false);
         List<InternalRow> result = table.get(row(11));
@@ -417,6 +466,105 @@ public class LookupTableTest {
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 11, 111);
         assertRow(result.get(1), 1, 11, 111);
+    }
+
+    @Test
+    public void testPartialLookupTable() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {0, 1, 2},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"));
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 1, -1, 11);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, -2, 22);
+
+        write(dimTable, ioManager, GenericRow.ofKind(RowKind.DELETE, 1, -1, 11));
+        table.refresh();
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+    }
+
+    @Test
+    public void testPartialLookupTableWithProjection() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {2, 1},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk1", "pk2"));
+        List<InternalRow> result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        result = table.get(row(1, -1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 11, -1);
+        result = table.get(row(2, -2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 22, -2);
+    }
+
+    @Test
+    public void testPartialLookupTableJoinKeyOrder() throws Exception {
+        FileStoreTable dimTable = createDimTable();
+        PrimaryKeyPartialLookupTable table =
+                PrimaryKeyPartialLookupTable.createLocalTable(
+                        dimTable,
+                        new int[] {2, 1},
+                        tempDir.toFile(),
+                        ImmutableList.of("pk2", "pk1"));
+        List<InternalRow> result = table.get(row(-1, 1));
+        assertThat(result).hasSize(0);
+
+        write(dimTable, ioManager, GenericRow.of(1, -1, 11), GenericRow.of(2, -2, 22));
+        result = table.get(row(-1, 1));
+        assertThat(result).hasSize(0);
+
+        table.refresh();
+        result = table.get(row(-1, 1));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 11, -1);
+        result = table.get(row(-2, 2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 22, -2);
+    }
+
+    private FileStoreTable createDimTable() throws Exception {
+        FileIO fileIO = LocalFileIO.create();
+        org.apache.paimon.fs.Path tablePath =
+                new org.apache.paimon.fs.Path(
+                        String.format("%s/%s.db/%s", warehouse, database, "T"));
+        Schema schema =
+                Schema.newBuilder()
+                        .column("pk1", DataTypes.INT())
+                        .column("pk2", DataTypes.INT())
+                        .column("col2", DataTypes.INT())
+                        .primaryKey("pk1", "pk2")
+                        .option(CoreOptions.BUCKET.key(), "2")
+                        .option(CoreOptions.BUCKET_KEY.key(), "pk2")
+                        .build();
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
+        return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 
     private static InternalRow row(Object... values) {

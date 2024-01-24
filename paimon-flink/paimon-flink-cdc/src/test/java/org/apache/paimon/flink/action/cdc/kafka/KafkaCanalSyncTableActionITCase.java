@@ -55,7 +55,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
-public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
+public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase {
+
+    private static final String CANAL = "canal";
 
     @Test
     @Timeout(60)
@@ -1240,5 +1242,11 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
                 getFileStoreTable(tableName),
                 rowType,
                 Collections.singletonList("_id"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testWaterMarkSyncTable() throws Exception {
+        testWaterMarkSyncTable(CANAL);
     }
 }

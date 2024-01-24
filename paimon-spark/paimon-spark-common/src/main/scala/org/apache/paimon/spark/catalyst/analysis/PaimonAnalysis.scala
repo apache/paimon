@@ -18,15 +18,15 @@
 package org.apache.paimon.spark.catalyst.analysis
 
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.spark.catalyst.plans.logical.{PaimonTableValuedFunctions, PaimonTableValueFunction}
-import org.apache.paimon.spark.commands.{PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
+import org.apache.paimon.spark.catalyst.analysis.PaimonRelation.isPaimonTable
+import org.apache.paimon.spark.commands.{PaimonAnalyzeTableColumnCommand, PaimonDynamicPartitionOverwriteCommand, PaimonTruncateTableCommand}
 import org.apache.paimon.table.FileStoreTable
 
-import PaimonRelation.isPaimonTable
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.analysis.ResolvedPartitionSpec
-import org.apache.spark.sql.catalyst.plans.logical.{LogicalPlan, MergeIntoTable, OverwritePartitionsDynamic, TruncatePartition, TruncateTable}
+import org.apache.spark.sql.catalyst.analysis.ResolvedTable
+import org.apache.spark.sql.catalyst.plans.logical._
 import org.apache.spark.sql.catalyst.rules.Rule
+import org.apache.spark.sql.connector.catalog.{Identifier, TableCatalog}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
 class PaimonAnalysis(session: SparkSession) extends Rule[LogicalPlan] {
@@ -48,6 +48,29 @@ case class PaimonPostHocResolutionRules(session: SparkSession) extends Rule[Logi
     plan match {
       case t @ TruncateTable(PaimonRelation(table)) if t.resolved =>
         PaimonTruncateTableCommand(table, Map.empty)
+
+      case a @ AnalyzeTable(
+            ResolvedTable(catalog, identifier, table: SparkTable, _),
+            partitionSpec,
+            noScan) if a.resolved =>
+        if (partitionSpec.nonEmpty) {
+          throw new UnsupportedOperationException("Analyze table partition is not supported")
+        } else if (noScan) {
+          throw new IllegalArgumentException("NOSCAN is ineffective with paimon")
+        } else {
+          PaimonAnalyzeTableColumnCommand(
+            catalog,
+            identifier,
+            table,
+            Option.apply(Seq()),
+            allColumns = false)
+        }
+
+      case a @ AnalyzeColumn(
+            ResolvedTable(catalog, identifier, table: SparkTable, _),
+            columnNames,
+            allColumns) if a.resolved =>
+        PaimonAnalyzeTableColumnCommand(catalog, identifier, table, columnNames, allColumns)
 
       case _ => plan
     }

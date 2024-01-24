@@ -19,58 +19,17 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.lookup.BulkLoader;
-import org.apache.paimon.lookup.RocksDBStateFactory;
-import org.apache.paimon.types.RowType;
 
+import java.io.Closeable;
 import java.io.IOException;
-import java.util.HashSet;
-import java.util.Iterator;
 import java.util.List;
-import java.util.function.Predicate;
 
 /** A lookup table which provides get and refresh. */
-public interface LookupTable {
+public interface LookupTable extends Closeable {
+
+    void open() throws Exception;
 
     List<InternalRow> get(InternalRow key) throws IOException;
 
-    void refresh(Iterator<InternalRow> input, boolean orderByLastField) throws IOException;
-
-    Predicate<InternalRow> recordFilter();
-
-    byte[] toKeyBytes(InternalRow row) throws IOException;
-
-    byte[] toValueBytes(InternalRow row) throws IOException;
-
-    TableBulkLoader createBulkLoader();
-
-    static LookupTable create(
-            RocksDBStateFactory stateFactory,
-            RowType rowType,
-            List<String> primaryKey,
-            List<String> joinKey,
-            Predicate<InternalRow> recordFilter,
-            long lruCacheSize)
-            throws IOException {
-        if (primaryKey.isEmpty()) {
-            return new NoPrimaryKeyLookupTable(
-                    stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
-        } else {
-            if (new HashSet<>(primaryKey).equals(new HashSet<>(joinKey))) {
-                return new PrimaryKeyLookupTable(
-                        stateFactory, rowType, joinKey, recordFilter, lruCacheSize);
-            } else {
-                return new SecondaryIndexLookupTable(
-                        stateFactory, rowType, primaryKey, joinKey, recordFilter, lruCacheSize);
-            }
-        }
-    }
-
-    /** Bulk loader for the table. */
-    interface TableBulkLoader {
-
-        void write(byte[] key, byte[] value) throws BulkLoader.WriteException, IOException;
-
-        void finish() throws IOException;
-    }
+    void refresh() throws Exception;
 }

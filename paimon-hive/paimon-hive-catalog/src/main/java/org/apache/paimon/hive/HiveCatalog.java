@@ -85,6 +85,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
+import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
@@ -93,11 +94,13 @@ import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
-    // we don't include paimon-hive-connector as dependencies because it depends on
-    // hive-exec
+    // Reserved properties
+    public static final String COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
+    // we don't include paimon-hive-connector as dependencies because it depends on
+    // hive-exec
     private static final String INPUT_FORMAT_CLASS_NAME =
             "org.apache.paimon.hive.mapred.PaimonInputFormat";
     private static final String OUTPUT_FORMAT_CLASS_NAME =
@@ -106,7 +109,6 @@ public class HiveCatalog extends AbstractCatalog {
     private static final String STORAGE_HANDLER_CLASS_NAME =
             "org.apache.paimon.hive.PaimonStorageHandler";
     private static final String HIVE_PREFIX = "hive.";
-    private static final int HIVE_PREFIX_LENGTH = HIVE_PREFIX.length();
     public static final String HIVE_SITE_FILE = "hive-site.xml";
 
     private final HiveConf hiveConf;
@@ -208,7 +210,10 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
         try {
-            return getDatabase(databaseName) != null;
+            client.getDatabase(databaseName);
+            return true;
+        } catch (NoSuchObjectException e) {
+            return false;
         } catch (TException e) {
             throw new RuntimeException(
                     "Failed to determine if database " + databaseName + " exists", e);
@@ -216,49 +221,69 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void createDatabaseImpl(String name) throws DatabaseAlreadyExistException {
+    protected void createDatabaseImpl(String name, Map<String, String> properties) {
         try {
-            Database database = getDatabase(name);
-            if (database == null) {
-                Path databasePath = newDatabasePath(name);
-                locationHelper.createPathIfRequired(databasePath, fileIO);
-
-                database = new Database();
-                database.setName(name);
-                locationHelper.specifyDatabaseLocation(databasePath, database);
-                client.createDatabase(database);
-            } else {
-                throw new DatabaseAlreadyExistException(name);
-            }
+            Database database = convertToHiveDatabase(name, properties);
+            Path databasePath =
+                    database.getLocationUri() == null
+                            ? newDatabasePath(name)
+                            : new Path(database.getLocationUri());
+            locationHelper.createPathIfRequired(databasePath, fileIO);
+            locationHelper.specifyDatabaseLocation(databasePath, database);
+            client.createDatabase(database);
         } catch (TException | IOException e) {
             throw new RuntimeException("Failed to create database " + name, e);
         }
     }
 
+    private Database convertToHiveDatabase(String name, Map<String, String> properties) {
+        Database database = new Database();
+        database.setName(name);
+        Map<String, String> parameter = new HashMap<>();
+        properties.forEach(
+                (key, value) -> {
+                    if (key.equals(COMMENT_PROP)) {
+                        database.setDescription(value);
+                    } else if (key.equals(DB_LOCATION_PROP)) {
+                        database.setLocationUri(value);
+                    } else if (value != null) {
+                        parameter.put(key, value);
+                    }
+                });
+        database.setParameters(parameter);
+        return database;
+    }
+
     @Override
-    protected void dropDatabaseImpl(String name) throws DatabaseNotExistException {
+    public Map<String, String> loadDatabasePropertiesImpl(String name) {
         try {
-            Database database = getDatabase(name);
-            if (database != null) {
-                String location = locationHelper.getDatabaseLocation(database);
-                locationHelper.dropPathIfRequired(new Path(location), fileIO);
-                client.dropDatabase(name, true, false, true);
-            } else {
-                throw new DatabaseNotExistException(name);
-            }
-        } catch (TException | IOException e) {
-            throw new RuntimeException("Failed to drop database " + name, e);
+            return convertToProperties(client.getDatabase(name));
+        } catch (TException e) {
+            throw new RuntimeException(
+                    String.format("Failed to get database %s properties", name), e);
         }
     }
 
-    private Database getDatabase(String databaseName) throws TException {
+    private Map<String, String> convertToProperties(Database database) {
+        Map<String, String> properties = new HashMap<>(database.getParameters());
+        if (database.getLocationUri() != null) {
+            properties.put(DB_LOCATION_PROP, database.getLocationUri());
+        }
+        if (database.getDescription() != null) {
+            properties.put(COMMENT_PROP, database.getDescription());
+        }
+        return properties;
+    }
+
+    @Override
+    protected void dropDatabaseImpl(String name) {
         try {
-            return client.getDatabase(databaseName);
-        } catch (NoSuchObjectException e) {
-            return null;
-        } catch (TException e) {
-            throw new RuntimeException(
-                    "Failed to determine if database " + databaseName + " exists", e);
+            Database database = client.getDatabase(name);
+            String location = locationHelper.getDatabaseLocation(database);
+            locationHelper.dropPathIfRequired(new Path(location), fileIO);
+            client.dropDatabase(name, true, false, true);
+        } catch (TException | IOException e) {
+            throw new RuntimeException("Failed to drop database " + name, e);
         }
     }
 
@@ -353,14 +378,7 @@ public class HiveCatalog extends AbstractCatalog {
         Table table =
                 newHmsTable(
                         identifier,
-                        tableSchema.options().entrySet().stream()
-                                .filter(entry -> entry.getKey().startsWith(HIVE_PREFIX))
-                                .collect(
-                                        Collectors.toMap(
-                                                entry ->
-                                                        entry.getKey()
-                                                                .substring(HIVE_PREFIX_LENGTH),
-                                                Map.Entry::getValue)));
+                        convertToPropertiesPrefixKey(tableSchema.options(), HIVE_PREFIX));
         try {
             updateHmsTable(table, identifier, tableSchema);
             client.createTable(table);
@@ -538,6 +556,9 @@ public class HiveCatalog extends AbstractCatalog {
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
+        if (schema.comment() != null) {
+            table.getParameters().put(COMMENT_PROP, schema.comment());
+        }
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());

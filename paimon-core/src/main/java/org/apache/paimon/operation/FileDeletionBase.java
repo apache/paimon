@@ -29,6 +29,7 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FileUtils;
 
@@ -64,6 +65,8 @@ public abstract class FileDeletionBase {
     protected final ManifestFile manifestFile;
     protected final ManifestList manifestList;
     protected final IndexFileHandler indexFileHandler;
+    protected final StatsFileHandler statsFileHandler;
+
     protected final Map<BinaryRow, Set<Integer>> deletionBuckets;
     protected final Executor ioExecutor;
 
@@ -72,13 +75,14 @@ public abstract class FileDeletionBase {
             FileStorePathFactory pathFactory,
             ManifestFile manifestFile,
             ManifestList manifestList,
-            IndexFileHandler indexFileHandler) {
+            IndexFileHandler indexFileHandler,
+            StatsFileHandler statsFileHandler) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
         this.manifestFile = manifestFile;
         this.manifestList = manifestList;
         this.indexFileHandler = indexFileHandler;
-
+        this.statsFileHandler = statsFileHandler;
         this.deletionBuckets = new HashMap<>();
         this.ioExecutor = FileUtils.COMMON_IO_FORK_JOIN_POOL;
     }
@@ -194,6 +198,11 @@ public abstract class FileDeletionBase {
                 indexFileHandler.deleteManifest(indexManifest);
             }
         }
+
+        // clean statistics
+        if (snapshot.statistics() != null && !skippingSet.contains(snapshot.statistics())) {
+            statsFileHandler.deleteStats(snapshot.statistics());
+        }
     }
 
     /**
@@ -289,6 +298,11 @@ public abstract class FileDeletionBase {
                         .map(IndexManifestEntry::indexFile)
                         .map(IndexFileMeta::fileName)
                         .forEach(skippingSet::add);
+            }
+
+            // statistics
+            if (skippingSnapshot.statistics() != null) {
+                skippingSet.add(skippingSnapshot.statistics());
             }
         }
 

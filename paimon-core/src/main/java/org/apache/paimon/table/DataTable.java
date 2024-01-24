@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -35,6 +36,8 @@ public interface DataTable extends InnerTable {
     SnapshotManager snapshotManager();
 
     TagManager tagManager();
+
+    BranchManager branchManager();
 
     Path location();
 

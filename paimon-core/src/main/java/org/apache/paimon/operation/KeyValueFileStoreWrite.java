@@ -43,8 +43,8 @@ import org.apache.paimon.mergetree.MergeTreeWriter;
 import org.apache.paimon.mergetree.compact.CompactRewriter;
 import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.FirstRowMergeTreeCompactRewriter;
+import org.apache.paimon.mergetree.compact.ForceUpLevel0Compaction;
 import org.apache.paimon.mergetree.compact.FullChangelogMergeTreeCompactRewriter;
-import org.apache.paimon.mergetree.compact.LookupCompaction;
 import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
@@ -156,10 +156,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 new UniversalCompaction(
                         options.maxSizeAmplificationPercent(),
                         options.sortedRunSizeRatio(),
-                        options.numSortedRunCompactionTrigger());
+                        options.numSortedRunCompactionTrigger(),
+                        options.optimizedCompactionInterval());
         CompactStrategy compactStrategy =
                 options.changelogProducer() == ChangelogProducer.LOOKUP
-                        ? new LookupCompaction(universalCompaction)
+                        ? new ForceUpLevel0Compaction(universalCompaction)
                         : universalCompaction;
         CompactManager compactManager =
                 createCompactManager(partition, bucket, compactStrategy, compactExecutor, levels);
@@ -275,6 +276,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
@@ -296,6 +298,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
                 options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));

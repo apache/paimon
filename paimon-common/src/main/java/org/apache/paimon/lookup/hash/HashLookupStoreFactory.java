@@ -28,10 +28,12 @@ import java.io.IOException;
 public class HashLookupStoreFactory implements LookupStoreFactory {
 
     private final CacheManager cacheManager;
+    private final int cachePageSize;
     private final double loadFactor;
 
-    public HashLookupStoreFactory(CacheManager cacheManager, double loadFactor) {
+    public HashLookupStoreFactory(CacheManager cacheManager, int cachePageSize, double loadFactor) {
         this.cacheManager = cacheManager;
+        this.cachePageSize = cachePageSize;
         this.loadFactor = loadFactor;
     }
 
@@ -42,6 +44,6 @@ public class HashLookupStoreFactory implements LookupStoreFactory {
 
     @Override
     public HashLookupStoreReader createReader(File file) throws IOException {
-        return new HashLookupStoreReader(cacheManager, file);
+        return new HashLookupStoreReader(cacheManager, cachePageSize, file);
     }
 }

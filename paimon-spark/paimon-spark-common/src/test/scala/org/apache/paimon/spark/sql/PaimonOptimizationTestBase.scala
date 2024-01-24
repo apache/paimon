@@ -1,0 +1,99 @@
+/*
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+package org.apache.paimon.spark.sql
+
+import org.apache.paimon.spark.PaimonSparkTestBase
+import org.apache.paimon.spark.catalyst.optimizer.MergePaimonScalarSubqueriers
+
+import org.apache.spark.sql.catalyst.expressions.{Attribute, CreateNamedStruct, Literal, NamedExpression}
+import org.apache.spark.sql.catalyst.plans.logical.{CTERelationDef, LogicalPlan, OneRowRelation, WithCTE}
+import org.apache.spark.sql.catalyst.rules.RuleExecutor
+import org.apache.spark.sql.functions._
+
+import scala.collection.immutable
+
+abstract class PaimonOptimizationTestBase extends PaimonSparkTestBase {
+
+  import org.apache.spark.sql.catalyst.dsl.expressions._
+  import org.apache.spark.sql.catalyst.dsl.plans._
+  import testImplicits._
+
+  private object Optimize extends RuleExecutor[LogicalPlan] {
+    val batches: immutable.Seq[Batch] =
+      Batch("MergePaimonScalarSubqueries", Once, MergePaimonScalarSubqueriers) :: Nil
+  }
+
+  test("Paimon Optimization: merge scalar subqueries") {
+    withTable("T") {
+
+      spark.sql(s"""
+                   |CREATE TABLE T (a INT, b DOUBLE, c STRING)
+                   |""".stripMargin)
+
+      spark.sql("INSERT INTO T values (1, 11.1, 'x1'), (2, 22.2, 'x2'), (3, 33.3, 'x3')")
+
+      val query = spark.sql(s"""
+                               |SELECT
+                               |  (SELECT COUNT(1) AS cnt FROM T),
+                               |  (SELECT SUM(a) AS sum_a FROM T),
+                               |  (SELECT AVG(b) AS avg_b FROM T)
+                               |""".stripMargin)
+      val optimizedPlan = Optimize.execute(query.queryExecution.analyzed)
+
+      val relation = createRelationV2("T")
+      val mergedSubquery = relation
+        .select(
+          count(Literal(1)).as("cnt"),
+          sum(col("a").expr).as("sum_a"),
+          avg(col("b").expr).as("avg_b")
+        )
+        .select(
+          CreateNamedStruct(
+            Seq(
+              Literal("cnt"),
+              'cnt,
+              Literal("sum_a"),
+              'sum_a,
+              Literal("avg_b"),
+              'avg_b
+            )).as("mergedValue"))
+      val analyzedMergedSubquery = mergedSubquery.analyze
+      val correctAnswer = WithCTE(
+        OneRowRelation()
+          .select(
+            extractorExpression(0, analyzedMergedSubquery.output, 0),
+            extractorExpression(0, analyzedMergedSubquery.output, 1),
+            extractorExpression(0, analyzedMergedSubquery.output, 2)
+          ),
+        Seq(definitionNode(analyzedMergedSubquery, 0))
+      )
+      // Check the plan applied MergePaimonScalarSubqueries.
+      comparePlans(optimizedPlan.analyze, correctAnswer.analyze)
+
+      // Check the query's result.
+      checkDataset(query.as[(Long, Long, Double)], (3L, 6L, 22.2))
+    }
+  }
+
+  private def definitionNode(plan: LogicalPlan, cteIndex: Int) = {
+    CTERelationDef(plan, cteIndex, underSubquery = true)
+  }
+
+  def extractorExpression(cteIndex: Int, output: Seq[Attribute], fieldIndex: Int): NamedExpression
+
+}

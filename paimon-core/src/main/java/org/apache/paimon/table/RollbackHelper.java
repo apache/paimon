@@ -122,7 +122,7 @@ public class RollbackHelper {
     }
 
     private List<Snapshot> cleanTagsDataFiles(Snapshot retainedSnapshot) {
-        SortedMap<Snapshot, String> tags = tagManager.tags();
+        SortedMap<Snapshot, List<String>> tags = tagManager.tags();
         if (tags.isEmpty()) {
             return Collections.emptyList();
         }
@@ -137,7 +137,7 @@ public class RollbackHelper {
                 break;
             }
             toBeCleaned.add(tag);
-            fileIO.deleteQuietly(tagManager.tagPath(tags.get(tag)));
+            tags.get(tag).forEach(tagName -> fileIO.deleteQuietly(tagManager.tagPath(tagName)));
         }
 
         // delete data files

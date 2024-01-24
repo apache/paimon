@@ -61,7 +61,8 @@ public class SortOperatorTest {
                         rowType,
                         MemorySize.parse("10 mb").getBytes(),
                         (int) MemorySize.parse("16 kb").getBytes(),
-                        128) {};
+                        128,
+                        1) {};
 
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
         harness.open();
@@ -88,7 +89,7 @@ public class SortOperatorTest {
     }
 
     @Test
-    public void testCloseSortOprator() throws Exception {
+    public void testCloseSortOperator() throws Exception {
         RowType keyRowType =
                 new RowType(
                         Collections.singletonList(
@@ -107,7 +108,8 @@ public class SortOperatorTest {
                         rowType,
                         MemorySize.parse("10 mb").getBytes(),
                         (int) MemorySize.parse("16 kb").getBytes(),
-                        128) {};
+                        128,
+                        1) {};
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
         harness.open();
         File[] files = harness.getEnvironment().getIOManager().getSpillingDirectories();

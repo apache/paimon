@@ -53,6 +53,18 @@ under the License.
 
         <dependency>
             <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-service-client</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-service-runtime</artifactId>
+            <version>${project.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-core</artifactId>
             <version>${project.version}</version>
             <scope>test</scope>

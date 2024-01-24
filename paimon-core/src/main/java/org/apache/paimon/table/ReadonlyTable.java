@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
@@ -44,6 +45,11 @@ public interface ReadonlyTable extends InnerTable {
 
     @Override
     default Optional<String> comment() {
+        return Optional.empty();
+    }
+
+    @Override
+    default Optional<Statistics> statistics() {
         return Optional.empty();
     }
 
@@ -124,6 +130,30 @@ public interface ReadonlyTable extends InnerTable {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support rollbackTo tag.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default void createBranch(String branchName, String tagName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support createBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default void deleteBranch(String branchName) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support deleteBranch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default ExpireSnapshots newExpireSnapshots() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support expireSnapshots.",
                         this.getClass().getSimpleName()));
     }
 }

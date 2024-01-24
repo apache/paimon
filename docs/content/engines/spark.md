@@ -459,13 +459,24 @@ val query = spark.readStream
 ```
 
 Paimon Structured Streaming supports read row in the form of changelog (add rowkind column in row to represent its 
-change type) by setting `read.changelog` to true (default is false).
+change type) in two ways:
+
+- Direct streaming read with the system audit_log table
+- Set `read.changelog` to true (default is false), then streaming read with table location
 
 **Example:**
 
 ```scala
-// no any scan-related configs are provided, that will use latest-full scan mode.
-val query = spark.readStream
+// Option 1
+val query1 = spark.readStream
+  .format("paimon")
+  .table("`table_name$audit_log`")
+  .writeStream
+  .format("console")
+  .start()
+
+// Option 2
+val query2 = spark.readStream
   .format("paimon")
   .option("read.changelog", "true")
   .load("/path/to/paimon/source/table")
@@ -538,12 +549,11 @@ Here list the configurations.
 ## Spark Procedure
 
 This section introduce all available spark procedures about paimon.
-
+s
 <table class="table table-bordered">
     <thead>
     <tr>
       <th class="text-left" style="width: 4%">Procedure Name</th>
-      <th class="text-left" style="width: 4%">Usage</th>
       <th class="text-left" style="width: 20%">Explaination</th>
       <th class="text-left" style="width: 4%">Example</th>
     </tr>
@@ -551,9 +561,20 @@ This section introduce all available spark procedures about paimon.
     <tbody style="font-size: 12px; ">
     <tr>
       <td>compact</td>
-      <td><nobr>CALL [paimon.]sys.compact(table => '&ltidentifier&gt' [,partitions => '&ltpartitions&gt'] </nobr><br>[, order_strategy =>'&ltsort_type&gt'] [,order_by => '&ltcolumns&gt'])</td>
       <td>identifier: the target table identifier. Cannot be empty.<br><br><nobr>partitions: partition filter. Left empty for all partitions.<br> "," means "AND"<br>";" means "OR"</nobr><br><br>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'. <br><br><nobr>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'. </nobr><br><br>If you want sort compact two partitions date=01 and date=02, you need to write 'date=01;date=02'<br><br>If you want sort one partition with date=01 and day=01, you need to write 'date=01,day=01'</td>
       <td><nobr>SET spark.sql.shuffle.partitions=10; --set the compact parallelism</nobr><br><nobr>CALL sys.compact(table => 'T', partitions => 'p=0',  order_strategy => 'zorder', order_by => 'a,b')</nobr></td>
+    </tr>
+    <tr>
+      <td>expire_snapshots</td>
+      <td>
+         To expire snapshots. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>retain_max: the maximum number of completed snapshots to retain.</li>
+            <li>retain_min: the minimum number of completed snapshots to retain.</li>
+            <li>older_than: timestamp before which snapshots will be removed.</li>
+            <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
+      </td>
+      <td>CALL sys.expire_snapshots(table => 'default.T', retainMax => 10)</td>
     </tr>
     </tbody>
 </table>

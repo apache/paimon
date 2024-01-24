@@ -41,6 +41,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
 
 /** A spark {@link org.apache.spark.sql.connector.catalog.Table} for paimon. */
@@ -121,5 +122,17 @@ public class SparkTable
         } else {
             return Collections.emptyMap();
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) {
+            return true;
+        }
+        if (o == null || getClass() != o.getClass()) {
+            return false;
+        }
+        SparkTable that = (SparkTable) o;
+        return Objects.equals(table, that.table);
     }
 }

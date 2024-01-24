@@ -18,13 +18,17 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.EnumSource;
 
-import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -34,12 +38,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Override
     public List<String> ddl() {
-        return Arrays.asList(
-                "CREATE TABLE T (i INT, `proctime` AS PROCTIME())",
-                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
-                        + " ('continuous.discovery-interval'='1 ms')",
-                "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED) "
-                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
+        return Collections.singletonList("CREATE TABLE T (i INT, `proctime` AS PROCTIME())");
     }
 
     @Override
@@ -47,8 +46,36 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         return 1;
     }
 
-    @Test
-    public void testLookupEmptyTable() throws Exception {
+    private void initTable(LookupCacheMode cacheMode) {
+        String dim =
+                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
+                        + " ('continuous.discovery-interval'='1 ms' %s)";
+        String partitioned =
+                "CREATE TABLE PARTITIONED_DIM (i INT, j INT, k1 INT, k2 INT, PRIMARY KEY (i, j) NOT ENFORCED)"
+                        + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms' %s)";
+
+        String fullOption = ", 'lookup.cache' = 'full'";
+
+        String lruOption = ", 'changelog-producer'='lookup'";
+
+        switch (cacheMode) {
+            case FULL:
+                tEnv.executeSql(String.format(dim, fullOption));
+                tEnv.executeSql(String.format(partitioned, fullOption));
+                break;
+            case AUTO:
+                tEnv.executeSql(String.format(dim, lruOption));
+                tEnv.executeSql(String.format(partitioned, lruOption));
+                break;
+            default:
+                throw new UnsupportedOperationException();
+        }
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupEmptyTable(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
@@ -74,8 +101,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookup() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookup(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -104,8 +133,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupWithLatest() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupWithLatest(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('scan.mode'='latest') */"
@@ -134,8 +165,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupProjection() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupProjection(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -162,8 +195,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupFilterPk() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupFilterPk(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -190,8 +225,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupFilterSelect() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupFilterSelect(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -218,8 +255,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupFilterUnSelect() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupFilterUnSelect(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -246,8 +285,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testLookupFilterUnSelectAndUpdate() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testLookupFilterUnSelectAndUpdate(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -276,6 +317,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookup() throws Exception {
+        initTable(LookupCacheMode.AUTO);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -307,6 +349,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookupProjection() throws Exception {
+        initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -332,6 +375,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookupFilterPk() throws Exception {
+        initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -356,6 +400,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookupFilterSelect() throws Exception {
+        initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -381,6 +426,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookupFilterUnSelect() throws Exception {
+        initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -406,6 +452,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testNonPkLookupFilterUnSelectAndUpdate() throws Exception {
+        initTable(LookupCacheMode.FULL);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222), (3, 22, 333, 3333)");
 
         String query =
@@ -429,8 +476,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testRepeatRefresh() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testRepeatRefresh(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -496,8 +545,10 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testRetryLookup() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testRetryLookup(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
@@ -518,31 +569,34 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         iterator.close();
     }
 
-    @Test
-    public void testAsyncRetryLookup() throws Exception {
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testAsyncRetryLookup(LookupCacheMode cacheMode) throws Exception {
+        initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
 
         String query =
                 "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
-                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='3s','max-attempts'='60') */"
                         + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (3)");
         sql("INSERT INTO T VALUES (2)");
         sql("INSERT INTO T VALUES (1)");
-        Thread.sleep(2000); // wait
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111), Row.of(2, 22, 222, 2222));
 
         sql("INSERT INTO DIM VALUES (3, 33, 333, 3333)");
-        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, 33, 333, 3333));
+        assertThat(iterator.collect(1, 10, TimeUnit.MINUTES))
+                .containsExactlyInAnyOrder(Row.of(3, 33, 333, 3333));
 
         iterator.close();
     }
 
     @Test
     public void testLookupPartitionedTable() throws Exception {
+        initTable(LookupCacheMode.AUTO);
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
@@ -573,6 +627,7 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "
                         + "PARTITIONED BY (`i`) WITH ('continuous.discovery-interval'='1 ms')");
+
         String query =
                 "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_NO_PK for system_time as of T.proctime AS D ON T.i "
                         + "= D.i";
@@ -644,14 +699,13 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         String query =
                 "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
-                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='3s','max-attempts'='60') */"
                         + " T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (3)");
         sql("INSERT INTO T VALUES (2)");
         sql("INSERT INTO T VALUES (1)");
-        Thread.sleep(2000); // wait
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111), Row.of(2, 22, 222, 2222));
 
@@ -670,22 +724,58 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
         String query =
                 "SELECT /*+ LOOKUP('table'='D', 'retry-predicate'='lookup_miss',"
-                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='1s','max-attempts'='60') */"
+                        + " 'retry-strategy'='fixed_delay', 'output-mode'='allow_unordered', 'fixed-delay'='3s','max-attempts'='60') */"
                         + " T.i, D.i, D.j, D.k2 FROM T LEFT JOIN DIM_WITH_SEQUENCE /*+ OPTIONS('lookup.async'='true') */ for system_time as of T.proctime AS D ON T.i = D.k1";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
         sql("INSERT INTO T VALUES (111)");
         sql("INSERT INTO T VALUES (333)");
-        Thread.sleep(2000); // wait
         assertThat(iterator.collect(2))
                 .containsExactlyInAnyOrder(Row.of(111, 1, 1, 1111), Row.of(111, 2, 2, 2222));
 
         sql("INSERT INTO DIM_WITH_SEQUENCE VALUES (2, 1, 111, 3333), (3, 3, 333, 3333)");
-        Thread.sleep(2000); // wait
         sql("INSERT INTO T VALUES (111)");
         assertThat(iterator.collect(3))
                 .containsExactlyInAnyOrder(
                         Row.of(111, 1, 1, 1111), Row.of(111, 2, 2, 2222), Row.of(333, 3, 3, 3333));
+
+        iterator.close();
+    }
+
+    @ParameterizedTest
+    @EnumSource(LookupCacheMode.class)
+    public void testPartialCacheBucketKeyOrder(LookupCacheMode mode) throws Exception {
+        sql(
+                "CREATE TABLE DIM (k2 INT, k1 INT, j INT , i INT, PRIMARY KEY(i, j) NOT ENFORCED) WITH"
+                        + " ('continuous.discovery-interval'='1 ms', 'lookup.cache'='%s', 'bucket' = '2', 'bucket-key' = 'j')",
+                mode);
+
+        sql("CREATE TABLE T2 (j INT, i INT, `proctime` AS PROCTIME())");
+
+        sql("INSERT INTO DIM VALUES (1111, 111, 11, 1), (2222, 222, 22, 2)");
+
+        String query =
+                "SELECT T2.i, D.j, D.k1, D.k2 FROM T2 LEFT JOIN DIM for system_time as of T2.proctime AS D ON T2.i = D.i and T2.j = D.j";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO T2 VALUES (11, 1), (22, 2), (33, 3)");
+        List<Row> result = iterator.collect(3);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 111, 1111),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, null, null, null));
+
+        sql("INSERT INTO DIM VALUES (2222, 222, 11, 1), (3333, 333, 33, 3)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T2 VALUES (11, 1), (22, 2), (33, 3), (44, 4)");
+        result = iterator.collect(4);
+        assertThat(result)
+                .containsExactlyInAnyOrder(
+                        Row.of(1, 11, 222, 2222),
+                        Row.of(2, 22, 222, 2222),
+                        Row.of(3, 33, 333, 3333),
+                        Row.of(4, null, null, null));
 
         iterator.close();
     }

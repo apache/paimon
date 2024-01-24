@@ -21,14 +21,16 @@ package org.apache.paimon.service;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.query.QueryLocationImpl;
-import org.apache.paimon.query.TableQuery;
 import org.apache.paimon.service.client.KvQueryClient;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.server.KvQueryServer;
+import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.CommitMessage;
-import org.apache.paimon.utils.Pair;
+import org.apache.paimon.table.sink.CommitMessageImpl;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,9 +39,7 @@ import org.junit.jupiter.api.Test;
 import java.net.InetAddress;
 import java.net.InetSocketAddress;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
@@ -49,8 +49,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for remote lookup. */
 public class KvQueryTableTest extends PrimaryKeyTableTestBase {
 
-    private TestTableQuery query0;
-    private TestTableQuery query1;
+    private LocalTableQuery query0;
+    private LocalTableQuery query1;
 
     private KvQueryServer server0;
     private KvQueryServer server1;
@@ -59,8 +59,9 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
 
     @BeforeEach
     public void beforeEach() {
-        this.query0 = new TestTableQuery();
-        this.query1 = new TestTableQuery();
+        IOManager ioManager = IOManager.create(tempPath.toString());
+        this.query0 = table.newLocalTableQuery().withIOManager(ioManager);
+        this.query1 = table.newLocalTableQuery().withIOManager(ioManager);
 
         this.server0 = createServer(0, query0, 7777);
         this.server1 = createServer(1, query1, 7900);
@@ -190,8 +191,15 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
 
     private void write(int partition, int key, int value) throws Exception {
         int bucket = computeBucket(partition, key, value);
-        TestTableQuery query = select(row(partition), bucket, 2) == 0 ? query0 : query1;
-        query.put(row(partition), bucket, row(key), row(partition, key, value));
+        LocalTableQuery query = select(row(partition), bucket, 2) == 0 ? query0 : query1;
+        BatchTableWrite write = table.newBatchWriteBuilder().newWrite();
+        write.write(row(partition, key, value), bucket);
+        CommitMessageImpl message = (CommitMessageImpl) write.prepareCommit().get(0);
+        query.refreshFiles(
+                message.partition(),
+                message.bucket(),
+                Collections.emptyList(),
+                message.newFilesIncrement().newFiles());
     }
 
     private int computeBucket(int partition, int key, int value) throws Exception {
@@ -199,29 +207,6 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
             write.write(GenericRow.of(partition, key, value));
             List<CommitMessage> commitMessages = write.prepareCommit();
             return commitMessages.get(0).bucket();
-        }
-    }
-
-    private static class TestTableQuery implements TableQuery {
-
-        private final Map<Pair<BinaryRow, Integer>, Map<BinaryRow, BinaryRow>> values =
-                new HashMap<>();
-
-        public void put(BinaryRow partition, int bucket, BinaryRow key, BinaryRow value) {
-            values.computeIfAbsent(Pair.of(partition, bucket), k -> new HashMap<>())
-                    .put(key, value);
-        }
-
-        @Override
-        public BinaryRow[] lookup(BinaryRow partition, int bucket, BinaryRow[] keys) {
-            Map<BinaryRow, BinaryRow> map = values.get(Pair.of(partition, bucket));
-            BinaryRow[] values = new BinaryRow[keys.length];
-            if (map != null) {
-                for (int i = 0; i < keys.length; i++) {
-                    values[i] = map.get(keys[i]);
-                }
-            }
-            return values;
         }
     }
 }

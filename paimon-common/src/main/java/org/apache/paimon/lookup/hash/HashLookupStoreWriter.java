@@ -173,11 +173,11 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             // Write metadata file
             File metadataFile = new File(tempFolder, "metadata.dat");
             metadataFile.deleteOnExit();
-            FileOutputStream metadataOututStream = new FileOutputStream(metadataFile);
-            DataOutputStream metadataDataOutputStream = new DataOutputStream(metadataOututStream);
+            FileOutputStream metadataOutputStream = new FileOutputStream(metadataFile);
+            DataOutputStream metadataDataOutputStream = new DataOutputStream(metadataOutputStream);
             writeMetadata(metadataDataOutputStream);
             metadataDataOutputStream.close();
-            metadataOututStream.close();
+            metadataOutputStream.close();
             filesToMerge.add(metadataFile);
 
             // Build index file

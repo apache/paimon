@@ -101,7 +101,7 @@ public class SparkSchemaEvolutionITCase extends SparkReadTestBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "ADD COLUMN cannot specify NOT NULL."));
+                                "Column d cannot specify NOT NULL in the default.testAddNotNullColumn table."));
     }
 
     @Test

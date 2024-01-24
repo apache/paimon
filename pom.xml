@@ -112,14 +112,14 @@ under the License.
         <javax.annotation-api.version>1.3.2</javax.annotation-api.version>
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
-        <testcontainers.version>1.17.2</testcontainers.version>
+        <testcontainers.version>1.19.1</testcontainers.version>
         <awaitility.version>4.2.0</awaitility.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
         <test.unit.pattern>**/*Test.*</test.unit.pattern>
         <test.flink.main.version>1.18</test.flink.main.version>
-        <test.flink.version>1.18.0</test.flink.version>
+        <test.flink.version>1.18.1</test.flink.version>
         <test.flink.connector.kafka.version>3.0.1-1.18</test.flink.connector.kafka.version>
 
         <janino.version>3.0.11</janino.version>
@@ -313,6 +313,47 @@ under the License.
                                 <id>source-release-assembly</id>
                                 <!-- disable the execution -->
                                 <phase>none</phase>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+
+        <profile>
+            <id>docs-and-source</id>
+            <activation>
+                <property>
+                    <name>docs-and-source</name>
+                </property>
+            </activation>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-source-plugin</artifactId>
+                        <version>3.2.1</version>
+                        <executions>
+                            <execution>
+                                <id>attach-sources</id>
+                                <goals>
+                                    <goal>jar-no-fork</goal>
+                                </goals>
+                            </execution>
+                        </executions>
+                    </plugin>
+                    <plugin>
+                        <groupId>org.apache.maven.plugins</groupId>
+                        <artifactId>maven-javadoc-plugin</artifactId>
+                        <configuration>
+                            <quiet>true</quiet>
+                        </configuration>
+                        <executions>
+                            <execution>
+                                <id>attach-javadocs</id>
+                                <goals>
+                                    <goal>jar</goal>
+                                </goals>
                             </execution>
                         </executions>
                     </plugin>

@@ -27,6 +27,9 @@ import org.apache.paimon.table.AbstractFileStoreTable
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
 import org.apache.spark.sql.QueryTest
+import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.connector.catalog.{Identifier => SparkIdentifier}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.test.SharedSparkSession
 import org.scalactic.source.Position
 import org.scalatest.Tag
@@ -43,6 +46,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   protected val tableName0: String = "T"
 
+  /** Add paimon ([[SparkCatalog]] in fileSystem) catalog */
   override protected def sparkConf: SparkConf = {
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
@@ -54,12 +58,12 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     super.beforeAll()
     spark.sql(s"USE paimon")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon.$dbName0")
-    spark.sql(s"USE paimon.$dbName0")
   }
 
   override protected def afterAll(): Unit = {
     try {
       spark.sql(s"USE paimon")
+      spark.sql(s"DROP TABLE IF EXISTS $dbName0.$tableName0")
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE paimon.$dbName0 CASCADE")
     } finally {
@@ -67,9 +71,11 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     }
   }
 
+  /** Default is paimon catalog */
   override protected def beforeEach(): Unit = {
     super.beforeAll()
     spark.sql(s"USE paimon")
+    spark.sql(s"USE paimon.$dbName0")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
   }
 
@@ -87,11 +93,20 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
     val options = Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf)
     val catalogContext =
-      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf());
-    CatalogFactory.createCatalog(catalogContext);
+      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
+    CatalogFactory.createCatalog(catalogContext)
   }
 
   def loadTable(tableName: String): AbstractFileStoreTable = {
     catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
+  }
+
+  protected def createRelationV2(tableName: String): LogicalPlan = {
+    val sparkTable = new SparkTable(loadTable(tableName))
+    DataSourceV2Relation.create(
+      sparkTable,
+      Some(spark.sessionState.catalogManager.currentCatalog),
+      Some(SparkIdentifier.of(Array(this.dbName0), tableName))
+    )
   }
 }
