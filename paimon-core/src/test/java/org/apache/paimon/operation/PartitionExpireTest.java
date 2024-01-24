@@ -26,7 +26,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -255,6 +254,6 @@ public class PartitionExpireTest {
         options.put(PARTITION_EXPIRATION_TIME.key(), "2 d");
         options.put(CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL.key(), "1 d");
         options.put(CoreOptions.PARTITION_TIMESTAMP_FORMATTER.key(), "yyyyMMdd");
-        return ((AbstractFileStoreTable) table.copy(options)).store().newPartitionExpire("");
+        return table.copy(options).store().newPartitionExpire("");
     }
 }

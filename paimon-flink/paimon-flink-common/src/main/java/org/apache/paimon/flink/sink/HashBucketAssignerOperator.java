@@ -22,7 +22,7 @@ import org.apache.paimon.index.BucketAssigner;
 import org.apache.paimon.index.HashBucketAssigner;
 import org.apache.paimon.index.SimpleHashBucketAssigner;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.utils.MathUtils;
@@ -42,7 +42,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
 
     private final String initialCommitUser;
 
-    private final AbstractFileStoreTable table;
+    private final FileStoreTable table;
     private final Integer numAssigners;
     private final SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction;
     private final boolean overwrite;
@@ -57,7 +57,7 @@ public class HashBucketAssignerOperator<T> extends AbstractStreamOperator<Tuple2
             SerializableFunction<TableSchema, PartitionKeyExtractor<T>> extractorFunction,
             boolean overwrite) {
         this.initialCommitUser = commitUser;
-        this.table = (AbstractFileStoreTable) table;
+        this.table = (FileStoreTable) table;
         this.numAssigners = numAssigners;
         this.extractorFunction = extractorFunction;
         this.overwrite = overwrite;
