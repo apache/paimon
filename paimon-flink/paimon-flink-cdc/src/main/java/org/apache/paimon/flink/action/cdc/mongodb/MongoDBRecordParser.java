@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.Mongo4VersionStrategy;
 import org.apache.paimon.flink.action.cdc.mongodb.strategy.MongoVersionStrategy;
@@ -33,7 +34,7 @@ import org.apache.flink.util.Collector;
 import java.util.List;
 
 /**
- * A parser for MongoDB Debezium JSON strings, converting them into a list of {@link
+ * A parser for MongoDB Debezium JSON records, converting them into a list of {@link
  * RichCdcMultiplexRecord}s.
  *
  * <p>This parser is designed to process and transform incoming MongoDB Debezium JSON records into a
@@ -51,7 +52,8 @@ import java.util.List;
  * <p>Note: This parser is primarily intended for use in Flink streaming applications that process
  * MongoDB CDC data.
  */
-public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMultiplexRecord> {
+public class MongoDBRecordParser
+        implements FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> {
 
     private static final String FIELD_DATABASE = "db";
     private static final String FIELD_TABLE = "coll";
@@ -72,8 +74,9 @@ public class MongoDBRecordParser implements FlatMapFunction<String, RichCdcMulti
     }
 
     @Override
-    public void flatMap(String value, Collector<RichCdcMultiplexRecord> out) throws Exception {
-        root = OBJECT_MAPPER.readValue(value, JsonNode.class);
+    public void flatMap(CdcSourceRecord value, Collector<RichCdcMultiplexRecord> out)
+            throws Exception {
+        root = OBJECT_MAPPER.readValue((String) value.getValue(), JsonNode.class);
         String databaseName = extractString(FIELD_DATABASE);
         String collection = extractString(FIELD_TABLE);
         MongoVersionStrategy versionStrategy =

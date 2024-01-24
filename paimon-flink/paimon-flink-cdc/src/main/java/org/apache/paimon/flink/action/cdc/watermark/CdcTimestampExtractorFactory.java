@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.action.cdc.watermark;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import com.ververica.cdc.connectors.mongodb.source.MongoDBSource;
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
@@ -65,8 +67,8 @@ public class CdcTimestampExtractorFactory implements Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
-        public long extractTimestamp(String record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(record, Long.class, "ts_ms");
+        public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
+            return JsonSerdeUtil.extractValue((JsonNode) record.getValue(), Long.class, "ts_ms");
         }
     }
 
@@ -76,7 +78,9 @@ public class CdcTimestampExtractorFactory implements Serializable {
         private static final long serialVersionUID = 1L;
 
         @Override
-        public long extractTimestamp(String record) throws JsonProcessingException {
+        public long extractTimestamp(CdcSourceRecord cdcSourceRecord)
+                throws JsonProcessingException {
+            JsonNode record = (JsonNode) cdcSourceRecord.getValue();
             if (JsonSerdeUtil.isNodeExists(record, "mysqlType")) {
                 // Canal json
                 return JsonSerdeUtil.extractValue(record, Long.class, "ts");
@@ -108,14 +112,15 @@ public class CdcTimestampExtractorFactory implements Serializable {
     public static class MysqlCdcTimestampExtractor implements CdcTimestampExtractor {
 
         @Override
-        public long extractTimestamp(String record) throws JsonProcessingException {
-            return JsonSerdeUtil.extractValue(record, Long.class, "payload", "ts_ms");
+        public long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException {
+            return JsonSerdeUtil.extractValue(
+                    (JsonNode) record.getValue(), Long.class, "payload", "ts_ms");
         }
     }
 
     /** Interface defining the contract for CDC timestamp extraction. */
     public interface CdcTimestampExtractor extends Serializable {
 
-        long extractTimestamp(String record) throws JsonProcessingException;
+        long extractTimestamp(CdcSourceRecord record) throws JsonProcessingException;
     }
 }

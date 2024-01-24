@@ -18,11 +18,16 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.flink.action.cdc.CdcDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
@@ -34,14 +39,14 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
 import org.apache.kafka.common.PartitionInfo;
 import org.apache.kafka.common.TopicPartition;
-import org.apache.kafka.common.serialization.StringDeserializer;
+import org.apache.kafka.common.serialization.ByteArrayDeserializer;
 
+import java.io.IOException;
 import java.time.Duration;
 import java.util.Arrays;
 import java.util.Collection;
@@ -69,8 +74,8 @@ public class KafkaActionUtils {
     private static final String PARTITION = "partition";
     private static final String OFFSET = "offset";
 
-    public static KafkaSource<String> buildKafkaSource(Configuration kafkaConfig) {
-        KafkaSourceBuilder<String> kafkaSourceBuilder = KafkaSource.builder();
+    public static KafkaSource<CdcSourceRecord> buildKafkaSource(Configuration kafkaConfig) {
+        KafkaSourceBuilder<CdcSourceRecord> kafkaSourceBuilder = KafkaSource.builder();
 
         if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
             List<String> topics =
@@ -84,7 +89,7 @@ public class KafkaActionUtils {
         }
 
         kafkaSourceBuilder
-                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .setValueOnlyDeserializer(new CdcDeserializationSchema())
                 .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = createKafkaProperties(kafkaConfig);
 
@@ -249,13 +254,17 @@ public class KafkaActionUtils {
                 ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG,
                 kafkaConfig.get(KafkaConnectorOptions.PROPS_BOOTSTRAP_SERVERS));
         props.put(ConsumerConfig.GROUP_ID_CONFIG, kafkaPropertiesGroupId(kafkaConfig));
-        props.put(ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
         props.put(
-                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class.getName());
+                ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG,
+                ByteArrayDeserializer.class.getName());
+        props.put(
+                ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
+                ByteArrayDeserializer.class.getName());
+
         props.put(ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "earliest");
         props.put(ConsumerConfig.ENABLE_AUTO_COMMIT_CONFIG, "false");
 
-        KafkaConsumer<String, String> consumer = new KafkaConsumer<>(props);
+        KafkaConsumer<byte[], byte[]> consumer = new KafkaConsumer<>(props);
 
         String topic;
         if (kafkaConfig.contains(KafkaConnectorOptions.TOPIC)) {
@@ -307,20 +316,33 @@ public class KafkaActionUtils {
 
     private static class KafkaConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
-        private final KafkaConsumer<String, String> consumer;
+        private final KafkaConsumer<byte[], byte[]> consumer;
         private final String topic;
+        private final ObjectMapper objectMapper = new ObjectMapper();
 
-        KafkaConsumerWrapper(KafkaConsumer<String, String> kafkaConsumer, String topic) {
+        KafkaConsumerWrapper(KafkaConsumer<byte[], byte[]> kafkaConsumer, String topic) {
             this.consumer = kafkaConsumer;
             this.topic = topic;
+            objectMapper
+                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         }
 
         @Override
-        public List<String> getRecords(int pollTimeOutMills) {
-            ConsumerRecords<String, String> consumerRecords =
+        public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
+            ConsumerRecords<byte[], byte[]> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
-                    .map(ConsumerRecord::value)
+                    .map(
+                            consumerRecord -> {
+                                try {
+                                    return new CdcSourceRecord(
+                                            objectMapper.readValue(
+                                                    consumerRecord.value(), JsonNode.class));
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
+                            })
                     .collect(Collectors.toList());
         }
 

@@ -180,7 +180,7 @@ public class SyncJobHandler {
         }
     }
 
-    public Source<String, ?, ?> provideSource() {
+    public Source<CdcSourceRecord, ?, ?> provideSource() {
         switch (sourceType) {
             case KAFKA:
                 return KafkaActionUtils.buildKafkaSource(cdcSourceConfig);
@@ -192,7 +192,7 @@ public class SyncJobHandler {
         }
     }
 
-    public FlatMapFunction<String, RichCdcMultiplexRecord> provideRecordParser(
+    public FlatMapFunction<CdcSourceRecord, RichCdcMultiplexRecord> provideRecordParser(
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,

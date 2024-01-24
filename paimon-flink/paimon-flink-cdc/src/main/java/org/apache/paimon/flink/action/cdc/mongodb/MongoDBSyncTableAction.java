@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.SyncJobHandler;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase;
 import org.apache.paimon.schema.Schema;
@@ -69,7 +70,7 @@ public class MongoDBSyncTableAction extends SyncTableActionBase {
     }
 
     @Override
-    protected MongoDBSource<String> buildSource() {
+    protected MongoDBSource<CdcSourceRecord> buildSource() {
         String tableList =
                 cdcSourceConfig.get(MongoDBSourceOptions.DATABASE)
                         + "\\."

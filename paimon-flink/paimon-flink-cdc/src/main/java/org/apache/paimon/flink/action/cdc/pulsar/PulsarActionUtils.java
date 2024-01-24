@@ -18,10 +18,15 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
+import org.apache.paimon.flink.action.cdc.CdcDeserializationSchema;
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.DeserializationFeature;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
+
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -50,6 +55,7 @@ import org.apache.pulsar.common.lookup.GetTopicsResult;
 import org.apache.pulsar.common.naming.NamespaceName;
 import org.apache.pulsar.common.naming.TopicName;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -162,15 +168,15 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
-    public static PulsarSource<String> buildPulsarSource(Configuration pulsarConfig) {
-        PulsarSourceBuilder<String> pulsarSourceBuilder = PulsarSource.builder();
+    public static PulsarSource<CdcSourceRecord> buildPulsarSource(Configuration pulsarConfig) {
+        PulsarSourceBuilder<CdcSourceRecord> pulsarSourceBuilder = PulsarSource.builder();
 
         // the minimum setup
         pulsarSourceBuilder
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
-                .setDeserializationSchema(new SimpleStringSchema());
+                .setDeserializationSchema(new CdcDeserializationSchema());
 
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
         pulsarConfig.getOptional(TOPIC_PATTERN).ifPresent(pulsarSourceBuilder::setTopicPattern);
@@ -296,10 +302,10 @@ public class PulsarActionUtils {
             SourceConfiguration pulsarSourceConfiguration = new SourceConfiguration(pulsarConfig);
             PulsarClient pulsarClient = PulsarClientFactory.createClient(pulsarSourceConfiguration);
 
-            ConsumerBuilder<String> consumerBuilder =
+            ConsumerBuilder<byte[]> consumerBuilder =
                     createConsumerBuilder(
                             pulsarClient,
-                            org.apache.pulsar.client.api.Schema.STRING,
+                            org.apache.pulsar.client.api.Schema.BYTES,
                             pulsarSourceConfiguration);
 
             // The default position is Latest
@@ -325,7 +331,7 @@ public class PulsarActionUtils {
             }
 
             // Create the consumer configuration by using common utils.
-            Consumer<String> consumer = consumerBuilder.subscribe();
+            Consumer<byte[]> consumer = consumerBuilder.subscribe();
 
             return new PulsarConsumerWrapper(consumer, topic);
         } catch (PulsarClientException e) {
@@ -373,22 +379,29 @@ public class PulsarActionUtils {
 
     private static class PulsarConsumerWrapper implements MessageQueueSchemaUtils.ConsumerWrapper {
 
-        private final Consumer<String> consumer;
+        private final Consumer<byte[]> consumer;
         private final String topic;
+        private final ObjectMapper objectMapper = new ObjectMapper();
 
-        PulsarConsumerWrapper(Consumer<String> consumer, String topic) {
+        PulsarConsumerWrapper(Consumer<byte[]> consumer, String topic) {
             this.consumer = consumer;
             this.topic = topic;
+            objectMapper
+                    .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
+                    .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         }
 
         @Override
-        public List<String> getRecords(int pollTimeOutMills) {
+        public List<CdcSourceRecord> getRecords(int pollTimeOutMills) {
             try {
-                Message<String> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
+                Message<byte[]> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
                 return message == null
                         ? Collections.emptyList()
-                        : Collections.singletonList(message.getValue());
-            } catch (PulsarClientException e) {
+                        : Collections.singletonList(
+                                new CdcSourceRecord(
+                                        objectMapper.readValue(
+                                                message.getValue(), JsonNode.class)));
+            } catch (IOException e) {
                 throw new RuntimeException(e);
             }
         }

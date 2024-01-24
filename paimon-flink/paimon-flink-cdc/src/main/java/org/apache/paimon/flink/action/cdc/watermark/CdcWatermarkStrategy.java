@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc.watermark;
 
+import org.apache.paimon.flink.action.cdc.CdcSourceRecord;
 import org.apache.paimon.flink.action.cdc.watermark.CdcTimestampExtractorFactory.CdcTimestampExtractor;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
@@ -32,7 +33,7 @@ import org.apache.flink.api.common.eventtime.WatermarkStrategy;
  * Watermark strategy for CDC sources, generating watermarks based on timestamps extracted from
  * records.
  */
-public class CdcWatermarkStrategy implements WatermarkStrategy<String> {
+public class CdcWatermarkStrategy implements WatermarkStrategy<CdcSourceRecord> {
 
     private final CdcTimestampExtractor timestampExtractor;
     private static final long serialVersionUID = 1L;
@@ -43,12 +44,12 @@ public class CdcWatermarkStrategy implements WatermarkStrategy<String> {
     }
 
     @Override
-    public WatermarkGenerator<String> createWatermarkGenerator(
+    public WatermarkGenerator<CdcSourceRecord> createWatermarkGenerator(
             WatermarkGeneratorSupplier.Context context) {
-        return new WatermarkGenerator<String>() {
+        return new WatermarkGenerator<CdcSourceRecord>() {
 
             @Override
-            public void onEvent(String record, long timestamp, WatermarkOutput output) {
+            public void onEvent(CdcSourceRecord record, long timestamp, WatermarkOutput output) {
                 long tMs;
                 try {
                     tMs = timestampExtractor.extractTimestamp(record);
