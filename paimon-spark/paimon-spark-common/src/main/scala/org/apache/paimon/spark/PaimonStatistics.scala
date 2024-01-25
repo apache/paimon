@@ -17,9 +17,19 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.spark.sql.connector.read.Statistics
+import org.apache.paimon.stats
+import org.apache.paimon.stats.ColStats
+import org.apache.paimon.types.DataType
 
-import java.util.OptionalLong
+import org.apache.spark.sql.Utils
+import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
+import org.apache.spark.sql.connector.expressions.NamedReference
+import org.apache.spark.sql.connector.read.Statistics
+import org.apache.spark.sql.connector.read.colstats.ColumnStatistics
+
+import java.util.{Optional, OptionalLong}
+
+import scala.collection.JavaConverters._
 
 case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
@@ -27,9 +37,69 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
 
   private lazy val scannedTotalSize: Long = rowCount * scan.readSchema().defaultSize
 
-  override def sizeInBytes(): OptionalLong = OptionalLong.of(scannedTotalSize)
+  private lazy val paimonStats: Optional[stats.Statistics] = scan.statistics
 
-  override def numRows(): OptionalLong = OptionalLong.of(rowCount)
+  override def sizeInBytes(): OptionalLong = if (paimonStats.isPresent)
+    paimonStats.get().mergedRecordSize()
+  else OptionalLong.of(scannedTotalSize)
 
-  // TODO: extend columnStats for CBO
+  override def numRows(): OptionalLong =
+    if (paimonStats.isPresent) paimonStats.get().mergedRecordCount() else OptionalLong.of(rowCount)
+
+  override def columnStats(): java.util.Map[NamedReference, ColumnStatistics] = {
+    val requiredFields = scan.readSchema().fieldNames.toList.asJava
+    val resultMap = new java.util.HashMap[NamedReference, ColumnStatistics]()
+    if (paimonStats.isPresent) {
+      val paimonColStats = paimonStats.get().colStats()
+      scan.tableRowType.getFields
+        .stream()
+        .filter(
+          field => requiredFields.contains(field.name) && paimonColStats.containsKey(field.name()))
+        .forEach(
+          f =>
+            resultMap.put(
+              Utils.fieldReference(f.name()),
+              PaimonColumnStats(f.`type`(), paimonColStats.get(f.name()))))
+    }
+    resultMap
+  }
+}
+
+case class PaimonColumnStats(
+    override val nullCount: OptionalLong,
+    override val min: Optional[Object],
+    override val max: Optional[Object],
+    override val distinctCount: OptionalLong,
+    override val avgLen: OptionalLong,
+    override val maxLen: OptionalLong)
+  extends ColumnStatistics
+
+object PaimonColumnStats {
+  def apply(dateType: DataType, paimonColStats: ColStats[_]): PaimonColumnStats = {
+    PaimonColumnStats(
+      paimonColStats.nullCount,
+      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.min().orElse(null), dateType)),
+      Optional.ofNullable(SparkInternalRow.fromPaimon(paimonColStats.max().orElse(null), dateType)),
+      paimonColStats.distinctCount,
+      paimonColStats.avgLen,
+      paimonColStats.maxLen
+    )
+  }
+
+  def apply(v1ColStats: ColumnStat): PaimonColumnStats = {
+    import PaimonImplicits._
+    PaimonColumnStats(
+      if (v1ColStats.nullCount.isDefined) OptionalLong.of(v1ColStats.nullCount.get.longValue())
+      else OptionalLong.empty(),
+      v1ColStats.min,
+      v1ColStats.max,
+      if (v1ColStats.distinctCount.isDefined)
+        OptionalLong.of(v1ColStats.distinctCount.get.longValue())
+      else OptionalLong.empty(),
+      if (v1ColStats.avgLen.isDefined) OptionalLong.of(v1ColStats.avgLen.get.longValue())
+      else OptionalLong.empty(),
+      if (v1ColStats.maxLen.isDefined) OptionalLong.of(v1ColStats.maxLen.get.longValue())
+      else OptionalLong.empty()
+    )
+  }
 }
