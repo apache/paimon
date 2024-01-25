@@ -18,27 +18,35 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
-import java.util.LinkedHashMap;
+import java.util.HashSet;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
 
 /** Build schema for new table found in database synchronization. */
 public class NewTableSchemaBuilder implements Serializable {
 
     private final Map<String, String> tableConfig;
     private final boolean caseSensitive;
+    private final CdcMetadataConverter[] metadataConverters;
 
-    public NewTableSchemaBuilder(Map<String, String> tableConfig, boolean caseSensitive) {
+    public NewTableSchemaBuilder(
+            Map<String, String> tableConfig,
+            boolean caseSensitive,
+            CdcMetadataConverter[] metadataConverters) {
         this.tableConfig = tableConfig;
         this.caseSensitive = caseSensitive;
+        this.metadataConverters = metadataConverters;
     }
 
     public Optional<Schema> build(RichCdcMultiplexRecord record) {
@@ -47,12 +55,27 @@ public class NewTableSchemaBuilder implements Serializable {
 
         String tableName = record.tableName();
         tableName = tableName == null ? "UNKNOWN" : tableName;
-        LinkedHashMap<String, DataType> fieldTypes =
-                mapKeyCaseConvert(
-                        record.fieldTypes(), caseSensitive, columnDuplicateErrMsg(tableName));
 
-        for (Map.Entry<String, DataType> entry : fieldTypes.entrySet()) {
-            builder.column(entry.getKey(), entry.getValue());
+        // fields
+        Set<String> existedFields = new HashSet<>();
+        Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
+
+        for (Map.Entry<String, DataType> entry : record.fieldTypes().entrySet()) {
+            String fieldName =
+                    columnCaseConvertAndDuplicateCheck(
+                            entry.getKey(), existedFields, caseSensitive, columnDuplicateErrMsg);
+
+            builder.column(fieldName, entry.getValue());
+        }
+
+        for (CdcMetadataConverter metadataConverter : metadataConverters) {
+            String metadataColumnName =
+                    columnCaseConvertAndDuplicateCheck(
+                            metadataConverter.columnName(),
+                            existedFields,
+                            caseSensitive,
+                            columnDuplicateErrMsg);
+            builder.column(metadataColumnName, metadataConverter.dataType());
         }
 
         builder.primaryKey(listCaseConvert(record.primaryKeys(), caseSensitive));

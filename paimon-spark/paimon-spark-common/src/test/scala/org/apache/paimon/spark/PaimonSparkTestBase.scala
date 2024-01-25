@@ -22,7 +22,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.WithTableOptions
-import org.apache.paimon.table.AbstractFileStoreTable
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
@@ -97,8 +97,8 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     CatalogFactory.createCatalog(catalogContext)
   }
 
-  def loadTable(tableName: String): AbstractFileStoreTable = {
-    catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
+  def loadTable(tableName: String): FileStoreTable = {
+    catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[FileStoreTable]
   }
 
   protected def createRelationV2(tableName: String): LogicalPlan = {

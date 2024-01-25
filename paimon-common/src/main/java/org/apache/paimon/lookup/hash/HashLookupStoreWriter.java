@@ -19,11 +19,14 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.lookup.LookupStoreWriter;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -76,28 +79,31 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int valueCount;
     // Number of collisions
     private int collisions;
+    @Nullable private final BloomFilter.Builder bloomFilter;
 
-    HashLookupStoreWriter(double loadFactor, File file) throws IOException {
+    HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
+            throws IOException {
         this.loadFactor = loadFactor;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(
                     "Illegal load factor = " + loadFactor + ", should be between 0.0 and 1.0.");
         }
 
-        tempFolder = new File(file.getParentFile(), UUID.randomUUID().toString());
+        this.tempFolder = new File(file.getParentFile(), UUID.randomUUID().toString());
         if (!tempFolder.mkdir()) {
             throw new IOException("Can not create temp folder: " + tempFolder);
         }
-        outputStream = new BufferedOutputStream(new FileOutputStream(file));
-        indexStreams = new DataOutputStream[0];
-        dataStreams = new DataOutputStream[0];
-        indexFiles = new File[0];
-        dataFiles = new File[0];
-        lastValues = new byte[0][];
-        lastValuesLength = new int[0];
-        dataLengths = new long[0];
-        maxOffsetLengths = new int[0];
-        keyCounts = new int[0];
+        this.outputStream = new BufferedOutputStream(new FileOutputStream(file));
+        this.indexStreams = new DataOutputStream[0];
+        this.dataStreams = new DataOutputStream[0];
+        this.indexFiles = new File[0];
+        this.dataFiles = new File[0];
+        this.lastValues = new byte[0][];
+        this.lastValuesLength = new int[0];
+        this.dataLengths = new long[0];
+        this.maxOffsetLengths = new int[0];
+        this.keyCounts = new int[0];
+        this.bloomFilter = bloomFilter;
     }
 
     @Override
@@ -145,6 +151,9 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
         keyCount++;
         keyCounts[keyLength]++;
+        if (bloomFilter != null) {
+            bloomFilter.addHash(MurmurHashUtils.hashBytes(key));
+        }
     }
 
     @Override
@@ -222,6 +231,20 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
         // Write the max value for keyLength
         dataOutputStream.writeInt(maxKeyLength);
+
+        // Write whether the bloom filter is enabled.
+        dataOutputStream.writeBoolean(bloomFilter != null);
+
+        if (bloomFilter != null) {
+            dataOutputStream.writeLong(bloomFilter.getNumRecords());
+            dataOutputStream.writeInt(bloomFilter.getBuffer().size());
+
+            // Write the bloom filter start index
+            dataOutputStream.writeInt(dataOutputStream.size() + Integer.SIZE / Byte.SIZE);
+
+            dataOutputStream.write(bloomFilter.getBuffer().getArray());
+            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+        }
 
         // For each keyLength
         long datasLength = 0L;

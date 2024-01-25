@@ -32,6 +32,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
@@ -49,6 +50,7 @@ import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
 import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
@@ -64,8 +66,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-
     private final Cache<String, LookupFile> lookupFiles;
+    private final Function<Long, BloomFilter.Builder> bfGenerator;
 
     public LookupLevels(
             Levels levels,
@@ -76,7 +78,8 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Duration fileRetention,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            Function<Long, BloomFilter.Builder> bfGenerator) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -92,6 +95,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
                         .removalListener(this::removalCallback)
                         .executor(MoreExecutors.directExecutor())
                         .build();
+        this.bfGenerator = bfGenerator;
         levels.addDropFileCallback(this);
     }
 
@@ -128,12 +132,14 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     @Nullable
     private KeyValue lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
+
+        byte[] keyBytes = keySerializer.serializeToBytes(key);
+
         while (lookupFile == null || lookupFile.isClosed) {
             lookupFile = createLookupFile(file);
             lookupFiles.put(file.fileName(), lookupFile);
         }
 
-        byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
         if (valueBytes == null) {
             return null;
@@ -165,7 +171,9 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter = lookupStoreFactory.createWriter(localFile);
+        try (LookupStoreWriter kvWriter =
+                        lookupStoreFactory.createWriter(
+                                localFile, bfGenerator.apply(file.rowCount()));
                 RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             DataOutputSerializer valueOut = new DataOutputSerializer(32);
             RecordReader.RecordIterator<KeyValue> batch;

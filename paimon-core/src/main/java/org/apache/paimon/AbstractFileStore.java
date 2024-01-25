@@ -205,7 +205,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                newStatsFileHandler());
     }
 
     @Override
@@ -220,7 +221,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                newStatsFileHandler());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();

@@ -36,6 +36,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
@@ -127,8 +128,8 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     @Override
     public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
-        currentTable = root.payload().source().table();
-        databaseName = root.payload().source().db();
+        currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
+        databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
         if (root.payload().isSchemaChange()) {
             extractSchemaChange().forEach(out::collect);

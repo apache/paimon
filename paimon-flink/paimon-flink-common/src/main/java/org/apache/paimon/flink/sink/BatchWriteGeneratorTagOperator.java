@@ -46,7 +46,7 @@ import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.util.SortedMap;
+import java.util.List;
 
 /**
  * Commit {@link Committable} for snapshot using the {@link CommitterOperator}. When the task is
@@ -136,14 +136,23 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             }
             TagManager tagManager = table.tagManager();
             TagDeletion tagDeletion = table.store().newTagDeletion();
-            SortedMap<Snapshot, String> tags = tagManager.tags();
-            if (tags.size() > tagNumRetainedMax) {
-                int toDelete = tags.size() - tagNumRetainedMax;
-                int i = 0;
-                for (String tag : tags.values()) {
-                    tagManager.deleteTag(tag, tagDeletion, snapshotManager);
-                    i++;
-                    if (i == toDelete) {
+            long tagCount = tagManager.tagCount();
+
+            while (tagCount > tagNumRetainedMax) {
+                for (List<String> tagNames : tagManager.tags().values()) {
+                    if (tagCount - tagNames.size() >= tagNumRetainedMax) {
+                        tagManager.deleteAllTagsOfOneSnapshot(
+                                tagNames, tagDeletion, snapshotManager);
+                        tagCount = tagCount - tagNames.size();
+                    } else {
+                        List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
+                        for (String toBeDeleted : sortedTagNames) {
+                            tagManager.deleteTag(toBeDeleted, tagDeletion, snapshotManager);
+                            tagCount--;
+                            if (tagCount == tagNumRetainedMax) {
+                                break;
+                            }
+                        }
                         break;
                     }
                 }

@@ -42,6 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -158,7 +159,7 @@ public class ContainsLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(50));
+        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(60));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             assertThat(lookupLevels.contains(row(i), 1)).isTrue();
@@ -185,9 +186,10 @@ public class ContainsLevelsTest {
                                 .createRecordReader(
                                         0, file.fileName(), file.fileSize(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
-                new HashLookupStoreFactory(new CacheManager(2048, MemorySize.ofMebiBytes(1)), 0.75),
+                new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
                 Duration.ofHours(1),
-                maxDiskSize);
+                maxDiskSize,
+                rowCount -> BloomFilter.builder(rowCount, 0.01));
     }
 
     private KeyValue kv(int key, int value) {

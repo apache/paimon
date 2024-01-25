@@ -27,7 +27,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
@@ -64,7 +64,7 @@ public class StatsTableTest extends TableTestBase {
                 GenericRow.of(1, 3, 1),
                 GenericRow.of(2, 1, 1));
 
-        AbstractFileStoreTable storeTable = (AbstractFileStoreTable) table;
+        FileStoreTable storeTable = (FileStoreTable) table;
         AbstractFileStore<?> store = (AbstractFileStore<?>) storeTable.store();
         String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
 

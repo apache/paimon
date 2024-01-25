@@ -88,6 +88,8 @@ public interface TagPeriodHandler {
 
     LocalDateTime nextTagTime(LocalDateTime time);
 
+    boolean isAutoTag(String tagName);
+
     /** Base implementation of {@link TagPeriodHandler}. */
     abstract class BaseTagPeriodHandler implements TagPeriodHandler {
 
@@ -123,6 +125,16 @@ public interface TagPeriodHandler {
         @Override
         public LocalDateTime nextTagTime(LocalDateTime time) {
             return time.plus(onePeriod());
+        }
+
+        @Override
+        public boolean isAutoTag(String tagName) {
+            try {
+                tagToTime(tagName);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
         }
     }
 

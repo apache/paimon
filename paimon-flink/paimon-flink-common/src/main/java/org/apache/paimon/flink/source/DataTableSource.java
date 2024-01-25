@@ -31,8 +31,6 @@ import org.apache.paimon.flink.lookup.FileStoreLookupFunction;
 import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
@@ -145,9 +143,9 @@ public class DataTableSource extends FlinkTableSource {
             return ChangelogMode.insertOnly();
         }
 
-        if (table instanceof AppendOnlyFileStoreTable) {
+        if (table.primaryKeys().isEmpty()) {
             return ChangelogMode.insertOnly();
-        } else if (table instanceof PrimaryKeyFileStoreTable) {
+        } else {
             Options options = Options.fromMap(table.options());
 
             if (new CoreOptions(options).mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
@@ -169,11 +167,6 @@ public class DataTableSource extends FlinkTableSource {
                             && options.get(LOG_CHANGELOG_MODE) == LogChangelogMode.ALL
                     ? ChangelogMode.all()
                     : ChangelogMode.upsert();
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unsupported Table subclass "
-                            + table.getClass().getName()
-                            + " for streaming mode.");
         }
     }
 

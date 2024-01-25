@@ -35,6 +35,7 @@ import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.hash.HashLookupStoreFactory;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.mergetree.LookupLevels;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
@@ -48,8 +49,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Supplier;
 
-import static org.apache.paimon.CoreOptions.LOOKUP_CACHE_MAX_MEMORY_SIZE;
 import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
@@ -82,9 +83,8 @@ public class LocalTableQuery implements TableQuery {
         this.keyComparatorSupplier = new KeyComparatorSupplier(readerFactoryBuilder.keyType());
         this.hashLookupStoreFactory =
                 new HashLookupStoreFactory(
-                        new CacheManager(
-                                options.pageSize(),
-                                options.toConfiguration().get(LOOKUP_CACHE_MAX_MEMORY_SIZE)),
+                        new CacheManager(options.lookupCacheMaxMemory()),
+                        options.cachePageSize(),
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR));
 
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP) {
@@ -125,6 +125,7 @@ public class LocalTableQuery implements TableQuery {
     private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
         KeyValueFileReaderFactory factory = readerFactoryBuilder.build(partition, bucket);
+        Options options = this.options.toConfiguration();
         LookupLevels lookupLevels =
                 new LookupLevels(
                         levels,
@@ -142,8 +143,10 @@ public class LocalTableQuery implements TableQuery {
                                         .createChannel()
                                         .getPathFile(),
                         hashLookupStoreFactory,
-                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+                        options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                        options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
+                        bfGenerator(options));
+
         tableView.computeIfAbsent(partition, k -> new HashMap<>()).put(bucket, lookupLevels);
     }
 

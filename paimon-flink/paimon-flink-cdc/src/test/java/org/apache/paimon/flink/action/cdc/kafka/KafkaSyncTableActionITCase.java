@@ -22,7 +22,6 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
@@ -652,8 +651,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
         runActionWithDefaultEnv(action);
 
-        AbstractFileStoreTable table =
-                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
+        FileStoreTable table =
+                (FileStoreTable) catalog.getTable(new Identifier(database, tableName));
         while (true) {
             if (table.snapshotManager().snapshotCount() > 0
                     && table.snapshotManager().latestSnapshot().watermark()
@@ -662,5 +661,44 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
             }
             Thread.sleep(1000);
         }
+    }
+
+    public void testSchemaIncludeRecord(String format) throws Exception {
+        String topic = "schema_include";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/debezium/table/schema/include/debezium-data-1.txt");
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format);
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.DOUBLE()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        List<String> expected =
+                Collections.singletonList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]");
+        waitForResult(expected, table, rowType, primaryKeys);
     }
 }
