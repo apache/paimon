@@ -23,7 +23,6 @@ import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
 import org.apache.paimon.flink.sink.CompactorSinkBuilder;
 import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -83,8 +82,7 @@ public class CompactAction extends TableActionBase {
         switch (fileStoreTable.bucketMode()) {
             case UNAWARE:
                 {
-                    buildForUnawareBucketCompaction(
-                            env, (AppendOnlyFileStoreTable) table, isStreaming);
+                    buildForUnawareBucketCompaction(env, fileStoreTable, isStreaming);
                     break;
                 }
             case FIXED:
@@ -109,7 +107,7 @@ public class CompactAction extends TableActionBase {
     }
 
     private void buildForUnawareBucketCompaction(
-            StreamExecutionEnvironment env, AppendOnlyFileStoreTable table, boolean isStreaming) {
+            StreamExecutionEnvironment env, FileStoreTable table, boolean isStreaming) {
         UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
                 new UnawareBucketCompactionTopoBuilder(env, identifier.getFullName(), table);
 

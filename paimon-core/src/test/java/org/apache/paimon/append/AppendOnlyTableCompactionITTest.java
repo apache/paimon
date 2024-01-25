@@ -28,7 +28,7 @@ import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -53,7 +53,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class AppendOnlyTableCompactionITTest {
 
     @TempDir private Path tempDir;
-    private AppendOnlyFileStoreTable appendOnlyFileStoreTable;
+    private FileStoreTable appendOnlyFileStoreTable;
     private SnapshotManager snapshotManager;
     private AppendOnlyTableCompactionCoordinator compactionCoordinator;
     private AppendOnlyFileStoreWrite write;
@@ -188,12 +188,9 @@ public class AppendOnlyTableCompactionITTest {
         TableSchema tableSchema = schemaManager.createTable(schema());
         snapshotManager = new SnapshotManager(fileIO, path);
         appendOnlyFileStoreTable =
-                (AppendOnlyFileStoreTable)
-                        FileStoreTableFactory.create(
-                                fileIO,
-                                new org.apache.paimon.fs.Path(tempDir.toString()),
-                                tableSchema);
+                FileStoreTableFactory.create(
+                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
         compactionCoordinator = new AppendOnlyTableCompactionCoordinator(appendOnlyFileStoreTable);
-        write = appendOnlyFileStoreTable.store().newWrite(commitUser);
+        write = (AppendOnlyFileStoreWrite) appendOnlyFileStoreTable.store().newWrite(commitUser);
     }
 }
