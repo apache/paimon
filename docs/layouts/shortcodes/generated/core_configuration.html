@@ -274,6 +274,18 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td>Max memory size for lookup cache.</td>
         </tr>
         <tr>
+            <td><h5>lookup.cache.bloom.filter.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable the bloom filter for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.bloom.filter.fpp</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Define the default false positive probability for lookup cache bloom filters.</td>
+        </tr>
+        <tr>
             <td><h5>lookup.hash-load-factor</h5></td>
             <td style="word-wrap: break-word;">0.75</td>
             <td>Float</td>

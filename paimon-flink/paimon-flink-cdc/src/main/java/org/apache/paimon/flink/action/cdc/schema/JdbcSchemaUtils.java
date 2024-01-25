@@ -16,10 +16,10 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc.schema;
 
+import org.apache.paimon.flink.action.cdc.JdbcToPaimonTypeVisitor;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.flink.sink.cdc.UpdatedDataFieldsProcessFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.types.DataField;
@@ -38,20 +38,40 @@ import java.util.Objects;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 
-/** Utility class to load MySQL table schema with JDBC. */
-public class MySqlSchemaUtils {
+/** Utility class to load table schema with JDBC. */
+public class JdbcSchemaUtils {
 
-    private static final Logger LOG = LoggerFactory.getLogger(MySqlSchemaUtils.class);
+    private static final Logger LOG = LoggerFactory.getLogger(JdbcSchemaUtils.class);
 
     public static Schema buildSchema(
             DatabaseMetaData metaData,
             String databaseName,
             String tableName,
             String tableComment,
-            TypeMapping typeMapping)
+            TypeMapping typeMapping,
+            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor)
+            throws SQLException {
+        return buildSchema(
+                metaData,
+                databaseName,
+                null,
+                tableName,
+                tableComment,
+                typeMapping,
+                jdbcToPaimonTypeVisitor);
+    }
+
+    public static Schema buildSchema(
+            DatabaseMetaData metaData,
+            String databaseName,
+            String schemaName,
+            String tableName,
+            String tableComment,
+            TypeMapping typeMapping,
+            JdbcToPaimonTypeVisitor jdbcToPaimonTypeVisitor)
             throws SQLException {
         Schema.Builder builder = Schema.newBuilder();
-        try (ResultSet rs = metaData.getColumns(databaseName, null, tableName, null)) {
+        try (ResultSet rs = metaData.getColumns(databaseName, schemaName, tableName, null)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 String fieldType = rs.getString("TYPE_NAME");
@@ -70,7 +90,8 @@ public class MySqlSchemaUtils {
                         typeMapping.containsMode(TO_NULLABLE)
                                 || isNullableColumn(rs.getString("IS_NULLABLE"));
                 DataType paimonType =
-                        MySqlTypeUtils.toDataType(fieldType, precision, scale, typeMapping)
+                        jdbcToPaimonTypeVisitor
+                                .visit(fieldType, precision, scale, typeMapping)
                                 .copy(isNullable);
 
                 builder.column(fieldName, paimonType, fieldComment);
@@ -79,7 +100,7 @@ public class MySqlSchemaUtils {
 
         // primary keys
         List<String> primaryKeys = new ArrayList<>();
-        try (ResultSet rs = metaData.getPrimaryKeys(databaseName, null, tableName)) {
+        try (ResultSet rs = metaData.getPrimaryKeys(databaseName, schemaName, tableName)) {
             while (rs.next()) {
                 String fieldName = rs.getString("COLUMN_NAME");
                 primaryKeys.add(fieldName);

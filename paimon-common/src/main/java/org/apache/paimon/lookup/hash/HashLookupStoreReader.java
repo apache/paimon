@@ -19,13 +19,16 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.CachedRandomInputView;
+import org.apache.paimon.io.cache.FileBasedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
+import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+
+import javax.annotation.Nullable;
 
 import java.io.BufferedInputStream;
 import java.io.DataInputStream;
@@ -58,9 +61,10 @@ public class HashLookupStoreReader
     // Offset of the data for different key length
     private final long[] dataOffsets;
     // File input view
-    private CachedRandomInputView inputView;
+    private FileBasedRandomInputView inputView;
     // Buffers
     private final byte[] slotBuffer;
+    @Nullable private FileBasedBloomFilter bloomFilter;
 
     HashLookupStoreReader(CacheManager cacheManager, int cachePageSize, File file)
             throws IOException {
@@ -69,6 +73,8 @@ public class HashLookupStoreReader
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
         }
         LOG.info("Opening file {}", file.getName());
+        // Create Mapped file in read-only mode
+        inputView = new FileBasedRandomInputView(file, cacheManager, cachePageSize);
 
         // Open file and read metadata
         long createdAt;
@@ -78,6 +84,7 @@ public class HashLookupStoreReader
         int keyCount;
         int indexOffset;
         long dataOffset;
+        boolean bloomFilterEnabled;
         try {
             // Time
             createdAt = dataInputStream.readLong();
@@ -88,6 +95,19 @@ public class HashLookupStoreReader
             int keyLengthCount = dataInputStream.readInt();
             // Max key length
             int maxKeyLength = dataInputStream.readInt();
+            // BloomFilter
+            bloomFilterEnabled = dataInputStream.readBoolean();
+            if (bloomFilterEnabled) {
+                long recordCount = dataInputStream.readLong();
+                int bfBytes = dataInputStream.readInt();
+                // Bloom filter buffer start index
+                int bfStartIndex = dataInputStream.readInt();
+                // Skip bloom filter buffers
+                dataInputStream.skipBytes(bfBytes);
+                bloomFilter =
+                        new FileBasedBloomFilter(
+                                inputView.file(), cacheManager, recordCount, bfStartIndex, bfBytes);
+            }
 
             // Read offset counts and keys
             indexOffsets = new int[maxKeyLength + 1];
@@ -127,14 +147,12 @@ public class HashLookupStoreReader
             inputStream.close();
         }
 
-        // Create Mapped file in read-only mode
-        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
-
         // logging
         DecimalFormat integerFormat = new DecimalFormat("#,##0.00");
         StringBuilder statMsg = new StringBuilder("Storage metadata\n");
         statMsg.append("  Created at: ").append(formatCreatedAt(createdAt)).append("\n");
         statMsg.append("  Key count: ").append(keyCount).append("\n");
+        statMsg.append("  Bloom filter: ").append(bloomFilterEnabled).append("\n");
         for (int i = 0; i < keyCounts.length; i++) {
             if (keyCounts[i] > 0) {
                 statMsg.append("  Key count for key length ")
@@ -159,14 +177,20 @@ public class HashLookupStoreReader
         if (keyLength >= slots.length || keyCounts[keyLength] == 0) {
             return null;
         }
-        long hash = MurmurHashUtils.hashBytesPositive(key);
+
+        int hashcode = MurmurHashUtils.hashBytes(key);
+        if (bloomFilter != null && !bloomFilter.testHash(hashcode)) {
+            return null;
+        }
+
+        long hashPositive = hashcode & 0x7fffffff;
         int numSlots = slots[keyLength];
         int slotSize = slotSizes[keyLength];
         int indexOffset = indexOffsets[keyLength];
         long dataOffset = dataOffsets[keyLength];
 
         for (int probe = 0; probe < numSlots; probe++) {
-            long slot = (hash + probe) % numSlots;
+            long slot = (hashPositive + probe) % numSlots;
             inputView.setReadPosition(indexOffset + slot * slotSize);
             inputView.readFully(slotBuffer, 0, slotSize);
 

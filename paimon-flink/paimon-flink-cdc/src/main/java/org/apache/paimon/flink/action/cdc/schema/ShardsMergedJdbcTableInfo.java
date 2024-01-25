@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc.schema;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -32,7 +32,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
  * Describe a table whose schema is merged from shards (tables with the same name but in different
  * database).
  */
-public class ShardsMergedMySqlTableInfo implements MySqlTableInfo {
+public class ShardsMergedJdbcTableInfo implements JdbcTableInfo {
 
     private final List<String> fromDatabases;
 
@@ -40,7 +40,7 @@ public class ShardsMergedMySqlTableInfo implements MySqlTableInfo {
 
     private Schema schema;
 
-    public ShardsMergedMySqlTableInfo() {
+    public ShardsMergedJdbcTableInfo() {
         this.fromDatabases = new ArrayList<>();
     }
 
@@ -50,15 +50,14 @@ public class ShardsMergedMySqlTableInfo implements MySqlTableInfo {
         this.schema = schema;
     }
 
-    public ShardsMergedMySqlTableInfo merge(Identifier otherTableId, Schema other) {
+    public ShardsMergedJdbcTableInfo merge(Identifier otherTableId, Schema other) {
         checkArgument(
                 otherTableId.getObjectName().equals(tableName),
                 "Table to be merged '%s' should equals to current table name '%s'.",
                 otherTableId.getObjectName(),
                 tableName);
 
-        schema =
-                MySqlSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
+        schema = JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromDatabases.add(otherTableId.getDatabaseName());
         return this;
     }

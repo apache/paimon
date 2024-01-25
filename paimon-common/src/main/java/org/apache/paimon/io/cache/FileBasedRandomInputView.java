@@ -34,24 +34,26 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
+
 /**
  * A {@link SeekableDataInputView} to read bytes from {@link RandomAccessFile}, the bytes can be
  * cached to {@link MemorySegment}s in {@link CacheManager}.
  */
-public class CachedRandomInputView extends AbstractPagedInputView
+public class FileBasedRandomInputView extends AbstractPagedInputView
         implements SeekableDataInputView, Closeable {
 
     private final RandomAccessFile file;
     private final long fileLength;
     private final CacheManager cacheManager;
-    private final Map<Integer, MemorySegment> segments;
+    private final Map<Integer, SegmentContainer> segments;
     private final int segmentSize;
     private final int segmentSizeBits;
     private final int segmentSizeMask;
 
     private int currentSegmentIndex;
 
-    public CachedRandomInputView(File file, CacheManager cacheManager, int segmentSize)
+    public FileBasedRandomInputView(File file, CacheManager cacheManager, int segmentSize)
             throws FileNotFoundException {
         this.file = new RandomAccessFile(file, "r");
         this.fileLength = file.length();
@@ -73,14 +75,16 @@ public class CachedRandomInputView extends AbstractPagedInputView
     }
 
     private MemorySegment getCurrentPage() {
-        MemorySegment segment = segments.get(currentSegmentIndex);
-        if (segment == null) {
+        SegmentContainer container = segments.get(currentSegmentIndex);
+        if (container == null || container.accessCount == REFRESH_COUNT) {
             long offset = segmentIndexToPosition(currentSegmentIndex);
             int length = (int) Math.min(segmentSize, fileLength - offset);
-            segment = cacheManager.getPage(file, offset, length, this::invalidPage);
-            segments.put(currentSegmentIndex, segment);
+            container =
+                    new SegmentContainer(
+                            cacheManager.getPage(file, offset, length, this::invalidPage));
+            segments.put(currentSegmentIndex, container);
         }
-        return segment;
+        return container.access();
     }
 
     @Override
@@ -122,5 +126,26 @@ public class CachedRandomInputView extends AbstractPagedInputView
 
     private long segmentIndexToPosition(int segmentIndex) {
         return (long) segmentIndex << segmentSizeBits;
+    }
+
+    public RandomAccessFile file() {
+        return file;
+    }
+
+    private static class SegmentContainer {
+
+        private final MemorySegment segment;
+
+        private int accessCount;
+
+        private SegmentContainer(MemorySegment segment) {
+            this.segment = segment;
+            this.accessCount = 0;
+        }
+
+        private MemorySegment access() {
+            this.accessCount++;
+            return segment;
+        }
     }
 }

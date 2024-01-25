@@ -16,26 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc;
 
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.schema.Schema;
+import org.apache.paimon.types.DataType;
 
-import java.util.List;
+import javax.annotation.Nullable;
 
-/** Describe a MySQL table. */
-public interface MySqlTableInfo {
-
-    /** To indicate where is the table from. */
-    String location();
-
-    /** Return all MySQL table identifiers that build this schema. */
-    List<Identifier> identifiers();
-
-    String tableName();
-
-    /** Convert to corresponding Paimon table name. */
-    String toPaimonTableName();
-
-    Schema schema();
+/** jdbc to paimon data type visitor. */
+@FunctionalInterface
+public interface JdbcToPaimonTypeVisitor {
+    DataType visit(
+            String type,
+            @Nullable Integer length,
+            @Nullable Integer scale,
+            TypeMapping typeMapping);
 }

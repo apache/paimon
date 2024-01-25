@@ -728,6 +728,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
+            key("lookup.cache.bloom.filter.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable the bloom filter for lookup cache.");
+
+    public static final ConfigOption<Double> LOOKUP_CACHE_BLOOM_FILTER_FPP =
+            key("lookup.cache.bloom.filter.fpp")
+                    .doubleType()
+                    .defaultValue(0.05)
+                    .withDescription(
+                            "Define the default false positive probability for lookup cache bloom filters.");
+
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
                     .intType()

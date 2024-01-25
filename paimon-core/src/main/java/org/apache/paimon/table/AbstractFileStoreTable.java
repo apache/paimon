@@ -72,7 +72,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
-public abstract class AbstractFileStoreTable implements FileStoreTable {
+abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -81,7 +81,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
-    public AbstractFileStoreTable(
+    protected AbstractFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
@@ -165,11 +165,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 DefaultValueAssigner.create(tableSchema));
     }
 
-    public abstract SplitGenerator splitGenerator();
+    protected abstract SplitGenerator splitGenerator();
 
-    public abstract boolean supportStreamingReadOverwrite();
-
-    public abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
+    protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
     protected abstract FileStoreTable copy(TableSchema newTableSchema);
 

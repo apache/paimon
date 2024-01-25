@@ -42,6 +42,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileStorePathFactory;
 
 import org.junit.jupiter.api.Test;
@@ -227,7 +228,8 @@ public class LookupLevelsTest {
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
                 new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
                 Duration.ofHours(1),
-                maxDiskSize);
+                maxDiskSize,
+                rowCount -> BloomFilter.builder(rowCount, 0.05));
     }
 
     private KeyValue kv(int key, int value) {
