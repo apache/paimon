@@ -78,6 +78,7 @@ public class TagsTableTest extends TableTestBase {
                                 .getMillisecond()));
         tagsTable = (TagsTable) catalog.getTable(identifier(tableName + "$tags"));
         tagManager = table.store().newTagManager();
+        table.createTag("many-tags-test");
     }
 
     @Test
@@ -89,17 +90,18 @@ public class TagsTableTest extends TableTestBase {
 
     private List<InternalRow> getExceptedResult() {
         List<InternalRow> internalRows = new ArrayList<>();
-        for (Map.Entry<Snapshot, String> tag : tagManager.tags().entrySet()) {
+        for (Map.Entry<Snapshot, List<String>> tag : tagManager.tags().entrySet()) {
             Snapshot snapshot = tag.getKey();
-
-            internalRows.add(
-                    GenericRow.of(
-                            BinaryString.fromString(tag.getValue()),
-                            snapshot.id(),
-                            snapshot.schemaId(),
-                            Timestamp.fromLocalDateTime(
-                                    DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                            snapshot.totalRecordCount()));
+            for (String tagName : tag.getValue()) {
+                internalRows.add(
+                        GenericRow.of(
+                                BinaryString.fromString(tagName),
+                                snapshot.id(),
+                                snapshot.schemaId(),
+                                Timestamp.fromLocalDateTime(
+                                        DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
+                                snapshot.totalRecordCount()));
+            }
         }
         return internalRows;
     }

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.codegen.RecordEqualiser;
@@ -35,6 +36,9 @@ import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
@@ -46,6 +50,8 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
     private final ContainsLevels containsLevels;
 
     public FirstRowMergeTreeCompactRewriter(
+            int maxLevel,
+            CoreOptions.MergeEngine mergeEngine,
             ContainsLevels containsLevels,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
@@ -55,6 +61,8 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         super(
+                maxLevel,
+                mergeEngine,
                 readerFactory,
                 writerFactory,
                 keyComparator,
@@ -72,8 +80,19 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
     }
 
     @Override
-    protected boolean upgradeChangelog(int outputLevel, DataFileMeta file) {
-        return file.level() == 0;
+    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
+        if (file.level() != 0) {
+            return NO_CHANGELOG;
+        }
+
+        if (outputLevel == maxLevel) {
+            return CHANGELOG_NO_REWRITE;
+        }
+
+        // FIRST_ROW must rewrite file, because some records that are already at higher level may be
+        // skipped
+        // See LookupMergeFunction, it just returns newly records.
+        return CHANGELOG_WITH_REWRITE;
     }
 
     @Override

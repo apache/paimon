@@ -20,6 +20,9 @@ package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.lookup.LookupStoreFactory;
+import org.apache.paimon.utils.BloomFilter;
+
+import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
@@ -28,20 +31,23 @@ import java.io.IOException;
 public class HashLookupStoreFactory implements LookupStoreFactory {
 
     private final CacheManager cacheManager;
+    private final int cachePageSize;
     private final double loadFactor;
 
-    public HashLookupStoreFactory(CacheManager cacheManager, double loadFactor) {
+    public HashLookupStoreFactory(CacheManager cacheManager, int cachePageSize, double loadFactor) {
         this.cacheManager = cacheManager;
+        this.cachePageSize = cachePageSize;
         this.loadFactor = loadFactor;
     }
 
     @Override
-    public HashLookupStoreWriter createWriter(File file) throws IOException {
-        return new HashLookupStoreWriter(loadFactor, file);
+    public HashLookupStoreReader createReader(File file) throws IOException {
+        return new HashLookupStoreReader(cacheManager, cachePageSize, file);
     }
 
     @Override
-    public HashLookupStoreReader createReader(File file) throws IOException {
-        return new HashLookupStoreReader(cacheManager, file);
+    public HashLookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
+            throws IOException {
+        return new HashLookupStoreWriter(loadFactor, file, bloomFilter);
     }
 }

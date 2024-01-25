@@ -30,16 +30,22 @@ import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExe
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.Objects;
-import java.util.function.Consumer;
+import java.util.function.BiConsumer;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
 
-    private final int pageSize;
+    /**
+     * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
+     * every 10 visits, refresh the LRU strategy.
+     */
+    public static final int REFRESH_COUNT = 10;
+
     private final Cache<CacheKey, CacheValue> cache;
 
-    public CacheManager(int pageSize, MemorySize maxMemorySize) {
-        this.pageSize = pageSize;
+    private int fileReadCount;
+
+    public CacheManager(MemorySize maxMemorySize) {
         this.cache =
                 Caffeine.newBuilder()
                         .weigher(this::weigh)
@@ -47,27 +53,24 @@ public class CacheManager {
                         .removalListener(this::onRemoval)
                         .executor(MoreExecutors.directExecutor())
                         .build();
+        this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    Cache<CacheKey, CacheValue> cache() {
+    public Cache<CacheKey, CacheValue> cache() {
         return cache;
-    }
-
-    public int pageSize() {
-        return pageSize;
     }
 
     public MemorySegment getPage(
             RandomAccessFile file,
-            long fileLength,
-            int pageNumber,
-            Consumer<Integer> cleanCallback) {
-        CacheKey key = new CacheKey(file, pageNumber);
+            long readOffset,
+            int readLength,
+            BiConsumer<Long, Integer> cleanCallback) {
+        CacheKey key = new CacheKey(file, readOffset, readLength);
         CacheValue value = cache.getIfPresent(key);
         while (value == null || value.isClosed) {
             try {
-                value = createValue(key, fileLength, cleanCallback);
+                value = new CacheValue(key.read(), cleanCallback);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -76,8 +79,8 @@ public class CacheManager {
         return value.segment;
     }
 
-    public void invalidPage(RandomAccessFile file, int pageNumber) {
-        cache.invalidate(new CacheKey(file, pageNumber));
+    public void invalidPage(RandomAccessFile file, long readOffset, int readLength) {
+        cache.invalidate(new CacheKey(file, readOffset, readLength));
     }
 
     private int weigh(CacheKey cacheKey, CacheValue cacheValue) {
@@ -86,30 +89,30 @@ public class CacheManager {
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
         value.isClosed = true;
-        value.cleanCallback.accept(key.pageNumber);
+        value.cleanCallback.accept(key.offset, key.length);
     }
 
-    private CacheValue createValue(CacheKey key, long fileLength, Consumer<Integer> cleanCallback)
-            throws IOException {
-        return new CacheValue(key.read(fileLength, pageSize), cleanCallback);
+    public int fileReadCount() {
+        return fileReadCount;
     }
 
-    private static class CacheKey {
+    private class CacheKey {
 
         private final RandomAccessFile file;
-        private final int pageNumber;
+        private final long offset;
+        private final int length;
 
-        private CacheKey(RandomAccessFile file, int pageNumber) {
+        private CacheKey(RandomAccessFile file, long offset, int length) {
             this.file = file;
-            this.pageNumber = pageNumber;
+            this.offset = offset;
+            this.length = length;
         }
 
-        private MemorySegment read(long fileLength, int pageSize) throws IOException {
-            long pageAddress = (long) pageNumber * pageSize;
-            int len = (int) Math.min(pageSize, fileLength - pageAddress);
-            byte[] bytes = new byte[len];
-            file.seek(pageAddress);
+        private MemorySegment read() throws IOException {
+            byte[] bytes = new byte[length];
+            file.seek(offset);
             file.readFully(bytes);
+            fileReadCount++;
             return MemorySegment.wrap(bytes);
         }
 
@@ -122,23 +125,25 @@ public class CacheManager {
                 return false;
             }
             CacheKey cacheKey = (CacheKey) o;
-            return pageNumber == cacheKey.pageNumber && Objects.equals(file, cacheKey.file);
+            return Objects.equals(file, cacheKey.file)
+                    && offset == cacheKey.offset
+                    && length == cacheKey.length;
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(file, pageNumber);
+            return Objects.hash(file, offset, length);
         }
     }
 
     private static class CacheValue {
 
         private final MemorySegment segment;
-        private final Consumer<Integer> cleanCallback;
+        private final BiConsumer<Long, Integer> cleanCallback;
 
         private boolean isClosed = false;
 
-        private CacheValue(MemorySegment segment, Consumer<Integer> cleanCallback) {
+        private CacheValue(MemorySegment segment, BiConsumer<Long, Integer> cleanCallback) {
             this.segment = segment;
             this.cleanCallback = cleanCallback;
         }

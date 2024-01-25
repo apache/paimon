@@ -19,7 +19,7 @@ package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.Snapshot.CommitKind
 import org.apache.paimon.spark.PaimonSparkTestBase
-import org.apache.paimon.table.AbstractFileStoreTable
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
@@ -422,11 +422,11 @@ abstract class CompactProcedureTestBase extends PaimonSparkTestBase with StreamT
     Assertions.assertThat(where).isEqualTo(whereExpected)
   }
 
-  def lastSnapshotCommand(table: AbstractFileStoreTable): CommitKind = {
+  def lastSnapshotCommand(table: FileStoreTable): CommitKind = {
     table.snapshotManager().latestSnapshot().commitKind()
   }
 
-  def lastSnapshotId(table: AbstractFileStoreTable): Long = {
+  def lastSnapshotId(table: FileStoreTable): Long = {
     table.snapshotManager().latestSnapshotId()
   }
 }

@@ -1314,6 +1314,20 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
                     table,
                     rowType,
                     Collections.singletonList("k"));
+
+            // test newly created table
+            if (mode == COMBINED) {
+                statement.execute("USE " + "metadata");
+                statement.executeUpdate("CREATE TABLE t3 (k INT, v1 VARCHAR(10), PRIMARY KEY (k))");
+                statement.executeUpdate("INSERT INTO t3 VALUES (1, 'Hi')");
+                waitingTables("t3");
+                table = getFileStoreTable("t3");
+                waitForResult(
+                        Collections.singletonList("+I[1, Hi, t3, metadata]"),
+                        table,
+                        rowType,
+                        Collections.singletonList("k"));
+            }
         }
     }
 

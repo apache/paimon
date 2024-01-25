@@ -40,7 +40,7 @@ import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -522,7 +522,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void commitStatistics(Stats stats, long commitIdentifier) {
+    public void commitStatistics(Statistics stats, long commitIdentifier) {
         String statsFileName = statsFileHandler.writeStats(stats);
         tryCommit(
                 Collections.emptyList(),
@@ -803,7 +803,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             if (newStatsFileName != null) {
                 statsFileName = newStatsFileName;
             } else if (latestSnapshot != null) {
-                Optional<Stats> previousStatistic = statsFileHandler.readStats(latestSnapshot);
+                Optional<Statistics> previousStatistic = statsFileHandler.readStats(latestSnapshot);
                 if (previousStatistic.isPresent()) {
                     if (previousStatistic.get().schemaId() != latestSchemaId) {
                         LOG.warn("Schema changed, stats will not be inherited");

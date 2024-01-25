@@ -50,6 +50,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
@@ -69,6 +70,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
+import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 
 /** {@link FileStoreWrite} for {@link KeyValueFileStore}. */
 public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
@@ -214,10 +216,13 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
         MergeSorter mergeSorter = new MergeSorter(options, keyType, valueType, ioManager);
+        int maxLevel = options.numLevels() - 1;
+        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
         switch (options.changelogProducer()) {
             case FULL_COMPACTION:
                 return new FullChangelogMergeTreeCompactRewriter(
-                        options.numLevels() - 1,
+                        maxLevel,
+                        mergeEngine,
                         readerFactory,
                         writerFactory,
                         keyComparator,
@@ -226,7 +231,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         valueEqualiserSupplier.get(),
                         options.changelogRowDeduplicate());
             case LOOKUP:
-                if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
                     KeyValueFileReaderFactory keyOnlyReader =
                             readerFactoryBuilder
                                     .copyWithoutProjection()
@@ -234,6 +239,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                                     .build(partition, bucket);
                     ContainsLevels containsLevels = createContainsLevels(levels, keyOnlyReader);
                     return new FirstRowMergeTreeCompactRewriter(
+                            maxLevel,
+                            mergeEngine,
                             containsLevels,
                             readerFactory,
                             writerFactory,
@@ -245,6 +252,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 }
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
+                        maxLevel,
+                        mergeEngine,
                         lookupLevels,
                         readerFactory,
                         writerFactory,
@@ -265,6 +274,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             throw new RuntimeException(
                     "Can not use lookup, there is no temp disk directory to use.");
         }
+        Options options = this.options.toConfiguration();
         return new LookupLevels(
                 levels,
                 keyComparatorSupplier.get(),
@@ -276,9 +286,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
-                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+                        this.options.cachePageSize(),
+                        options.get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
+                options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
+                bfGenerator(options));
     }
 
     private ContainsLevels createContainsLevels(
@@ -287,6 +299,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             throw new RuntimeException(
                     "Can not use lookup, there is no temp disk directory to use.");
         }
+        Options options = this.options.toConfiguration();
         return new ContainsLevels(
                 levels,
                 keyComparatorSupplier.get(),
@@ -297,8 +310,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 () -> ioManager.createChannel().getPathFile(),
                 new HashLookupStoreFactory(
                         cacheManager,
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
-                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
-                options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE));
+                        this.options.cachePageSize(),
+                        options.get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR)),
+                options.get(CoreOptions.LOOKUP_CACHE_FILE_RETENTION),
+                options.get(CoreOptions.LOOKUP_CACHE_MAX_DISK_SIZE),
+                bfGenerator(options));
     }
 }

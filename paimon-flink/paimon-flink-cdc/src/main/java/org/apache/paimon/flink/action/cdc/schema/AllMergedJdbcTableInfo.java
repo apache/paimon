@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.flink.action.cdc.mysql.schema;
+package org.apache.paimon.flink.action.cdc.schema;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.schema.Schema;
@@ -28,12 +28,12 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Describe a table whose schema is merged from all source tables. */
-public class AllMergedMySqlTableInfo implements MySqlTableInfo {
+public class AllMergedJdbcTableInfo implements JdbcTableInfo {
 
     private final List<Identifier> fromTables;
     private Schema schema;
 
-    public AllMergedMySqlTableInfo() {
+    public AllMergedJdbcTableInfo() {
         this.fromTables = new ArrayList<>();
     }
 
@@ -42,9 +42,8 @@ public class AllMergedMySqlTableInfo implements MySqlTableInfo {
         this.schema = schema;
     }
 
-    public AllMergedMySqlTableInfo merge(Identifier otherTableId, Schema other) {
-        schema =
-                MySqlSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
+    public AllMergedJdbcTableInfo merge(Identifier otherTableId, Schema other) {
+        schema = JdbcSchemaUtils.mergeSchema(location(), schema, otherTableId.getFullName(), other);
         fromTables.add(otherTableId);
         return this;
     }

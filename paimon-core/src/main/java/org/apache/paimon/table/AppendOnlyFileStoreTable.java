@@ -47,7 +47,7 @@ import java.io.IOException;
 import java.util.function.BiConsumer;
 
 /** {@link FileStoreTable} for append table. */
-public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
+class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -89,7 +89,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public SplitGenerator splitGenerator() {
+    protected SplitGenerator splitGenerator() {
         return new AppendOnlySplitGenerator(
                 store().options().splitTargetSize(),
                 store().options().splitOpenFileCost(),
@@ -106,7 +106,7 @@ public class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+    protected BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
         return (scan, predicate) -> ((AppendOnlyFileStoreScan) scan).withFilter(predicate);
     }
 

@@ -25,11 +25,32 @@ import org.apache.paimon.mergetree.SortedRun;
 import java.io.Closeable;
 import java.util.List;
 
-/** Rewrite sections to the files. */
+/** Rewrite sections to new level. */
 public interface CompactRewriter extends Closeable {
 
+    /**
+     * Rewrite sections to new level.
+     *
+     * @param outputLevel new level
+     * @param dropDelete whether to drop the deletion, see {@link
+     *     MergeTreeCompactManager#triggerCompaction}
+     * @param sections list of sections (section is a list of {@link SortedRun}s, and key intervals
+     *     between sections do not overlap)
+     * @return compaction result
+     * @throws Exception exception
+     */
     CompactResult rewrite(int outputLevel, boolean dropDelete, List<List<SortedRun>> sections)
             throws Exception;
 
+    /**
+     * Upgrade file to new level, usually file data is not rewritten, only the metadata is updated.
+     * But in some certain scenarios, we must rewrite file too, e.g. {@link
+     * ChangelogMergeTreeRewriter}
+     *
+     * @param outputLevel new level
+     * @param file file to be updated
+     * @return compaction result
+     * @throws Exception exception
+     */
     CompactResult upgrade(int outputLevel, DataFileMeta file) throws Exception;
 }

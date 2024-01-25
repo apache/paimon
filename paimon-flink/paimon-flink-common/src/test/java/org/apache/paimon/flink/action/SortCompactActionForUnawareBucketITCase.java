@@ -26,10 +26,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -92,8 +93,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         Assertions.assertThatCode(() -> order(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();
 
-        List<ManifestEntry> files =
-                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
 
         ManifestEntry entry = files.get(0);
         DataSplit dataSplit =
@@ -118,7 +118,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         Assertions.assertThatCode(() -> order(Arrays.asList("f2", "f1")))
                 .doesNotThrowAnyException();
 
-        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        files = getTable().store().newScan().plan().files();
 
         entry = files.get(0);
         dataSplit =
@@ -161,12 +161,9 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 100, 200);
 
-        List<ManifestEntry> files =
-                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
         List<ManifestEntry> filesFilter =
-                ((AppendOnlyFileStoreTable) getTable())
-                        .store()
-                        .newScan()
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
                         .withFilter(predicate)
                         .plan()
                         .files();
@@ -175,11 +172,9 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
         zorder(Arrays.asList("f2", "f1"));
 
-        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        files = getTable().store().newScan().plan().files();
         filesFilter =
-                ((AppendOnlyFileStoreTable) getTable())
-                        .store()
-                        .newScan()
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
                         .withFilter(predicate)
                         .plan()
                         .files();
@@ -194,23 +189,17 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
         Predicate predicate = predicateBuilder.between(1, 10, 20);
 
-        List<ManifestEntry> filesZorder =
-                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesZorder = getTable().store().newScan().plan().files();
         List<ManifestEntry> filesFilterZorder =
-                ((AppendOnlyFileStoreTable) getTable())
-                        .store()
-                        .newScan()
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
                         .withFilter(predicate)
                         .plan()
                         .files();
 
         order(Arrays.asList("f2", "f1"));
-        List<ManifestEntry> filesOrder =
-                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> filesOrder = getTable().store().newScan().plan().files();
         List<ManifestEntry> filesFilterOrder =
-                ((AppendOnlyFileStoreTable) getTable())
-                        .store()
-                        .newScan()
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
                         .withFilter(predicate)
                         .plan()
                         .files();
@@ -246,16 +235,31 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         prepareSameData(200);
         Assertions.assertThatCode(() -> order(Collections.singletonList("f1")))
                 .doesNotThrowAnyException();
-        List<ManifestEntry> files =
-                ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
         Assertions.assertThat(files.size()).isEqualTo(3);
 
         dropTable();
         prepareSameData(200);
         Assertions.assertThatCode(() -> zorder(Arrays.asList("f1", "f2")))
                 .doesNotThrowAnyException();
-        files = ((AppendOnlyFileStoreTable) getTable()).store().newScan().plan().files();
+        files = getTable().store().newScan().plan().files();
         Assertions.assertThat(files.size()).isEqualTo(3);
+    }
+
+    @Test
+    public void testSortCompactionOnEmptyData() throws Exception {
+        createTable();
+        SortCompactAction sortCompactAction =
+                new SortCompactAction(
+                                warehouse,
+                                database,
+                                tableName,
+                                Collections.emptyMap(),
+                                Collections.emptyMap())
+                        .withOrderStrategy("zorder")
+                        .withOrderColumns(Collections.singletonList("f0"));
+
+        sortCompactAction.run();
     }
 
     private void zorder(List<String> columns) throws Exception {
@@ -354,8 +358,8 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         return messages;
     }
 
-    private Table getTable() throws Exception {
-        return catalog.getTable(identifier());
+    private FileStoreTable getTable() throws Exception {
+        return (FileStoreTable) catalog.getTable(identifier());
     }
 
     private static List<CommitMessage> writeOnce(Table table, int p, int size) throws Exception {

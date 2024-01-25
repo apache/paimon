@@ -95,7 +95,7 @@ public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
     // Reserved properties
-    public static final String DB_COMMENT_PROP = "comment";
+    public static final String COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
@@ -242,7 +242,7 @@ public class HiveCatalog extends AbstractCatalog {
         Map<String, String> parameter = new HashMap<>();
         properties.forEach(
                 (key, value) -> {
-                    if (key.equals(DB_COMMENT_PROP)) {
+                    if (key.equals(COMMENT_PROP)) {
                         database.setDescription(value);
                     } else if (key.equals(DB_LOCATION_PROP)) {
                         database.setLocationUri(value);
@@ -270,7 +270,7 @@ public class HiveCatalog extends AbstractCatalog {
             properties.put(DB_LOCATION_PROP, database.getLocationUri());
         }
         if (database.getDescription() != null) {
-            properties.put(DB_COMMENT_PROP, database.getDescription());
+            properties.put(COMMENT_PROP, database.getDescription());
         }
         return properties;
     }
@@ -439,7 +439,8 @@ public class HiveCatalog extends AbstractCatalog {
             // sync to hive hms
             Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
             updateHmsTable(table, identifier, schema);
-            client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
+            client.alter_table(
+                    identifier.getDatabaseName(), identifier.getObjectName(), table, true);
         } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
             throw new RuntimeException(te);
@@ -556,6 +557,9 @@ public class HiveCatalog extends AbstractCatalog {
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
+        if (schema.comment() != null) {
+            table.getParameters().put(COMMENT_PROP, schema.comment());
+        }
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());

@@ -21,14 +21,14 @@ package org.apache.paimon.flink.sink.cdc;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.UnawareBucketSink;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
 /** CDC Sink for unaware bucket table. */
 public class CdcUnawareBucketSink extends UnawareBucketSink<CdcRecord> {
 
-    public CdcUnawareBucketSink(AppendOnlyFileStoreTable table, Integer parallelism) {
+    public CdcUnawareBucketSink(FileStoreTable table, Integer parallelism) {
         super(table, null, null, parallelism, false);
     }
 

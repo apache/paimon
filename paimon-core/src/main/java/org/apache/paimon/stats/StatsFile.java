@@ -41,8 +41,8 @@ public class StatsFile {
      *
      * @return stats
      */
-    public Stats read(String fileName) {
-        return Stats.fromPath(fileIO, pathFactory.toPath(fileName));
+    public Statistics read(String fileName) {
+        return Statistics.fromPath(fileIO, pathFactory.toPath(fileName));
     }
 
     /**
@@ -50,7 +50,7 @@ public class StatsFile {
      *
      * @return the written file name
      */
-    public String write(Stats stats) {
+    public String write(Statistics stats) {
         Path path = pathFactory.newPath();
 
         try {

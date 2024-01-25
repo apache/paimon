@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -127,7 +126,7 @@ public abstract class AbstractCatalog implements Catalog {
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
         commit.dropPartitions(
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
@@ -446,8 +445,6 @@ public abstract class AbstractCatalog implements Catalog {
             } else if (change instanceof SchemaChange.RenameColumn) {
                 SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
                 fieldNames.add(rename.newName());
-            } else {
-                // do nothing
             }
         }
         validateFieldNameCaseInsensitive(fieldNames);
@@ -459,7 +456,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void validateAutoCreateClose(Map<String, String> options) {
         checkArgument(
-                !Boolean.valueOf(
+                !Boolean.parseBoolean(
                         options.getOrDefault(
                                 CoreOptions.AUTO_CREATE.key(),
                                 CoreOptions.AUTO_CREATE.defaultValue().toString())),

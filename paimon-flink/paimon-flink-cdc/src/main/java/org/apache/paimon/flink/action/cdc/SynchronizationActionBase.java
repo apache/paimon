@@ -40,7 +40,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
@@ -91,15 +90,9 @@ public abstract class SynchronizationActionBase extends ActionBase {
     public SynchronizationActionBase withMetadataColumns(List<String> metadataColumns) {
         this.metadataConverters =
                 metadataColumns.stream()
-                        .map(this::metadataConverter)
-                        .filter(Optional::isPresent)
-                        .map(Optional::get)
+                        .map(this.syncJobHandler::provideMetadataConverter)
                         .toArray(CdcMetadataConverter[]::new);
         return this;
-    }
-
-    protected Optional<CdcMetadataConverter<?>> metadataConverter(String column) {
-        return Optional.empty();
     }
 
     @VisibleForTesting

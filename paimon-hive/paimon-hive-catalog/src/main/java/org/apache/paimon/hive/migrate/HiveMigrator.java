@@ -30,9 +30,9 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -111,8 +111,7 @@ public class HiveMigrator implements Migrator {
         }
 
         try {
-            AbstractFileStoreTable paimonTable =
-                    (AbstractFileStoreTable) hiveCatalog.getTable(identifier);
+            FileStoreTable paimonTable = (FileStoreTable) hiveCatalog.getTable(identifier);
             checkPaimonTable(paimonTable);
 
             List<String> partitionsNames =
@@ -165,7 +164,9 @@ public class HiveMigrator implements Migrator {
 
                 throw new RuntimeException("Migrating failed because exception happens", e);
             }
-            paimonTable.newBatchWriteBuilder().newCommit().commit(new ArrayList<>(commitMessages));
+            try (BatchTableCommit commit = paimonTable.newBatchWriteBuilder().newCommit()) {
+                commit.commit(new ArrayList<>(commitMessages));
+            }
         } catch (Exception e) {
             if (!alreadyExist) {
                 hiveCatalog.dropTable(identifier, true);
@@ -184,8 +185,8 @@ public class HiveMigrator implements Migrator {
         }
     }
 
-    private void checkPaimonTable(AbstractFileStoreTable paimonTable) {
-        if (!(paimonTable instanceof AppendOnlyFileStoreTable)) {
+    private void checkPaimonTable(FileStoreTable paimonTable) {
+        if (paimonTable.primaryKeys().size() > 0) {
             throw new IllegalArgumentException(
                     "Hive migrator only support append only table target table");
         }
@@ -231,7 +232,7 @@ public class HiveMigrator implements Migrator {
             FileIO fileIO,
             List<String> partitionNames,
             Table sourceTable,
-            AbstractFileStoreTable paimonTable,
+            FileStoreTable paimonTable,
             Map<Path, Path> rollback)
             throws Exception {
         List<MigrateTask> migrateTasks = new ArrayList<>();
@@ -265,7 +266,7 @@ public class HiveMigrator implements Migrator {
     public MigrateTask importUnPartitionedTableTask(
             FileIO fileIO,
             Table sourceTable,
-            AbstractFileStoreTable paimonTable,
+            FileStoreTable paimonTable,
             Map<Path, Path> rollback) {
         String format = parseFormat(sourceTable.getSd().getSerdeInfo().toString());
         String location = sourceTable.getSd().getLocation();
@@ -274,7 +275,7 @@ public class HiveMigrator implements Migrator {
                 fileIO, format, location, paimonTable, BinaryRow.EMPTY_ROW, path, rollback);
     }
 
-    private void checkCompatible(Table sourceHiveTable, AbstractFileStoreTable paimonTable) {
+    private void checkCompatible(Table sourceHiveTable, FileStoreTable paimonTable) {
         List<FieldSchema> sourceFields = new ArrayList<>(sourceHiveTable.getPartitionKeys());
         List<DataField> targetFields =
                 new ArrayList<>(
@@ -321,7 +322,7 @@ public class HiveMigrator implements Migrator {
         private final FileIO fileIO;
         private final String format;
         private final String location;
-        private final AbstractFileStoreTable paimonTable;
+        private final FileStoreTable paimonTable;
         private final BinaryRow partitionRow;
         private final Path newDir;
         private final Map<Path, Path> rollback;
@@ -330,7 +331,7 @@ public class HiveMigrator implements Migrator {
                 FileIO fileIO,
                 String format,
                 String location,
-                AbstractFileStoreTable paimonTable,
+                FileStoreTable paimonTable,
                 BinaryRow partitionRow,
                 Path newDir,
                 Map<Path, Path> rollback) {

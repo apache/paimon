@@ -34,6 +34,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
@@ -72,7 +73,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Abstract {@link FileStoreTable}. */
-public abstract class AbstractFileStoreTable implements FileStoreTable {
+abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -81,7 +82,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
-    public AbstractFileStoreTable(
+    protected AbstractFileStoreTable(
             FileIO fileIO,
             Path path,
             TableSchema tableSchema,
@@ -96,6 +97,16 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+    }
+
+    @Override
+    public Optional<Statistics> statistics() {
+        // todo: support time travel
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        if (latestSnapshot != null) {
+            return store().newStatsFileHandler().readStats(latestSnapshot);
+        }
+        return Optional.empty();
     }
 
     @Override
@@ -160,11 +171,9 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
                 DefaultValueAssigner.create(tableSchema));
     }
 
-    public abstract SplitGenerator splitGenerator();
+    protected abstract SplitGenerator splitGenerator();
 
-    public abstract boolean supportStreamingReadOverwrite();
-
-    public abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
+    protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
     protected abstract FileStoreTable copy(TableSchema newTableSchema);
 
