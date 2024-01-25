@@ -26,9 +26,7 @@ import org.apache.paimon.flink.PaimonDataStreamSinkProvider;
 import org.apache.paimon.flink.log.LogSinkProvider;
 import org.apache.paimon.flink.log.LogStoreTableFactory;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 import org.apache.paimon.table.Table;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -75,11 +73,11 @@ public abstract class FlinkTableSinkBase
 
     @Override
     public ChangelogMode getChangelogMode(ChangelogMode requestedMode) {
-        if (table instanceof AppendOnlyFileStoreTable) {
+        if (table.primaryKeys().isEmpty()) {
             // Don't check this, for example, only inserts are available from the database, but the
             // plan phase contains all changelogs
             return requestedMode;
-        } else if (table instanceof PrimaryKeyFileStoreTable) {
+        } else {
             Options options = Options.fromMap(table.options());
             if (options.get(CHANGELOG_PRODUCER) == ChangelogProducer.INPUT) {
                 return requestedMode;
@@ -101,9 +99,6 @@ public abstract class FlinkTableSinkBase
                 }
             }
             return builder.build();
-        } else {
-            throw new UnsupportedOperationException(
-                    "Unknown FileStoreTable subclass " + table.getClass().getName());
         }
     }
 

@@ -185,8 +185,8 @@ public abstract class TableTestBase {
         return messages;
     }
 
-    public Table getTableDefault() throws Exception {
-        return catalog.getTable(identifier());
+    public FileStoreTable getTableDefault() throws Exception {
+        return (FileStoreTable) catalog.getTable(identifier());
     }
 
     private List<CommitMessage> writeOnce(Table table, int time, int size) throws Exception {

@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 
@@ -142,14 +141,10 @@ public class FlinkSinkBuilder {
 
     private DataStreamSink<?> buildUnawareBucketSink(DataStream<InternalRow> input) {
         checkArgument(
-                table instanceof AppendOnlyFileStoreTable,
+                table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
         return new RowUnawareBucketSink(
-                        (AppendOnlyFileStoreTable) table,
-                        overwritePartition,
-                        logSinkFunction,
-                        parallelism,
-                        boundedInput)
+                        table, overwritePartition, logSinkFunction, parallelism, boundedInput)
                 .sinkFrom(input);
     }
 }

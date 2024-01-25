@@ -27,7 +27,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -50,8 +49,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
     public void testAsyncCompactionWorks() throws Exception {
         createTableDefault();
         AppendOnlyTableCompactionWorkerOperator workerOperator =
-                new AppendOnlyTableCompactionWorkerOperator(
-                        (AppendOnlyFileStoreTable) getTableDefault(), "user");
+                new AppendOnlyTableCompactionWorkerOperator(getTableDefault(), "user");
 
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 20);
@@ -103,8 +101,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
     public void testAsyncCompactionFileDeletedWhenShutdown() throws Exception {
         createTableDefault();
         AppendOnlyTableCompactionWorkerOperator workerOperator =
-                new AppendOnlyTableCompactionWorkerOperator(
-                        (AppendOnlyFileStoreTable) getTableDefault(), "user");
+                new AppendOnlyTableCompactionWorkerOperator(getTableDefault(), "user");
 
         // write 200 files
         List<CommitMessage> commitMessages = writeDataDefault(200, 40);
@@ -125,7 +122,7 @@ public class AppendOnlyTableCompactionWorkerOperatorTest extends TableTestBase {
 
         LocalFileIO localFileIO = LocalFileIO.create();
         DataFilePathFactory dataFilePathFactory =
-                ((AppendOnlyFileStoreTable) getTableDefault())
+                getTableDefault()
                         .store()
                         .pathFactory()
                         .createDataFilePathFactory(BinaryRow.EMPTY_ROW, 0);

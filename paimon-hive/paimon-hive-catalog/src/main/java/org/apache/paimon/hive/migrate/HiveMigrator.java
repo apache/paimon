@@ -30,7 +30,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.migrate.FileMetaUtils;
 import org.apache.paimon.migrate.Migrator;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -187,7 +186,7 @@ public class HiveMigrator implements Migrator {
     }
 
     private void checkPaimonTable(FileStoreTable paimonTable) {
-        if (!(paimonTable instanceof AppendOnlyFileStoreTable)) {
+        if (paimonTable.primaryKeys().size() > 0) {
             throw new IllegalArgumentException(
                     "Hive migrator only support append only table target table");
         }

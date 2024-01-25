@@ -27,15 +27,14 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-/** Statistics tests for {@link PrimaryKeyFileStoreTable}. */
+/** Statistics tests for table with primary keys. */
 public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestBase {
 
-    /** {@link PrimaryKeyFileStoreTable} does not support filter value. */
+    /** Primary key tables does not support filter value. */
     @Test
     public void testTableFilterValueStatistics() throws Exception {
         FileStoreTable table = writeData();
