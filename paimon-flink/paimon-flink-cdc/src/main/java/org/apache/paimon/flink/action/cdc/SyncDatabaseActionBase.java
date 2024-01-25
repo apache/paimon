@@ -117,7 +117,8 @@ public abstract class SyncDatabaseActionBase extends SynchronizationActionBase {
 
     @Override
     protected EventParser.Factory<RichCdcMultiplexRecord> buildEventParserFactory() {
-        NewTableSchemaBuilder schemaBuilder = new NewTableSchemaBuilder(tableConfig, caseSensitive);
+        NewTableSchemaBuilder schemaBuilder =
+                new NewTableSchemaBuilder(tableConfig, caseSensitive, metadataConverters);
         Pattern includingPattern = Pattern.compile(includingTables);
         Pattern excludingPattern =
                 excludingTables == null ? null : Pattern.compile(excludingTables);
