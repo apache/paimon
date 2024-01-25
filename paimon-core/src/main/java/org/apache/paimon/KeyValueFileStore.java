@@ -107,7 +107,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan("main");
+        return newScan(DEFAULT_MAIN_BRANCH);
     }
 
     public KeyValueFileStoreScan newScan(String branchName) {
@@ -163,7 +163,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true, "main").withManifestCacheFilter(manifestFilter),
+                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
                 keyValueFieldsExtractor,

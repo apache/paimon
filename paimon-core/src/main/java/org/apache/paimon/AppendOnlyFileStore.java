@@ -69,7 +69,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
 
     @Override
     public AppendOnlyFileStoreScan newScan() {
-        return newScan("main");
+        return newScan(DEFAULT_MAIN_BRANCH);
     }
 
     public AppendOnlyFileStoreScan newScan(String branchName) {
@@ -103,7 +103,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true, "main").withManifestCacheFilter(manifestFilter),
+                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
                 options,
                 tableName);
     }
