@@ -49,7 +49,7 @@ under the License.
         <dependency>
             <groupId>org.apache.paimon</groupId>
             <artifactId>paimon-shade-netty-4</artifactId>
-            <version>4.1.100.Final-${paimon.shade.version}</version>
+            <version>${paimon.shade.netty.version}-${paimon.shade.version}</version>
         </dependency>
 
         <dependency>
