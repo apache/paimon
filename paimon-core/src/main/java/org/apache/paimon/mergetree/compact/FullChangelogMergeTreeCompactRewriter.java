@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -32,13 +33,15 @@ import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
+
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
 
-    private final int maxLevel;
-
     public FullChangelogMergeTreeCompactRewriter(
             int maxLevel,
+            CoreOptions.MergeEngine mergeEngine,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
@@ -47,6 +50,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             RecordEqualiser valueComparator,
             boolean changelogRowDeduplicate) {
         super(
+                maxLevel,
+                mergeEngine,
                 readerFactory,
                 writerFactory,
                 keyComparator,
@@ -54,7 +59,6 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mergeSorter,
                 valueComparator,
                 changelogRowDeduplicate);
-        this.maxLevel = maxLevel;
     }
 
     @Override
@@ -70,8 +74,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
     }
 
     @Override
-    protected boolean upgradeChangelog(int outputLevel, DataFileMeta file) {
-        return outputLevel == maxLevel;
+    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
+        return outputLevel == maxLevel ? CHANGELOG_NO_REWRITE : NO_CHANGELOG;
     }
 
     @Override

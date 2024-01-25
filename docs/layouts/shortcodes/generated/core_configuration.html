@@ -45,6 +45,12 @@ under the License.
             <td>Specify the paimon distribution policy. Data is assigned to each bucket according to the hash value of bucket-key.<br />If you specify multiple fields, delimiter is ','.<br />If not specified, the primary key will be used; if there is no primary key, the full row will be used.</td>
         </tr>
         <tr>
+            <td><h5>cache-page-size</h5></td>
+            <td style="word-wrap: break-word;">16 kb</td>
+            <td>MemorySize</td>
+            <td>Memory page size for caching.</td>
+        </tr>
+        <tr>
             <td><h5>changelog-producer</h5></td>
             <td style="word-wrap: break-word;">none</td>
             <td><p>Enum</p></td>
@@ -91,6 +97,12 @@ under the License.
             <td style="word-wrap: break-word;">5</td>
             <td>Integer</td>
             <td>For file set [f_0,...,f_N], the minimum file number which satisfies sum(size(f_i)) &gt;= targetFileSize to trigger a compaction for append-only table. This value avoids almost-full-file to be compacted, which is not cost-effective.</td>
+        </tr>
+        <tr>
+            <td><h5>compaction.optimization-interval</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>Implying how often to perform an optimization compaction, this configuration is used to ensure the query timeliness of the read-optimized system table.</td>
         </tr>
         <tr>
             <td><h5>compaction.size-ratio</h5></td>
@@ -260,6 +272,18 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
             <td>Max memory size for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.bloom.filter.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable the bloom filter for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache.bloom.filter.fpp</h5></td>
+            <td style="word-wrap: break-word;">0.05</td>
+            <td>Double</td>
+            <td>Define the default false positive probability for lookup cache bloom filters.</td>
         </tr>
         <tr>
             <td><h5>lookup.hash-load-factor</h5></td>
@@ -628,6 +652,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The maximum number of tags to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>tag.period-formatter</h5></td>
+            <td style="word-wrap: break-word;">with_dashes</td>
+            <td><p>Enum</p></td>
+            <td>The date format for tag periods.<br /><br />Possible values:<ul><li>"with_dashes": Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'</li><li>"without_dashes": Dates and hours without dashes, e.g., 'yyyyMMdd HH'</li></ul></td>
         </tr>
         <tr>
             <td><h5>target-file-size</h5></td>

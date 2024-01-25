@@ -20,8 +20,8 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemaUtils;
-import org.apache.paimon.flink.action.cdc.mysql.schema.MySqlSchemasInfo;
+import org.apache.paimon.flink.action.cdc.schema.JdbcSchemaUtils;
+import org.apache.paimon.flink.action.cdc.schema.JdbcSchemasInfo;
 import org.apache.paimon.schema.Schema;
 
 import com.ververica.cdc.connectors.mysql.source.MySqlSource;
@@ -29,10 +29,10 @@ import com.ververica.cdc.connectors.mysql.source.MySqlSourceBuilder;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffset;
 import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffsetBuilder;
-import com.ververica.cdc.connectors.mysql.table.JdbcUrlUtils;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
+import com.ververica.cdc.debezium.utils.JdbcUrlUtils;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -54,6 +54,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
+import static org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils.toPaimonTypeVisitor;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 
 /** Utils for MySQL Action. */
@@ -94,7 +95,7 @@ public class MySqlActionUtils {
                 mySqlConfig.get(MySqlSourceOptions.PASSWORD));
     }
 
-    public static MySqlSchemasInfo getMySqlTableInfos(
+    public static JdbcSchemasInfo getMySqlTableInfos(
             Configuration mySqlConfig,
             Predicate<String> monitorTablePredication,
             List<Identifier> excludedTables,
@@ -102,7 +103,7 @@ public class MySqlActionUtils {
             throws Exception {
         Pattern databasePattern =
                 Pattern.compile(mySqlConfig.get(MySqlSourceOptions.DATABASE_NAME));
-        MySqlSchemasInfo mySqlSchemasInfo = new MySqlSchemasInfo();
+        JdbcSchemasInfo mySqlSchemasInfo = new JdbcSchemasInfo();
         Map<String, String> jdbcProperties = getJdbcProperties(typeMapping, mySqlConfig);
 
         try (Connection conn = MySqlActionUtils.getConnection(mySqlConfig, jdbcProperties)) {
@@ -111,24 +112,27 @@ public class MySqlActionUtils {
                 while (schemas.next()) {
                     String databaseName = schemas.getString("TABLE_CAT");
                     Matcher databaseMatcher = databasePattern.matcher(databaseName);
-                    if (databaseMatcher.matches()) {
-                        try (ResultSet tables = metaData.getTables(databaseName, null, "%", null)) {
-                            while (tables.next()) {
-                                String tableName = tables.getString("TABLE_NAME");
-                                String tableComment = tables.getString("REMARKS");
-                                Identifier identifier = Identifier.create(databaseName, tableName);
-                                if (monitorTablePredication.test(tableName)) {
-                                    Schema schema =
-                                            MySqlSchemaUtils.buildSchema(
-                                                    metaData,
-                                                    databaseName,
-                                                    tableName,
-                                                    tableComment,
-                                                    typeMapping);
-                                    mySqlSchemasInfo.addSchema(identifier, schema);
-                                } else {
-                                    excludedTables.add(identifier);
-                                }
+                    if (!databaseMatcher.matches()) {
+                        continue;
+                    }
+                    try (ResultSet tables =
+                            metaData.getTables(databaseName, null, "%", new String[] {"TABLE"})) {
+                        while (tables.next()) {
+                            String tableName = tables.getString("TABLE_NAME");
+                            String tableComment = tables.getString("REMARKS");
+                            Identifier identifier = Identifier.create(databaseName, tableName);
+                            if (monitorTablePredication.test(tableName)) {
+                                Schema schema =
+                                        JdbcSchemaUtils.buildSchema(
+                                                metaData,
+                                                databaseName,
+                                                tableName,
+                                                tableComment,
+                                                typeMapping,
+                                                toPaimonTypeVisitor());
+                                mySqlSchemasInfo.addSchema(identifier, schema);
+                            } else {
+                                excludedTables.add(identifier);
                             }
                         }
                     }

@@ -103,6 +103,7 @@ public abstract class E2eTestBase {
                         .withEnv("NETWORK_ID", ((Network.NetworkImpl) network).getName())
                         .withLogConsumer("jobmanager_1", new LogConsumer(LOG))
                         .withLogConsumer("taskmanager_1", new LogConsumer(LOG))
+                        .withStartupTimeout(Duration.ofMinutes(3))
                         .withLocalCompose(true);
         if (withKafka) {
             List<String> kafkaServices = Arrays.asList("zookeeper", "kafka");

@@ -95,6 +95,10 @@ public class KeyValue {
         return valueKind;
     }
 
+    public boolean isAdd() {
+        return valueKind.isAdd();
+    }
+
     public InternalRow value() {
         return value;
     }

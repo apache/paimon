@@ -54,6 +54,7 @@ public class CdcActionCommonUtils {
     public static final String KAFKA_CONF = "kafka_conf";
     public static final String MONGODB_CONF = "mongodb_conf";
     public static final String MYSQL_CONF = "mysql_conf";
+    public static final String POSTGRES_CONF = "postgres_conf";
     public static final String PULSAR_CONF = "pulsar_conf";
     public static final String TABLE_PREFIX = "table_prefix";
     public static final String TABLE_SUFFIX = "table_suffix";
@@ -221,8 +222,9 @@ public class CdcActionCommonUtils {
             for (String key : specifiedPrimaryKeys) {
                 checkArgument(
                         sourceColumns.contains(key),
-                        "Specified primary key '%s' does not exist in source tables or computed columns.",
-                        key);
+                        "Specified primary key '%s' does not exist in source tables or computed columns %s.",
+                        key,
+                        sourceColumns);
             }
             builder.primaryKey(listCaseConvert(specifiedPrimaryKeys, caseSensitive));
         } else if (!sourceSchema.primaryKeys().isEmpty()) {

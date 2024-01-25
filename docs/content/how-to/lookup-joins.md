@@ -30,7 +30,7 @@ under the License.
 
 Paimon supports lookup joins on tables with primary keys and append tables in Flink. The following example illustrates this feature.
 
-### Prepare
+## Prepare
 
 First, let's create a Paimon table and update it in real-time.
 
@@ -69,7 +69,7 @@ CREATE TEMPORARY TABLE Orders (
 );
 ```
 
-### Normal Lookup
+## Normal Lookup
 
 You can now use `customers` in a lookup join query.
 
@@ -82,7 +82,7 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
-### Retry Lookup
+## Retry Lookup
 
 If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
 You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
@@ -98,7 +98,7 @@ FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
-### Async Retry Lookup
+## Async Retry Lookup
 
 The problem with synchronous retry is that one record will block subsequent records, causing the entire job to be blocked.
 You can consider using async + allow_unordered to avoid blocking, the records that join missing will no longer block
@@ -120,22 +120,34 @@ your streaming job may be blocked. You can try to use `audit_log` system table f
 (convert CDC stream to append stream).
 {{< /hint >}}
 
-### Performance
+## Query Service
 
-The lookup join operator will maintain a RocksDB cache locally and pull the latest updates of the table in real time. Lookup join operator will only pull the necessary data, so your filter conditions are very important for performance.
+You can run a Flink Streaming Job to start query service for the table. When QueryService exists, Flink Lookup Join
+will prioritize obtaining data from it, which will effectively improve query performance.
 
-This feature is only suitable for tables containing at most tens of millions of records to avoid excessive use of local disks.
+{{< tabs "query-service" >}}
 
-## RocksDB Cache Options
-
-The following options allow users to finely adjust RocksDB for better performance. You can either specify them in table properties or in dynamic table hints.
+{{< tab "Flink SQL" >}}
 
 ```sql
--- dynamic table hints example
-SELECT o.order_id, o.total, c.country, c.zip
-FROM Orders AS o JOIN customers /*+ OPTIONS('lookup.cache-rows'='20000') */
-FOR SYSTEM_TIME AS OF o.proc_time AS c
-ON o.customer_id = c.id;
+CALL sys.query_service('database_name.table_name', parallelism);
 ```
 
-{{< generated/rocksdb_configuration >}}
+{{< /tab >}}
+
+{{< tab "Flink Action" >}}
+
+```bash
+<FLINK_HOME>/bin/flink run \
+    /path/to/paimon-flink-action-{{< version >}}.jar \
+    query_service \
+    --warehouse <warehouse-path> \
+    --database <database-name> \
+    --table <table-name> \
+    [--parallelism <parallelism>] \
+    [--catalog_conf <paimon-catalog-conf> [--catalog_conf <paimon-catalog-conf> ...]]
+```
+
+{{< /tab >}}
+
+{{< /tabs >}}

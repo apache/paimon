@@ -28,6 +28,7 @@ import org.apache.paimon.query.QueryLocationImpl;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.service.client.KvQueryClient;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
@@ -47,11 +48,11 @@ public class RemoteTableQuery implements TableQuery {
     private final KvQueryClient client;
     private final InternalRowSerializer keySerializer;
 
-    private int[] projection;
+    @Nullable private int[] projection;
 
-    public RemoteTableQuery(FileStoreTable table) {
-        this.table = table;
-        ServiceManager manager = table.store().newServiceManager();
+    public RemoteTableQuery(Table table) {
+        this.table = (FileStoreTable) table;
+        ServiceManager manager = this.table.store().newServiceManager();
         this.client = new KvQueryClient(new QueryLocationImpl(manager), 1);
         this.keySerializer =
                 InternalSerializers.create(TypeUtils.project(table.rowType(), table.primaryKeys()));
@@ -77,6 +78,10 @@ public class RemoteTableQuery implements TableQuery {
             throw new IOException(e);
         } catch (ExecutionException e) {
             throw new IOException(e.getCause());
+        }
+
+        if (projection == null) {
+            return row;
         }
 
         if (row == null) {

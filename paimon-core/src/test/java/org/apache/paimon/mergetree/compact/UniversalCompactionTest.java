@@ -25,13 +25,14 @@ import org.apache.paimon.mergetree.SortedRun;
 
 import org.junit.jupiter.api.Test;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.mergetree.compact.UniversalCompaction.createUnit;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link UniversalCompaction}. */
@@ -39,11 +40,17 @@ public class UniversalCompactionTest {
 
     @Test
     public void testOutputLevel() {
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 1).outputLevel()).isEqualTo(1);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 2).outputLevel()).isEqualTo(1);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 3).outputLevel()).isEqualTo(2);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 4).outputLevel()).isEqualTo(3);
-        assertThat(createUnit(createLevels(0, 0, 1, 3, 4), 5, 5).outputLevel()).isEqualTo(5);
+        UniversalCompaction compaction = new UniversalCompaction(25, 1, 3);
+        assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 1).outputLevel())
+                .isEqualTo(1);
+        assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 2).outputLevel())
+                .isEqualTo(1);
+        assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 3).outputLevel())
+                .isEqualTo(2);
+        assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 4).outputLevel())
+                .isEqualTo(3);
+        assertThat(compaction.createUnit(createLevels(0, 0, 1, 3, 4), 5, 5).outputLevel())
+                .isEqualTo(5);
     }
 
     @Test
@@ -72,6 +79,48 @@ public class UniversalCompactionTest {
         results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
         // 3 should be in the candidate, by size ratio after picking by file num
         assertThat(results).isEqualTo(new long[] {1, 2, 3});
+    }
+
+    @Test
+    public void testOptimizedCompactionInterval() {
+        AtomicLong time = new AtomicLong(0);
+        UniversalCompaction compaction =
+                new UniversalCompaction(100, 1, 3, Duration.ofMillis(1000)) {
+                    @Override
+                    long currentTimeMillis() {
+                        return time.get();
+                    }
+                };
+
+        // first time, force optimized compaction
+        Optional<CompactUnit> pick =
+                compaction.pick(3, Arrays.asList(level(0, 1), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isTrue();
+        long[] results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 3, 5});
+
+        // modify time, optimized compaction
+        time.set(1001);
+        pick = compaction.pick(3, Arrays.asList(level(0, 1), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isTrue();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {1, 3, 5});
+
+        // third time, no compaction
+        pick = compaction.pick(3, Arrays.asList(level(0, 1), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isFalse();
+
+        // 4 time, pickForSizeAmp
+        time.set(1500);
+        pick = compaction.pick(3, Arrays.asList(level(0, 3), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isTrue();
+        results = pick.get().files().stream().mapToLong(DataFileMeta::fileSize).toArray();
+        assertThat(results).isEqualTo(new long[] {3, 3, 5});
+
+        // 5 time, no compaction because pickForSizeAmp already done
+        time.set(2001);
+        pick = compaction.pick(3, Arrays.asList(level(0, 1), level(1, 3), level(2, 5)));
+        assertThat(pick.isPresent()).isFalse();
     }
 
     @Test
@@ -217,7 +266,8 @@ public class UniversalCompactionTest {
 
     @Test
     public void testLookup() {
-        LookupCompaction compaction = new LookupCompaction(new UniversalCompaction(25, 1, 3));
+        ForceUpLevel0Compaction compaction =
+                new ForceUpLevel0Compaction(new UniversalCompaction(25, 1, 3));
 
         // level 0 to max level
         Optional<CompactUnit> pick = compaction.pick(3, level0(1, 2, 2, 2));

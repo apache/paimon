@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 
@@ -49,7 +48,7 @@ public class DropPartitionAction extends TableActionBase {
 
         this.partitions = partitions;
 
-        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         this.commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
     }
 

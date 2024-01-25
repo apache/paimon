@@ -22,7 +22,7 @@ import org.apache.paimon.options.Options
 import org.apache.paimon.spark.catalog.Catalogs
 import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 import org.apache.paimon.spark.sql.WithTableOptions
-import org.apache.paimon.table.AbstractFileStoreTable
+import org.apache.paimon.table.FileStoreTable
 
 import org.apache.spark.SparkConf
 import org.apache.spark.paimon.Utils
@@ -58,12 +58,12 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     super.beforeAll()
     spark.sql(s"USE paimon")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS paimon.$dbName0")
-    spark.sql(s"USE paimon.$dbName0")
   }
 
   override protected def afterAll(): Unit = {
     try {
       spark.sql(s"USE paimon")
+      spark.sql(s"DROP TABLE IF EXISTS $dbName0.$tableName0")
       spark.sql("USE default")
       spark.sql(s"DROP DATABASE paimon.$dbName0 CASCADE")
     } finally {
@@ -75,6 +75,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
   override protected def beforeEach(): Unit = {
     super.beforeAll()
     spark.sql(s"USE paimon")
+    spark.sql(s"USE paimon.$dbName0")
     spark.sql(s"DROP TABLE IF EXISTS $tableName0")
   }
 
@@ -92,12 +93,12 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
     val options = Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf)
     val catalogContext =
-      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf());
-    CatalogFactory.createCatalog(catalogContext);
+      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
+    CatalogFactory.createCatalog(catalogContext)
   }
 
-  def loadTable(tableName: String): AbstractFileStoreTable = {
-    catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[AbstractFileStoreTable]
+  def loadTable(tableName: String): FileStoreTable = {
+    catalog.getTable(Identifier.create(dbName0, tableName)).asInstanceOf[FileStoreTable]
   }
 
   protected def createRelationV2(tableName: String): LogicalPlan = {

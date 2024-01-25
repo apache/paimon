@@ -33,6 +33,16 @@ public class MathUtils {
     }
 
     /**
+     * Checks whether the given value is a power of two.
+     *
+     * @param value The value to check.
+     * @return True, if the value is a power of two, false otherwise.
+     */
+    public static boolean isPowerOf2(long value) {
+        return (value & (value - 1)) == 0;
+    }
+
+    /**
      * Computes the logarithm of the given value to the base of 2. This method throws an error, if
      * the given argument is not a power of 2.
      *

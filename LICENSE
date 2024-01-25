@@ -219,13 +219,13 @@ from https://github.com/linkedin/PalDB version 1.2.0
 paimon-filesystems/paimon-s3-impl/src/main/java/com/amazonaws/services/s3/model/transform/XmlResponsesSaxParser.java
 from https://github.com/aws/aws-sdk-java version 1.12.319
 
-paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlTypeUtils.java
-from https://ververica.github.io/flink-cdc-connectors/ version 2.3.0
+paimon-flink/paimon-flink-cdc/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlTypeUtils.java
+paimon-flink/paimon-flink-cdc/src/main/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBContainer.java
+paimon-flink/paimon-flink-cdc/src/main/java/org/apache/paimon/flink/action/cdc/postgres/PostgresTypeUtils.java
+from https://ververica.github.io/flink-cdc-connectors/ version 2.4.2
 
-paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/action/cdc/mongodb/MongoDBContainer.java
-from https://ververica.github.io/flink-cdc-connectors/ version 2.4.0
-
-paimon-flink/paimon-flink-common/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlDebeziumJsonEventParser.java
+paimon-flink/paimon-flink-cdc/src/main/java/org/apache/paimon/flink/action/cdc/mysql/MySqlRecordParser.java
+paimon-flink/paimon-flink-cdc/src/main/java/org/apache/paimon/flink/action/cdc/postgres/PostgresRecordParser.java
 from https://github.com/apache/doris-flink-connector/ version 1.4.0
 
 docs/static/js/flink.js

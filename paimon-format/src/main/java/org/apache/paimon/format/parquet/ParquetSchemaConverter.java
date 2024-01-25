@@ -115,11 +115,11 @@ public class ParquetSchemaConverter {
             case TIMESTAMP_WITHOUT_TIME_ZONE:
                 TimestampType timestampType = (TimestampType) type;
                 return createTimestampWithLogicalType(
-                        name, timestampType.getPrecision(), repetition);
+                        name, timestampType.getPrecision(), repetition, false);
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 LocalZonedTimestampType localZonedTimestampType = (LocalZonedTimestampType) type;
                 return createTimestampWithLogicalType(
-                        name, localZonedTimestampType.getPrecision(), repetition);
+                        name, localZonedTimestampType.getPrecision(), repetition, true);
             case ARRAY:
                 ArrayType arrayType = (ArrayType) type;
                 return ConversionPatterns.listOfElements(
@@ -151,13 +151,21 @@ public class ParquetSchemaConverter {
     }
 
     private static Type createTimestampWithLogicalType(
-            String name, int precision, Type.Repetition repetition) {
+            String name, int precision, Type.Repetition repetition, boolean isAdjustToUTC) {
         if (precision <= 3) {
-            return Types.primitive(INT64, repetition).as(OriginalType.TIMESTAMP_MILLIS).named(name);
+            return Types.primitive(INT64, repetition)
+                    .as(
+                            LogicalTypeAnnotation.timestampType(
+                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MILLIS))
+                    .named(name);
         } else if (precision > 6) {
             return Types.primitive(PrimitiveType.PrimitiveTypeName.INT96, repetition).named(name);
         } else {
-            return Types.primitive(INT64, repetition).as(OriginalType.TIMESTAMP_MICROS).named(name);
+            return Types.primitive(INT64, repetition)
+                    .as(
+                            LogicalTypeAnnotation.timestampType(
+                                    isAdjustToUTC, LogicalTypeAnnotation.TimeUnit.MICROS))
+                    .named(name);
         }
     }
 

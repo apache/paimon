@@ -215,8 +215,8 @@ Current supported aggregate functions and data types are:
   The first_value function retrieves the first null value from a data set.
   It supports all data types.
 
-* `first_not_null_value`:
-  The first_not_null_value function selects the first non-null value in a data set.
+* `first_non_null_value`:
+  The first_non_null_value function selects the first non-null value in a data set.
   It supports all data types.
 
 * `nested_update`:
@@ -295,7 +295,7 @@ Current supported aggregate functions and data types are:
 * `merge_map`:
   The merge_map function merge input maps. It only supports MAP type.
 
-Only `sum` and `product` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+Only `sum`, `product` and `count` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
