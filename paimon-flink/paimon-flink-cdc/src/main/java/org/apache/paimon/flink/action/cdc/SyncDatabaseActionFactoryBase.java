@@ -45,7 +45,7 @@ public abstract class SyncDatabaseActionFactoryBase<T extends SyncDatabaseAction
     }
 
     @Override
-    protected void withParams(MultipleParameterToolAdapter params, SyncDatabaseActionBase action) {
+    protected void withParams(MultipleParameterToolAdapter params, T action) {
         action.withTablePrefix(params.get(TABLE_PREFIX))
                 .withTableSuffix(params.get(TABLE_SUFFIX))
                 .includingTables(params.get(INCLUDING_TABLES))
