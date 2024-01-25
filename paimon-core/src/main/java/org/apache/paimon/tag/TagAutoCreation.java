@@ -23,13 +23,16 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.tag.TagTimeExtractor.ProcessTimeExtractor;
+import org.apache.paimon.tag.TagTimeExtractor.WatermarkExtractor;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import javax.annotation.Nullable;
 
 import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.List;
 import java.util.Optional;
 import java.util.SortedMap;
@@ -49,6 +52,7 @@ public class TagAutoCreation {
     private final Duration delay;
     private final Integer numRetainedMax;
     private final List<TagCallback> callbacks;
+    private final Duration idlenessTimeout;
 
     private LocalDateTime nextTag;
     private long nextSnapshot;
@@ -61,6 +65,7 @@ public class TagAutoCreation {
             TagPeriodHandler periodHandler,
             Duration delay,
             Integer numRetainedMax,
+            Duration idlenessTimeout,
             List<TagCallback> callbacks) {
         this.snapshotManager = snapshotManager;
         this.tagManager = tagManager;
@@ -70,6 +75,7 @@ public class TagAutoCreation {
         this.delay = delay;
         this.numRetainedMax = numRetainedMax;
         this.callbacks = callbacks;
+        this.idlenessTimeout = idlenessTimeout;
 
         this.periodHandler.validateDelay(delay);
 
@@ -89,11 +95,24 @@ public class TagAutoCreation {
     }
 
     public boolean forceCreatingSnapshot() {
-        return timeExtractor instanceof ProcessTimeExtractor
-                && (nextTag == null
-                        || isAfterOrEqual(
-                                LocalDateTime.now().minus(delay),
-                                periodHandler.nextTagTime(nextTag)));
+        if (timeExtractor instanceof WatermarkExtractor && idlenessTimeout != null) {
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            if (latestSnapshot == null) {
+                return false;
+            }
+
+            LocalDateTime snapshotTime =
+                    LocalDateTime.ofInstant(
+                            Instant.ofEpochMilli(latestSnapshot.watermark()),
+                            ZoneId.systemDefault());
+
+            return isAfterOrEqual(LocalDateTime.now().minus(idlenessTimeout), snapshotTime);
+        } else if (timeExtractor instanceof ProcessTimeExtractor) {
+            return nextTag == null
+                    || isAfterOrEqual(
+                            LocalDateTime.now().minus(delay), periodHandler.nextTagTime(nextTag));
+        }
+        return false;
     }
 
     public void run() {
@@ -179,6 +198,7 @@ public class TagAutoCreation {
                 TagPeriodHandler.create(options),
                 options.tagCreationDelay(),
                 options.tagNumRetainedMax(),
+                options.snapshotWatermarkIdleTimeout(),
                 callbacks);
     }
 }

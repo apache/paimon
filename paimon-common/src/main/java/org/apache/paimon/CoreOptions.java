@@ -991,6 +991,13 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
 
+    public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
+            key("snapshot.watermark-idle-timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
+
     public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
             key("parquet.enable.dictionary")
                     .intType()
@@ -1542,6 +1549,10 @@ public class CoreOptions implements Serializable {
 
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public Duration snapshotWatermarkIdleTimeout() {
+        return options.get(SNAPSHOT_WATERMARK_IDLE_TIMEOUT);
     }
 
     public String sinkWatermarkTimeZone() {
