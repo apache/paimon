@@ -67,7 +67,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
-import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -124,7 +124,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
-        return newSnapshotReader(MAIN_BRANCH);
+        return newSnapshotReader(DEFAULT_MAIN_BRANCH);
     }
 
     @Override
@@ -287,7 +287,7 @@ public abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public TableCommitImpl newCommit(String commitUser) {
         // Compatibility with previous design, the main branch is written by default
-        return newCommit(commitUser, MAIN_BRANCH);
+        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
     }
 
     public TableCommitImpl newCommit(String commitUser, String branchName) {

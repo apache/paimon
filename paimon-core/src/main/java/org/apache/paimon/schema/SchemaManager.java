@@ -64,7 +64,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
-import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -92,12 +92,12 @@ public class SchemaManager implements Serializable {
 
     /** @return latest schema. */
     public Optional<TableSchema> latest() {
-        return latest(MAIN_BRANCH);
+        return latest(DEFAULT_MAIN_BRANCH);
     }
 
     public Optional<TableSchema> latest(String branchName) {
         Path directoryPath =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? schemaDirectory()
                         : branchSchemaDirectory(branchName);
         try {

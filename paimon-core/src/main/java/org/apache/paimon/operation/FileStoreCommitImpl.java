@@ -71,7 +71,7 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -712,7 +712,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
         Path newSnapshotPath =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotManager.snapshotPath(newSnapshotId)
                         : snapshotManager.branchSnapshotPath(branchName, newSnapshotId);
 

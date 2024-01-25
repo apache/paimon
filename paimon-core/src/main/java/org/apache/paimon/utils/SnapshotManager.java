@@ -43,7 +43,7 @@ import java.util.function.BinaryOperator;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.MAIN_BRANCH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
@@ -92,12 +92,12 @@ public class SnapshotManager implements Serializable {
     }
 
     public Snapshot snapshot(long snapshotId) {
-        return snapshot(MAIN_BRANCH, snapshotId);
+        return snapshot(DEFAULT_MAIN_BRANCH, snapshotId);
     }
 
     public Snapshot snapshot(String branchName, long snapshotId) {
         Path snapshotPath =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotPath(snapshotId)
                         : branchSnapshotPath(branchName, snapshotId);
         return Snapshot.fromPath(fileIO, snapshotPath);
@@ -115,7 +115,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Snapshot latestSnapshot() {
-        return latestSnapshot(MAIN_BRANCH);
+        return latestSnapshot(DEFAULT_MAIN_BRANCH);
     }
 
     public @Nullable Snapshot latestSnapshot(String branchName) {
@@ -124,7 +124,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long latestSnapshotId() {
-        return latestSnapshotId(MAIN_BRANCH);
+        return latestSnapshotId(DEFAULT_MAIN_BRANCH);
     }
 
     public @Nullable Long latestSnapshotId(String branchName) {
@@ -141,7 +141,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public @Nullable Long earliestSnapshotId() {
-        return earliestSnapshotId(MAIN_BRANCH);
+        return earliestSnapshotId(DEFAULT_MAIN_BRANCH);
     }
 
     public @Nullable Long earliestSnapshotId(String branchName) {
@@ -379,7 +379,7 @@ public class SnapshotManager implements Serializable {
 
     private @Nullable Long findLatest(String branchName) throws IOException {
         Path snapshotDir =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotDirectory()
                         : branchSnapshotDirectory(branchName);
         if (!fileIO.exists(snapshotDir)) {
@@ -400,7 +400,7 @@ public class SnapshotManager implements Serializable {
 
     private @Nullable Long findEarliest(String branchName) throws IOException {
         Path snapshotDir =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotDirectory()
                         : branchSnapshotDirectory(branchName);
         if (!fileIO.exists(snapshotDir)) {
@@ -417,12 +417,12 @@ public class SnapshotManager implements Serializable {
     }
 
     public Long readHint(String fileName) {
-        return readHint(fileName, MAIN_BRANCH);
+        return readHint(fileName, DEFAULT_MAIN_BRANCH);
     }
 
     public Long readHint(String fileName, String branName) {
         Path snapshotDir =
-                branName.equals(MAIN_BRANCH)
+                branName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotDirectory()
                         : branchSnapshotDirectory(branName);
         Path path = new Path(snapshotDir, fileName);
@@ -445,7 +445,7 @@ public class SnapshotManager implements Serializable {
     private Long findByListFiles(BinaryOperator<Long> reducer, String branchName)
             throws IOException {
         Path snapshotDir =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotDirectory()
                         : branchSnapshotDirectory(branchName);
         return listVersionedFiles(fileIO, snapshotDir, SNAPSHOT_PREFIX)
@@ -454,7 +454,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitLatestHint(long snapshotId) throws IOException {
-        commitLatestHint(snapshotId, MAIN_BRANCH);
+        commitLatestHint(snapshotId, DEFAULT_MAIN_BRANCH);
     }
 
     public void commitLatestHint(long snapshotId, String branchName) throws IOException {
@@ -462,7 +462,7 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitEarliestHint(long snapshotId) throws IOException {
-        commitEarliestHint(snapshotId, MAIN_BRANCH);
+        commitEarliestHint(snapshotId, DEFAULT_MAIN_BRANCH);
     }
 
     public void commitEarliestHint(long snapshotId, String branchName) throws IOException {
@@ -472,7 +472,7 @@ public class SnapshotManager implements Serializable {
     private void commitHint(long snapshotId, String fileName, String branchName)
             throws IOException {
         Path snapshotDir =
-                branchName.equals(MAIN_BRANCH)
+                branchName.equals(DEFAULT_MAIN_BRANCH)
                         ? snapshotDirectory()
                         : branchSnapshotDirectory(branchName);
         Path hintFile = new Path(snapshotDir, fileName);

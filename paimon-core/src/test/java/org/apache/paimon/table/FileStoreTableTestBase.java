@@ -989,6 +989,12 @@ public abstract class FileStoreTableTestBase {
         table.createTag("test-tag", 1);
         table.createBranch("branch0", "test-tag");
 
+        assertThatThrownBy(() -> table.createBranch("main", "tag1"))
+                .satisfies(
+                        AssertionUtils.anyCauseMatches(
+                                IllegalArgumentException.class,
+                                "Branch name 'main' is the default branch and cannot be used."));
+
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(
                         AssertionUtils.anyCauseMatches(

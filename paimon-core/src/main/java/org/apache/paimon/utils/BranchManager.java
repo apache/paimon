@@ -36,7 +36,7 @@ public class BranchManager {
     private static final Logger LOG = LoggerFactory.getLogger(BranchManager.class);
 
     public static final String BRANCH_PREFIX = "branch-";
-    public static final String MAIN_BRANCH = "main";
+    public static final String DEFAULT_MAIN_BRANCH = "main";
 
     private final FileIO fileIO;
     private final Path tablePath;
@@ -73,6 +73,9 @@ public class BranchManager {
     }
 
     public void createBranch(String branchName, String tagName) {
+        checkArgument(
+                !branchName.equals(DEFAULT_MAIN_BRANCH),
+                "Branch name 'main' is the default branch and cannot be used.");
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         checkArgument(tagManager.tagExists(tagName), "Tag name '%s' not exists.", tagName);
