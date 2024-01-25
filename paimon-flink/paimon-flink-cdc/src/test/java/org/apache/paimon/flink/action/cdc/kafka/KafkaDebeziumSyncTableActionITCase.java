@@ -99,6 +99,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
     }
 
     @Test
+    @Timeout(60)
     public void testAllTypesWithSchema() throws Exception {
         testAllTypesWithSchemaImpl(DEBEZIUM);
     }
