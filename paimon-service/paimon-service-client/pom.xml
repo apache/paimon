@@ -31,10 +31,6 @@ under the License.
     <artifactId>paimon-service-client</artifactId>
     <name>Paimon : Service : Client</name>
 
-    <properties>
-        <flink.shaded.version>17.0</flink.shaded.version>
-    </properties>
-
     <dependencies>
         <dependency>
             <groupId>org.apache.paimon</groupId>
@@ -51,9 +47,9 @@ under the License.
         </dependency>
 
         <dependency>
-            <groupId>org.apache.flink</groupId>
-            <artifactId>flink-shaded-netty</artifactId>
-            <version>4.1.91.Final-${flink.shaded.version}</version>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-netty-4</artifactId>
+            <version>4.1.100.Final-${paimon.shade.version}</version>
         </dependency>
 
         <dependency>
