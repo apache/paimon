@@ -22,8 +22,8 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.utils.DateTimeUtils;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
@@ -44,7 +44,6 @@ import javax.annotation.Nullable;
 import java.math.BigDecimal;
 import java.time.Instant;
 import java.time.LocalDateTime;
-import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Map;
@@ -62,12 +61,14 @@ public class DebeziumSchemaUtils {
             @Nullable String rawValue,
             String debeziumType,
             @Nullable String className,
-            TypeMapping typeMapping) {
+            TypeMapping typeMapping,
+            JsonNode origin) {
         if (rawValue == null) {
             return null;
         }
 
         String transformed = rawValue;
+
         if (Bits.LOGICAL_NAME.equals(className)) {
             // transform little-endian form to normal order
             // https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-data-types
@@ -139,8 +140,8 @@ public class DebeziumSchemaUtils {
             // RowDataDebeziumDeserializeSchema#convertToTimestamp in flink-cdc-connector
             // for implementation
             // TODO currently we cannot get zone id
-            ZoneId zoneId = ZoneId.systemDefault();
-            LocalDateTime localDateTime = Instant.parse(rawValue).atZone(zoneId).toLocalDateTime();
+            LocalDateTime localDateTime =
+                    Instant.parse(rawValue).atZone(ZoneOffset.UTC).toLocalDateTime();
             transformed = DateTimeUtils.formatLocalDateTime(localDateTime, 6);
         } else if (MicroTime.SCHEMA_NAME.equals(className)) {
             long microseconds = Long.parseLong(rawValue);
@@ -157,8 +158,7 @@ public class DebeziumSchemaUtils {
         } else if (Point.LOGICAL_NAME.equals(className)
                 || Geometry.LOGICAL_NAME.equals(className)) {
             try {
-                JsonNode geoNode = JsonSerdeUtil.asSpecificNodeType(rawValue, JsonNode.class);
-                byte[] wkb = geoNode.get(Geometry.WKB_FIELD).binaryValue();
+                byte[] wkb = origin.get(Geometry.WKB_FIELD).binaryValue();
                 transformed = MySqlTypeUtils.convertWkbArray(wkb);
             } catch (Exception e) {
                 throw new IllegalArgumentException(
@@ -180,9 +180,14 @@ public class DebeziumSchemaUtils {
                     String precision = parameters.get("connect.decimal.precision");
                     if (precision == null) {
                         return DataTypes.DECIMAL(20, 0);
+                    }
+
+                    int p = Integer.parseInt(precision);
+                    if (p > DecimalType.MAX_PRECISION) {
+                        return DataTypes.STRING();
                     } else {
                         int scale = Integer.parseInt(parameters.get("scale"));
-                        return DataTypes.DECIMAL(Integer.parseInt(precision), scale);
+                        return DataTypes.DECIMAL(p, scale);
                     }
                 case Date.SCHEMA_NAME:
                     return DataTypes.DATE();

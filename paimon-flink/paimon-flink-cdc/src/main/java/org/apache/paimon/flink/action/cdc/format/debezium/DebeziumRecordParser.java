@@ -39,10 +39,10 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
-import static org.apache.paimon.utils.JsonSerdeUtil.parseJsonMap;
 
 /**
  * The {@code DebeziumRecordParser} class extends the abstract {@link RecordParser} and is designed
@@ -120,13 +120,16 @@ public class DebeziumRecordParser extends RecordParser {
     @Override
     protected void setRoot(String record) {
         JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
+
+        hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
-            hasSchema = true;
-            JsonNode schema = node.get(FIELD_SCHEMA);
-            parseSchema(schema);
             root = node.get(FIELD_PAYLOAD);
+            JsonNode schema = node.get(FIELD_SCHEMA);
+            if (!isNull(schema)) {
+                parseSchema(schema);
+                hasSchema = true;
+            }
         } else {
-            hasSchema = false;
             root = node;
         }
     }
@@ -142,10 +145,10 @@ public class DebeziumRecordParser extends RecordParser {
         ArrayNode fields = null;
         for (int i = 0; i < schemaFields.size(); i++) {
             JsonNode node = schemaFields.get(i);
-            if (node.get("field").equals("after")) {
+            if (getString(node, "field").equals("after")) {
                 fields = getNodeAs(node, "fields", ArrayNode.class);
                 break;
-            } else if (node.get("field").equals("before")) {
+            } else if (getString(node, "field").equals("before")) {
                 if (fields == null) {
                     fields = getNodeAs(node, "fields", ArrayNode.class);
                 }
@@ -159,11 +162,14 @@ public class DebeziumRecordParser extends RecordParser {
             debeziumTypes.put(field, getString(node, "type"));
             classNames.put(field, getString(node, "name"));
 
-            String parametersString = getString(node, "parameters");
+            JsonNode parametersNode = node.get("parameters");
             Map<String, String> parametersMap =
-                    parametersString == null
+                    isNull(parametersNode)
                             ? Collections.emptyMap()
-                            : parseJsonMap(parametersString, String.class);
+                            : JsonSerdeUtil.convertValue(
+                                    parametersNode,
+                                    new TypeReference<HashMap<String, String>>() {});
+
             parameters.put(field, parametersMap);
         }
     }
@@ -181,18 +187,18 @@ public class DebeziumRecordParser extends RecordParser {
             return super.extractRowData(record, paimonFieldTypes);
         }
 
-        Map<String, String> recordMap =
-                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, String>>() {});
+        Map<String, Object> recordMap =
+                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
-        for (Map.Entry<String, String> entry : recordMap.entrySet()) {
+        for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
             String fieldName = entry.getKey();
-            String rawValue = entry.getValue();
+            String rawValue = Objects.toString(entry.getValue(), null);
             String debeziumType = debeziumTypes.get(fieldName);
             String className = classNames.get(fieldName);
 
             String transformed =
                     DebeziumSchemaUtils.transformRawValue(
-                            rawValue, debeziumType, className, typeMapping);
+                            rawValue, debeziumType, className, typeMapping, record.get(fieldName));
             resultMap.put(fieldName, transformed);
 
             paimonFieldTypes.put(
