@@ -26,12 +26,11 @@ import org.apache.paimon.memory.MemorySegment;
 
 import java.io.RandomAccessFile;
 
+import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Util to apply a built bloom filter . */
 public class FileBasedBloomFilter {
-
-    private static final int FORCE_REFRESH_CACHE = 30;
 
     private final RandomAccessFile file;
     private final CacheManager cacheManager;
@@ -39,7 +38,7 @@ public class FileBasedBloomFilter {
     private final long readOffset;
     private final int readLength;
 
-    private int refreshCount;
+    private int accessCount;
 
     public FileBasedBloomFilter(
             RandomAccessFile file,
@@ -53,14 +52,14 @@ public class FileBasedBloomFilter {
         this.filter = new BloomFilter(numRecords, readLength);
         this.readOffset = readOffset;
         this.readLength = readLength;
-        this.refreshCount = 0;
+        this.accessCount = 0;
     }
 
     public boolean testHash(int hash) {
-        refreshCount++;
+        accessCount++;
         // we should refresh cache in LRU, but we cannot refresh everytime, it is costly.
         // so we introduce a refresh count to reduce refresh
-        if (refreshCount == FORCE_REFRESH_CACHE || filter.getMemorySegment() == null) {
+        if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
             MemorySegment segment =
                     cacheManager.getPage(
                             file,
@@ -68,7 +67,7 @@ public class FileBasedBloomFilter {
                             readLength,
                             (position, length) -> filter.unsetMemorySegment());
             filter.setMemorySegment(segment, 0);
-            refreshCount = 0;
+            accessCount = 0;
         }
         return filter.testHash(hash);
     }

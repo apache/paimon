@@ -35,7 +35,15 @@ import java.util.function.BiConsumer;
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
 
+    /**
+     * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
+     * every 10 visits, refresh the LRU strategy.
+     */
+    public static final int REFRESH_COUNT = 10;
+
     private final Cache<CacheKey, CacheValue> cache;
+
+    private int fileReadCount;
 
     public CacheManager(MemorySize maxMemorySize) {
         this.cache =
@@ -45,6 +53,7 @@ public class CacheManager {
                         .removalListener(this::onRemoval)
                         .executor(MoreExecutors.directExecutor())
                         .build();
+        this.fileReadCount = 0;
     }
 
     @VisibleForTesting
@@ -83,7 +92,11 @@ public class CacheManager {
         value.cleanCallback.accept(key.offset, key.length);
     }
 
-    private static class CacheKey {
+    public int fileReadCount() {
+        return fileReadCount;
+    }
+
+    private class CacheKey {
 
         private final RandomAccessFile file;
         private final long offset;
@@ -99,6 +112,7 @@ public class CacheManager {
             byte[] bytes = new byte[length];
             file.seek(offset);
             file.readFully(bytes);
+            fileReadCount++;
             return MemorySegment.wrap(bytes);
         }
 
