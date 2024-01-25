@@ -19,7 +19,7 @@
 package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.CachedRandomInputView;
+import org.apache.paimon.io.cache.FileBasedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
@@ -61,7 +61,7 @@ public class HashLookupStoreReader
     // Offset of the data for different key length
     private final long[] dataOffsets;
     // File input view
-    private CachedRandomInputView inputView;
+    private FileBasedRandomInputView inputView;
     // Buffers
     private final byte[] slotBuffer;
     @Nullable private FileBasedBloomFilter bloomFilter;
@@ -74,7 +74,7 @@ public class HashLookupStoreReader
         }
         LOG.info("Opening file {}", file.getName());
         // Create Mapped file in read-only mode
-        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
+        inputView = new FileBasedRandomInputView(file, cacheManager, cachePageSize);
 
         // Open file and read metadata
         long createdAt;
