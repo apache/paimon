@@ -24,8 +24,9 @@ import org.apache.paimon.service.messages.KvResponseTest;
 import org.apache.paimon.service.network.messages.MessageBody;
 import org.apache.paimon.service.network.messages.MessageSerializer;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.channel.embedded.EmbeddedChannel;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.channel.embedded.EmbeddedChannel;
+
 import org.junit.jupiter.api.Test;
 
 import java.nio.channels.ClosedChannelException;

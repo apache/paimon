@@ -18,10 +18,10 @@
 
 package org.apache.paimon.service.network;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufAllocator;
-import org.apache.flink.shaded.netty4.io.netty.buffer.CompositeByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.buffer.PooledByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.buffer.CompositeByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.PooledByteBufAllocator;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
