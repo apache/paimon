@@ -439,7 +439,8 @@ public class HiveCatalog extends AbstractCatalog {
             // sync to hive hms
             Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
             updateHmsTable(table, identifier, schema);
-            client.alter_table(identifier.getDatabaseName(), identifier.getObjectName(), table);
+            client.alter_table(
+                    identifier.getDatabaseName(), identifier.getObjectName(), table, true);
         } catch (Exception te) {
             schemaManager.deleteSchema(schema.id());
             throw new RuntimeException(te);
