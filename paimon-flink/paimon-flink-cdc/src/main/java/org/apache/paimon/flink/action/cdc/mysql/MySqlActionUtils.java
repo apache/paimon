@@ -225,9 +225,9 @@ public class MySqlActionUtils {
 
         boolean scanNewlyAddedTables = mySqlConfig.get(SCAN_NEWLY_ADDED_TABLE_ENABLED);
 
-        mySqlConfig
-                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
-                .ifPresent(sourceBuilder::closeIdleReaders);
+//        mySqlConfig
+//                .getOptional(MySqlSourceOptions.SCAN_INCREMENTAL_CLOSE_IDLE_READER_ENABLED)
+//                .ifPresent(sourceBuilder::closeIdleReaders);
 
         return sourceBuilder
                 .deserializer(schema)
