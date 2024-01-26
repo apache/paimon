@@ -39,9 +39,8 @@ public interface PartitionPredicate {
 
     boolean test(long rowCount, FieldStats[] fieldStats);
 
-    static PartitionPredicate fromPredicate(RowType partitionType, Predicate predicate) {
-        return new DefaultPartitionPredicate(
-                new RowDataToObjectArrayConverter(partitionType), predicate);
+    static PartitionPredicate fromPredicate(Predicate predicate) {
+        return new DefaultPartitionPredicate(predicate);
     }
 
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
@@ -52,18 +51,15 @@ public interface PartitionPredicate {
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 
-        private final RowDataToObjectArrayConverter converter;
         private final Predicate predicate;
 
-        private DefaultPartitionPredicate(
-                RowDataToObjectArrayConverter converter, Predicate predicate) {
-            this.converter = converter;
+        private DefaultPartitionPredicate(Predicate predicate) {
             this.predicate = predicate;
         }
 
         @Override
         public boolean test(BinaryRow part) {
-            return predicate.test(converter.convert(part));
+            return predicate.test(part);
         }
 
         @Override

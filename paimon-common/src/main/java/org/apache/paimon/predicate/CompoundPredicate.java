@@ -49,11 +49,6 @@ public class CompoundPredicate implements Predicate {
     }
 
     @Override
-    public boolean test(Object[] values) {
-        return function.test(values, children);
-    }
-
-    @Override
     public boolean test(InternalRow row) {
         return function.test(row, children);
     }
@@ -94,8 +89,6 @@ public class CompoundPredicate implements Predicate {
 
     /** Evaluate the predicate result based on multiple {@link Predicate}s. */
     public abstract static class Function implements Serializable {
-
-        public abstract boolean test(Object[] values, List<Predicate> children);
 
         public abstract boolean test(InternalRow row, List<Predicate> children);
 
