@@ -24,6 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBListState;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -68,11 +69,12 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                     "Append table does not support order by last field.");
         }
 
+        Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             joinKeyRow.replaceRow(row);
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (recordFilter().test(row)) {
+                if (predicate == null || predicate.test(row)) {
                     state.add(joinKeyRow, row);
                 }
             } else {

@@ -35,16 +35,6 @@ public class Or extends CompoundPredicate.Function {
     private Or() {}
 
     @Override
-    public boolean test(Object[] values, List<Predicate> children) {
-        for (Predicate child : children) {
-            if (child.test(values)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    @Override
     public boolean test(InternalRow row, List<Predicate> children) {
         for (Predicate child : children) {
             if (child.test(row)) {

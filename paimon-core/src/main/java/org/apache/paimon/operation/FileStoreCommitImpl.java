@@ -392,8 +392,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // sanity check, all changes must be done within the given partition
                 if (partitionFilter != null) {
                     for (ManifestEntry entry : appendTableFiles) {
-                        if (!partitionFilter.test(
-                                partitionObjectConverter.convert(entry.partition()))) {
+                        if (!partitionFilter.test(entry.partition())) {
                             throw new IllegalArgumentException(
                                     "Trying to overwrite partition "
                                             + partition
@@ -651,13 +650,10 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
                 // collect index files
                 if (latestSnapshot.indexManifest() != null) {
-                    RowDataToObjectArrayConverter converter =
-                            new RowDataToObjectArrayConverter(partitionType);
                     List<IndexManifestEntry> entries =
                             indexManifestFile.read(latestSnapshot.indexManifest());
                     for (IndexManifestEntry entry : entries) {
-                        if (partitionFilter == null
-                                || partitionFilter.test(converter.convert(entry.partition()))) {
+                        if (partitionFilter == null || partitionFilter.test(entry.partition())) {
                             indexChangesWithOverwrite.add(entry.toDeleteEntry());
                         }
                     }

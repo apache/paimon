@@ -44,7 +44,6 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -650,8 +649,6 @@ public class FileStoreCommitTest {
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
         // check data
-        RowDataToObjectArrayConverter partitionConverter =
-                new RowDataToObjectArrayConverter(TestKeyValueGenerator.DEFAULT_PART_TYPE);
         org.apache.paimon.predicate.Predicate partitionFilter =
                 partitions.stream()
                         .map(
@@ -663,7 +660,7 @@ public class FileStoreCommitTest {
 
         List<KeyValue> expectedKvs = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
-            if (partitionFilter.test(partitionConverter.convert(entry.getKey()))) {
+            if (partitionFilter.test(entry.getKey())) {
                 continue;
             }
             expectedKvs.addAll(entry.getValue());
