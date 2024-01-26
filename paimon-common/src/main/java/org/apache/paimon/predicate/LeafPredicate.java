@@ -89,11 +89,6 @@ public class LeafPredicate implements Predicate {
     }
 
     @Override
-    public boolean test(Object[] values) {
-        return function.test(type, values[fieldIndex], literals);
-    }
-
-    @Override
     public boolean test(InternalRow row) {
         return function.test(type, InternalRowUtils.get(row, fieldIndex, type), literals);
     }

@@ -35,13 +35,6 @@ import java.util.Optional;
 public interface Predicate extends Serializable {
 
     /**
-     * Test based on the specific input column values.
-     *
-     * @return return true when hit, false when not hit.
-     */
-    boolean test(Object[] values);
-
-    /**
      * Test based on the specific input row.
      *
      * @return return true when hit, false when not hit.

@@ -26,7 +26,6 @@ import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -59,7 +58,7 @@ public class TableStreamingReader {
     private final Table table;
     private final int[] projection;
     private final ReadBuilder readBuilder;
-    @Nullable private final PredicateFilter recordFilter;
+    @Nullable private final Predicate projectedPredicate;
     private final StreamTableScan scan;
 
     public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
@@ -94,12 +93,10 @@ public class TableStreamingReader {
             int[] fieldIdxToProjectionIdx =
                     IntStream.range(0, table.rowType().getFieldCount()).map(operator).toArray();
 
-            this.recordFilter =
-                    new PredicateFilter(
-                            TypeUtils.project(table.rowType(), projection),
-                            transformFieldMapping(predicate, fieldIdxToProjectionIdx).orElse(null));
+            this.projectedPredicate =
+                    transformFieldMapping(predicate, fieldIdxToProjectionIdx).orElse(null);
         } else {
-            recordFilter = null;
+            this.projectedPredicate = null;
         }
     }
 
@@ -134,8 +131,8 @@ public class TableStreamingReader {
             reader = ConcatRecordReader.create(readers);
         }
 
-        if (recordFilter != null) {
-            reader = reader.filter(recordFilter::test);
+        if (projectedPredicate != null) {
+            reader = reader.filter(projectedPredicate::test);
         }
         return reader;
     }
