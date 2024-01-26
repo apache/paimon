@@ -18,9 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
-import org.apache.flink.api.common.ExecutionConfig;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.configuration.RestOptions;
+import org.apache.flink.streaming.api.environment.CheckpointConfig;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
@@ -32,8 +30,10 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeCasts;
 
+import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.PipelineOptions;
 import org.apache.flink.configuration.ReadableConfig;
+import org.apache.flink.configuration.RestOptions;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
@@ -64,15 +64,17 @@ public abstract class ActionBase implements Action {
 
         // use the default env if user doesn't pass one
         Configuration configuration = new Configuration();
-        configuration.setLong("heartbeat.timeout",10000000000L);
+        configuration.setLong("heartbeat.timeout", 10000000000L);
         configuration.setString("taskmanager.memory.network.max", "200mb");
-        configuration.setString("security.kerberos.login.keytab","/opt/env/badmin.keytab");
-        configuration.setString("security.kerberos.login.principal","badmin");
+        configuration.setString("security.kerberos.login.keytab", "/opt/env/badmin.keytab");
+        configuration.setString("security.kerberos.login.principal", "badmin");
         configuration.setString(RestOptions.BIND_PORT, "8087"); // 指定访问端口
         initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment(configuration));
     }
 
     public ActionBase withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
+        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+        checkpointConfig.setCheckpointInterval(10000);
         initFlinkEnv(env);
         return this;
     }
