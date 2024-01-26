@@ -278,7 +278,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 .read()
                                 .dataSplits());
         TableRead read = table.newRead();
-        System.out.println(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING));
+
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
                         Arrays.asList(
