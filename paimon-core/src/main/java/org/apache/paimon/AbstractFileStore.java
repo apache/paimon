@@ -62,8 +62,6 @@ import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
  */
 public abstract class AbstractFileStore<T> implements FileStore<T> {
 
-    public static final String DEFAULT_MAIN_BRANCH = "main";
-
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
     protected final long schemaId;

@@ -38,6 +38,7 @@ import java.util.List;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** {@link FileStore} for reading and writing {@link InternalRow}. */
 public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
