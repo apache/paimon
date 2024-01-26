@@ -306,8 +306,8 @@ public class SchemaEvolutionUtilTest {
 
         LeafPredicate child = (LeafPredicate) filters.get(0);
         // Validate value 1 with index 1
-        assertThat(child.test(new Integer[] {0, 1})).isTrue();
+        assertThat(child.test(GenericRow.of(0, 1))).isTrue();
         // Validate value 2 with index 1
-        assertThat(child.test(new Integer[] {1, 2})).isFalse();
+        assertThat(child.test(GenericRow.of(1, 2))).isFalse();
     }
 }

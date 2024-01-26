@@ -26,12 +26,10 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -161,8 +159,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             storeTable,
                             projection,
                             predicate,
+                            createProjectedPredicate(projection),
                             path,
-                            createRecordFilter(projection),
                             joinKeys);
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
@@ -170,7 +168,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         lookupTable.open();
     }
 
-    private PredicateFilter createRecordFilter(int[] projection) {
+    @Nullable
+    private Predicate createProjectedPredicate(int[] projection) {
         Predicate adjustedPredicate = null;
         if (predicate != null) {
             // adjust to projection index
@@ -182,8 +181,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                             .toArray())
                             .orElse(null);
         }
-        return new PredicateFilter(
-                TypeUtils.project(table.rowType(), projection), adjustedPredicate);
+        return adjustedPredicate;
     }
 
     public Collection<RowData> lookup(RowData keyRow) {

@@ -112,7 +112,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withPartitionFilter(Predicate predicate) {
         if (partitionType.getFieldCount() > 0 && predicate != null) {
-            this.partitionFilter = PartitionPredicate.fromPredicate(partitionType, predicate);
+            this.partitionFilter = PartitionPredicate.fromPredicate(predicate);
         } else {
             this.partitionFilter = null;
         }

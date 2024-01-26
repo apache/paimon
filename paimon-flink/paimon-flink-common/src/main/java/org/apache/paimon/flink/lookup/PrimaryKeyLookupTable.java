@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -87,6 +88,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     @Override
     public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
             throws IOException {
+        Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
@@ -99,7 +101,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
             }
 
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (recordFilter().test(row)) {
+                if (predicate == null || predicate.test(row)) {
                     tableState.put(primaryKeyRow, row);
                 } else {
                     // The new record under primary key is filtered
