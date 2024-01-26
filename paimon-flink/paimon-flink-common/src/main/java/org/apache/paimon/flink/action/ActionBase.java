@@ -73,14 +73,15 @@ public abstract class ActionBase implements Action {
     }
 
     public ActionBase withStreamExecutionEnvironment(StreamExecutionEnvironment env) {
-        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
-        checkpointConfig.setCheckpointInterval(10000);
         initFlinkEnv(env);
         return this;
     }
 
     private void initFlinkEnv(StreamExecutionEnvironment env) {
         this.env = env;
+        CheckpointConfig checkpointConfig = env.getCheckpointConfig();
+        checkpointConfig.setCheckpointInterval(60000);
+        checkpointConfig.setMinPauseBetweenCheckpoints(40000);
         // we enable object reuse, we copy the un-reusable object ourselves.
         this.env.getConfig().enableObjectReuse();
         batchTEnv = StreamTableEnvironment.create(this.env, EnvironmentSettings.inBatchMode());
