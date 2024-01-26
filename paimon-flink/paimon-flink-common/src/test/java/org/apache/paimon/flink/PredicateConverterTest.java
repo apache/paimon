@@ -265,11 +265,7 @@ public class PredicateConverterTest {
         IntStream.range(0, rowCountList.size())
                 .forEach(
                         i ->
-                                assertThat(
-                                                predicate.test(
-                                                        GenericRow.of(
-                                                                rowCountList.get(i),
-                                                                statsList.get(i))))
+                                assertThat(predicate.test(rowCountList.get(i), statsList.get(i)))
                                         .isEqualTo(expectedForStats.get(i)));
     }
 
