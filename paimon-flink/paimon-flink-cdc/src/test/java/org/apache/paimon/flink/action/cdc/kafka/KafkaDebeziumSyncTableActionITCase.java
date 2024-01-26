@@ -91,4 +91,16 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
     public void testKafkaBuildSchemaWithDelete() throws Exception {
         testKafkaBuildSchemaWithDelete(DEBEZIUM);
     }
+
+    @Test
+    @Timeout(60)
+    public void testSchemaIncludeRecord1() throws Exception {
+        testSchemaIncludeRecord(DEBEZIUM);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testAllTypesWithSchema() throws Exception {
+        testAllTypesWithSchemaImpl(DEBEZIUM);
+    }
 }

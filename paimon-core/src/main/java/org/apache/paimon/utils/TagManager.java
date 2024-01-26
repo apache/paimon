@@ -19,6 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.Snapshot;
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -31,6 +32,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
 import java.util.SortedMap;
@@ -98,6 +100,25 @@ public class TagManager {
         }
     }
 
+    /** Make sure the tagNames are ALL tags of one snapshot. */
+    public void deleteAllTagsOfOneSnapshot(
+            List<String> tagNames, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
+        Snapshot taggedSnapshot = taggedSnapshot(tagNames.get(0));
+        List<Snapshot> taggedSnapshots;
+
+        // skip file deletion if snapshot exists
+        if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
+            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
+            return;
+        } else {
+            // FileIO discovers tags by tag file, so we should read all tags before we delete tag
+            taggedSnapshots = taggedSnapshots();
+            tagNames.forEach(tagName -> fileIO.deleteQuietly(tagPath(tagName)));
+        }
+
+        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+    }
+
     public void deleteTag(
             String tagName, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
@@ -112,10 +133,24 @@ public class TagManager {
             return;
         } else {
             // FileIO discovers tags by tag file, so we should read all tags before we delete tag
-            taggedSnapshots = taggedSnapshots();
+            SortedMap<Snapshot, List<String>> tags = tags();
             fileIO.deleteQuietly(tagPath(tagName));
+
+            // skip data file clean if more than 1 tags are created based on this snapshot
+            if (tags.get(taggedSnapshot).size() > 1) {
+                return;
+            }
+            taggedSnapshots = new ArrayList<>(tags.keySet());
         }
 
+        doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+    }
+
+    private void doClean(
+            Snapshot taggedSnapshot,
+            List<Snapshot> taggedSnapshots,
+            SnapshotManager snapshotManager,
+            TagDeletion tagDeletion) {
         // collect skipping sets from the left neighbor tag and the nearest right neighbor (either
         // the earliest snapshot or right neighbor tag)
         List<Snapshot> skippedSnapshots = new ArrayList<>();
@@ -141,8 +176,8 @@ public class TagManager {
         } catch (Exception e) {
             LOG.info(
                     String.format(
-                            "Skip cleaning data files of tag '%s' due to failed to build skipping set.",
-                            tagName),
+                            "Skip cleaning data files for tag of snapshot %s due to failed to build skipping set.",
+                            taggedSnapshot.id()),
                     e);
             success = false;
         }
@@ -189,7 +224,7 @@ public class TagManager {
     }
 
     /** Get all tagged snapshots with names sorted by snapshot id. */
-    public SortedMap<Snapshot, String> tags() {
+    public SortedMap<Snapshot, List<String>> tags() {
         return tags(tagName -> true);
     }
 
@@ -204,8 +239,9 @@ public class TagManager {
      *     name.
      * @throws RuntimeException if an IOException occurs during retrieval of snapshots.
      */
-    public SortedMap<Snapshot, String> tags(Predicate<String> filter) {
-        TreeMap<Snapshot, String> tags = new TreeMap<>(Comparator.comparingLong(Snapshot::id));
+    public SortedMap<Snapshot, List<String>> tags(Predicate<String> filter) {
+        TreeMap<Snapshot, List<String>> tags =
+                new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
             List<Path> paths =
                     listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
@@ -221,12 +257,35 @@ public class TagManager {
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
                 Snapshot.safelyFromPath(fileIO, path)
-                        .ifPresent(snapshot -> tags.put(snapshot, tagName));
+                        .ifPresent(
+                                snapshot ->
+                                        tags.computeIfAbsent(snapshot, s -> new ArrayList<>())
+                                                .add(tagName));
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         return tags;
+    }
+
+    public List<String> sortTagsOfOneSnapshot(List<String> tagNames) {
+        return tagNames.stream()
+                .map(
+                        name -> {
+                            try {
+                                return fileIO.getFileStatus(tagPath(name));
+                            } catch (IOException e) {
+                                throw new RuntimeException(e);
+                            }
+                        })
+                .sorted(Comparator.comparingLong(FileStatus::getModificationTime))
+                .map(fileStatus -> fileStatus.getPath().getName().substring(TAG_PREFIX.length()))
+                .collect(Collectors.toList());
+    }
+
+    @VisibleForTesting
+    public List<String> allTagNames() {
+        return tags().values().stream().flatMap(Collection::stream).collect(Collectors.toList());
     }
 
     private int findIndex(Snapshot taggedSnapshot, List<Snapshot> taggedSnapshots) {

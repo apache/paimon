@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.DefaultValueAssigner;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -56,10 +55,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     public static final String READ_OPTIMIZED = "ro";
 
-    private final AbstractFileStoreTable dataTable;
+    private final FileStoreTable dataTable;
 
     public ReadOptimizedTable(FileStoreTable dataTable) {
-        this.dataTable = (AbstractFileStoreTable) dataTable;
+        this.dataTable = dataTable;
     }
 
     @Override

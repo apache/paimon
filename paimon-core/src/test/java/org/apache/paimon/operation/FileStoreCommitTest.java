@@ -36,7 +36,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.stats.ColStats;
-import org.apache.paimon.stats.Stats;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataField;
@@ -790,16 +790,16 @@ public class FileStoreCommitTest {
 
         // Analyze and check
         HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(3, 10L, 1L, 10L, 0L, 8L, 8L));
-        Stats fakeStats =
-                new Stats(
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 10L, 1L, 10L, 0L, 8L, 8L));
+        Statistics fakeStats =
+                new Statistics(
                         latestSnapshot.id(),
                         latestSnapshot.schemaId(),
                         10L,
                         1000L,
                         fakeColStatsMap);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
-        Optional<Stats> readStats = statsFileHandler.readStats();
+        Optional<Statistics> readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();
         assertThat(readStats.get()).isEqualTo(fakeStats);
 
@@ -821,9 +821,9 @@ public class FileStoreCommitTest {
         // Then we need to analyze again
         latestSnapshot = store.snapshotManager().latestSnapshot();
         fakeColStatsMap = new HashMap<>();
-        fakeColStatsMap.put("orderId", new ColStats<>(3, 30L, 1L, 30L, 0L, 8L, 8L));
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 30L, 1L, 30L, 0L, 8L, 8L));
         fakeStats =
-                new Stats(
+                new Statistics(
                         latestSnapshot.id(),
                         latestSnapshot.schemaId(),
                         30L,
@@ -836,7 +836,7 @@ public class FileStoreCommitTest {
 
         // Analyze without col stats and check
         latestSnapshot = store.snapshotManager().latestSnapshot();
-        fakeStats = new Stats(latestSnapshot.id(), latestSnapshot.schemaId(), 30L, 3000L);
+        fakeStats = new Statistics(latestSnapshot.id(), latestSnapshot.schemaId(), 30L, 3000L);
         fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
         readStats = statsFileHandler.readStats();
         assertThat(readStats).isPresent();

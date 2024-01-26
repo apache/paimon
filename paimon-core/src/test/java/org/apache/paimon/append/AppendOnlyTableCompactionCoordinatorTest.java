@@ -26,7 +26,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataTypes;
 
@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class AppendOnlyTableCompactionCoordinatorTest {
 
     @TempDir Path tempDir;
-    private AppendOnlyFileStoreTable appendOnlyFileStoreTable;
+    private FileStoreTable appendOnlyFileStoreTable;
     private AppendOnlyTableCompactionCoordinator compactionCoordinator;
     private BinaryRow partition;
 
@@ -159,11 +159,8 @@ public class AppendOnlyTableCompactionCoordinatorTest {
         TableSchema tableSchema = schemaManager.createTable(schema());
 
         appendOnlyFileStoreTable =
-                (AppendOnlyFileStoreTable)
-                        FileStoreTableFactory.create(
-                                fileIO,
-                                new org.apache.paimon.fs.Path(tempDir.toString()),
-                                tableSchema);
+                FileStoreTableFactory.create(
+                        fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
         compactionCoordinator = new AppendOnlyTableCompactionCoordinator(appendOnlyFileStoreTable);
         partition = BinaryRow.EMPTY_ROW;
     }

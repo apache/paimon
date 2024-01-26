@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
@@ -135,7 +134,6 @@ public class CdcSinkBuilder<T> {
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
-        return new CdcUnawareBucketSink((AppendOnlyFileStoreTable) dataTable, parallelism)
-                .sinkFrom(parsed);
+        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed);
     }
 }

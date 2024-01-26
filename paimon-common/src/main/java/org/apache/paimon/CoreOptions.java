@@ -356,6 +356,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
+    public static final ConfigOption<MemorySize> CACHE_PAGE_SIZE =
+            key("cache-page-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("16 kb"))
+                    .withDescription("Memory page size for caching.");
+
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
             key("target-file-size")
                     .memoryType()
@@ -722,6 +728,19 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
+            key("lookup.cache.bloom.filter.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable the bloom filter for lookup cache.");
+
+    public static final ConfigOption<Double> LOOKUP_CACHE_BLOOM_FILTER_FPP =
+            key("lookup.cache.bloom.filter.fpp")
+                    .doubleType()
+                    .defaultValue(0.05)
+                    .withDescription(
+                            "Define the default false positive probability for lookup cache bloom filters.");
+
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
                     .intType()
@@ -971,6 +990,13 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
+
+    public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
+            key("snapshot.watermark-idle-timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
 
     public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
             key("parquet.enable.dictionary")
@@ -1261,6 +1287,14 @@ public class CoreOptions implements Serializable {
         return (int) options.get(PAGE_SIZE).getBytes();
     }
 
+    public int cachePageSize() {
+        return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public MemorySize lookupCacheMaxMemory() {
+        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
+    }
+
     public long targetFileSize() {
         return options.get(TARGET_FILE_SIZE).getBytes();
     }
@@ -1515,6 +1549,10 @@ public class CoreOptions implements Serializable {
 
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public Duration snapshotWatermarkIdleTimeout() {
+        return options.get(SNAPSHOT_WATERMARK_IDLE_TIMEOUT);
     }
 
     public String sinkWatermarkTimeZone() {

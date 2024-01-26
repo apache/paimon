@@ -43,7 +43,7 @@ public class StatsFileHandler {
      *
      * @return the written file name
      */
-    public String writeStats(Stats stats) {
+    public String writeStats(Statistics stats) {
         stats.serializeFieldsToString(schemaManager.schema(stats.schemaId()));
         return statsFile.write(stats);
     }
@@ -53,7 +53,7 @@ public class StatsFileHandler {
      *
      * @return stats
      */
-    public Optional<Stats> readStats() {
+    public Optional<Statistics> readStats() {
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             throw new IllegalStateException("Unable to obtain the latest schema");
@@ -66,15 +66,15 @@ public class StatsFileHandler {
      *
      * @return stats
      */
-    public Optional<Stats> readStats(long snapshotId) {
+    public Optional<Statistics> readStats(long snapshotId) {
         return readStats(snapshotManager.snapshot(snapshotId));
     }
 
-    public Optional<Stats> readStats(Snapshot snapshot) {
+    public Optional<Statistics> readStats(Snapshot snapshot) {
         if (snapshot.statistics() == null) {
             return Optional.empty();
         } else {
-            Stats stats = statsFile.read(snapshot.statistics());
+            Statistics stats = statsFile.read(snapshot.statistics());
             stats.deserializeFieldsFromString(schemaManager.schema(stats.schemaId()));
             return Optional.of(stats);
         }
@@ -86,5 +86,9 @@ public class StatsFileHandler {
         if (snapshot.statistics() != null) {
             statsFile.delete(snapshot.statistics());
         }
+    }
+
+    public void deleteStats(String statistic) {
+        statsFile.delete(statistic);
     }
 }

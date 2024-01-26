@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.flink.compact.UnawareBucketCompactionTopoBuilder;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.configuration.ExecutionOptions;
@@ -37,14 +37,14 @@ import java.util.Map;
  */
 public abstract class UnawareBucketSink<T> extends FlinkWriteSink<T> {
 
-    protected final AppendOnlyFileStoreTable table;
+    protected final FileStoreTable table;
     protected final LogSinkFunction logSinkFunction;
 
     @Nullable protected final Integer parallelism;
     protected final boolean boundedInput;
 
     public UnawareBucketSink(
-            AppendOnlyFileStoreTable table,
+            FileStoreTable table,
             @Nullable Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
             @Nullable Integer parallelism,

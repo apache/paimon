@@ -23,11 +23,10 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 
-/** Statistics tests for {@link AppendOnlyFileStoreTable}. */
+/** Statistics tests for append only tables. */
 public class AppendOnlyTableStatisticsTest extends FileStoreTableStatisticsTestBase {
     @Override
     protected FileStoreTable createStoreTable() throws Exception {

@@ -35,8 +35,8 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** Test for {@link CachedRandomInputView}. */
-public class CachedRandomInputViewTest {
+/** Test for {@link FileBasedRandomInputView}. */
+public class FileBasedRandomInputViewTest {
 
     @TempDir Path tempDir;
 
@@ -44,20 +44,20 @@ public class CachedRandomInputViewTest {
 
     @Test
     public void testMatched() throws IOException {
-        innerTest(1024 * 512);
+        innerTest(1024 * 512, 5000);
     }
 
     @Test
     public void testNotMatched() throws IOException {
-        innerTest(131092);
+        innerTest(131092, 1000);
     }
 
     @Test
     public void testRandom() throws IOException {
-        innerTest(rnd.nextInt(5000, 100000));
+        innerTest(rnd.nextInt(5000, 100000), 100);
     }
 
-    private void innerTest(int len) throws IOException {
+    private void innerTest(int len, int maxFileReadCount) throws IOException {
         byte[] bytes = new byte[len];
         MemorySegment segment = MemorySegment.wrap(bytes);
         for (int i = 0; i < bytes.length; i++) {
@@ -65,8 +65,8 @@ public class CachedRandomInputViewTest {
         }
 
         File file = writeFile(bytes);
-        CacheManager cacheManager = new CacheManager(1024, MemorySize.ofKibiBytes(128));
-        CachedRandomInputView view = new CachedRandomInputView(file, cacheManager);
+        CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
+        FileBasedRandomInputView view = new FileBasedRandomInputView(file, cacheManager, 1024);
 
         // read first one
         // this assertThatCode check the ConcurrentModificationException is not threw.
@@ -88,12 +88,16 @@ public class CachedRandomInputViewTest {
 
         // random read
         for (int i = 0; i < 10000; i++) {
-            int position = rnd.nextInt(bytes.length - 8);
+            // hot key -> 10
+            int position = rnd.nextBoolean() ? 10 : rnd.nextInt(bytes.length - 8);
             assertThatCode(() -> view.setReadPosition(position)).doesNotThrowAnyException();
             assertThat(view.readLong()).isEqualTo(segment.getLongBigEndian(position));
         }
 
         view.close();
+
+        // hot key in LRU, should have good cache hit rate
+        assertThat(cacheManager.fileReadCount()).isLessThan(maxFileReadCount);
         assertThat(cacheManager.cache().asMap().size()).isEqualTo(0);
     }
 

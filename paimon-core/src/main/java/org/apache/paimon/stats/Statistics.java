@@ -18,6 +18,7 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.TableSchema;
@@ -46,7 +47,8 @@ import java.util.OptionalLong;
  *   <li>colStats: column stats map
  * </ul>
  */
-public class Stats {
+@Experimental
+public class Statistics {
 
     // ID of the snapshot this statistics collected from
     private static final String FIELD_SNAPSHOT_ID = "snapshotId";
@@ -74,7 +76,7 @@ public class Stats {
     private final Map<String, ColStats<?>> colStats;
 
     @JsonCreator
-    public Stats(
+    public Statistics(
             @JsonProperty(FIELD_SNAPSHOT_ID) long snapshotId,
             @JsonProperty(FIELD_SCHEMA_ID) long schemaId,
             @JsonProperty(FIELD_MERGED_RECORD_COUNT) @Nullable Long mergedRecordCount,
@@ -87,7 +89,8 @@ public class Stats {
         this.colStats = colStats;
     }
 
-    public Stats(long snapshotId, long schemaId, Long mergedRecordCount, Long mergedRecordSize) {
+    public Statistics(
+            long snapshotId, long schemaId, Long mergedRecordCount, Long mergedRecordSize) {
         this(snapshotId, schemaId, mergedRecordCount, mergedRecordSize, Collections.emptyMap());
     }
 
@@ -161,14 +164,14 @@ public class Stats {
         return JsonSerdeUtil.toJson(this);
     }
 
-    public static Stats fromJson(String json) {
-        return JsonSerdeUtil.fromJson(json, Stats.class);
+    public static Statistics fromJson(String json) {
+        return JsonSerdeUtil.fromJson(json, Statistics.class);
     }
 
-    public static Stats fromPath(FileIO fileIO, Path path) {
+    public static Statistics fromPath(FileIO fileIO, Path path) {
         try {
             String json = fileIO.readFileUtf8(path);
-            return Stats.fromJson(json);
+            return Statistics.fromJson(json);
         } catch (IOException e) {
             throw new RuntimeException("Fails to read snapshot from path " + path, e);
         }
@@ -182,7 +185,7 @@ public class Stats {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        Stats stats = (Stats) o;
+        Statistics stats = (Statistics) o;
         return snapshotId == stats.snapshotId
                 && schemaId == stats.schemaId
                 && Objects.equals(mergedRecordCount, stats.mergedRecordCount)

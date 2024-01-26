@@ -97,7 +97,7 @@ public class HiveCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
     // Reserved properties
-    public static final String DB_COMMENT_PROP = "comment";
+    public static final String COMMENT_PROP = "comment";
     public static final String TABLE_TYPE_PROP = "table_type";
     public static final String PAIMON_TABLE_TYPE_VALUE = "paimon";
 
@@ -244,7 +244,7 @@ public class HiveCatalog extends AbstractCatalog {
         Map<String, String> parameter = new HashMap<>();
         properties.forEach(
                 (key, value) -> {
-                    if (key.equals(DB_COMMENT_PROP)) {
+                    if (key.equals(COMMENT_PROP)) {
                         database.setDescription(value);
                     } else if (key.equals(DB_LOCATION_PROP)) {
                         database.setLocationUri(value);
@@ -272,7 +272,7 @@ public class HiveCatalog extends AbstractCatalog {
             properties.put(DB_LOCATION_PROP, database.getLocationUri());
         }
         if (database.getDescription() != null) {
-            properties.put(DB_COMMENT_PROP, database.getDescription());
+            properties.put(COMMENT_PROP, database.getDescription());
         }
         return properties;
     }
@@ -449,14 +449,14 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     /**
-     * Avoid Hive metastore read SD location path data.
+     * Get EnvironmentContext with cascade param.
      *
      * @return EnvironmentContext
      */
     private EnvironmentContext getEnvironmentContext() {
         EnvironmentContext environmentContext = new EnvironmentContext();
         environmentContext.putToProperties(
-                StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
+                StatsSetupConst.CASCADE, StatsSetupConst.TRUE);
         return environmentContext;
     }
 
@@ -466,12 +466,14 @@ public class HiveCatalog extends AbstractCatalog {
                 hiveConf.getBoolean(
                         HiveCatalogOptions.TABLE_STATS_SKIP.key(),
                         HiveCatalogOptions.TABLE_STATS_SKIP.defaultValue());
+        EnvironmentContext environmentContext = getEnvironmentContext();
         if (skipTableStatsProperty) {
-            client.alter_table_with_environmentContext(
-                    databaseName, objectName, table, getEnvironmentContext());
-            return;
+            // Avoid Hive metastore read SD location path data.
+            environmentContext.putToProperties(
+                    StatsSetupConst.DO_NOT_UPDATE_STATS, StatsSetupConst.TRUE);
         }
-        client.alter_table(databaseName, objectName, table);
+        client.alter_table_with_environmentContext(
+                databaseName, objectName, table, environmentContext);
     }
 
     @Override
@@ -584,6 +586,9 @@ public class HiveCatalog extends AbstractCatalog {
                             .collect(Collectors.toList()));
         }
         table.setSd(sd);
+        if (schema.comment() != null) {
+            table.getParameters().put(COMMENT_PROP, schema.comment());
+        }
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
