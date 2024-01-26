@@ -19,7 +19,7 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
@@ -29,7 +29,7 @@ import java.util.Map;
 public class RowUnawareBucketSink extends UnawareBucketSink<InternalRow> {
 
     public RowUnawareBucketSink(
-            AppendOnlyFileStoreTable table,
+            FileStoreTable table,
             Map<String, String> overwritePartitions,
             LogSinkFunction logSinkFunction,
             Integer parallelism,

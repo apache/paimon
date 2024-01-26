@@ -20,26 +20,21 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.CoreOptions.MERGE_ENGINE
 import org.apache.paimon.options.Options
 import org.apache.paimon.spark.SparkTable
-import org.apache.paimon.table.{FileStoreTable, PrimaryKeyFileStoreTable, Table}
 
 import org.apache.spark.sql.catalyst.SQLConfHelper
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, AttributeSet, BinaryExpression, EqualTo, Expression, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.Assignment
-
-import scala.collection.JavaConverters._
 
 trait RowLevelHelper extends SQLConfHelper {
 
   val operation: RowLevelOp
 
   protected def checkPaimonTable(table: SparkTable): Unit = {
-    val paimonTable = table.getTable match {
-      case pkTable: PrimaryKeyFileStoreTable => pkTable
-      case _: FileStoreTable =>
-        throw new UnsupportedOperationException(
-          s"Only support to $operation table with primary keys.")
-      case _ =>
-        throw new UnsupportedOperationException(s"Can't $operation a non-file store table.")
+    val paimonTable = if (table.getTable.primaryKeys().size() > 0) {
+      table.getTable
+    } else {
+      throw new UnsupportedOperationException(
+        s"Only support to $operation table with primary keys.")
     }
 
     val options = Options.fromMap(paimonTable.options)

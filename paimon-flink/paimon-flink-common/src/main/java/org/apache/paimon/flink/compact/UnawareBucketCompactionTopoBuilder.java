@@ -25,7 +25,7 @@ import org.apache.paimon.flink.sink.UnawareBucketCompactionSink;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
@@ -51,14 +51,12 @@ public class UnawareBucketCompactionTopoBuilder {
 
     private final transient StreamExecutionEnvironment env;
     private final String tableIdentifier;
-    private final AppendOnlyFileStoreTable table;
+    private final FileStoreTable table;
     @Nullable private List<Map<String, String>> specifiedPartitions = null;
     private boolean isContinuous = false;
 
     public UnawareBucketCompactionTopoBuilder(
-            StreamExecutionEnvironment env,
-            String tableIdentifier,
-            AppendOnlyFileStoreTable table) {
+            StreamExecutionEnvironment env, String tableIdentifier, FileStoreTable table) {
         this.env = env;
         this.tableIdentifier = tableIdentifier;
         this.table = table;

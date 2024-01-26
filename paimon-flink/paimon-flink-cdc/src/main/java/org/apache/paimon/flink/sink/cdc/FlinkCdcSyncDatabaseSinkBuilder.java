@@ -27,7 +27,6 @@ import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.Preconditions;
@@ -171,7 +170,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        new CdcUnawareBucketSink((AppendOnlyFileStoreTable) table, parallelism).sinkFrom(parsed);
+        new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed);
     }
 
     private void buildDividedCdcSink() {
