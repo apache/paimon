@@ -18,7 +18,10 @@
 
 package org.apache.paimon.flink.action.cdc.oracle;
 
+import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
+import io.debezium.relational.TableId;
 import org.apache.commons.lang3.StringUtils;
+import org.apache.flink.configuration.Configuration;
 import org.jetbrains.annotations.NotNull;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
@@ -31,6 +34,30 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.Future;
+
+import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.ResultSet;
+import java.sql.SQLException;
+import java.sql.Statement;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.*;
+import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertNotNull;
+import static org.junit.Assert.assertTrue;
 
 /** Copy from testcontainers. */
 public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
@@ -244,4 +271,81 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
         parameters.put(SETUP_SQL_PARAM_NAME, sqlPath);
         return this;
     }
+
+    static Connection getConnection() throws Exception {
+        String url = ORACLE_CONTAINER.getJdbcUrl();
+
+        return DriverManager.getConnection(
+                url,
+                TEST_USER,
+                TEST_PWD);
+    }
+
+    public static void createAndInitialize(String sqlFile) throws Exception {
+        final String ddlFile = String.format("%s", sqlFile);
+        final URL ddlTestFile = OracleActionITCaseBase.class.getClassLoader().getResource(ddlFile);
+        assertNotNull("Cannot locate " + ddlFile, ddlTestFile);
+        try (Connection connection = getConnection();
+             Statement statement = connection.createStatement()) {
+            connection.setAutoCommit(true);
+            // region Drop all user tables in Debezium schema
+            listTables(connection)
+                    .forEach(
+                            tableId -> {
+                                try {
+                                    statement.execute(
+                                            "DROP TABLE "
+                                                    + String.join(
+                                                    ".",
+                                                    tableId.schema(),
+                                                    tableId.table()));
+                                } catch (SQLException e) {
+                                    //LOG.warn("drop table error, table:{}", tableId, e);
+                                }
+                            });
+            // endregion
+
+            final List<String> statements =
+                    Arrays.stream(
+                            Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()
+                                    .map(String::trim)
+                                    .filter(x -> !x.startsWith("--") && !x.isEmpty())
+//                                    .map(
+//                                            x -> {
+//                                                final Matcher m =
+//                                                        COMMENT_PATTERN.matcher(x);
+//                                                return m.matches() ? m.group(1) : x;
+//                                            })
+                                    .collect(Collectors.joining("\n"))
+                                    .split(";"))
+                            .collect(Collectors.toList());
+
+            for (String stmt : statements) {
+                statement.execute(stmt);
+            }
+        }
+    }
+
+    // ------------------ utils -----------------------
+    private static List<TableId> listTables(Connection connection) {
+
+        Set<TableId> tableIdSet = new HashSet<>();
+        String queryTablesSql =
+                "SELECT OWNER ,TABLE_NAME,TABLESPACE_NAME FROM ALL_TABLES \n"
+                        + "WHERE TABLESPACE_NAME IS NOT NULL AND TABLESPACE_NAME NOT IN ('SYSTEM','SYSAUX') "
+                        + "AND NESTED = 'NO' AND TABLE_NAME NOT IN (SELECT PARENT_TABLE_NAME FROM ALL_NESTED_TABLES)";
+        try {
+            ResultSet resultSet = connection.createStatement().executeQuery(queryTablesSql);
+            while (resultSet.next()) {
+                String schemaName = resultSet.getString(1);
+                String tableName = resultSet.getString(2);
+                TableId tableId = new TableId(ORACLE_DATABASE, schemaName, tableName);
+                tableIdSet.add(tableId);
+            }
+        } catch (SQLException e) {
+            //LOG.warn(" SQL execute error, sql:{}", queryTablesSql, e);
+        }
+        return new ArrayList<>(tableIdSet);
+    }
+
 }

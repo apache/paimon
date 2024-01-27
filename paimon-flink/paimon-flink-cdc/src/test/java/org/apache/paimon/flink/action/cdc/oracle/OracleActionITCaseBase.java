@@ -81,7 +81,7 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
 
     protected Statement getStatement(String databaseName) throws SQLException {
         Connection conn =
-                DriverManager.getConnection(ORACLE_CONTAINER.getJdbcUrl(), USER, PASSWORD);
+                DriverManager.getConnection(ORACLE_CONTAINER.getJdbcUrl(), TEST_USER, TEST_PWD);
         return conn.createStatement();
     }
 
@@ -90,9 +90,11 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
         config.put(OracleSourceOptions.HOSTNAME.key(), ORACLE_CONTAINER.getHost());
         config.put(
                 OracleSourceOptions.PORT.key(), String.valueOf(ORACLE_CONTAINER.getOraclePort()));
-        config.put(OracleSourceOptions.USERNAME.key(), USER);
-        config.put(OracleSourceOptions.PASSWORD.key(), PASSWORD);
-        config.put(OracleSourceOptions.DATABASE_NAME.key(), ORACLE_DATABASE);
+//        config.put(OracleSourceOptions.USERNAME.key(), TEST_USER);
+//        config.put(OracleSourceOptions.PASSWORD.key(), TEST_PWD);
+        config.put(OracleSourceOptions.USERNAME.key(), ORACLE_CONTAINER.getUsername());
+        config.put(OracleSourceOptions.PASSWORD.key(), ORACLE_CONTAINER.getPassword());
+        config.put(OracleSourceOptions.DATABASE_NAME.key(), ORACLE_CONTAINER.getDatabaseName());
         return config;
     }
 

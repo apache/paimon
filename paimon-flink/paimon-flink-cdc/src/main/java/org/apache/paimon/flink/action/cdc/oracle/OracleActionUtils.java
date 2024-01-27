@@ -89,7 +89,10 @@ public class OracleActionUtils {
                                     databaseName, schemaName, "%", new String[] {"TABLE"})) {
                         while (tables.next()) {
                             String tableName = tables.getString("TABLE_NAME");
+                            System.out.println(tableName);
                             String tableComment = tables.getString("REMARKS");
+                            System.out.println(tableComment);
+                            System.out.println("============");
                             Identifier identifier = Identifier.create(databaseName, tableName);
                             if (monitorTablePredication.test(tableName)) {
                                 Schema schema =

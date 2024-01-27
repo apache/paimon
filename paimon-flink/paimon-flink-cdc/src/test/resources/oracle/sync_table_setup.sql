@@ -24,38 +24,59 @@
 -- ################################################################################
 
 -- Create and populate products and category tables using a single insert with many rows
-CREATE TABLE DEBEZIUM.PRODUCTS (
-                                   ID NUMBER(9, 0) NOT NULL,
-                                   NAME VARCHAR(255) NOT NULL,
-                                   DESCRIPTION VARCHAR(512),
-                                   WEIGHT FLOAT,
-                                   PRIMARY KEY(ID)
+-- CREATE TABLE DEBEZIUM.PRODUCTS (
+--                                    id NUMBER(9, 0) NOT NULL,
+--                                    NAME VARCHAR(255) NOT NULL,
+--                                    DESCRIPTION VARCHAR(512),
+--                                    WEIGHT FLOAT,
+--                                    PRIMARY KEY(id)
+-- );
+-- CREATE TABLE DEBEZIUM.COMPOSITE (
+--                                    id NUMBER(9, 0) NOT NULL,
+--                                    NAME VARCHAR(255) NOT NULL,
+--                                    DESCRIPTION VARCHAR(512),
+--                                    WEIGHT FLOAT,
+--                                    PRIMARY KEY(id)
+-- );
+
+-- sqlplus dbzuser/dbz@localhost:1521/ORCLCDB
+
+CREATE TABLE DEBEZIUM.composite (
+                                    id NUMBER(9, 0) NOT NULL,
+                                    name VARCHAR(255) NOT NULL,
+                                    PRIMARY KEY(id)
 );
-CREATE TABLE DEBEZIUM.CATEGORY (
-                                   ID NUMBER(9, 0) NOT NULL,
-                                   CATEGORY_NAME VARCHAR(255),
-                                   PRIMARY KEY(ID)
-);
 
-ALTER TABLE DEBEZIUM.PRODUCTS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
-ALTER TABLE DEBEZIUM.CATEGORY ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+-- CREATE TABLE DEBEZIUM.cat (
+--                                    id NUMBER(9, 0) NOT NULL,
+--                                    CATEGORY_NAME VARCHAR(255),
+--                                    PRIMARY KEY(id)
+-- );
 
 
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (101,'scooter','Small 2-wheel scooter',3.14);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (102,'car battery','12V car battery',8.1);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (103,'12-pack drill bits','12-pack of drill bits with sizes ranging from #40 to #3',0.8);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (104,'hammer','12oz carpenters hammer',0.75);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (105,'hammer','14oz carpenters hammer',0.875);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (106,'hammer','16oz carpenters hammer',1.0);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (107,'rocks','box of assorted rocks',5.3);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (108,'jacket','water resistent black wind breaker',0.1);
-INSERT INTO DEBEZIUM.PRODUCTS (ID,NAME,DESCRIPTION,WEIGHT)
-VALUES (109,'spare tire','24 inch spare tire',22.2);
+-- ALTER TABLE DEBEZIUM.PRODUCTS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+-- ALTER TABLE DEBEZIUM.cat ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+ALTER TABLE DEBEZIUM.composite ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+-- ALTER TABLE DEBEZIUM.COMPOSITE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+
+-- INSERT INTO DEBEZIUM.composite (id,name,weight)
+-- VALUES (101,'scooter',3.14);
+-- INSERT INTO DEBEZIUM.composite (id,name,weight)
+-- VALUES (102,'test',6.28);
+-- INSERT INTO DEBEZIUM.COMPOSITE (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (101,'scooter','Small 2-wheel scooter',3.14);
+
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (101,'scooter','Small 2-wheel scooter',3.14);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (102,'car battery','12V car battery',8.1);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (103,'12-pack drill bits','12-pack of drill bits with sizes ranging from #40 to #3',0.8);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (104,'hammer','12oz carpenters hammer',0.75);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (105,'hammer','14oz carpenters hammer',0.875);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (106,'hammer','16oz carpenters hammer',1.0);
+-- INSERT INTO DEBEZIUM.PRODUCTS (id,NAME,DESCRIPTION,WEIGHT)
+-- VALUES (107,'rocks','box of assorted rocks',5.3);

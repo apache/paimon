@@ -147,6 +147,9 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                             plan == null ? Collections.emptyList() : plan.splits(),
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
+            if(sortedActual.size() != 0) {
+                System.out.println(sortedActual.get(0));
+            }
             Collections.sort(sortedActual);
             if (sortedExpected.equals(sortedActual)) {
                 break;

@@ -235,14 +235,14 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
-            records.add(
-                    new RichCdcMultiplexRecord(
-                            databaseName,
-                            currentTable,
-                            fieldTypes,
-                            Collections.emptyList(),
-                            new CdcRecord(RowKind.INSERT, after)));
-            // records.add((createRecord(RowKind.INSERT,after)));
+//            records.add(
+//                    new RichCdcMultiplexRecord(
+//                            databaseName,
+//                            currentTable,
+//                            fieldTypes,
+//                            Collections.emptyList(),
+//                            new CdcRecord(RowKind.INSERT, after)));
+             records.add((createRecord(RowKind.INSERT,after)));
         }
 
         return records;
@@ -265,7 +265,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
         for (Map.Entry<String, DebeziumEvent.Field> field : fields.entrySet()) {
             String fieldName = field.getKey();
-            String postgresSqlType = field.getValue().type();
+            String oracleSqlType = field.getValue().type();
             JsonNode objectValue = recordRow.get(fieldName);
             if (isNull(objectValue)) {
                 continue;
@@ -288,10 +288,10 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                 } else {
                     newValue = Base64.getEncoder().encodeToString(bigEndian);
                 }
-            } else if (("bytes".equals(postgresSqlType) && className == null)) {
+            } else if (("bytes".equals(oracleSqlType) && className == null)) {
                 // binary, varbinary
                 newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(postgresSqlType) && Decimal.LOGICAL_NAME.equals(className)) {
+            } else if ("bytes".equals(oracleSqlType) && Decimal.LOGICAL_NAME.equals(className)) {
                 // numeric, decimal
                 try {
                     new BigDecimal(oldValue);
@@ -348,7 +348,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                                 .atZone(ZoneOffset.UTC)
                                 .toLocalTime()
                                 .toString();
-            } else if ("array".equals(postgresSqlType)) {
+            } else if ("array".equals(oracleSqlType)) {
                 ArrayNode arrayNode = (ArrayNode) objectValue;
                 List<String> newArrayValues = new ArrayList<>();
                 arrayNode

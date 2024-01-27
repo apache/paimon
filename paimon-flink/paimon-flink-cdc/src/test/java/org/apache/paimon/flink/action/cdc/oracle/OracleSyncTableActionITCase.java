@@ -28,7 +28,6 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Arrays;
@@ -36,6 +35,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.flink.action.cdc.oracle.OracleContainer.createAndInitialize;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link OracleSyncTableAction}. */
@@ -43,18 +43,21 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
     private static final String DATABASE_NAME = "ORCLCDB";
 
     @BeforeAll
-    public static void startContainers() {
-        ORACLE_CONTAINER.withSetupSQL("postgres/sync_table_setup.sql");
+    public static void startContainers() throws Exception {
+        //ORACLE_CONTAINER.withSetupSQL("oracle/sync_table_setup.sql");
+
         start();
+        createAndInitialize("oracle/sync_table_setup.sql");
     }
 
     @Test
-    //@Timeout(60)
+    // @Timeout(60)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> oracleConfig = getBasicOracleConfig();
-        oracleConfig.put(OracleSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
+        System.out.println(ORACLE_CONTAINER.getDatabaseName() + "*****");
+        //oracleConfig.put(OracleSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
         oracleConfig.put(OracleSourceOptions.SCHEMA_NAME.key(), ORACLE_SCHEMA);
-        oracleConfig.put(OracleSourceOptions.TABLE_NAME.key(), "PRODUCTS");
+        oracleConfig.put(OracleSourceOptions.TABLE_NAME.key(), "COMPOSITE");
 
         OracleSyncTableAction action =
                 syncTableActionBuilder(oracleConfig)
@@ -63,30 +66,27 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
                                         CatalogOptions.METASTORE.key(), "test-alter-table"))
                         .withTableConfig(getBasicTableConfig())
                         .withPartitionKeys("ID")
-                        .withPrimaryKeys("ID","NAME")
+                        .withPrimaryKeys("ID", "NAME")
                         .build();
         runActionWithDefaultEnv(action);
 
-        checkTableSchema(
-                "[{\"id\":0,\"name\":\"pt\",\"type\":\"INT NOT NULL\"},"
-                        + "{\"id\":1,\"name\":\"_id\",\"type\":\"INT NOT NULL\"},"
-                        + "{\"id\":2,\"name\":\"v1\",\"type\":\"VARCHAR(10)\"}]");
+                checkTableSchema(
+                        "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
+                                + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"}]");
 
-        try (Statement statement = getStatement(DATABASE_NAME)) {
+        try (Statement statement = getStatement(ORACLE_CONTAINER.getDatabaseName())) {
             FileStoreTable table = getFileStoreTable();
 
-            statement.executeUpdate("INSERT INTO schema_evolution_1 VALUES (1, 1, 'one')");
-            statement.executeUpdate(
-                    "INSERT INTO schema_evolution_2 VALUES (1, 2, 'two'), (2, 4, 'four')");
+            statement.executeUpdate("INSERT INTO DEBEZIUM.composite (id,name) VALUES (103,'test66')");
+
             RowType rowType =
                     RowType.of(
                             new DataType[] {
                                 DataTypes.INT().notNull(),
-                                DataTypes.INT().notNull(),
-                                DataTypes.STRING()
+                                DataTypes.STRING().notNull()
                             },
-                            new String[] {"pt", "_id", "v1"});
-            List<String> primaryKeys = Arrays.asList("pt", "_id");
+                            new String[] {"ID", "NAME"});
+            List<String> primaryKeys = Arrays.asList("ID", "NAME");
             List<String> expected =
                     Arrays.asList("+I[1, 1, one]", "+I[1, 2, two]", "+I[2, 4, four]");
             waitForResult(expected, table, rowType, primaryKeys);

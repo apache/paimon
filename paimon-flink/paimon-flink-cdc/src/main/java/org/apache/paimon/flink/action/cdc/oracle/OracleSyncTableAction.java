@@ -95,7 +95,7 @@ public class OracleSyncTableAction extends SyncTableActionBase {
         this.oracleSchemasInfo =
                 OracleActionUtils.getOracleTableInfos(
                         cdcSourceConfig, monitorTablePredication(), new ArrayList<>(), typeMapping);
-        validatePostgresTableInfos(oracleSchemasInfo);
+        validateOracleTableInfos(oracleSchemasInfo);
         JdbcTableInfo tableInfo = oracleSchemasInfo.mergeAll();
         return tableInfo.schema();
     }
@@ -122,7 +122,7 @@ public class OracleSyncTableAction extends SyncTableActionBase {
                 cdcSourceConfig, schemaList.toArray(new String[0]), tableList);
     }
 
-    private void validatePostgresTableInfos(JdbcSchemasInfo jdbcSchemasInfo) {
+    private void validateOracleTableInfos(JdbcSchemasInfo jdbcSchemasInfo) {
         List<Identifier> nonPkTables = jdbcSchemasInfo.nonPkTables();
         checkArgument(
                 nonPkTables.isEmpty(),
