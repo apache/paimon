@@ -121,7 +121,6 @@ public class SyncJobHandler {
                         cdcSourceConfig,
                         POSTGRES_CONF,
                         PostgresSourceOptions.HOSTNAME,
-                        PostgresSourceOptions.PG_PORT,
                         PostgresSourceOptions.USERNAME,
                         PostgresSourceOptions.PASSWORD,
                         PostgresSourceOptions.DATABASE_NAME,
