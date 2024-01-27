@@ -29,18 +29,18 @@ import org.apache.paimon.utils.FutureUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.netty4.io.netty.bootstrap.Bootstrap;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFutureListener;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelInitializer;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelOption;
+import org.apache.paimon.shade.netty4.io.netty.channel.EventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.nio.NioEventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.SocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.nio.NioSocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import org.apache.paimon.shade.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 
-import org.apache.flink.shaded.netty4.io.netty.bootstrap.Bootstrap;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufAllocator;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFutureListener;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
-import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioSocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
