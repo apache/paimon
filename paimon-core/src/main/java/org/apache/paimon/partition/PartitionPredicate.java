@@ -19,6 +19,8 @@
 package org.apache.paimon.partition;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
@@ -37,7 +39,8 @@ public interface PartitionPredicate {
 
     boolean test(BinaryRow part);
 
-    boolean test(long rowCount, FieldStats[] fieldStats);
+    boolean test(
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
     static PartitionPredicate fromPredicate(Predicate predicate) {
         return new DefaultPartitionPredicate(predicate);
@@ -63,8 +66,12 @@ public interface PartitionPredicate {
         }
 
         @Override
-        public boolean test(long rowCount, FieldStats[] fieldStats) {
-            return predicate.test(rowCount, fieldStats);
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            return predicate.test(rowCount, minValues, maxValues, nullCounts);
         }
     }
 
@@ -75,7 +82,7 @@ public interface PartitionPredicate {
     class MultiplePartitionPredicate implements PartitionPredicate {
 
         private final Set<BinaryRow> partitions;
-
+        private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
 
@@ -83,7 +90,7 @@ public interface PartitionPredicate {
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
             RowType partitionType = converter.rowType();
-            int fieldNum = partitionType.getFieldCount();
+            this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
             Serializer<Object>[] serializers = new Serializer[fieldNum];
             FullFieldStatsCollector[] collectors = new FullFieldStatsCollector[fieldNum];
@@ -113,13 +120,18 @@ public interface PartitionPredicate {
         }
 
         @Override
-        public boolean test(long rowCount, FieldStats[] fieldStats) {
-            if (fieldStats.length == 0) {
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            if (fieldNum == 0) {
                 return true;
             }
 
-            for (int i = 0; i < fieldStats.length; i++) {
-                if (!min[i].test(rowCount, fieldStats) || !max[i].test(rowCount, fieldStats)) {
+            for (int i = 0; i < fieldNum; i++) {
+                if (!min[i].test(rowCount, minValues, maxValues, nullCounts)
+                        || !max[i].test(rowCount, minValues, maxValues, nullCounts)) {
                     return false;
                 }
             }

@@ -45,7 +45,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 meta.fileSize(),
                 meta.numAddedFiles(),
                 meta.numDeletedFiles(),
-                meta.partitionStats().toRowData(),
+                meta.partitionStats().toRow(),
                 meta.schemaId());
     }
 
@@ -65,7 +65,7 @@ public class ManifestFileMetaSerializer extends VersionedObjectSerializer<Manife
                 row.getLong(1),
                 row.getLong(2),
                 row.getLong(3),
-                BinaryTableStats.fromRowData(row.getRow(4, 3)),
+                BinaryTableStats.fromRow(row.getRow(4, 3)),
                 row.getLong(5));
     }
 }

@@ -139,12 +139,17 @@ public class SchemaEvolutionUtil {
             List<DataField> tableFields,
             int[] dataProjection,
             List<DataField> dataFields) {
-        List<DataField> tableProjectFields = projectDataFields(tableProjection, tableFields);
-        List<DataField> dataProjectFields = projectDataFields(dataProjection, dataFields);
+        return createIndexCastMapping(
+                projectDataFields(tableProjection, tableFields),
+                projectDataFields(dataProjection, dataFields));
+    }
 
-        int[] indexMapping = createIndexMapping(tableProjectFields, dataProjectFields);
+    /** Create index mapping from table fields to underlying data fields. */
+    public static IndexCastMapping createIndexCastMapping(
+            List<DataField> tableFields, List<DataField> dataFields) {
+        int[] indexMapping = createIndexMapping(tableFields, dataFields);
         CastFieldGetter[] castMapping =
-                createCastFieldGetterMapping(tableProjectFields, dataProjectFields, indexMapping);
+                createCastFieldGetterMapping(tableFields, dataFields, indexMapping);
         return new IndexCastMapping() {
             @Nullable
             @Override
