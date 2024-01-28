@@ -74,10 +74,10 @@ public class KeyValueSerializer extends ObjectSerializer<KeyValue> {
 
     @Override
     public KeyValue fromRow(InternalRow row) {
-        reusedKey.replace(row);
-        reusedValue.replace(row);
         long sequenceNumber = row.getLong(keyArity);
         RowKind valueKind = RowKind.fromByteValue(row.getByte(keyArity + 1));
+        reusedKey.replace(row);
+        reusedValue.replace(row).replace(valueKind);
         reusedKv.replace(reusedKey, sequenceNumber, valueKind, reusedValue);
         return reusedKv;
     }

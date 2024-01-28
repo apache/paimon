@@ -316,12 +316,14 @@ public class MergeSorter {
 
             int keyArity = keyType.getFieldCount();
             int valueArity = valueType.getFieldCount();
+
+            RowKind rowKind = RowKind.fromByteValue(row.getByte(keyArity + 1));
             return new KeyValue()
                     .replace(
                             new OffsetRow(keyArity, 0).replace(row),
                             row.getLong(keyArity),
-                            RowKind.fromByteValue(row.getByte(keyArity + 1)),
-                            new OffsetRow(valueArity, keyArity + 3).replace(row))
+                            rowKind,
+                            new OffsetRow(valueArity, keyArity + 3).replace(row).replace(rowKind))
                     .setLevel(row.getInt(keyArity + 2));
         }
     }
