@@ -85,6 +85,12 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
         return conn.createStatement();
     }
 
+    protected Statement getStatementDBA() throws SQLException {
+        Connection conn =
+                DriverManager.getConnection(ORACLE_CONTAINER.getJdbcUrl(), "sys as sysdba", "top_secret");
+        return conn.createStatement();
+    }
+
     protected Map<String, String> getBasicOracleConfig() {
         Map<String, String> config = new HashMap<>();
         config.put(OracleSourceOptions.HOSTNAME.key(), ORACLE_CONTAINER.getHost());

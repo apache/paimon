@@ -44,6 +44,7 @@
 CREATE TABLE DEBEZIUM.composite (
                                     id NUMBER(9, 0) NOT NULL,
                                     name VARCHAR(255) NOT NULL,
+                                    WEIGHT FLOAT,
                                     PRIMARY KEY(id)
 );
 

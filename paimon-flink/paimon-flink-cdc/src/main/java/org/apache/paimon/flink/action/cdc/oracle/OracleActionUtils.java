@@ -159,6 +159,9 @@ public class OracleActionUtils {
         debeziumProperties.putAll(
                 OptionsUtils.convertToPropertiesPrefixKey(
                         oracleConfig.toMap(), DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX));
+
+        // Float类型时默认为io.debezium.data.VariableScaleDecimal
+        debeziumProperties.put("decimal.handling.mode","string");
         sourceBuilder.debeziumProperties(debeziumProperties);
 
         Map<String, Object> customConverterConfigs = new HashMap<>();

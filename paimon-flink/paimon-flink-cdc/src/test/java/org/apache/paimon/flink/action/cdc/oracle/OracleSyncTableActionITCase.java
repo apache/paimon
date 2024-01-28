@@ -53,6 +53,10 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
     @Test
     // @Timeout(60)
     public void testSchemaEvolution() throws Exception {
+//        try (Statement statement = getStatementDBA()){
+//            boolean execute = statement.execute("archive log list;");
+//            System.out.println(execute);
+//        }
         Map<String, String> oracleConfig = getBasicOracleConfig();
         System.out.println(ORACLE_CONTAINER.getDatabaseName() + "*****");
         //oracleConfig.put(OracleSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
@@ -72,25 +76,54 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
 
                 checkTableSchema(
                         "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"}]");
+                                + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"}," +
+                                "{\"id\":2,\"name\":\"WEIGHT\",\"type\":\"FLOAT\"}]");
 
-        try (Statement statement = getStatement(ORACLE_CONTAINER.getDatabaseName())) {
+
+        try (Statement statement = getStatementDBA()) {
             FileStoreTable table = getFileStoreTable();
 
-            statement.executeUpdate("INSERT INTO DEBEZIUM.composite (id,name) VALUES (103,'test66')");
+            statement.executeUpdate("INSERT INTO DEBEZIUM.composite (id,name,weight) VALUES (101,'Jack',3.25)");
+            statement.executeUpdate("INSERT INTO DEBEZIUM.composite (id,name,weight) VALUES (102,'test66',7.14)");
 
             RowType rowType =
                     RowType.of(
                             new DataType[] {
                                 DataTypes.INT().notNull(),
-                                DataTypes.STRING().notNull()
+                                DataTypes.STRING().notNull(),
+                                    DataTypes.FLOAT()
                             },
-                            new String[] {"ID", "NAME"});
+                            new String[] {"ID", "NAME","WEIGHT"});
             List<String> primaryKeys = Arrays.asList("ID", "NAME");
             List<String> expected =
-                    Arrays.asList("+I[1, 1, one]", "+I[1, 2, two]", "+I[2, 4, four]");
+                    Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
             waitForResult(expected, table, rowType, primaryKeys);
-        }
+
+            boolean execute = statement.execute("ALTER TABLE DEBEZIUM.composite ADD v1 FLOAT");
+            boolean execute1 = statement.execute(
+                    "INSERT INTO DEBEZIUM.composite (id,name,weight,v1) VALUES (103,'five',3.25,5.12)");
+//            statement.executeUpdate("ALTER TABLE schema_evolution_2 ADD COLUMN v2 INT");
+//            statement.executeUpdate("INSERT INTO schema_evolution_2 VALUES (1, 6, 'six', 60)");
+//            statement.executeUpdate("UPDATE schema_evolution_2 SET v1 = 'second' WHERE _id = 2");
+            rowType =
+                    RowType.of(
+                            new DataType[] {
+                                    DataTypes.INT().notNull(),
+                                    DataTypes.STRING().notNull(),
+                                    DataTypes.FLOAT(),
+                                    DataTypes.FLOAT()
+                            },
+                            new String[] {"ID", "NAME", "WEIGHT", "V1"});
+            expected =
+                    Arrays.asList(
+                            "+I[1, 1, one, NULL]",
+                            "+I[1, 2, second, NULL]",
+                            "+I[2, 3, three, 30]",
+                            "+I[2, 4, four, NULL]",
+                            "+I[1, 5, five, 50]",
+                            "+I[1, 6, six, 60]");
+            waitForResult(expected, table, rowType, primaryKeys);
+            }
     }
 
     private void checkTableSchema(String excepted) throws Exception {
