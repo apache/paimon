@@ -41,11 +41,17 @@
 
 -- sqlplus dbzuser/dbz@localhost:1521/ORCLCDB
 
-CREATE TABLE DEBEZIUM.composite (
+CREATE TABLE DEBEZIUM.composite1 (
                                     id NUMBER(9, 0) NOT NULL,
                                     name VARCHAR(255) NOT NULL,
                                     WEIGHT FLOAT,
                                     PRIMARY KEY(id)
+);
+CREATE TABLE DEBEZIUM.composite2 (
+                                     id NUMBER(9, 0) NOT NULL,
+                                     name VARCHAR(255) NOT NULL,
+                                     WEIGHT FLOAT,
+                                     PRIMARY KEY(id)
 );
 
 -- CREATE TABLE DEBEZIUM.cat (
@@ -57,7 +63,8 @@ CREATE TABLE DEBEZIUM.composite (
 
 -- ALTER TABLE DEBEZIUM.PRODUCTS ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
 -- ALTER TABLE DEBEZIUM.cat ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
-ALTER TABLE DEBEZIUM.composite ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+ALTER TABLE DEBEZIUM.composite1 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
+ALTER TABLE DEBEZIUM.composite2 ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
 -- ALTER TABLE DEBEZIUM.COMPOSITE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS;
 
 -- INSERT INTO DEBEZIUM.composite (id,name,weight)

@@ -148,7 +148,10 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
             if(sortedActual.size() != 0) {
-                System.out.println(sortedActual.get(0));
+                for(String s:sortedActual){
+                    System.out.println(s);
+                }
+                System.out.println("==========");
             }
             Collections.sort(sortedActual);
             if (sortedExpected.equals(sortedActual)) {

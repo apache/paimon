@@ -128,10 +128,9 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
-        if (root.payload().isSchemaChange()) {
-            // extractSchemaChange().forEach(out::collect);
-            System.out.println(666);
-            return;
+        if(root.payload().op().equals("c")){
+            System.out.println(root.payload().after());
+            System.out.println("!!!!!!!!");
         }
         extractRecords().forEach(out::collect);
     }
@@ -239,14 +238,14 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         if (!after.isEmpty()) {
             after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
-//            records.add(
-//                    new RichCdcMultiplexRecord(
-//                            databaseName,
-//                            currentTable,
-//                            fieldTypes,
-//                            Collections.emptyList(),
-//                            new CdcRecord(RowKind.INSERT, after)));
-             records.add((createRecord(RowKind.INSERT,after)));
+            records.add(
+                    new RichCdcMultiplexRecord(
+                            databaseName,
+                            currentTable,
+                            fieldTypes,
+                            Collections.emptyList(),
+                            new CdcRecord(RowKind.INSERT, after)));
+             //records.add((createRecord(RowKind.INSERT,after)));
         }
 
         return records;

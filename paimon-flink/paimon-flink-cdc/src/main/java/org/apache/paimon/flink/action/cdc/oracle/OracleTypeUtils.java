@@ -72,9 +72,10 @@ public class OracleTypeUtils {
             case NCLOB:
             case XMLTYPE:
             case SYS_XMLTYPE:
+            case FLOAT:
             case TIMESTAMP_WITH_TIME_ZONE:
                 return DataTypes.STRING();
-            case FLOAT:
+
             case BINARY_FLOAT:
                 return DataTypes.FLOAT();
             case BINARY_DOUBLE:
