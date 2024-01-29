@@ -331,10 +331,11 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     private void zorder(List<String> columns) throws Exception {
+        String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
         if (RANDOM.nextBoolean()) {
-            createAction("zorder", columns).run();
+            createAction("zorder", rangeStrategy, columns).run();
         } else {
-            callProcedure("zorder", columns);
+            callProcedure("zorder", rangeStrategy, columns);
         }
     }
 
@@ -347,14 +348,17 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     private void order(List<String> columns) throws Exception {
+        String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
         if (RANDOM.nextBoolean()) {
-            createAction("order", columns).run();
+            createAction("order", rangeStrategy, columns).run();
         } else {
-            callProcedure("order", columns);
+            callProcedure("order", rangeStrategy, columns);
         }
     }
 
-    private SortCompactAction createAction(String orderStrategy, List<String> columns) {
+    private SortCompactAction createAction(
+            String orderStrategy, String rangeStrategy, List<String> columns) {
+
         return createAction(
                 SortCompactAction.class,
                 "compact",
@@ -367,14 +371,21 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                 "--order_strategy",
                 orderStrategy,
                 "--order_by",
-                String.join(",", columns));
+                String.join(",", columns),
+                "--table_conf sort-compaction.range-strategy=" + rangeStrategy,
+                rangeStrategy);
     }
 
-    private void callProcedure(String orderStrategy, List<String> orderByColumns) {
+    private void callProcedure(
+            String orderStrategy, String rangeStrategy, List<String> orderByColumns) {
         callProcedure(
                 String.format(
-                        "CALL sys.compact('%s.%s', 'ALL', '%s', '%s')",
-                        database, tableName, orderStrategy, String.join(",", orderByColumns)),
+                        "CALL sys.compact('%s.%s', 'ALL', '%s', '%s','sort-compaction.range-strategy=%s')",
+                        database,
+                        tableName,
+                        orderStrategy,
+                        String.join(",", orderByColumns),
+                        rangeStrategy),
                 false,
                 true);
     }
