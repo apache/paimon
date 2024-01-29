@@ -173,6 +173,11 @@ public class Path implements Comparable<Path>, Serializable {
         // parse uri authority, if any
         if (pathString.startsWith("//", start)
                 && (pathString.length() - start > 2)) { // has authority
+            // add a slash in front of paths with Windows drive letters
+            if (hasWindowsDrive(pathString.substring(start + 2))
+                    && pathString.charAt(start + 2) != SEPARATOR_CHAR) {
+                pathString = StringUtils.replace(pathString, "//", "///", 1);
+            }
             int nextSlash = pathString.indexOf(SEPARATOR_CHAR, start + 2);
             int authEnd = nextSlash > 0 ? nextSlash : pathString.length();
             authority = pathString.substring(start + 2, authEnd);
