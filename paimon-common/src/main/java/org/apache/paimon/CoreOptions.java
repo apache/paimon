@@ -492,18 +492,11 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             Description.builder()
-                                    .text(
-                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
+                                    .text("Specify the way of padding precision.")
                                     .list(
                                             text("You can specific:"),
                                             text(
-                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-                                            text(
-                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
-                                            text(
-                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
-                                            text(
-                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
+                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."))
                                     .build());
 
     public static final ConfigOption<StartupMode> SCAN_MODE =

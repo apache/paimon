@@ -61,12 +61,7 @@ option to automatically pad the sequence field for you.
    (the time that the change was made in the database) in Mysql Binlog. It is recommended to use the automatic
    padding for row kind flag, which will automatically distinguish between -U (-D) and +U (+I).
 
-2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
-   millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
-   of sequence number will be made up to microsecond by system.
-
-3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
-   pad the row kind flag.
+(Note: If the provided `sequence.field` doesn't meet the precision, like a rough second or millisecond, system will combine `sequence.field` with an internal incrementing sequence number to ensure that even if the same `sequence.field` appears, the built-in incrementing sequence number can distinguish between different records.)
 
 ## Row Kind Field
 
