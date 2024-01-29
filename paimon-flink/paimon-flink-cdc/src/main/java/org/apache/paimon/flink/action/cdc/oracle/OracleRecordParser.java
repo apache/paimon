@@ -148,9 +148,6 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                             columnCaseConvertAndDuplicateCheck(
                                     key, existedFields, caseSensitive, columnDuplicateErrMsg);
 
-                    if("VAL_TSTZ".equals(columnName)){
-                        System.out.println(888);
-                    }
                     DataType dataType = extractFieldType(value);
                     dataType =
                             dataType.copy(
@@ -182,7 +179,8 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                 }
                 return DataTypes.INT();
             case "int64":
-                if (MicroTimestamp.SCHEMA_NAME.equals(field.name()) || Timestamp.SCHEMA_NAME.equals(field.name())) {
+                if (MicroTimestamp.SCHEMA_NAME.equals(field.name())
+                        || Timestamp.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIMESTAMP(6);
                 } else if (MicroTime.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIME(6);
@@ -244,7 +242,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                             fieldTypes,
                             Collections.emptyList(),
                             new CdcRecord(RowKind.INSERT, after)));
-             //records.add((createRecord(RowKind.INSERT,after)));
+            // records.add((createRecord(RowKind.INSERT,after)));
         }
 
         return records;

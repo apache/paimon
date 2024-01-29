@@ -47,15 +47,11 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
     public static final String ORACLE_IMAGE = "goodboy008/oracle-19.3.0-ee";
     public static final String ORACLE_DATABASE = "ORCLCDB";
     public static final String ORACLE_SCHEMA = "DEBEZIUM";
-    public static final String CONNECTOR_USER = "dbzuser";
-    public static final String CONNECTOR_PWD = "dbz";
     public static final String TEST_USER = "debezium";
     public static final String TEST_PWD = "dbz";
-    public static final String TOP_SECRET = "top_secret";
 
     public static final OracleContainer ORACLE_CONTAINER =
-            new OracleContainer(
-                            DockerImageName.parse("goodboy008/oracle-19.3.0-ee").withTag("non-cdb"))
+            new OracleContainer(DockerImageName.parse(ORACLE_IMAGE).withTag("non-cdb"))
                     .withUsername(USER)
                     .withPassword(PASSWORD)
                     .withDatabaseName(ORACLE_DATABASE)
@@ -81,20 +77,11 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
         return conn.createStatement();
     }
 
-    protected Statement getStatementDBA() throws SQLException {
-        Connection conn =
-                DriverManager.getConnection(
-                        ORACLE_CONTAINER.getJdbcUrl(), "sys as sysdba", "top_secret");
-        return conn.createStatement();
-    }
-
     protected Map<String, String> getBasicOracleConfig() {
         Map<String, String> config = new HashMap<>();
         config.put(OracleSourceOptions.HOSTNAME.key(), ORACLE_CONTAINER.getHost());
         config.put(
                 OracleSourceOptions.PORT.key(), String.valueOf(ORACLE_CONTAINER.getOraclePort()));
-        //        config.put(OracleSourceOptions.USERNAME.key(), TEST_USER);
-        //        config.put(OracleSourceOptions.PASSWORD.key(), TEST_PWD);
         config.put(OracleSourceOptions.USERNAME.key(), ORACLE_CONTAINER.getUsername());
         config.put(OracleSourceOptions.PASSWORD.key(), ORACLE_CONTAINER.getPassword());
         config.put(OracleSourceOptions.DATABASE_NAME.key(), ORACLE_CONTAINER.getDatabaseName());

@@ -31,8 +31,6 @@ public class DataFormatTestUtil {
 
     /** Stringify the given {@link InternalRow}. */
     public static String toStringNoRowKind(InternalRow row, RowType type) {
-        System.out.println("row:" + row);
-        System.out.println("rowtype:" + type);
         StringBuilder build = new StringBuilder();
         for (int i = 0; i < type.getFieldCount(); i++) {
             if (i != 0) {

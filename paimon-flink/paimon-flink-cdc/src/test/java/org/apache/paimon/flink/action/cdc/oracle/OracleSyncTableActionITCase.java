@@ -29,6 +29,7 @@ import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Arrays;
@@ -49,7 +50,7 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
     }
 
     @Test
-    // @Timeout(60)
+    @Timeout(240)
     public void testSchemaEvolution() throws Exception {
         Map<String, String> oracleConfig = getBasicOracleConfig();
         oracleConfig.put(OracleSourceOptions.SCHEMA_NAME.key(), ORACLE_SCHEMA);
@@ -91,10 +92,8 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
             List<String> expected = Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
             waitForResult(expected, table, rowType, primaryKeys);
 
-            boolean execute = statement.execute("ALTER TABLE DEBEZIUM.composite1 ADD v1 FLOAT");
-            boolean execute1 =
-                    statement.execute(
-                            "INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
+            statement.execute("ALTER TABLE DEBEZIUM.composite1 ADD v1 FLOAT");
+            statement.execute("INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
 
             statement.execute("ALTER TABLE DEBEZIUM.composite2 ADD v1 FLOAT");
             statement.execute(
@@ -118,13 +117,13 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
     }
 
     @Test
-    // @Timeout(90)
+    @Timeout(240)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
-         for (int i = 0; i < 2; i++) {
+        for (int i = 0; i < 2; i++) {
             testAllTypesOnce();
-         }
+        }
     }
 
     private void testAllTypesOnce() throws Exception {
@@ -152,40 +151,39 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                            DataTypes.INT().notNull(), // _id
-                            DataTypes.STRING().notNull(), // pt
-                            DataTypes.STRING(), // _bit1
-                            DataTypes.STRING(), // _bit
-                            DataTypes.STRING(), // _bit_varying
-                            DataTypes.STRING(), // _bit_varying1
-                            DataTypes.FLOAT(), // 6
-                            DataTypes.DOUBLE(), // _bool
-                            DataTypes.STRING(), // _smallint
-                            DataTypes.STRING(), // _int
-                            DataTypes.STRING(), // 10
-                            DataTypes.STRING(), // _small_serial
-                            DataTypes.STRING(), // _serial
-                            DataTypes.STRING(), // _big_serial
-                            DataTypes.STRING(), // _float
-                            DataTypes.STRING(), // _real
-                            DataTypes.STRING(), // _double_precision
-                            DataTypes.STRING(), // _numeric
-                            DataTypes.STRING(), // _decimal
-                            DataTypes.STRING(), // _big_decimal
-                                DataTypes.STRING(),// 20
-                            DataTypes.TINYINT(), // _timestamp
-                            DataTypes.TINYINT(), // _timestamp0
-                            DataTypes.SMALLINT(), // _time
-                            DataTypes.INT(), // _time0
-                            DataTypes.BIGINT(), // _char
-                            DataTypes.TIMESTAMP(6), // _varchar
-                            DataTypes.TIMESTAMP(6), // _text
-                            DataTypes.TIMESTAMP(6), // _text
-                            DataTypes.TIMESTAMP(6), // _text
-                            DataTypes.TIMESTAMP(6), // _text
-//                                DataTypes.STRING(),
-                            DataTypes.STRING(), // _text
-                            DataTypes.STRING(), // _json
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.FLOAT(),
+                            DataTypes.DOUBLE(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.TINYINT(),
+                            DataTypes.TINYINT(),
+                            DataTypes.SMALLINT(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.TIMESTAMP(6),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
                         },
                         new String[] {
                             "ID",
@@ -219,7 +217,6 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
                             "VAL_TS_PRECISION2",
                             "VAL_TS_PRECISION4",
                             "VAL_TS_PRECISION9",
-//                            "VAL_TSTZ",
                             "VAL_TSLTZ",
                             "T15VARCHAR",
                         });
@@ -227,10 +224,10 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
 
         List<String> expected =
                 Arrays.asList(
-                        "+I[1, vc2, vc2, nvc2, c  , nc , 1.1, 2.22, 3.33, 8.888, 4.444400, 5.555, 6.66, 1234.567891, 1234.567891, 77.323, 1, 22, 333, 4444, 5555, 1, 9, 999, 99999999, 99999999999999999, 2022-10-30T00:00, 2022-10-30T12:34:56.007890, 2022-10-30T12:34:56.130, 2022-10-30T12:34:56.125500, 2022-10-30T12:34:56.125457, 2022-10-29 17:34:56.007890, <name>\n" +
-                                "  <a id=\"1\" value=\"some values\">test xmlType</a>\n" +
-                                "</name>\n" +
-                                "]");
+                        "+I[1, vc2, vc2, nvc2, c  , nc , 1.1, 2.22, 3.33, 8.888, 4.444400, 5.555, 6.66, 1234.567891, 1234.567891, 77.323, 1, 22, 333, 4444, 5555, 1, 9, 999, 99999999, 99999999999999999, 2022-10-30T00:00, 2022-10-30T12:34:56.007890, 2022-10-30T12:34:56.130, 2022-10-30T12:34:56.125500, 2022-10-30T12:34:56.125457, 2022-10-29 17:34:56.007890, <name>\n"
+                                + "  <a id=\"1\" value=\"some values\">test xmlType</a>\n"
+                                + "</name>\n"
+                                + "]");
         waitForResult(expected, table, rowType, Arrays.asList("ID", "VAL_VARCHAR"));
     }
 

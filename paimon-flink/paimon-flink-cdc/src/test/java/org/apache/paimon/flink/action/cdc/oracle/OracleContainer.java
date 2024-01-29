@@ -21,6 +21,8 @@ package org.apache.paimon.flink.action.cdc.oracle;
 import io.debezium.relational.TableId;
 import org.apache.commons.lang3.StringUtils;
 import org.jetbrains.annotations.NotNull;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
 import org.testcontainers.utility.DockerImageName;
@@ -41,7 +43,6 @@ import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.ORACLE_CONTAINER;
@@ -53,14 +54,12 @@ import static org.junit.Assert.assertNotNull;
 /** Copy from testcontainers. */
 public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
 
-    private static final String SETUP_SQL_PARAM_NAME = "SETUP_SQL";
+    private static final Logger LOG = LoggerFactory.getLogger(OracleContainer.class);
 
     private static final DockerImageName DEFAULT_IMAGE_NAME =
             DockerImageName.parse("goodboy008/oracle-19.3.0-ee");
 
     static final String DEFAULT_TAG = "latest";
-
-    static final String IMAGE = DEFAULT_IMAGE_NAME.getUnversionedPart();
 
     static final int ORACLE_PORT = 1521;
 
@@ -100,10 +99,6 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
     @Deprecated
     public OracleContainer() {
         this(DEFAULT_IMAGE_NAME.withTag(DEFAULT_TAG));
-    }
-
-    public OracleContainer(String dockerImageName) {
-        this(DockerImageName.parse(dockerImageName));
     }
 
     public OracleContainer(final DockerImageName dockerImageName) {
@@ -252,11 +247,6 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
         withEnv("APP_USER_PASSWORD", password);
     }
 
-    public OracleContainer withSetupSQL(String sqlPath) {
-        parameters.put(SETUP_SQL_PARAM_NAME, sqlPath);
-        return this;
-    }
-
     static Connection getConnection() throws Exception {
         String url = ORACLE_CONTAINER.getJdbcUrl();
 
@@ -282,25 +272,15 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
                                                             tableId.schema(),
                                                             tableId.table()));
                                 } catch (SQLException e) {
-                                    // ignore
+                                    LOG.warn("drop table error, table:{}", tableId, e);
                                 }
                             });
-            // endregion
 
             final List<String> statements =
                     Arrays.stream(
                                     Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()
                                             .map(String::trim)
                                             .filter(x -> !x.startsWith("--") && !x.isEmpty())
-                                            //                                    .map(
-                                            //                                            x -> {
-                                            //                                                final
-                                            // Matcher m =
-                                            //
-                                            //  COMMENT_PATTERN.matcher(x);
-                                            //                                                return
-                                            // m.matches() ? m.group(1) : x;
-                                            //                                            })
                                             .collect(Collectors.joining("\n"))
                                             .split(";"))
                             .collect(Collectors.toList());
@@ -328,7 +308,7 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
                 tableIdSet.add(tableId);
             }
         } catch (SQLException e) {
-            // LOG.warn(" SQL execute error, sql:{}", queryTablesSql, e);
+            LOG.warn(" SQL execute error, sql:{}", queryTablesSql, e);
         }
         return new ArrayList<>(tableIdSet);
     }

@@ -113,7 +113,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
     protected void waitForResult(
             List<String> expected, FileStoreTable table, RowType rowType, List<String> primaryKeys)
             throws Exception {
-         assertThat(table.schema().primaryKeys()).isEqualTo(primaryKeys);
+        assertThat(table.schema().primaryKeys()).isEqualTo(primaryKeys);
 
         // wait for table schema to become our expected schema
         while (true) {
@@ -135,7 +135,6 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             Thread.sleep(1000);
         }
 
-        System.out.println(table.schema());
         // wait for data to become expected
         List<String> sortedExpected = new ArrayList<>(expected);
         Collections.sort(sortedExpected);
@@ -148,12 +147,6 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                             plan == null ? Collections.emptyList() : plan.splits(),
                             rowType);
             List<String> sortedActual = new ArrayList<>(result);
-            if (sortedActual.size() != 0) {
-                for (String s : sortedActual) {
-                    System.out.println(s);
-                }
-                System.out.println("==========");
-            }
             Collections.sort(sortedActual);
             if (sortedExpected.equals(sortedActual)) {
                 break;
