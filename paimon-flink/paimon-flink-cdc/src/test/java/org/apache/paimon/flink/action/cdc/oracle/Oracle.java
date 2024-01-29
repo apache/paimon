@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.action.cdc.oracle;
 
-import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
+
+import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
@@ -43,7 +44,7 @@ public class Oracle extends OracleActionITCaseBase {
 
     @BeforeAll
     public static void startContainers() throws Exception {
-        //ORACLE_CONTAINER.withSetupSQL("oracle/sync_table_setup.sql");
+        // ORACLE_CONTAINER.withSetupSQL("oracle/sync_table_setup.sql");
 
         start();
         createAndInitialize("oracle/sync_table_setup.sql");
@@ -67,34 +68,35 @@ public class Oracle extends OracleActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-                checkTableSchema(
-                        "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"}," +
-                                "{\"id\":2,\"name\":\"WEIGHT\",\"type\":\"STRING\"}]");
-
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
+                        + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"},"
+                        + "{\"id\":2,\"name\":\"WEIGHT\",\"type\":\"STRING\"}]");
 
         try (Statement statement = getStatementDBA()) {
             FileStoreTable table = getFileStoreTable();
 
-            statement.executeUpdate("INSERT INTO DEBEZIUM.composite1 (id,name,weight) VALUES (101,'Jack',3.25)");
-            statement.executeUpdate("INSERT INTO DEBEZIUM.composite2 (id,name,weight) VALUES (102,'test66',7.14)");
+            statement.executeUpdate(
+                    "INSERT INTO DEBEZIUM.composite1 (id,name,weight) VALUES (101,'Jack',3.25)");
+            statement.executeUpdate(
+                    "INSERT INTO DEBEZIUM.composite2 (id,name,weight) VALUES (102,'test66',7.14)");
 
             RowType rowType =
                     RowType.of(
                             new DataType[] {
                                 DataTypes.INT().notNull(),
                                 DataTypes.STRING().notNull(),
-                                    DataTypes.STRING()
+                                DataTypes.STRING()
                             },
-                            new String[] {"ID", "NAME","WEIGHT"});
+                            new String[] {"ID", "NAME", "WEIGHT"});
             List<String> primaryKeys = Arrays.asList("ID", "NAME");
-            List<String> expected =
-                    Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
+            List<String> expected = Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
             waitForResult(expected, table, rowType, primaryKeys);
 
             boolean execute = statement.execute("ALTER TABLE DEBEZIUM.composite1 ADD v1 FLOAT");
-            boolean execute1 = statement.execute(
-                    "INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
+            boolean execute1 =
+                    statement.execute(
+                            "INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
 
             statement.execute("ALTER TABLE DEBEZIUM.composite2 ADD v1 FLOAT");
             statement.execute(
@@ -102,10 +104,10 @@ public class Oracle extends OracleActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                    DataTypes.INT().notNull(),
-                                    DataTypes.STRING().notNull(),
-                                    DataTypes.STRING(),
-                                    DataTypes.STRING()
+                                DataTypes.INT().notNull(),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING()
                             },
                             new String[] {"ID", "NAME", "WEIGHT", "V1"});
             expected =
@@ -114,7 +116,7 @@ public class Oracle extends OracleActionITCaseBase {
                             "+I[1020, test88, 7.14, NULL]",
                             "+I[103, three, 3.25, 5.12]");
             waitForResult(expected, table, rowType, primaryKeys);
-            }
+        }
     }
 
     private void checkTableSchema(String excepted) throws Exception {

@@ -18,22 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc.oracle;
 
-import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import io.debezium.relational.TableId;
 import org.apache.commons.lang3.StringUtils;
-import org.apache.flink.configuration.Configuration;
 import org.jetbrains.annotations.NotNull;
 import org.testcontainers.containers.JdbcDatabaseContainer;
 import org.testcontainers.containers.wait.strategy.LogMessageWaitStrategy;
 import org.testcontainers.utility.DockerImageName;
-
-import java.time.Duration;
-import java.time.temporal.ChronoUnit;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.List;
-import java.util.Set;
-import java.util.concurrent.Future;
 
 import java.net.URL;
 import java.nio.file.Files;
@@ -43,25 +33,25 @@ import java.sql.DriverManager;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.Duration;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.*;
-import static org.junit.Assert.assertArrayEquals;
-import static org.junit.Assert.assertEquals;
+import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.ORACLE_CONTAINER;
+import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.ORACLE_DATABASE;
+import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.TEST_PWD;
+import static org.apache.paimon.flink.action.cdc.oracle.OracleActionITCaseBase.TEST_USER;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertTrue;
 
 /** Copy from testcontainers. */
 public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
-    public static final String NAME = "oracle";
 
     private static final String SETUP_SQL_PARAM_NAME = "SETUP_SQL";
 
@@ -119,11 +109,6 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
     public OracleContainer(final DockerImageName dockerImageName) {
         super(dockerImageName);
         dockerImageName.assertCompatibleWith(DEFAULT_IMAGE_NAME);
-        preconfigure();
-    }
-
-    public OracleContainer(Future<String> dockerImageName) {
-        super(dockerImageName);
         preconfigure();
     }
 
@@ -275,10 +260,7 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
     static Connection getConnection() throws Exception {
         String url = ORACLE_CONTAINER.getJdbcUrl();
 
-        return DriverManager.getConnection(
-                url,
-                TEST_USER,
-                TEST_PWD);
+        return DriverManager.getConnection(url, TEST_USER, TEST_PWD);
     }
 
     public static void createAndInitialize(String sqlFile) throws Exception {
@@ -286,7 +268,7 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
         final URL ddlTestFile = OracleActionITCaseBase.class.getClassLoader().getResource(ddlFile);
         assertNotNull("Cannot locate " + ddlFile, ddlTestFile);
         try (Connection connection = getConnection();
-             Statement statement = connection.createStatement()) {
+                Statement statement = connection.createStatement()) {
             connection.setAutoCommit(true);
             // region Drop all user tables in Debezium schema
             listTables(connection)
@@ -296,28 +278,31 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
                                     statement.execute(
                                             "DROP TABLE "
                                                     + String.join(
-                                                    ".",
-                                                    tableId.schema(),
-                                                    tableId.table()));
+                                                            ".",
+                                                            tableId.schema(),
+                                                            tableId.table()));
                                 } catch (SQLException e) {
-                                    //LOG.warn("drop table error, table:{}", tableId, e);
+                                    // ignore
                                 }
                             });
             // endregion
 
             final List<String> statements =
                     Arrays.stream(
-                            Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()
-                                    .map(String::trim)
-                                    .filter(x -> !x.startsWith("--") && !x.isEmpty())
-//                                    .map(
-//                                            x -> {
-//                                                final Matcher m =
-//                                                        COMMENT_PATTERN.matcher(x);
-//                                                return m.matches() ? m.group(1) : x;
-//                                            })
-                                    .collect(Collectors.joining("\n"))
-                                    .split(";"))
+                                    Files.readAllLines(Paths.get(ddlTestFile.toURI())).stream()
+                                            .map(String::trim)
+                                            .filter(x -> !x.startsWith("--") && !x.isEmpty())
+                                            //                                    .map(
+                                            //                                            x -> {
+                                            //                                                final
+                                            // Matcher m =
+                                            //
+                                            //  COMMENT_PATTERN.matcher(x);
+                                            //                                                return
+                                            // m.matches() ? m.group(1) : x;
+                                            //                                            })
+                                            .collect(Collectors.joining("\n"))
+                                            .split(";"))
                             .collect(Collectors.toList());
 
             for (String stmt : statements) {
@@ -343,9 +328,8 @@ public class OracleContainer extends JdbcDatabaseContainer<OracleContainer> {
                 tableIdSet.add(tableId);
             }
         } catch (SQLException e) {
-            //LOG.warn(" SQL execute error, sql:{}", queryTablesSql, e);
+            // LOG.warn(" SQL execute error, sql:{}", queryTablesSql, e);
         }
         return new ArrayList<>(tableIdSet);
     }
-
 }

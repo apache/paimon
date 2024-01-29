@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.oracle;
 
-import io.debezium.data.SpecialValueDecimal;
-import io.debezium.data.VariableScaleDecimal;
-import org.apache.kafka.connect.data.Struct;
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
@@ -57,7 +54,6 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.math.BigDecimal;
-import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
@@ -128,7 +124,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
-        if(root.payload().op().equals("c")){
+        if (root.payload().op().equals("c")) {
             System.out.println(root.payload().after());
             System.out.println("!!!!!!!!");
         }
@@ -152,6 +148,9 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                             columnCaseConvertAndDuplicateCheck(
                                     key, existedFields, caseSensitive, columnDuplicateErrMsg);
 
+                    if("VAL_TSTZ".equals(columnName)){
+                        System.out.println(888);
+                    }
                     DataType dataType = extractFieldType(value);
                     dataType =
                             dataType.copy(
@@ -183,7 +182,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                 }
                 return DataTypes.INT();
             case "int64":
-                if (MicroTimestamp.SCHEMA_NAME.equals(field.name())) {
+                if (MicroTimestamp.SCHEMA_NAME.equals(field.name()) || Timestamp.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIMESTAMP(6);
                 } else if (MicroTime.SCHEMA_NAME.equals(field.name())) {
                     return DataTypes.TIME(6);

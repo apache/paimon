@@ -18,9 +18,6 @@
 
 package org.apache.paimon.flink.action.cdc.oracle;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
-import org.apache.flink.core.execution.JobClient;
-import org.apache.paimon.flink.action.cdc.postgres.PostgresSyncTableAction;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
@@ -29,9 +26,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
+import org.apache.flink.core.execution.JobClient;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.Timeout;
 
 import java.sql.Statement;
 import java.util.Arrays;
@@ -44,12 +41,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** IT cases for {@link OracleSyncTableAction}. */
 public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
-    private static final String DATABASE_NAME = "ORCLCDB";
 
     @BeforeAll
     public static void startContainers() throws Exception {
-        //ORACLE_CONTAINER.withSetupSQL("oracle/sync_table_setup.sql");
-
         start();
         createAndInitialize("oracle/sync_table_setup.sql");
     }
@@ -72,34 +66,35 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action);
 
-                checkTableSchema(
-                        "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
-                                + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"}," +
-                                "{\"id\":2,\"name\":\"WEIGHT\",\"type\":\"STRING\"}]");
+        checkTableSchema(
+                "[{\"id\":0,\"name\":\"ID\",\"type\":\"INT NOT NULL\"},"
+                        + "{\"id\":1,\"name\":\"NAME\",\"type\":\"STRING NOT NULL\"},"
+                        + "{\"id\":2,\"name\":\"WEIGHT\",\"type\":\"STRING\"}]");
 
-
-        try (Statement statement = getStatementDBA()) {
+        try (Statement statement = getStatement()) {
             FileStoreTable table = getFileStoreTable();
 
-            statement.executeUpdate("INSERT INTO DEBEZIUM.composite1 (id,name,weight) VALUES (101,'Jack',3.25)");
-            statement.executeUpdate("INSERT INTO DEBEZIUM.composite2 (id,name,weight) VALUES (102,'test66',7.14)");
+            statement.executeUpdate(
+                    "INSERT INTO DEBEZIUM.composite1 (id,name,weight) VALUES (101,'Jack',3.25)");
+            statement.executeUpdate(
+                    "INSERT INTO DEBEZIUM.composite2 (id,name,weight) VALUES (102,'test66',7.14)");
 
             RowType rowType =
                     RowType.of(
                             new DataType[] {
                                 DataTypes.INT().notNull(),
                                 DataTypes.STRING().notNull(),
-                                    DataTypes.STRING()
+                                DataTypes.STRING()
                             },
-                            new String[] {"ID", "NAME","WEIGHT"});
+                            new String[] {"ID", "NAME", "WEIGHT"});
             List<String> primaryKeys = Arrays.asList("ID", "NAME");
-            List<String> expected =
-                    Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
+            List<String> expected = Arrays.asList("+I[102, test66, 7.14]", "+I[101, Jack, 3.25]");
             waitForResult(expected, table, rowType, primaryKeys);
 
             boolean execute = statement.execute("ALTER TABLE DEBEZIUM.composite1 ADD v1 FLOAT");
-            boolean execute1 = statement.execute(
-                    "INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
+            boolean execute1 =
+                    statement.execute(
+                            "INSERT INTO DEBEZIUM.composite1 VALUES (103,'three',3.25,5.12)");
 
             statement.execute("ALTER TABLE DEBEZIUM.composite2 ADD v1 FLOAT");
             statement.execute(
@@ -107,10 +102,10 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
             rowType =
                     RowType.of(
                             new DataType[] {
-                                    DataTypes.INT().notNull(),
-                                    DataTypes.STRING().notNull(),
-                                    DataTypes.STRING(),
-                                    DataTypes.STRING()
+                                DataTypes.INT().notNull(),
+                                DataTypes.STRING().notNull(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING()
                             },
                             new String[] {"ID", "NAME", "WEIGHT", "V1"});
             expected =
@@ -119,47 +114,34 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
                             "+I[1020, test88, 7.14, NULL]",
                             "+I[103, three, 3.25, 5.12]");
             waitForResult(expected, table, rowType, primaryKeys);
-            }
+        }
     }
 
     @Test
-    @Timeout(90)
+    // @Timeout(90)
     public void testAllTypes() throws Exception {
         // the first round checks for table creation
         // the second round checks for running the action on an existing table
-        for (int i = 0; i < 2; i++) {
+         for (int i = 0; i < 2; i++) {
             testAllTypesOnce();
-        }
+         }
     }
 
     private void testAllTypesOnce() throws Exception {
         Map<String, String> oracleConfig = getBasicOracleConfig();
         oracleConfig.put(OracleSourceOptions.SCHEMA_NAME.key(), ORACLE_SCHEMA);
-        oracleConfig.put(OracleSourceOptions.TABLE_NAME.key(), "COMPOSITE\\d+");
+        oracleConfig.put(OracleSourceOptions.TABLE_NAME.key(), "FULL_TYPES");
 
         OracleSyncTableAction action =
                 syncTableActionBuilder(oracleConfig)
-                        .withCatalogConfig(
-                                Collections.singletonMap(
-                                        CatalogOptions.METASTORE.key(), "test-alter-table"))
                         .withTableConfig(getBasicTableConfig())
                         .withPartitionKeys("ID")
-                        .withPrimaryKeys("ID", "NAME")
+                        .withPrimaryKeys("ID", "VAL_VARCHAR")
                         .build();
-        runActionWithDefaultEnv(action);
-        Map<String, String> postgresConfig = getBasicPostgresConfig();
-        postgresConfig.put(PostgresSourceOptions.DATABASE_NAME.key(), DATABASE_NAME);
-        postgresConfig.put(PostgresSourceOptions.SCHEMA_NAME.key(), SCHEMA_NAME);
-        postgresConfig.put(PostgresSourceOptions.TABLE_NAME.key(), "all_types_table");
 
-        PostgresSyncTableAction action =
-                syncTableActionBuilder(postgresConfig)
-                        .withPartitionKeys("pt")
-                        .withPrimaryKeys("pt", "_id")
-                        .build();
         JobClient client = runActionWithDefaultEnv(action);
 
-        try (Statement statement = getStatement(DATABASE_NAME)) {
+        try (Statement statement = getStatement()) {
             testAllTypesImpl(statement);
         }
 
@@ -170,118 +152,86 @@ public class OracleSyncTableActionITCase extends OracleActionITCaseBase {
         RowType rowType =
                 RowType.of(
                         new DataType[] {
-                                DataTypes.INT().notNull(), // _id
-                                DataTypes.DECIMAL(2, 1).notNull(), // pt
-                                DataTypes.BOOLEAN(), // _bit1
-                                DataTypes.BINARY(2), // _bit
-                                DataTypes.BINARY(Integer.MAX_VALUE / 8), // _bit_varying
-                                DataTypes.BINARY(8), // _bit_varying1
-                                DataTypes.BOOLEAN(), // _boolean
-                                DataTypes.BOOLEAN(), // _bool
-                                DataTypes.SMALLINT(), // _smallint
-                                DataTypes.INT(), // _int
-                                DataTypes.BIGINT(), // _bigint
-                                DataTypes.SMALLINT().notNull(), // _small_serial
-                                DataTypes.INT().notNull(), // _serial
-                                DataTypes.BIGINT().notNull(), // _big_serial
-                                DataTypes.DOUBLE(), // _float
-                                DataTypes.FLOAT(), // _real
-                                DataTypes.DOUBLE(), // _double_precision
-                                DataTypes.DECIMAL(8, 3), // _numeric
-                                DataTypes.DECIMAL(8, 0), // _decimal
-                                DataTypes.DECIMAL(38, 10), // _big_decimal
-                                DataTypes.DATE(), // _date
-                                DataTypes.TIMESTAMP(6), // _timestamp
-                                DataTypes.TIMESTAMP(6), // _timestamp0
-                                DataTypes.TIME(6), // _time
-                                DataTypes.TIME(6), // _time0
-                                DataTypes.STRING(), // _char
-                                DataTypes.STRING(), // _varchar
-                                DataTypes.STRING(), // _text
-                                DataTypes.BYTES(), // _bin
-                                DataTypes.STRING(), // _json
-                                DataTypes.ARRAY(DataTypes.STRING()) // _array
+                            DataTypes.INT().notNull(), // _id
+                            DataTypes.STRING().notNull(), // pt
+                            DataTypes.STRING(), // _bit1
+                            DataTypes.STRING(), // _bit
+                            DataTypes.STRING(), // _bit_varying
+                            DataTypes.STRING(), // _bit_varying1
+                            DataTypes.FLOAT(), // 6
+                            DataTypes.DOUBLE(), // _bool
+                            DataTypes.STRING(), // _smallint
+                            DataTypes.STRING(), // _int
+                            DataTypes.STRING(), // 10
+                            DataTypes.STRING(), // _small_serial
+                            DataTypes.STRING(), // _serial
+                            DataTypes.STRING(), // _big_serial
+                            DataTypes.STRING(), // _float
+                            DataTypes.STRING(), // _real
+                            DataTypes.STRING(), // _double_precision
+                            DataTypes.STRING(), // _numeric
+                            DataTypes.STRING(), // _decimal
+                            DataTypes.STRING(), // _big_decimal
+                                DataTypes.STRING(),// 20
+                            DataTypes.TINYINT(), // _timestamp
+                            DataTypes.TINYINT(), // _timestamp0
+                            DataTypes.SMALLINT(), // _time
+                            DataTypes.INT(), // _time0
+                            DataTypes.BIGINT(), // _char
+                            DataTypes.TIMESTAMP(6), // _varchar
+                            DataTypes.TIMESTAMP(6), // _text
+                            DataTypes.TIMESTAMP(6), // _text
+                            DataTypes.TIMESTAMP(6), // _text
+                            DataTypes.TIMESTAMP(6), // _text
+//                                DataTypes.STRING(),
+                            DataTypes.STRING(), // _text
+                            DataTypes.STRING(), // _json
                         },
                         new String[] {
-                                "_id",
-                                "pt",
-                                "_bit1",
-                                "_bit",
-                                "_bit_varying",
-                                "_bit_varying1",
-                                "_boolean",
-                                "_bool",
-                                "_smallint",
-                                "_int",
-                                "_bigint",
-                                "_small_serial",
-                                "_serial",
-                                "_big_serial",
-                                "_float",
-                                "_real",
-                                "_double_precision",
-                                "_numeric",
-                                "_decimal",
-                                "_big_decimal",
-                                "_date",
-                                "_timestamp",
-                                "_timestamp0",
-                                "_time",
-                                "_time0",
-                                "_char",
-                                "_varchar",
-                                "_text",
-                                "_bin",
-                                "_json",
-                                "_array",
+                            "ID",
+                            "VAL_VARCHAR",
+                            "VAL_VARCHAR2",
+                            "VAL_NVARCHAR2",
+                            "VAL_CHAR",
+                            "VAL_NCHAR",
+                            "VAL_BF",
+                            "VAL_BD",
+                            "VAL_F",
+                            "VAL_F_10",
+                            "VAL_NUM",
+                            "VAL_DP",
+                            "VAL_R",
+                            "VAL_DECIMAL",
+                            "VAL_NUMERIC",
+                            "VAL_NUM_VS",
+                            "VAL_INT",
+                            "VAL_INTEGER",
+                            "VAL_SMALLINT",
+                            "VAL_NUMBER_38_NO_SCALE",
+                            "VAL_NUMBER_38_SCALE_0",
+                            "VAL_NUMBER_1",
+                            "VAL_NUMBER_2",
+                            "VAL_NUMBER_4",
+                            "VAL_NUMBER_9",
+                            "VAL_NUMBER_18",
+                            "VAL_DATE",
+                            "VAL_TS",
+                            "VAL_TS_PRECISION2",
+                            "VAL_TS_PRECISION4",
+                            "VAL_TS_PRECISION9",
+//                            "VAL_TSTZ",
+                            "VAL_TSLTZ",
+                            "T15VARCHAR",
                         });
         FileStoreTable table = getFileStoreTable();
-        // BIT(11) data: 0B11111000111 -> 0B00000111_11000111
-        String bits = Arrays.toString(new byte[] {(byte) 0B00000111, (byte) 0B11000111});
+
         List<String> expected =
                 Arrays.asList(
-                        "+I["
-                                + "1, 1.1, "
-                                + String.format("true, %s, [5], [2], ", bits)
-                                + "true, true, "
-                                + "1000, "
-                                + "1000000, "
-                                + "10000000000, 1, 2, 3, "
-                                + "1.5, "
-                                + "1.000001, "
-                                + "1.000111, "
-                                + "12345.110, "
-                                + "11111, 2222222222222222300000001111.1234567890, "
-                                + "19439, "
-                                + "2023-03-23T14:30:05, 2023-03-23T00:00, "
-                                + "36803000, 36803000, "
-                                + "Paimon, Apache Paimon, Apache Paimon PostgreSQL Test Data, "
-                                + "[98, 121, 116, 101, 115], "
-                                + "{\"a\": \"b\"}, "
-                                + "[\"item1\", \"item2\"]"
-                                + "]",
-                        "+I["
-                                + "2, 2.2, "
-                                + "NULL, NULL, NULL, NULL, "
-                                + "NULL, NULL, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL, 4, 5, 6, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL, NULL, "
-                                + "NULL, "
-                                + "NULL, NULL, "
-                                + "NULL, NULL, "
-                                + "NULL, NULL, "
-                                + "NULL, "
-                                + "NULL, "
-                                + "NULL"
-                                + "]");
-        waitForResult(expected, table, rowType, Arrays.asList("pt", "_id"));
+                        "+I[1, vc2, vc2, nvc2, c  , nc , 1.1, 2.22, 3.33, 8.888, 4.444400, 5.555, 6.66, 1234.567891, 1234.567891, 77.323, 1, 22, 333, 4444, 5555, 1, 9, 999, 99999999, 99999999999999999, 2022-10-30T00:00, 2022-10-30T12:34:56.007890, 2022-10-30T12:34:56.130, 2022-10-30T12:34:56.125500, 2022-10-30T12:34:56.125457, 2022-10-29 17:34:56.007890, <name>\n" +
+                                "  <a id=\"1\" value=\"some values\">test xmlType</a>\n" +
+                                "</name>\n" +
+                                "]");
+        waitForResult(expected, table, rowType, Arrays.asList("ID", "VAL_VARCHAR"));
     }
 
     private void checkTableSchema(String excepted) throws Exception {

@@ -183,6 +183,7 @@ public interface InternalRow extends DataGetters {
             case DECIMAL:
                 final int decimalPrecision = getPrecision(fieldType);
                 final int decimalScale = getScale(fieldType);
+                System.out.println("output:" + fieldPos);
                 fieldGetter = row -> row.getDecimal(fieldPos, decimalPrecision, decimalScale);
                 break;
             case TINYINT:

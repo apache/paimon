@@ -41,15 +41,10 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
 
     private static final Logger LOG = LoggerFactory.getLogger(OracleActionITCaseBase.class);
 
-    public static final String DEFAULT_DB = "oracle";
-
     private static final String USER = "dbzuser";
     private static final String PASSWORD = "dbz";
 
-    private static final String ORACLE_DRIVER_CLASS = "oracle.jdbc.driver.OracleDriver";
-    private static final String INTER_CONTAINER_ORACLE_ALIAS = "oracle";
     public static final String ORACLE_IMAGE = "goodboy008/oracle-19.3.0-ee";
-    private static OracleContainer oracle;
     public static final String ORACLE_DATABASE = "ORCLCDB";
     public static final String ORACLE_SCHEMA = "DEBEZIUM";
     public static final String CONNECTOR_USER = "dbzuser";
@@ -79,15 +74,17 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
         LOG.info("Containers are stopped.");
     }
 
-    protected Statement getStatement(String databaseName) throws SQLException {
+    protected Statement getStatement() throws SQLException {
         Connection conn =
-                DriverManager.getConnection(ORACLE_CONTAINER.getJdbcUrl(), TEST_USER, TEST_PWD);
+                DriverManager.getConnection(
+                        ORACLE_CONTAINER.getJdbcUrl(), "sys as sysdba", "top_secret");
         return conn.createStatement();
     }
 
     protected Statement getStatementDBA() throws SQLException {
         Connection conn =
-                DriverManager.getConnection(ORACLE_CONTAINER.getJdbcUrl(), "sys as sysdba", "top_secret");
+                DriverManager.getConnection(
+                        ORACLE_CONTAINER.getJdbcUrl(), "sys as sysdba", "top_secret");
         return conn.createStatement();
     }
 
@@ -96,8 +93,8 @@ public class OracleActionITCaseBase extends CdcActionITCaseBase {
         config.put(OracleSourceOptions.HOSTNAME.key(), ORACLE_CONTAINER.getHost());
         config.put(
                 OracleSourceOptions.PORT.key(), String.valueOf(ORACLE_CONTAINER.getOraclePort()));
-//        config.put(OracleSourceOptions.USERNAME.key(), TEST_USER);
-//        config.put(OracleSourceOptions.PASSWORD.key(), TEST_PWD);
+        //        config.put(OracleSourceOptions.USERNAME.key(), TEST_USER);
+        //        config.put(OracleSourceOptions.PASSWORD.key(), TEST_PWD);
         config.put(OracleSourceOptions.USERNAME.key(), ORACLE_CONTAINER.getUsername());
         config.put(OracleSourceOptions.PASSWORD.key(), ORACLE_CONTAINER.getPassword());
         config.put(OracleSourceOptions.DATABASE_NAME.key(), ORACLE_CONTAINER.getDatabaseName());

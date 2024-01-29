@@ -47,8 +47,8 @@ public class OracleTypeUtils {
     private static final String BLOB = "BLOB";
     private static final String SYS_XMLTYPE = "SYS.XMLTYPE";
     private static final String XMLTYPE = "XMLTYPE";
-    private static final String INTERVAL_DAY_TO_SECDOND = "INTERVAL DAY TO SECDOND";
-    private static final String INTERVAL_YEAR_TO_MONTH = "INTERVAL YEAR TO MONTH";
+    private static final String INTERVAL_DAY = "INTERVAL DAY";
+    private static final String INTERVAL_YEAR = "INTERVAL YEAR";
 
     public static DataType toDataType(
             String typeName,
@@ -58,6 +58,7 @@ public class OracleTypeUtils {
         if (typeMapping.containsMode(TO_STRING)) {
             return DataTypes.STRING();
         }
+        typeName = concatenateSubstring(typeName);
         precision = precision == null ? 0 : precision;
         scale = scale == null ? 0 : scale;
         // refer:
@@ -74,27 +75,23 @@ public class OracleTypeUtils {
             case SYS_XMLTYPE:
             case FLOAT:
             case TIMESTAMP_WITH_TIME_ZONE:
+            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return DataTypes.STRING();
-
             case BINARY_FLOAT:
                 return DataTypes.FLOAT();
             case BINARY_DOUBLE:
                 return DataTypes.DOUBLE();
             case DATE:
             case TIMESTAMP:
-                return DataTypes.TIMESTAMP(precision);
-            case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
-                return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(precision);
+                return DataTypes.TIMESTAMP(6);
             case BLOB:
                 return DataTypes.BYTES();
-            case INTERVAL_DAY_TO_SECDOND:
-            case INTERVAL_YEAR_TO_MONTH:
+            case INTERVAL_DAY:
+            case INTERVAL_YEAR:
                 return DataTypes.BIGINT();
             case NUMBER:
-                if (precision == 1) {
-                    return DataTypes.BOOLEAN();
-                } else if (precision > 0 && scale > 0) {
-                    return DataTypes.DECIMAL(precision, scale);
+                if (precision > 0 && scale > 0) {
+                    return DataTypes.STRING();
                 } else {
                     int diff = precision - scale;
                     if (diff < 3) {
@@ -105,8 +102,6 @@ public class OracleTypeUtils {
                         return DataTypes.INT();
                     } else if (diff < 19) {
                         return DataTypes.BIGINT();
-                    } else if (diff <= 38) {
-                        return DataTypes.DECIMAL(diff, 0);
                     } else {
                         return DataTypes.STRING();
                     }
@@ -114,6 +109,24 @@ public class OracleTypeUtils {
             default:
                 throw new UnsupportedOperationException(
                         String.format("Doesn't support Oracle type '%s' yet", typeName));
+        }
+    }
+
+    protected static String concatenateSubstring(String input) {
+        // 查找左括号的位置
+        int leftParenIndex = input.indexOf('(');
+
+        // 查找右括号的位置
+        int rightParenIndex = input.indexOf(')');
+
+        // 如果找到左括号和右括号，则拼接左括号左边的部分和右括号右边的部分
+        if (leftParenIndex != -1 && rightParenIndex != -1) {
+            String leftPart = input.substring(0, leftParenIndex);
+            String rightPart = input.substring(rightParenIndex + 1);
+            return leftPart + rightPart;
+        } else {
+            // 如果没有找到左括号，则返回原字符串
+            return input;
         }
     }
 
