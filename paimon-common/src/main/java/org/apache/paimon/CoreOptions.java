@@ -283,6 +283,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 mb"))
                     .withDescription("Amount of data to spill records to disk in spilled sort.");
 
+    public static final ConfigOption<String> SPILL_COMPRESSION =
+            key("spill-compression")
+                    .stringType()
+                    .defaultValue("LZ4")
+                    .withDescription(
+                            "Compression for spill, currently lz4, lzo and zstd are supported.");
+
     public static final ConfigOption<Boolean> WRITE_ONLY =
             key("write-only")
                     .booleanType()
@@ -1269,6 +1276,10 @@ public class CoreOptions implements Serializable {
 
     public long sortSpillBufferSize() {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
+    }
+
+    public String spillCompression() {
+        return options.get(SPILL_COMPRESSION);
     }
 
     public Duration continuousDiscoveryInterval() {

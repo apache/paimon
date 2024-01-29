@@ -57,12 +57,6 @@ under the License.
         <!-- flink dependencies -->
 
         <dependency>
-            <groupId>org.lz4</groupId>
-            <artifactId>lz4-java</artifactId>
-            <version>${lz4.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>frocksdbjni</artifactId>
             <version>${frocksdbjni.version}</version>

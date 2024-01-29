@@ -18,6 +18,11 @@
 
 package org.apache.paimon.compression;
 
+import io.airlift.compress.lzo.LzoCompressor;
+import io.airlift.compress.lzo.LzoDecompressor;
+import io.airlift.compress.zstd.ZstdCompressor;
+import io.airlift.compress.zstd.ZstdDecompressor;
+
 /**
  * Each compression codec has an implementation of {@link BlockCompressionFactory} to create
  * compressors and decompressors.
@@ -27,4 +32,18 @@ public interface BlockCompressionFactory {
     BlockCompressor getCompressor();
 
     BlockDecompressor getDecompressor();
+
+    /** Creates {@link BlockCompressionFactory} according to the configuration. */
+    static BlockCompressionFactory create(String compression) {
+        switch (compression.toUpperCase()) {
+            case "LZ4":
+                return new Lz4BlockCompressionFactory();
+            case "LZO":
+                return new AirCompressorFactory(new LzoCompressor(), new LzoDecompressor());
+            case "ZSTD":
+                return new AirCompressorFactory(new ZstdCompressor(), new ZstdDecompressor());
+            default:
+                throw new IllegalStateException("Unknown CompressionMethod " + compression);
+        }
+    }
 }
