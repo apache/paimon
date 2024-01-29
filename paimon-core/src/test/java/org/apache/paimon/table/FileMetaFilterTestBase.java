@@ -18,18 +18,22 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -73,36 +77,38 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                                             .collect(Collectors.toList()))
                             .containsAll(filesName);
 
+                    Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
+                    FieldStatsConverters converters =
+                            new FieldStatsConverters(schemaFields, table.schema().id());
                     for (DataFileMeta fileMeta : fileMetaList) {
-                        FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
-                        assertThat(statsArray.length).isEqualTo(6);
-                        if (filesName.contains(fileMeta.fileName())) {
-                            assertThat(statsArray[0].minValue()).isNotNull();
-                            assertThat(statsArray[0].maxValue()).isNotNull();
-                            assertThat(statsArray[1].minValue()).isNotNull();
-                            assertThat(statsArray[1].maxValue()).isNotNull();
-                            assertThat(statsArray[2].minValue()).isNotNull();
-                            assertThat(statsArray[2].maxValue()).isNotNull();
+                        BinaryTableStats stats = getTableValueStats(fileMeta);
+                        FieldStatsArraySerializer serializer =
+                                converters.getOrCreate(fileMeta.schemaId());
+                        InternalRow min = serializer.evolution(stats.minValues());
+                        InternalRow max = serializer.evolution(stats.maxValues());
 
-                            assertThat(statsArray[3].minValue()).isNull();
-                            assertThat(statsArray[3].maxValue()).isNull();
-                            assertThat(statsArray[4].minValue()).isNull();
-                            assertThat(statsArray[4].maxValue()).isNull();
-                            assertThat(statsArray[5].minValue()).isNull();
-                            assertThat(statsArray[5].maxValue()).isNull();
+                        assertThat(min.getFieldCount()).isEqualTo(6);
+
+                        assertThat(min.isNullAt(0)).isFalse();
+                        assertThat(max.isNullAt(0)).isFalse();
+                        assertThat(min.isNullAt(1)).isFalse();
+                        assertThat(max.isNullAt(1)).isFalse();
+                        assertThat(min.isNullAt(2)).isFalse();
+                        assertThat(max.isNullAt(2)).isFalse();
+                        if (filesName.contains(fileMeta.fileName())) {
+                            assertThat(min.isNullAt(3)).isTrue();
+                            assertThat(max.isNullAt(3)).isTrue();
+                            assertThat(min.isNullAt(4)).isTrue();
+                            assertThat(max.isNullAt(4)).isTrue();
+                            assertThat(min.isNullAt(5)).isTrue();
+                            assertThat(max.isNullAt(5)).isTrue();
                         } else {
-                            assertThat(statsArray[0].minValue()).isNotNull();
-                            assertThat(statsArray[0].maxValue()).isNotNull();
-                            assertThat(statsArray[1].minValue()).isNotNull();
-                            assertThat(statsArray[1].maxValue()).isNotNull();
-                            assertThat(statsArray[2].minValue()).isNotNull();
-                            assertThat(statsArray[2].maxValue()).isNotNull();
-                            assertThat(statsArray[3].minValue()).isNotNull();
-                            assertThat(statsArray[3].maxValue()).isNotNull();
-                            assertThat(statsArray[4].minValue()).isNotNull();
-                            assertThat(statsArray[4].maxValue()).isNotNull();
-                            assertThat(statsArray[5].minValue()).isNotNull();
-                            assertThat(statsArray[5].maxValue()).isNotNull();
+                            assertThat(min.isNullAt(3)).isFalse();
+                            assertThat(max.isNullAt(3)).isFalse();
+                            assertThat(min.isNullAt(4)).isFalse();
+                            assertThat(max.isNullAt(4)).isFalse();
+                            assertThat(min.isNullAt(5)).isFalse();
+                            assertThat(max.isNullAt(5)).isFalse();
                         }
                     }
                 },
@@ -177,12 +183,19 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     List<DataSplit> allSplits = table.newSnapshotReader().read().dataSplits();
                     assertThat(filterAllSplits).isEqualTo(allSplits);
 
+                    Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
+                    FieldStatsConverters converters =
+                            new FieldStatsConverters(schemaFields, table.schema().id());
                     Set<String> filterFileNames = new HashSet<>();
                     for (DataSplit dataSplit : filterAllSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
-                            FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
-                            int minValue = (Integer) fieldStats[1].minValue();
-                            int maxValue = (Integer) fieldStats[1].maxValue();
+                            BinaryTableStats stats = getTableValueStats(dataFileMeta);
+                            FieldStatsArraySerializer serializer =
+                                    converters.getOrCreate(dataFileMeta.schemaId());
+                            InternalRow min = serializer.evolution(stats.minValues());
+                            InternalRow max = serializer.evolution(stats.maxValues());
+                            int minValue = min.getInt(1);
+                            int maxValue = max.getInt(1);
                             if (minValue >= 14
                                     && minValue <= 19
                                     && maxValue >= 14
@@ -249,11 +262,18 @@ public abstract class FileMetaFilterTestBase extends SchemaEvolutionTableTestBas
                     checkFilterRowCount(toDataFileMetas(allSplits), 12L);
 
                     Set<String> filterFileNames = new HashSet<>();
+                    Function<Long, List<DataField>> schemaFields = id -> schemas.get(id).fields();
+                    FieldStatsConverters converters =
+                            new FieldStatsConverters(schemaFields, table.schema().id());
                     for (DataSplit dataSplit : allSplits) {
                         for (DataFileMeta dataFileMeta : dataSplit.dataFiles()) {
-                            FieldStats[] fieldStats = getTableValueStats(dataFileMeta).fields(null);
-                            Integer minValue = (Integer) fieldStats[3].minValue();
-                            Integer maxValue = (Integer) fieldStats[3].maxValue();
+                            BinaryTableStats stats = getTableValueStats(dataFileMeta);
+                            FieldStatsArraySerializer serializer =
+                                    converters.getOrCreate(dataFileMeta.schemaId());
+                            InternalRow min = serializer.evolution(stats.minValues());
+                            InternalRow max = serializer.evolution(stats.maxValues());
+                            Integer minValue = min.isNullAt(3) ? null : min.getInt(3);
+                            Integer maxValue = max.isNullAt(3) ? null : max.getInt(3);
                             if (minValue != null
                                     && maxValue != null
                                     && minValue > 1120

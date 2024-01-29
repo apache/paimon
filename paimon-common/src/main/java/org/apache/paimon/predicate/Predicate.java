@@ -19,8 +19,8 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
 import java.util.Optional;
@@ -47,7 +47,8 @@ public interface Predicate extends Serializable {
      * @return return true is likely to hit (there may also be false positives), return false is
      *     absolutely not possible to hit.
      */
-    boolean test(long rowCount, FieldStats[] fieldStats);
+    boolean test(
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
     /** @return the negation predicate of this predicate if possible. */
     Optional<Predicate> negate();

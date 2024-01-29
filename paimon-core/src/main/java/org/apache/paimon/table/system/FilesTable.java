@@ -372,7 +372,7 @@ public class FilesTable implements ReadonlyTable {
                     fieldStatsConverters.getOrCreate(file.schemaId());
             // Create value stats
             FieldStats[] fieldStatsArray =
-                    tableStats.fields(fieldStatsArraySerializer, file.rowCount());
+                    fieldStatsArraySerializer.fromBinary(tableStats, file.rowCount());
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();
