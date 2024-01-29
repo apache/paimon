@@ -25,13 +25,14 @@ import org.apache.paimon.service.network.stats.ServiceRequestStats;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFutureListener;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandlerContext;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInboundHandlerAdapter;
-import org.apache.flink.shaded.netty4.io.netty.util.ReferenceCountUtil;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFuture;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFutureListener;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandler;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandlerContext;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelInboundHandlerAdapter;
+import org.apache.paimon.shade.netty4.io.netty.util.ReferenceCountUtil;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

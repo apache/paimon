@@ -29,6 +29,7 @@ import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -36,7 +37,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -63,6 +63,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.types.DataTypes.INT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -111,8 +112,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -169,8 +170,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -213,8 +214,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        r -> r.getInt(0) < 3,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -244,8 +245,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT(), INT())).lessThan(1, 22),
                         tempDir.toFile(),
-                        r -> r.getInt(1) < 22,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -267,8 +268,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -311,8 +312,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -365,8 +366,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        r -> r.getInt(0) < 3,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -405,8 +406,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -447,8 +448,8 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT(), INT(), INT())).lessThan(2, 222),
                         tempDir.toFile(),
-                        r -> r.getInt(2) < 222,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
 
@@ -555,9 +556,9 @@ public class LookupTableTest extends TableTestBase {
                         String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema =
                 Schema.newBuilder()
-                        .column("pk1", DataTypes.INT())
-                        .column("pk2", DataTypes.INT())
-                        .column("col2", DataTypes.INT())
+                        .column("pk1", INT())
+                        .column("pk2", INT())
+                        .column("col2", INT())
                         .primaryKey("pk1", "pk2")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "pk2")

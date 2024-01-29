@@ -17,11 +17,13 @@
  */
 package org.apache.paimon.spark
 
-import org.apache.paimon.CoreOptions
+import org.apache.paimon.{stats, CoreOptions}
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.sources.PaimonMicroBatchStream
+import org.apache.paimon.spark.statistics.StatisticsHelper
 import org.apache.paimon.table.{DataTable, FileStoreTable, Table}
 import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.connector.metric.CustomMetric
 import org.apache.spark.sql.connector.read.{Batch, Scan, Statistics, SupportsReportStatistics}
@@ -29,18 +31,22 @@ import org.apache.spark.sql.connector.read.streaming.MicroBatchStream
 import org.apache.spark.sql.sources.Filter
 import org.apache.spark.sql.types.StructType
 
+import java.util.Optional
+
 import scala.collection.JavaConverters._
 
 abstract class PaimonBaseScan(
     table: Table,
     requiredSchema: StructType,
     filters: Array[Predicate],
+    reservedFilters: Array[Filter],
     pushDownLimit: Option[Int])
   extends Scan
   with SupportsReportStatistics
-  with ScanHelper {
+  with ScanHelper
+  with StatisticsHelper {
 
-  private val tableRowType = table.rowType
+  val tableRowType: RowType = table.rowType
 
   private lazy val tableSchema = SparkTypeUtils.fromPaimonRowType(tableRowType)
 
@@ -49,6 +55,8 @@ abstract class PaimonBaseScan(
   protected var splits: Array[Split] = _
 
   override val coreOptions: CoreOptions = CoreOptions.fromMap(table.options())
+
+  lazy val statistics: Optional[stats.Statistics] = table.statistics()
 
   lazy val readBuilder: ReadBuilder = {
     val _readBuilder = table.newReadBuilder()
@@ -89,7 +97,12 @@ abstract class PaimonBaseScan(
   }
 
   override def estimateStatistics(): Statistics = {
-    PaimonStatistics(this)
+    val stats = PaimonStatistics(this)
+    if (reservedFilters.nonEmpty) {
+      filterStatistics(stats, reservedFilters)
+    } else {
+      stats
+    }
   }
 
   override def supportedCustomMetrics: Array[CustomMetric] = {

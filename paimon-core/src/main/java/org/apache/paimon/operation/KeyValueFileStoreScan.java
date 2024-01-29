@@ -25,6 +25,8 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
@@ -84,15 +86,18 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        return keyFilter == null
-                || keyFilter.test(
-                        entry.file().rowCount(),
-                        entry.file()
-                                .keyStats()
-                                .fields(
-                                        fieldKeyStatsConverters.getOrCreate(
-                                                entry.file().schemaId()),
-                                        entry.file().rowCount()));
+        if (keyFilter == null) {
+            return true;
+        }
+
+        FieldStatsArraySerializer serializer =
+                fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
+        BinaryTableStats stats = entry.file().keyStats();
+        return keyFilter.test(
+                entry.file().rowCount(),
+                serializer.evolution(stats.minValues()),
+                serializer.evolution(stats.maxValues()),
+                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
     }
 
     /** Note: Keep this thread-safe. */
@@ -102,14 +107,14 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         // the bucket.
         if (valueFilter != null) {
             for (ManifestEntry entry : entries) {
+                FieldStatsArraySerializer serializer =
+                        fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
+                BinaryTableStats stats = entry.file().valueStats();
                 if (valueFilter.test(
                         entry.file().rowCount(),
-                        entry.file()
-                                .valueStats()
-                                .fields(
-                                        fieldValueStatsConverters.getOrCreate(
-                                                entry.file().schemaId()),
-                                        entry.file().rowCount()))) {
+                        serializer.evolution(stats.minValues()),
+                        serializer.evolution(stats.maxValues()),
+                        serializer.evolution(stats.nullCounts(), entry.file().rowCount()))) {
                     return true;
                 }
             }

@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -30,7 +29,8 @@ public abstract class LeafUnaryFunction extends LeafFunction {
 
     public abstract boolean test(DataType type, Object value);
 
-    public abstract boolean test(DataType type, long rowCount, FieldStats fieldStats);
+    public abstract boolean test(
+            DataType type, long rowCount, Object min, Object max, Long nullCount);
 
     @Override
     public boolean test(DataType type, Object value, List<Object> literals) {
@@ -39,7 +39,12 @@ public abstract class LeafUnaryFunction extends LeafFunction {
 
     @Override
     public boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
-        return test(type, rowCount, fieldStats);
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            List<Object> literals) {
+        return test(type, rowCount, min, max, nullCount);
     }
 }

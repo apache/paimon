@@ -18,15 +18,14 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.ListSerializer;
 import org.apache.paimon.data.serializer.NullableSerializer;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataInputViewStreamWrapper;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.utils.InternalRowUtils;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;
@@ -34,6 +33,8 @@ import java.io.ObjectOutputStream;
 import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
+
+import static org.apache.paimon.utils.InternalRowUtils.get;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
 public class LeafPredicate implements Predicate {
@@ -89,28 +90,25 @@ public class LeafPredicate implements Predicate {
     }
 
     @Override
-    public boolean test(Object[] values) {
-        return function.test(type, values[fieldIndex], literals);
-    }
-
-    @Override
     public boolean test(InternalRow row) {
-        return function.test(type, InternalRowUtils.get(row, fieldIndex, type), literals);
+        return function.test(type, get(row, fieldIndex, type), literals);
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
-        FieldStats stats = fieldStats[fieldIndex];
-        Long nullCount = stats.nullCount();
+    public boolean test(
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
+        Object min = get(minValues, fieldIndex, type);
+        Object max = get(maxValues, fieldIndex, type);
+        Long nullCount = nullCounts.isNullAt(fieldIndex) ? null : nullCounts.getLong(fieldIndex);
         if (nullCount == null || rowCount != nullCount) {
             // not all null
             // min or max is null
             // unknown stats
-            if (stats.minValue() == null || stats.maxValue() == null) {
+            if (min == null || max == null) {
                 return true;
             }
         }
-        return function.test(type, rowCount, stats, literals);
+        return function.test(type, rowCount, min, max, nullCount, literals);
     }
 
     @Override

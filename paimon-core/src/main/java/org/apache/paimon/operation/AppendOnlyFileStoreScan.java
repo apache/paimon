@@ -24,6 +24,8 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
@@ -71,14 +73,18 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        return filter == null
-                || filter.test(
-                        entry.file().rowCount(),
-                        entry.file()
-                                .valueStats()
-                                .fields(
-                                        fieldStatsConverters.getOrCreate(entry.file().schemaId()),
-                                        entry.file().rowCount()));
+        if (filter == null) {
+            return true;
+        }
+
+        FieldStatsArraySerializer serializer =
+                fieldStatsConverters.getOrCreate(entry.file().schemaId());
+        BinaryTableStats stats = entry.file().valueStats();
+        return filter.test(
+                entry.file().rowCount(),
+                serializer.evolution(stats.minValues()),
+                serializer.evolution(stats.maxValues()),
+                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
     }
 
     @Override

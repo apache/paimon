@@ -81,7 +81,7 @@ public class PostgresTypeUtils {
         }
         precision = precision == null ? 0 : precision;
         scale = scale == null ? 0 : scale;
-        switch (typeName) {
+        switch (typeName.toLowerCase()) {
             case PG_BIT:
             case PG_VARBIT:
                 if (precision <= 1) {

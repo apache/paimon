@@ -15,25 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-package org.apache.paimon.spark
+package org.apache.paimon.spark.statistics
 
-import java.util.Optional
+import org.apache.spark.sql.catalyst.expressions.Attribute
+import org.apache.spark.sql.catalyst.plans.logical
+import org.apache.spark.sql.connector.read.Statistics
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 
-import scala.language.implicitConversions
-
-object PaimonImplicits {
-  implicit def toScalaOption[T](o: Optional[T]): Option[T] = {
-    if (o.isPresent) {
-      Some(o.get)
-    } else {
-      None
-    }
-  }
-
-  implicit def toJavaOptional[T, U](o: Option[T]): Optional[U] = {
-    o match {
-      case Some(t) => Optional.ofNullable(t.asInstanceOf[U])
-      case _ => Optional.empty[U]
-    }
+trait StatisticsHelper extends StatisticsHelperBase {
+  protected def toV1Stats(v2Stats: Statistics, attrs: Seq[Attribute]): logical.Statistics = {
+    DataSourceV2Relation.transformV2Stats(v2Stats, None, conf.defaultSizeInBytes)
   }
 }

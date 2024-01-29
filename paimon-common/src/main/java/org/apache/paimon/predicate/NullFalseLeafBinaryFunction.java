@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -31,7 +30,7 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
     public abstract boolean test(DataType type, Object field, Object literal);
 
     public abstract boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, Object literal);
+            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal);
 
     @Override
     public boolean test(DataType type, Object field, List<Object> literals) {
@@ -43,13 +42,17 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
 
     @Override
     public boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
-        Long nullCount = fieldStats.nullCount();
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            List<Object> literals) {
         if (nullCount != null) {
             if (rowCount == nullCount || literals.get(0) == null) {
                 return false;
             }
         }
-        return test(type, rowCount, fieldStats, literals.get(0));
+        return test(type, rowCount, min, max, nullCount, literals.get(0));
     }
 }

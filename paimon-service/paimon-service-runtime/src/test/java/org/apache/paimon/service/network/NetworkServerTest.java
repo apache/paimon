@@ -26,7 +26,8 @@ import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
 import org.apache.paimon.service.network.stats.ServiceRequestStats;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+
 import org.junit.jupiter.api.Test;
 
 import java.net.InetAddress;
