@@ -50,6 +50,20 @@ under the License.
             <version>${paimon.shade.caffeine.version}-${paimon.shade.version}</version>
         </dependency>
 
+        <!-- From paimon-format -->
+        <dependency>
+            <groupId>io.airlift</groupId>
+            <artifactId>aircompressor</artifactId>
+            <version>${airlift.version}</version>
+        </dependency>
+
+        <!-- From paimon-bundle -->
+        <dependency>
+            <groupId>org.lz4</groupId>
+            <artifactId>lz4-java</artifactId>
+            <version>${lz4.version}</version>
+        </dependency>
+
         <!-- Java compiler -->
         <dependency>
             <groupId>org.codehaus.janino</groupId>

@@ -576,6 +576,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The maximum time of completed snapshots to retain.</td>
         </tr>
         <tr>
+            <td><h5>snapshot.watermark-idle-timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
+        </tr>
+        <tr>
             <td><h5>sort-engine</h5></td>
             <td style="word-wrap: break-word;">loser-tree</td>
             <td><p>Enum</p></td>
@@ -604,6 +610,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Target size of a source split when scanning a bucket.</td>
+        </tr>
+        <tr>
+            <td><h5>spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"LZ4"</td>
+            <td>String</td>
+            <td>Compression for spill, currently lz4, lzo and zstd are supported.</td>
         </tr>
         <tr>
             <td><h5>streaming-read-mode</h5></td>
@@ -652,12 +664,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
             <td>The maximum number of tags to retain.</td>
-        </tr>
-        <tr>
-            <td><h5>snapshot.watermark-idle-timeout</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Duration</td>
-            <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
         </tr>
         <tr>
             <td><h5>tag.period-formatter</h5></td>

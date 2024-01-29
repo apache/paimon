@@ -62,6 +62,7 @@ public class SortOperatorTest {
                         MemorySize.parse("10 mb").getBytes(),
                         (int) MemorySize.parse("16 kb").getBytes(),
                         128,
+                        "lz4",
                         1) {};
 
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
@@ -109,6 +110,7 @@ public class SortOperatorTest {
                         MemorySize.parse("10 mb").getBytes(),
                         (int) MemorySize.parse("16 kb").getBytes(),
                         128,
+                        "lz4",
                         1) {};
         OneInputStreamOperatorTestHarness harness = createTestHarness(sortOperator);
         harness.open();

@@ -416,6 +416,7 @@ public abstract class MergeTreeTestBase {
                 new MergeTreeWriter(
                         false,
                         128,
+                        "lz4",
                         null,
                         compactManager,
                         maxSequenceNumber,
