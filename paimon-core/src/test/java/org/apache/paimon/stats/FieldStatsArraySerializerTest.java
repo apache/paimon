@@ -26,7 +26,7 @@ import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
@@ -44,10 +44,10 @@ public class FieldStatsArraySerializerTest {
                 new TableSchema(
                         0,
                         Arrays.asList(
-                                new DataField(0, "a", new IntType()),
-                                new DataField(1, "b", new IntType()),
-                                new DataField(2, "c", new IntType()),
-                                new DataField(3, "d", new IntType())),
+                                new DataField(0, "a", DataTypes.INT()),
+                                new DataField(1, "b", DataTypes.INT()),
+                                new DataField(2, "c", DataTypes.INT()),
+                                new DataField(3, "d", DataTypes.INT())),
                         3,
                         Collections.EMPTY_LIST,
                         Collections.EMPTY_LIST,
@@ -57,11 +57,11 @@ public class FieldStatsArraySerializerTest {
                 new TableSchema(
                         0,
                         Arrays.asList(
-                                new DataField(1, "c", new IntType()),
-                                new DataField(3, "a", new IntType()),
-                                new DataField(5, "d", new IntType()),
-                                new DataField(6, "e", new IntType()),
-                                new DataField(7, "b", new IntType())),
+                                new DataField(1, "c", DataTypes.INT()),
+                                new DataField(3, "a", DataTypes.INT()),
+                                new DataField(5, "d", DataTypes.INT()),
+                                new DataField(6, "e", DataTypes.INT()),
+                                new DataField(7, "b", DataTypes.INT())),
                         7,
                         Collections.EMPTY_LIST,
                         Collections.EMPTY_LIST,

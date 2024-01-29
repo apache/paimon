@@ -19,7 +19,7 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
@@ -73,7 +73,7 @@ public class StatsTestUtils {
 
     public static BinaryTableStats newEmptyTableStats(int fieldCount) {
         FieldStatsArraySerializer statsConverter =
-                new FieldStatsArraySerializer(RowType.of(new IntType()));
+                new FieldStatsArraySerializer(RowType.of(DataTypes.INT()));
         FieldStats[] array = new FieldStats[fieldCount];
         for (int i = 0; i < fieldCount; i++) {
             array[i] = new FieldStats(null, null, 0L);
@@ -83,7 +83,7 @@ public class StatsTestUtils {
 
     public static BinaryTableStats newTableStats(int min, int max) {
         FieldStatsArraySerializer statsConverter =
-                new FieldStatsArraySerializer(RowType.of(new IntType()));
+                new FieldStatsArraySerializer(RowType.of(DataTypes.INT()));
         return statsConverter.toBinary(new FieldStats[] {new FieldStats(min, max, 0L)});
     }
 }

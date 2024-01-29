@@ -21,9 +21,7 @@ package org.apache.paimon.spark;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -87,8 +85,8 @@ public class SparkReadITCase {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "a", new IntType()),
-                                new DataField(1, "b", new BigIntType()),
+                                new DataField(0, "a", DataTypes.INT()),
+                                new DataField(1, "b", DataTypes.BIGINT()),
                                 new DataField(2, "c", new VarCharType())));
         return new SimpleTableTestHelper(tablePath, rowType);
     }

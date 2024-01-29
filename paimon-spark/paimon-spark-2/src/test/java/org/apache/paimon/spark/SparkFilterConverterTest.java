@@ -23,7 +23,6 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DateType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 
@@ -53,7 +52,7 @@ public class SparkFilterConverterTest {
     @Test
     public void testAll() {
         RowType rowType =
-                new RowType(Collections.singletonList(new DataField(0, "id", new IntType())));
+                new RowType(Collections.singletonList(new DataField(0, "id", DataTypes.INT())));
         SparkFilterConverter converter = new SparkFilterConverter(rowType);
         PredicateBuilder builder = new PredicateBuilder(rowType);
 

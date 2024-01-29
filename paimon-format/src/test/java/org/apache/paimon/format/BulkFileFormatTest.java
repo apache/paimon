@@ -25,7 +25,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -61,7 +61,7 @@ public class BulkFileFormatTest {
             @TempDir java.nio.file.Path tempDir, String format, String codec) throws IOException {
         FileFormat fileFormat = createFileFormat(format, codec);
         RowType rowType =
-                RowType.builder().fields(Arrays.asList(new IntType(), new IntType())).build();
+                RowType.builder().fields(Arrays.asList(DataTypes.INT(), DataTypes.INT())).build();
 
         Path path = new Path(tempDir.toUri().toString(), "1." + format);
 

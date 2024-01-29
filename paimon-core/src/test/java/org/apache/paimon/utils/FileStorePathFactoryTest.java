@@ -25,7 +25,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
@@ -81,7 +81,7 @@ public class FileStorePathFactoryTest {
                 new FileStorePathFactory(
                         new Path(tempDir.toString()),
                         RowType.of(
-                                new DataType[] {new VarCharType(10), new IntType()},
+                                new DataType[] {new VarCharType(10), DataTypes.INT()},
                                 new String[] {"dt", "hr"}),
                         "default",
                         CoreOptions.FILE_FORMAT.defaultValue().toString());

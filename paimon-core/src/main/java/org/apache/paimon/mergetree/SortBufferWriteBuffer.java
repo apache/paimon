@@ -36,8 +36,8 @@ import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -70,7 +70,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
 
         // user key + sequenceNumber
         List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-        sortKeyTypes.add(new BigIntType(false));
+        sortKeyTypes.add(DataTypes.BIGINT().notNull());
 
         // for sort binary buffer
         NormalizedKeyComputer normalizedKeyComputer =

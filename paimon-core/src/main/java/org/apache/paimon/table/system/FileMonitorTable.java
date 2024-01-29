@@ -40,9 +40,8 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -59,7 +58,6 @@ import static org.apache.paimon.CoreOptions.SCAN_BOUNDED_WATERMARK;
 import static org.apache.paimon.CoreOptions.STREAM_SCAN_MODE;
 import static org.apache.paimon.CoreOptions.StreamScanMode.FILE_MONITOR;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** A table to produce modified files for snapshots. */
@@ -73,11 +71,11 @@ public class FileMonitorTable implements DataTable, ReadonlyTable {
     private static final RowType ROW_TYPE =
             RowType.of(
                     new DataType[] {
-                        new BigIntType(false),
-                        newBytesType(false),
-                        new IntType(false),
-                        newBytesType(false),
-                        newBytesType(false)
+                        DataTypes.BIGINT().notNull(),
+                        DataTypes.BYTES().notNull(),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BYTES().notNull(),
+                        DataTypes.BYTES().notNull()
                     },
                     new String[] {
                         "_SNAPSHOT_ID", "_PARTITION", "_BUCKET", "_BEFORE_FILES", "_DATA_FILES"

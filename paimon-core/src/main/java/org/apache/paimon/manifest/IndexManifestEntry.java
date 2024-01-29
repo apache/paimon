@@ -20,9 +20,8 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileMeta;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 
@@ -31,8 +30,6 @@ import java.util.List;
 import java.util.Objects;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Manifest entry for index file. */
 public class IndexManifestEntry {
@@ -74,12 +71,12 @@ public class IndexManifestEntry {
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "_KIND", new TinyIntType(false)));
-        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
-        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
-        fields.add(new DataField(3, "_INDEX_TYPE", newStringType(false)));
-        fields.add(new DataField(4, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(5, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(6, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(1, "_PARTITION", DataTypes.BYTES().notNull()));
+        fields.add(new DataField(2, "_BUCKET", DataTypes.INT().notNull()));
+        fields.add(new DataField(3, "_INDEX_TYPE", DataTypes.STRING().notNull()));
+        fields.add(new DataField(4, "_FILE_NAME", DataTypes.STRING().notNull()));
+        fields.add(new DataField(5, "_FILE_SIZE", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(6, "_ROW_COUNT", DataTypes.BIGINT().notNull()));
         return new RowType(fields);
     }
 

@@ -24,8 +24,8 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -97,11 +97,11 @@ public class ManifestFileMeta {
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "_FILE_NAME", new VarCharType(false, Integer.MAX_VALUE)));
-        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(2, "_NUM_ADDED_FILES", new BigIntType(false)));
-        fields.add(new DataField(3, "_NUM_DELETED_FILES", new BigIntType(false)));
+        fields.add(new DataField(1, "_FILE_SIZE", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(2, "_NUM_ADDED_FILES", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(3, "_NUM_DELETED_FILES", DataTypes.BIGINT().notNull()));
         fields.add(new DataField(4, "_PARTITION_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(5, "_SCHEMA_ID", new BigIntType(false)));
+        fields.add(new DataField(5, "_SCHEMA_ID", DataTypes.BIGINT().notNull()));
         return new RowType(fields);
     }
 

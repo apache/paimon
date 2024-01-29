@@ -33,7 +33,6 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.Pair;
 
@@ -133,7 +132,7 @@ public class EqualiserCodeGeneratorTest {
         TEST_DATA.put(
                 DataTypeRoot.MULTISET,
                 new GeneratedData(
-                        DataTypes.MULTISET(new IntType()),
+                        DataTypes.MULTISET(DataTypes.INT()),
                         Pair.of(
                                 new GenericMap(
                                         new HashMap<Integer, Integer>() {
@@ -153,7 +152,7 @@ public class EqualiserCodeGeneratorTest {
         TEST_DATA.put(
                 DataTypeRoot.MAP,
                 new GeneratedData(
-                        DataTypes.MAP(new IntType(), new IntType()),
+                        DataTypes.MAP(DataTypes.INT(), DataTypes.INT()),
                         Pair.of(
                                 new GenericMap(
                                         new HashMap<Integer, Integer>() {

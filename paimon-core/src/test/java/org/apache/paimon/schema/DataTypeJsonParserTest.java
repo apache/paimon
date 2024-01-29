@@ -19,18 +19,17 @@
 package org.apache.paimon.schema;
 
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeJsonParser;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -85,9 +84,9 @@ public class DataTypeJsonParserTest {
                 TestSpec.forString("NUMERIC(10, 3)").expectType(new DecimalType(10, 3)),
                 TestSpec.forString("TINYINT").expectType(new TinyIntType()),
                 TestSpec.forString("SMALLINT").expectType(new SmallIntType()),
-                TestSpec.forString("INTEGER").expectType(new IntType()),
-                TestSpec.forString("INT").expectType(new IntType()),
-                TestSpec.forString("BIGINT").expectType(new BigIntType()),
+                TestSpec.forString("INTEGER").expectType(DataTypes.INT()),
+                TestSpec.forString("INT").expectType(DataTypes.INT()),
+                TestSpec.forString("BIGINT").expectType(DataTypes.BIGINT()),
                 TestSpec.forString("FLOAT").expectType(new FloatType()),
                 TestSpec.forString("DOUBLE").expectType(new DoubleType()),
                 TestSpec.forString("DOUBLE PRECISION").expectType(new DoubleType()),
@@ -111,43 +110,43 @@ public class DataTypeJsonParserTest {
                                 "{\"type\":\"ARRAY\",\"element\":\"TIMESTAMP(3) WITH LOCAL TIME ZONE\"}")
                         .expectType(new ArrayType(new LocalZonedTimestampType(3))),
                 TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT NOT NULL\"}")
-                        .expectType(new ArrayType(new IntType(false))),
+                        .expectType(new ArrayType(DataTypes.INT().notNull())),
                 TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT\"}")
-                        .expectType(new ArrayType(new IntType())),
+                        .expectType(new ArrayType(DataTypes.INT())),
                 TestSpec.forString("{\"type\":\"ARRAY\",\"element\":\"INT NOT NULL\"}")
-                        .expectType(new ArrayType(new IntType(false))),
+                        .expectType(new ArrayType(DataTypes.INT().notNull())),
                 TestSpec.forString("{\"type\":\"ARRAY NOT NULL\",\"element\":\"INT\"}")
-                        .expectType(new ArrayType(false, new IntType())),
+                        .expectType(new ArrayType(false, DataTypes.INT())),
                 TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT NOT NULL\"}")
-                        .expectType(new MultisetType(new IntType(false))),
+                        .expectType(new MultisetType(DataTypes.INT().notNull())),
                 TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT\"}")
-                        .expectType(new MultisetType(new IntType())),
+                        .expectType(new MultisetType(DataTypes.INT())),
                 TestSpec.forString("{\"type\":\"MULTISET\",\"element\":\"INT NOT NULL\"}")
-                        .expectType(new MultisetType(new IntType(false))),
+                        .expectType(new MultisetType(DataTypes.INT().notNull())),
                 TestSpec.forString("{\"type\":\"MULTISET NOT NULL\",\"element\":\"INT\"}")
-                        .expectType(new MultisetType(false, new IntType())),
+                        .expectType(new MultisetType(false, DataTypes.INT())),
                 TestSpec.forString("{\"type\":\"MAP\",\"key\":\"BIGINT\",\"value\":\"BOOLEAN\"}")
-                        .expectType(new MapType(new BigIntType(), new BooleanType())),
+                        .expectType(new MapType(DataTypes.BIGINT(), new BooleanType())),
                 TestSpec.forString(
                                 "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
                         .expectType(
                                 new RowType(
                                         Arrays.asList(
-                                                new DataField(0, "f0", new IntType(false)),
+                                                new DataField(0, "f0", DataTypes.INT().notNull()),
                                                 new DataField(1, "f1", new BooleanType())))),
                 TestSpec.forString(
                                 "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT NOT NULL\"},{\"id\":1,\"name\":\"f1\",\"type\":\"BOOLEAN\"}]}")
                         .expectType(
                                 new RowType(
                                         Arrays.asList(
-                                                new DataField(0, "f0", new IntType(false)),
+                                                new DataField(0, "f0", DataTypes.INT().notNull()),
                                                 new DataField(1, "f1", new BooleanType())))),
                 TestSpec.forString(
                                 "{\"type\":\"ROW\",\"fields\":[{\"id\":0,\"name\":\"f0\",\"type\":\"INT\"}]}")
                         .expectType(
                                 new RowType(
                                         Collections.singletonList(
-                                                new DataField(0, "f0", new IntType())))),
+                                                new DataField(0, "f0", DataTypes.INT())))),
                 TestSpec.forString("{\"type\":\"ROW\",\"fields\":[]}")
                         .expectType(new RowType(Collections.emptyList())),
                 TestSpec.forString(
@@ -158,7 +157,7 @@ public class DataTypeJsonParserTest {
                                                 new DataField(
                                                         0,
                                                         "f0",
-                                                        new IntType(false),
+                                                        DataTypes.INT().notNull(),
                                                         "This is a comment."),
                                                 new DataField(
                                                         1,

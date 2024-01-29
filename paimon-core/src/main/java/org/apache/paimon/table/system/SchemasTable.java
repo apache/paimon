@@ -36,14 +36,13 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -70,14 +69,12 @@ public class SchemasTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "schema_id", new BigIntType(false)),
-                            new DataField(1, "fields", SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    2, "partition_keys", SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    3, "primary_keys", SerializationUtils.newStringType(false)),
-                            new DataField(4, "options", SerializationUtils.newStringType(false)),
-                            new DataField(5, "comment", SerializationUtils.newStringType(true)),
+                            new DataField(0, "schema_id", DataTypes.BIGINT().notNull()),
+                            new DataField(1, "fields", DataTypes.STRING().notNull()),
+                            new DataField(2, "partition_keys", DataTypes.STRING().notNull()),
+                            new DataField(3, "primary_keys", DataTypes.STRING().notNull()),
+                            new DataField(4, "options", DataTypes.STRING().notNull()),
+                            new DataField(5, "comment", DataTypes.STRING()),
                             new DataField(6, "update_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;

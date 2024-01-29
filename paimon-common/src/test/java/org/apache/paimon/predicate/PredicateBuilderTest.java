@@ -20,7 +20,7 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -35,7 +35,7 @@ public class PredicateBuilderTest {
 
     @Test
     public void testBetween() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.between(0, 1, 3);
 
         assertThat(predicate.test(GenericRow.of(1))).isEqualTo(true);
@@ -55,7 +55,7 @@ public class PredicateBuilderTest {
 
     @Test
     public void testBetweenNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.between(0, 1, null);
 
         assertThat(predicate.test(GenericRow.of(1))).isEqualTo(false);
@@ -81,13 +81,13 @@ public class PredicateBuilderTest {
         PredicateBuilder builder =
                 new PredicateBuilder(
                         RowType.of(
-                                new IntType(),
-                                new IntType(),
-                                new IntType(),
-                                new IntType(),
-                                new IntType(),
-                                new IntType(),
-                                new IntType()));
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT()));
 
         Predicate child1 =
                 PredicateBuilder.or(builder.isNull(0), builder.isNull(1), builder.isNull(2));

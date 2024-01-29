@@ -28,7 +28,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -60,7 +60,7 @@ public class ChangelogModeTest {
         new SchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(
-                                RowType.of(new IntType(), new IntType()).getFields(),
+                                RowType.of(DataTypes.INT(), DataTypes.INT()).getFields(),
                                 Collections.emptyList(),
                                 Collections.singletonList("f0"),
                                 options.toMap(),

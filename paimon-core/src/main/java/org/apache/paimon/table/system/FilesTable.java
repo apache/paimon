@@ -45,12 +45,10 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
-import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -79,25 +77,19 @@ public class FilesTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "partition", SerializationUtils.newStringType(true)),
-                            new DataField(1, "bucket", new IntType(false)),
-                            new DataField(2, "file_path", SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    3, "file_format", SerializationUtils.newStringType(false)),
-                            new DataField(4, "schema_id", new BigIntType(false)),
-                            new DataField(5, "level", new IntType(false)),
-                            new DataField(6, "record_count", new BigIntType(false)),
-                            new DataField(7, "file_size_in_bytes", new BigIntType(false)),
-                            new DataField(8, "min_key", SerializationUtils.newStringType(true)),
-                            new DataField(9, "max_key", SerializationUtils.newStringType(true)),
-                            new DataField(
-                                    10,
-                                    "null_value_counts",
-                                    SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    11, "min_value_stats", SerializationUtils.newStringType(false)),
-                            new DataField(
-                                    12, "max_value_stats", SerializationUtils.newStringType(false)),
+                            new DataField(0, "partition", DataTypes.STRING()),
+                            new DataField(1, "bucket", DataTypes.INT().notNull()),
+                            new DataField(2, "file_path", DataTypes.STRING().notNull()),
+                            new DataField(3, "file_format", DataTypes.STRING().notNull()),
+                            new DataField(4, "schema_id", DataTypes.BIGINT().notNull()),
+                            new DataField(5, "level", DataTypes.INT().notNull()),
+                            new DataField(6, "record_count", DataTypes.BIGINT().notNull()),
+                            new DataField(7, "file_size_in_bytes", DataTypes.BIGINT().notNull()),
+                            new DataField(8, "min_key", DataTypes.STRING()),
+                            new DataField(9, "max_key", DataTypes.STRING()),
+                            new DataField(10, "null_value_counts", DataTypes.STRING().notNull()),
+                            new DataField(11, "min_value_stats", DataTypes.STRING().notNull()),
+                            new DataField(12, "max_value_stats", DataTypes.STRING().notNull()),
                             new DataField(13, "min_sequence_number", new BigIntType(true)),
                             new DataField(14, "max_sequence_number", new BigIntType(true)),
                             new DataField(15, "creation_time", DataTypes.TIMESTAMP_MILLIS())));

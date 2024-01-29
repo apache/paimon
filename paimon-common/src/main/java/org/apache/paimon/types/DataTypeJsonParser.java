@@ -500,9 +500,9 @@ public final class DataTypeJsonParser {
                     return new SmallIntType();
                 case INT:
                 case INTEGER:
-                    return new IntType();
+                    return DataTypes.INT();
                 case BIGINT:
-                    return new BigIntType();
+                    return DataTypes.BIGINT();
                 case FLOAT:
                     return new FloatType();
                 case DOUBLE:

@@ -33,6 +33,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
@@ -46,8 +47,6 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.utils.SerializationUtils.newStringType;
-
 /** This is a system {@link Table} to display catalog options. */
 public class CatalogOptionsTable implements ReadonlyTable {
 
@@ -58,8 +57,8 @@ public class CatalogOptionsTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "key", newStringType(false)),
-                            new DataField(1, "value", newStringType(false))));
+                            new DataField(0, "key", DataTypes.STRING().notNull()),
+                            new DataField(1, "value", DataTypes.STRING().notNull())));
 
     public CatalogOptionsTable(Options catalogOptions) {
         this.catalogOptions = catalogOptions;

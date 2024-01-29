@@ -50,8 +50,8 @@ public class UpdatedDataFieldsProcessFunctionBaseTest {
 
     @Test
     public void testCanConvertNumber() {
-        IntType oldType = new IntType();
-        BigIntType bigintType = new BigIntType();
+        IntType oldType = DataTypes.INT();
+        BigIntType bigintType = DataTypes.BIGINT();
         SmallIntType smallintType = new SmallIntType();
 
         UpdatedDataFieldsProcessFunctionBase.ConvertAction convertAction = null;

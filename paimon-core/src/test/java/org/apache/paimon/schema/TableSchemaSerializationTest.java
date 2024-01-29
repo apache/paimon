@@ -20,7 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -43,7 +43,7 @@ public class TableSchemaSerializationTest {
     public void testSchema() {
         List<DataField> fields =
                 Arrays.asList(
-                        new DataField(0, "f0", new IntType()),
+                        new DataField(0, "f0", DataTypes.INT()),
                         new DataField(1, "f1", newRowType(false, 2)),
                         new DataField(3, "f2", new ArrayType(false, newRowType(true, 4))),
                         new DataField(5, "f3", new MultisetType(true, newRowType(false, 6))),

@@ -31,10 +31,9 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -72,11 +71,11 @@ public class TestKeyValueGenerator {
             RowType.of(
                     new DataType[] {
                         new VarCharType(false, 8),
-                        new IntType(false),
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
+                        DataTypes.INT().notNull(),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BIGINT().notNull(),
+                        DataTypes.BIGINT(),
+                        new ArrayType(DataTypes.INT()),
                         new VarCharType(Integer.MAX_VALUE)
                     },
                     new String[] {
@@ -89,10 +88,10 @@ public class TestKeyValueGenerator {
             RowType.of(
                     new DataType[] {
                         new VarCharType(false, 8),
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BIGINT().notNull(),
+                        DataTypes.BIGINT(),
+                        new ArrayType(DataTypes.INT()),
                         new VarCharType(Integer.MAX_VALUE)
                     },
                     new String[] {"dt", "shopId", "orderId", "itemId", "priceAmount", "comment"});
@@ -102,10 +101,10 @@ public class TestKeyValueGenerator {
     public static final RowType NON_PARTITIONED_ROW_TYPE =
             RowType.of(
                     new DataType[] {
-                        new IntType(false),
-                        new BigIntType(false),
-                        new BigIntType(),
-                        new ArrayType(new IntType()),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BIGINT().notNull(),
+                        DataTypes.BIGINT(),
+                        new ArrayType(DataTypes.INT()),
                         new VarCharType(Integer.MAX_VALUE)
                     },
                     new String[] {"shopId", "orderId", "itemId", "priceAmount", "comment"});
@@ -115,7 +114,7 @@ public class TestKeyValueGenerator {
 
     public static final RowType KEY_TYPE =
             RowType.of(
-                    new DataType[] {new IntType(false), new BigIntType(false)},
+                    new DataType[] {DataTypes.INT().notNull(), DataTypes.BIGINT().notNull()},
                     new String[] {"key_shopId", "key_orderId"});
 
     public static final InternalRowSerializer DEFAULT_ROW_SERIALIZER =

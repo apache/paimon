@@ -21,7 +21,6 @@ import org.apache.paimon.data.serializer.InternalArraySerializer;
 import org.apache.paimon.data.serializer.InternalMapSerializer;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 
@@ -107,7 +106,9 @@ public class RowDataTest {
         writer.writeArray(12, array, new InternalArraySerializer(DataTypes.INT()));
         writer.writeMap(13, map, new InternalMapSerializer(DataTypes.INT(), DataTypes.INT()));
         writer.writeRow(
-                14, underRow, new InternalRowSerializer(RowType.of(new IntType(), new IntType())));
+                14,
+                underRow,
+                new InternalRowSerializer(RowType.of(DataTypes.INT(), DataTypes.INT())));
         writer.writeBinary(15, bytes);
         writer.writeTimestamp(16, timestamp1, 3);
         writer.writeTimestamp(17, timestamp2, 9);

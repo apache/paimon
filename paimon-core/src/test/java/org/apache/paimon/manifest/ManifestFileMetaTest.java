@@ -20,7 +20,7 @@ package org.apache.paimon.manifest;
 
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 
@@ -50,7 +50,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Tests for {@link ManifestFileMeta}. */
 public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
 
-    private static final RowType PARTITION_TYPE = RowType.of(new IntType());
+    private static final RowType PARTITION_TYPE = RowType.of(DataTypes.INT());
 
     @TempDir java.nio.file.Path tempDir;
     private ManifestFile manifestFile;

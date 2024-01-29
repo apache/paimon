@@ -25,6 +25,7 @@ import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -57,7 +58,7 @@ public class SchemaMergingUtilsTest {
     @Test
     public void testMergeTableSchemas() {
         // Init the table schema
-        DataField a = new DataField(0, "a", new IntType());
+        DataField a = new DataField(0, "a", DataTypes.INT());
         DataField b = new DataField(1, "b", new DoubleType());
         DataField c =
                 new DataField(
@@ -96,7 +97,7 @@ public class SchemaMergingUtilsTest {
     public void testMergeSchemas() {
         // This will test both `mergeSchemas` and `merge` methods.
         // Init the source schema
-        DataField a = new DataField(0, "a", new IntType());
+        DataField a = new DataField(0, "a", DataTypes.INT());
         DataField b = new DataField(1, "b", new DoubleType());
         DataField c =
                 new DataField(
@@ -129,7 +130,7 @@ public class SchemaMergingUtilsTest {
 
         // Case 3: an additional nested field and a missing field.
         DataField f1 = new DataField(-1, "f1", new CharType(10));
-        DataField f2 = new DataField(-1, "f2", new IntType());
+        DataField f2 = new DataField(-1, "f2", DataTypes.INT());
         RowType fDataType = new RowType(Lists.newArrayList(f1, f2));
         DataField f = new DataField(-1, "f", fDataType);
         RowType t3 = new RowType(Lists.newArrayList(a, b, c, d, f));
@@ -172,16 +173,16 @@ public class SchemaMergingUtilsTest {
     public void testMergeArrayTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
-        DataType source = new ArrayType(false, new IntType());
+        DataType source = new ArrayType(false, DataTypes.INT());
 
         // the element types are same.
-        DataType t1 = new ArrayType(true, new IntType());
+        DataType t1 = new ArrayType(true, DataTypes.INT());
         ArrayType r1 = (ArrayType) SchemaMergingUtils.merge(source, t1, highestFieldId, false);
         assertThat(r1.isNullable()).isFalse();
         assertThat(r1.getElementType() instanceof IntType).isTrue();
 
         // the element types aren't same, but can be evolved safety.
-        DataType t2 = new ArrayType(true, new BigIntType());
+        DataType t2 = new ArrayType(true, DataTypes.BIGINT());
         ArrayType r2 = (ArrayType) SchemaMergingUtils.merge(source, t2, highestFieldId, false);
         assertThat(r2.getElementType() instanceof BigIntType).isTrue();
 
@@ -199,10 +200,10 @@ public class SchemaMergingUtilsTest {
     public void testMergeMapTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
-        DataType source = new MapType(new VarCharType(VarCharType.MAX_LENGTH), new IntType());
+        DataType source = new MapType(new VarCharType(VarCharType.MAX_LENGTH), DataTypes.INT());
 
         // both the key and value types are same to the source's.
-        DataType t1 = new MapType(new VarCharType(VarCharType.MAX_LENGTH), new IntType());
+        DataType t1 = new MapType(new VarCharType(VarCharType.MAX_LENGTH), DataTypes.INT());
         MapType r1 = (MapType) SchemaMergingUtils.merge(source, t1, highestFieldId, false);
         assertThat(r1.isNullable()).isTrue();
         assertThat(r1.getKeyType() instanceof VarCharType).isTrue();
@@ -229,17 +230,17 @@ public class SchemaMergingUtilsTest {
     public void testMergeMultisetTypes() {
         AtomicInteger highestFieldId = new AtomicInteger(1);
 
-        DataType source = new MultisetType(false, new IntType());
+        DataType source = new MultisetType(false, DataTypes.INT());
 
         // the element types are same.
-        DataType t1 = new MultisetType(true, new IntType());
+        DataType t1 = new MultisetType(true, DataTypes.INT());
         MultisetType r1 =
                 (MultisetType) SchemaMergingUtils.merge(source, t1, highestFieldId, false);
         assertThat(r1.isNullable()).isFalse();
         assertThat(r1.getElementType() instanceof IntType).isTrue();
 
         // the element types aren't same, but can be evolved safety.
-        DataType t2 = new MultisetType(true, new BigIntType());
+        DataType t2 = new MultisetType(true, DataTypes.BIGINT());
         MultisetType r2 =
                 (MultisetType) SchemaMergingUtils.merge(source, t2, highestFieldId, false);
         assertThat(r2.getElementType() instanceof BigIntType).isTrue();
@@ -272,7 +273,7 @@ public class SchemaMergingUtilsTest {
 
         // DecimalType -> Other Numeric Type
         DataType dcmSource = new DecimalType();
-        DataType iTarget = new IntType();
+        DataType iTarget = DataTypes.INT();
         assertThatThrownBy(
                         () -> SchemaMergingUtils.merge(dcmSource, iTarget, highestFieldId, false))
                 .isInstanceOf(UnsupportedOperationException.class);
@@ -524,10 +525,10 @@ public class SchemaMergingUtilsTest {
         DataType tiTarget = new TinyIntType();
         DataType siSource = new SmallIntType();
         DataType siTarget = new SmallIntType();
-        DataType iSource = new IntType();
-        DataType iTarget = new IntType();
-        DataType biSource = new BigIntType();
-        DataType biTarget = new BigIntType();
+        DataType iSource = DataTypes.INT();
+        DataType iTarget = DataTypes.INT();
+        DataType biSource = DataTypes.BIGINT();
+        DataType biTarget = DataTypes.BIGINT();
         DataType fSource = new FloatType();
         DataType fTarget = new FloatType();
         DataType dSource = new DoubleType();

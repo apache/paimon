@@ -21,8 +21,8 @@ package org.apache.paimon;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
@@ -114,7 +114,7 @@ public class KeyValue {
 
     public static RowType schema(RowType keyType, RowType valueType) {
         List<DataField> fields = new ArrayList<>(keyType.getFields());
-        fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
+        fields.add(new DataField(0, SEQUENCE_NUMBER, DataTypes.BIGINT().notNull()));
         fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
         fields.addAll(valueType.getFields());
         return new RowType(fields);

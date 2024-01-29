@@ -29,7 +29,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.flink.table.catalog.ObjectIdentifier;
@@ -177,8 +177,8 @@ public abstract class FileStoreTableStatisticsTestBase {
 
     protected Schema.Builder schemaBuilder() {
         return Schema.newBuilder()
-                .column("pt", new IntType())
-                .column("a", new IntType())
+                .column("pt", DataTypes.INT())
+                .column("a", DataTypes.INT())
                 .column("b", new BigIntType(true))
                 .column("c", new VarCharType(100));
     }

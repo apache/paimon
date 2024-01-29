@@ -22,10 +22,9 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -67,7 +66,8 @@ public class SchemaManagerTest {
     private final List<String> partitionKeys = Collections.singletonList("f0");
     private final List<String> primaryKeys = Arrays.asList("f0", "f1");
     private final Map<String, String> options = Collections.singletonMap("key", "value");
-    private final RowType rowType = RowType.of(new IntType(), new BigIntType(), new VarCharType());
+    private final RowType rowType =
+            RowType.of(DataTypes.INT(), DataTypes.BIGINT(), new VarCharType());
     private final Schema schema =
             new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, "");
 
@@ -207,8 +207,8 @@ public class SchemaManagerTest {
     public void testPrimaryKeyType() throws Exception {
         final RowType mapPrimaryKeyType =
                 RowType.of(
-                        new MapType(new IntType(), new BigIntType()),
-                        new BigIntType(),
+                        new MapType(DataTypes.INT(), DataTypes.BIGINT()),
+                        DataTypes.BIGINT(),
                         new VarCharType());
         final Schema mapPrimaryKeySchema =
                 new Schema(mapPrimaryKeyType.getFields(), partitionKeys, primaryKeys, options, "");
@@ -219,7 +219,7 @@ public class SchemaManagerTest {
                         MapType.class.getSimpleName(), "f0");
 
         RowType doublePrimaryKeyType =
-                RowType.of(new DoubleType(), new BigIntType(), new VarCharType());
+                RowType.of(new DoubleType(), DataTypes.BIGINT(), new VarCharType());
         final Schema doublePrimaryKeySchema =
                 new Schema(
                         doublePrimaryKeyType.getFields(), partitionKeys, primaryKeys, options, "");
@@ -247,8 +247,8 @@ public class SchemaManagerTest {
     public void testPartitionType() {
         final RowType mapPrimaryKeyType =
                 RowType.of(
-                        new MapType(new IntType(), new BigIntType()),
-                        new BigIntType(),
+                        new MapType(DataTypes.INT(), DataTypes.BIGINT()),
+                        DataTypes.BIGINT(),
                         new VarCharType());
         final Schema mapPartitionSchema =
                 new Schema(

@@ -27,7 +27,7 @@ import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.StringUtils;
@@ -57,7 +57,7 @@ public class FieldStatsCollectorTest {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "a", new IntType(), "Someone's desc."),
+                                new DataField(0, "a", DataTypes.INT(), "Someone's desc."),
                                 new DataField(1, "b", new VarCharType())));
         serializers = new Serializer[2];
         for (int i = 0; i < rowType.getFieldCount(); i++) {

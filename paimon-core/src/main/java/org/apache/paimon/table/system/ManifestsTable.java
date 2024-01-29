@@ -38,13 +38,12 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -68,11 +67,11 @@ public class ManifestsTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "file_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "file_size", new BigIntType(false)),
-                            new DataField(2, "num_added_files", new BigIntType(false)),
-                            new DataField(3, "num_deleted_files", new BigIntType(false)),
-                            new DataField(4, "schema_id", new BigIntType(false))));
+                            new DataField(0, "file_name", DataTypes.STRING().notNull()),
+                            new DataField(1, "file_size", DataTypes.BIGINT().notNull()),
+                            new DataField(2, "num_added_files", DataTypes.BIGINT().notNull()),
+                            new DataField(3, "num_deleted_files", DataTypes.BIGINT().notNull()),
+                            new DataField(4, "schema_id", DataTypes.BIGINT().notNull())));
 
     private final FileIO fileIO;
     private final Path location;

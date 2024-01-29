@@ -36,6 +36,7 @@ import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.ProjectedRow;
@@ -45,8 +46,6 @@ import javax.annotation.Nullable;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.IntStream;
-
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
 /** Serializer for array of {@link FieldStats}. */
 public class FieldStatsArraySerializer {
@@ -162,8 +161,8 @@ public class FieldStatsArraySerializer {
 
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_MIN_VALUES", newBytesType(false)));
-        fields.add(new DataField(1, "_MAX_VALUES", newBytesType(false)));
+        fields.add(new DataField(0, "_MIN_VALUES", DataTypes.BYTES().notNull()));
+        fields.add(new DataField(1, "_MAX_VALUES", DataTypes.BYTES().notNull()));
         fields.add(new DataField(2, "_NULL_COUNTS", new ArrayType(new BigIntType(true))));
         return new RowType(fields);
     }

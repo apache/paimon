@@ -30,7 +30,7 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -50,7 +50,7 @@ public class FileFormatTest {
     @Test
     public void testWriteRead(@TempDir java.nio.file.Path tempDir) throws IOException {
         FileFormat avro = createFileFormat("snappy");
-        RowType rowType = RowType.of(new IntType(), new IntType());
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT());
 
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         // write
@@ -82,7 +82,7 @@ public class FileFormatTest {
     @Test
     public void testUnsupportedOption(@TempDir java.nio.file.Path tempDir) {
         FormatWriterFactory writerFactory =
-                createFileFormat("_unsupported").createWriterFactory(RowType.of(new IntType()));
+                createFileFormat("_unsupported").createWriterFactory(RowType.of(DataTypes.INT()));
         Path path = new Path(tempDir.toUri().toString(), "1.avro");
         assertThatThrownBy(
                         () ->

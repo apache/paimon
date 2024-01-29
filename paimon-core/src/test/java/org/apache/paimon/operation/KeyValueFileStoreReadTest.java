@@ -38,10 +38,9 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -96,17 +95,22 @@ public class KeyValueFileStoreReadTest {
         // remove zero occurrence, it might be merged and discarded by the merge tree
         expected.entrySet().removeIf(e -> e.getValue() == 0);
 
-        RowType partitionType = RowType.of(new DataType[] {new IntType(false)}, new String[] {"c"});
+        RowType partitionType =
+                RowType.of(new DataType[] {DataTypes.INT().notNull()}, new String[] {"c"});
         InternalRowSerializer partitionSerializer = new InternalRowSerializer(partitionType);
         List<String> keyNames = Arrays.asList("a", "b", "c");
         RowType keyType =
                 RowType.of(
-                        new DataType[] {new IntType(false), new IntType(false), new IntType(false)},
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT().notNull()
+                        },
                         keyNames.toArray(new String[0]));
-        RowType projectedKeyType = RowType.of(new IntType(false), new IntType(false));
+        RowType projectedKeyType = RowType.of(DataTypes.INT().notNull(), DataTypes.INT().notNull());
         InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(projectedKeyType);
         RowType valueType =
-                RowType.of(new DataType[] {new BigIntType(false)}, new String[] {"count"});
+                RowType.of(new DataType[] {DataTypes.BIGINT().notNull()}, new String[] {"count"});
         InternalRowSerializer valueSerializer = new InternalRowSerializer(valueType);
 
         TestFileStore store =
@@ -177,10 +181,10 @@ public class KeyValueFileStoreReadTest {
 
         InternalRowSerializer projectedValueSerializer =
                 new InternalRowSerializer(
-                        new IntType(false),
-                        new BigIntType(),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BIGINT(),
                         new VarCharType(false, 8),
-                        new IntType(false));
+                        DataTypes.INT().notNull());
         Map<BinaryRow, BinaryRow> expected = store.toKvMap(data);
         expected.replaceAll(
                 (k, v) ->

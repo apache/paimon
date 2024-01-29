@@ -252,7 +252,7 @@ object GenerateUtils {
       leftTerm: String,
       rightTerm: String): String = {
     val keyArrayType = new ArrayType(multisetType.getElementType)
-    val valueArrayType = new ArrayType(new IntType(false))
+    val valueArrayType = new ArrayType(DataTypes.INT().notNull())
     generateMapDataCompare(ctx, nullsIsLast, leftTerm, rightTerm, keyArrayType, valueArrayType)
   }
 

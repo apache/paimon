@@ -26,10 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import java.time.LocalDateTime;
@@ -42,8 +40,6 @@ import java.util.Optional;
 
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
-import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of a data file. */
 public class DataFileMeta {
@@ -337,18 +333,20 @@ public class DataFileMeta {
 
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
-        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
+        fields.add(new DataField(0, "_FILE_NAME", DataTypes.STRING().notNull()));
+        fields.add(new DataField(1, "_FILE_SIZE", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(2, "_ROW_COUNT", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(3, "_MIN_KEY", DataTypes.BYTES().notNull()));
+        fields.add(new DataField(4, "_MAX_KEY", DataTypes.BYTES().notNull()));
         fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
         fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
-        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
+        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(9, "_SCHEMA_ID", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(10, "_LEVEL", DataTypes.INT().notNull()));
+        fields.add(
+                new DataField(
+                        11, "_EXTRA_FILES", new ArrayType(false, DataTypes.STRING().notNull())));
         fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
         return new RowType(fields);
     }

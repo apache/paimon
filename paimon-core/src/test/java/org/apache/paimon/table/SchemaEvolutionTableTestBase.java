@@ -41,15 +41,14 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.VarBinaryType;
@@ -83,17 +82,17 @@ public abstract class SchemaEvolutionTableTestBase {
     protected static final List<DataField> SCHEMA_0_FIELDS =
             Arrays.asList(
                     new DataField(0, "a", VarCharType.STRING_TYPE),
-                    new DataField(1, "pt", new IntType()),
-                    new DataField(2, "b", new IntType()),
+                    new DataField(1, "pt", DataTypes.INT()),
+                    new DataField(2, "b", DataTypes.INT()),
                     new DataField(3, "c", VarCharType.STRING_TYPE),
-                    new DataField(4, "kt", new BigIntType()),
+                    new DataField(4, "kt", DataTypes.BIGINT()),
                     new DataField(5, "d", VarCharType.STRING_TYPE));
     protected static final List<DataField> SCHEMA_1_FIELDS =
             Arrays.asList(
-                    new DataField(1, "pt", new IntType()),
-                    new DataField(2, "d", new IntType()),
-                    new DataField(4, "kt", new BigIntType()),
-                    new DataField(6, "a", new IntType()),
+                    new DataField(1, "pt", DataTypes.INT()),
+                    new DataField(2, "d", DataTypes.INT()),
+                    new DataField(4, "kt", DataTypes.BIGINT()),
+                    new DataField(6, "a", DataTypes.INT()),
                     new DataField(7, "f", VarCharType.STRING_TYPE),
                     new DataField(8, "b", VarCharType.STRING_TYPE));
     protected static final List<String> PARTITION_NAMES = Collections.singletonList("pt");
@@ -101,13 +100,13 @@ public abstract class SchemaEvolutionTableTestBase {
 
     protected static final List<DataField> SCHEMA_FIELDS =
             Arrays.asList(
-                    new DataField(0, "a", new IntType()),
+                    new DataField(0, "a", DataTypes.INT()),
                     new DataField(1, "b", new CharType(10)),
                     new DataField(2, "c", new VarCharType(10)),
                     new DataField(3, "d", new DecimalType(10, 2)),
                     new DataField(4, "e", new SmallIntType()),
-                    new DataField(5, "f", new IntType()),
-                    new DataField(6, "g", new BigIntType()),
+                    new DataField(5, "f", DataTypes.INT()),
+                    new DataField(6, "g", DataTypes.BIGINT()),
                     new DataField(7, "h", new FloatType()),
                     new DataField(8, "i", new DoubleType()),
                     new DataField(9, "j", new DateType()),
@@ -326,7 +325,7 @@ public abstract class SchemaEvolutionTableTestBase {
         List<DataField> evolutionFields = new ArrayList<>(SCHEMA_FIELDS);
         evolutionFields.set(1, new DataField(1, "b", new VarCharType(10)));
         evolutionFields.set(3, new DataField(3, "d", new DoubleType()));
-        evolutionFields.set(4, new DataField(4, "e", new IntType()));
+        evolutionFields.set(4, new DataField(4, "e", DataTypes.INT()));
         evolutionFields.set(5, new DataField(5, "f", new DecimalType(10, 2)));
         evolutionFields.set(6, new DataField(6, "g", new FloatType()));
         evolutionFields.set(7, new DataField(7, "h", new DoubleType()));

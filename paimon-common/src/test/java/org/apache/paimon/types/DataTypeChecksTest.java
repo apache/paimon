@@ -33,7 +33,7 @@ class DataTypeChecksTest {
         DataType dataType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "f0", new IntType()),
+                                new DataField(0, "f0", DataTypes.INT()),
                                 new DataField(1, "f1", STRING_TYPE)));
         assertThat(DataTypeChecks.isCompositeType(dataType)).isTrue();
     }
@@ -48,7 +48,7 @@ class DataTypeChecksTest {
         DataType dataType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "f0", new IntType()),
+                                new DataField(0, "f0", DataTypes.INT()),
                                 new DataField(1, "f1", STRING_TYPE)));
         assertThat(DataTypeChecks.getFieldNames(dataType)).containsExactly("f0", "f1");
     }
@@ -58,7 +58,7 @@ class DataTypeChecksTest {
         DataType dataType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "f0", new IntType()),
+                                new DataField(0, "f0", DataTypes.INT()),
                                 new DataField(1, "f1", STRING_TYPE)));
         assertThat(DataTypeChecks.getFieldCount(dataType)).isEqualTo(2);
     }

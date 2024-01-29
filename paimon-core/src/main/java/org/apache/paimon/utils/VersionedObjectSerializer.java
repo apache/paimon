@@ -22,7 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
@@ -39,7 +39,7 @@ public abstract class VersionedObjectSerializer<T> extends ObjectSerializer<T> {
 
     public static RowType versionType(RowType rowType) {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(-1, "_VERSION", new IntType(false)));
+        fields.add(new DataField(-1, "_VERSION", DataTypes.INT().notNull()));
         fields.addAll(rowType.getFields());
         return new RowType(fields);
     }

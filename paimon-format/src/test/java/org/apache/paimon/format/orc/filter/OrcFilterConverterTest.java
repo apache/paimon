@@ -23,16 +23,15 @@ import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -70,7 +69,7 @@ public class OrcFilterConverterTest {
                 new PredicateBuilder(
                         new RowType(
                                 Collections.singletonList(
-                                        new DataField(0, "long1", new BigIntType()))));
+                                        new DataField(0, "long1", DataTypes.BIGINT()))));
         test(
                 builder.in(0, Arrays.asList(1L, 2L, 3L)),
                 new OrcFilters.Or(
@@ -214,8 +213,8 @@ public class OrcFilterConverterTest {
                 Tuple4.of(new DoubleType(), PredicateLeaf.Type.FLOAT, 3.4, true),
                 Tuple4.of(new TinyIntType(), PredicateLeaf.Type.LONG, 10, true),
                 Tuple4.of(new SmallIntType(), PredicateLeaf.Type.LONG, 10, true),
-                Tuple4.of(new BigIntType(), PredicateLeaf.Type.LONG, 10, true),
-                Tuple4.of(new IntType(), PredicateLeaf.Type.LONG, 10, true));
+                Tuple4.of(DataTypes.BIGINT(), PredicateLeaf.Type.LONG, 10, true),
+                Tuple4.of(DataTypes.INT(), PredicateLeaf.Type.LONG, 10, true));
     }
 
     static class Tuple4 {

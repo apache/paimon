@@ -35,8 +35,8 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -141,7 +141,7 @@ public class InternalRowUtils {
                         ((MapType) type).getValueType());
             } else {
                 return copyMap(
-                        (InternalMap) o, ((MultisetType) type).getElementType(), new IntType());
+                        (InternalMap) o, ((MultisetType) type).getElementType(), DataTypes.INT());
             }
         } else if (o instanceof Decimal) {
             return ((Decimal) o).copy();

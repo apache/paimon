@@ -26,7 +26,7 @@ import org.apache.paimon.format.TableStatsCollector;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 
@@ -42,7 +42,7 @@ public class TableStatsCollectorTest {
     @Test
     public void testCollect() {
         RowType rowType =
-                RowType.of(new IntType(), new VarCharType(10), new ArrayType(new IntType()));
+                RowType.of(DataTypes.INT(), new VarCharType(10), new ArrayType(DataTypes.INT()));
         TableStatsCollector collector =
                 new TableStatsCollector(
                         rowType,

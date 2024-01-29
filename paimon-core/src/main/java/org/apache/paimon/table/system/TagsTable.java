@@ -37,12 +37,12 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -68,9 +68,9 @@ public class TagsTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "tag_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "snapshot_id", new BigIntType(false)),
-                            new DataField(2, "schema_id", new BigIntType(false)),
+                            new DataField(0, "tag_name", DataTypes.STRING().notNull()),
+                            new DataField(1, "snapshot_id", DataTypes.BIGINT().notNull()),
+                            new DataField(2, "schema_id", DataTypes.BIGINT().notNull()),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true))));
 

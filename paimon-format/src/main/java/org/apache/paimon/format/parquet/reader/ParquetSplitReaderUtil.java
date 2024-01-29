@@ -35,8 +35,8 @@ import org.apache.paimon.format.parquet.ParquetSchemaConverter;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -164,7 +164,7 @@ public class ParquetSplitReaderUtil {
                                 pages.getPageReader(descriptors.get(1)),
                                 true,
                                 descriptors.get(1).getPrimitiveType(),
-                                new ArrayType(new IntType(false)));
+                                new ArrayType(DataTypes.INT().notNull()));
                 return new MapColumnReader(multisetKeyReader, multisetValueReader);
             case ROW:
                 RowType rowType = (RowType) fieldType;
@@ -328,7 +328,7 @@ public class ParquetSplitReaderUtil {
                                 depth + 2),
                         createWritableColumnVector(
                                 batchSize,
-                                new IntType(false),
+                                DataTypes.INT().notNull(),
                                 multisetRepeatedType.getType(1),
                                 descriptors,
                                 depth + 2));

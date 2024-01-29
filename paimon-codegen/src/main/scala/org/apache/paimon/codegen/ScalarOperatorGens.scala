@@ -71,7 +71,7 @@ object ScalarOperatorGens {
         left,
         right,
         multisetType.getElementType,
-        new IntType(false),
+        DataTypes.INT().notNull(),
         resultType)
     }
     // comparable types of same type

@@ -37,7 +37,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
@@ -80,7 +80,7 @@ public class LookupTableTest extends TableTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        this.rowType = RowType.of(new IntType(), new IntType(), new IntType());
+        this.rowType = RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
         this.ioManager = new IOManagerImpl(tempDir.toString());
     }
 

@@ -21,8 +21,7 @@ package org.apache.paimon.sort.zorder;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.types.BigIntType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.ZOrderByteUtils;
@@ -41,7 +40,7 @@ public class ZIndexerTest {
 
     @Test
     public void testZIndexer() {
-        RowType rowType = RowType.of(new IntType(), new BigIntType());
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.BIGINT());
 
         ZIndexer zIndexer = new ZIndexer(rowType, Arrays.asList("f0", "f1"));
         zIndexer.open();

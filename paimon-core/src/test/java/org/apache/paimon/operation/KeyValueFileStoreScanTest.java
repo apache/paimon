@@ -34,7 +34,7 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -136,7 +136,7 @@ public class KeyValueFileStoreScanTest {
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
         scan.withKeyFilter(
-                new PredicateBuilder(RowType.of(new IntType(false))).equal(0, wantedShopId));
+                new PredicateBuilder(RowType.of(DataTypes.INT().notNull())).equal(0, wantedShopId));
 
         Map<BinaryRow, BinaryRow> expected =
                 store.toKvMap(

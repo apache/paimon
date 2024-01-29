@@ -32,7 +32,6 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.io.TempDir;
@@ -60,7 +59,7 @@ public class TableBenchmark {
         catalog.createDatabase(database, true);
 
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "k", new IntType()));
+        fields.add(new DataField(0, "k", DataTypes.INT()));
         for (int i = 1; i <= VALUE_COUNT; i++) {
             fields.add(new DataField(i, "f" + i, DataTypes.STRING()));
         }

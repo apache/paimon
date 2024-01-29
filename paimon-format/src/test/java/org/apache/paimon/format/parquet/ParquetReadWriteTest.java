@@ -32,13 +32,12 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -82,8 +81,8 @@ public class ParquetReadWriteTest {
                             new BooleanType(),
                             new TinyIntType(),
                             new SmallIntType(),
-                            new IntType(),
-                            new BigIntType(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
                             new FloatType(),
                             new DoubleType(),
                             new TimestampType(3),
@@ -99,8 +98,8 @@ public class ParquetReadWriteTest {
                             new ArrayType(new BooleanType()),
                             new ArrayType(new TinyIntType()),
                             new ArrayType(new SmallIntType()),
-                            new ArrayType(new IntType()),
-                            new ArrayType(new BigIntType()),
+                            new ArrayType(DataTypes.INT()),
+                            new ArrayType(DataTypes.BIGINT()),
                             new ArrayType(new FloatType()),
                             new ArrayType(new DoubleType()),
                             new ArrayType(new TimestampType(9)),
@@ -113,10 +112,12 @@ public class ParquetReadWriteTest {
                             new MapType(
                                     new VarCharType(VarCharType.MAX_LENGTH),
                                     new VarCharType(VarCharType.MAX_LENGTH)),
-                            new MapType(new IntType(), new BooleanType()),
+                            new MapType(DataTypes.INT(), new BooleanType()),
                             new MultisetType(new VarCharType(VarCharType.MAX_LENGTH)),
                             RowType.builder()
-                                    .fields(new VarCharType(VarCharType.MAX_LENGTH), new IntType())
+                                    .fields(
+                                            new VarCharType(VarCharType.MAX_LENGTH),
+                                            DataTypes.INT())
                                     .build())
                     .build();
 
@@ -221,7 +222,8 @@ public class ParquetReadWriteTest {
 
         Path testPath = createTempParquetFile(folder, records, rowGroupSize);
         // test reader
-        DataType[] fieldTypes = new DataType[] {new DoubleType(), new TinyIntType(), new IntType()};
+        DataType[] fieldTypes =
+                new DataType[] {new DoubleType(), new TinyIntType(), DataTypes.INT()};
         ParquetReaderFactory format =
                 new ParquetReaderFactory(
                         new Options(),
@@ -257,7 +259,7 @@ public class ParquetReadWriteTest {
         // test reader
         DataType[] fieldTypes =
                 new DataType[] {
-                    new DoubleType(), new TinyIntType(), new IntType(), new VarCharType()
+                    new DoubleType(), new TinyIntType(), DataTypes.INT(), new VarCharType()
                 };
         ParquetReaderFactory format =
                 new ParquetReaderFactory(

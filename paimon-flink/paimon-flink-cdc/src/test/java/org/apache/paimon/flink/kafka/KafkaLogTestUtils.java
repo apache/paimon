@@ -42,7 +42,6 @@ import org.apache.flink.table.runtime.connector.sink.SinkRuntimeProviderContext;
 import org.apache.flink.table.runtime.connector.source.ScanRuntimeProviderContext;
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
 import org.apache.flink.table.types.DataType;
-import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.LogicalType;
 import org.apache.flink.table.types.logical.RowType;
 import org.apache.flink.table.types.utils.TypeConversions;
@@ -182,7 +181,7 @@ public class KafkaLogTestUtils {
                 servers,
                 changelogMode,
                 consistency,
-                RowType.of(new IntType(), new IntType()),
+                RowType.of(DataTypes.INT(), DataTypes.INT()),
                 keyed ? new int[] {0} : new int[0],
                 new HashMap<>());
     }

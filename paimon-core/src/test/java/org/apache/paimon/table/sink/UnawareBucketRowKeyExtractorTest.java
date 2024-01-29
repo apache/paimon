@@ -22,7 +22,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -54,9 +54,9 @@ public class UnawareBucketRowKeyExtractorTest {
         RowType rowType =
                 new RowType(
                         Arrays.asList(
-                                new DataField(0, "a", new IntType()),
-                                new DataField(1, "b", new IntType()),
-                                new DataField(2, "c", new IntType())));
+                                new DataField(0, "a", DataTypes.INT()),
+                                new DataField(1, "b", DataTypes.INT()),
+                                new DataField(2, "c", DataTypes.INT())));
         List<DataField> fields = TableSchema.newFields(rowType);
         Map<String, String> options = new HashMap<>();
         options.put(BUCKET.key(), "-1");

@@ -20,15 +20,14 @@ package org.apache.paimon.casting;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TimeType;
@@ -55,9 +54,13 @@ public class CastExecutorTest {
                 (byte) 1,
                 (short) 1);
         compareCastResult(
-                CastExecutors.resolve(new TinyIntType(false), new IntType(false)), (byte) 1, 1);
+                CastExecutors.resolve(new TinyIntType(false), DataTypes.INT().notNull()),
+                (byte) 1,
+                1);
         compareCastResult(
-                CastExecutors.resolve(new TinyIntType(false), new BigIntType(false)), (byte) 1, 1L);
+                CastExecutors.resolve(new TinyIntType(false), DataTypes.BIGINT().notNull()),
+                (byte) 1,
+                1L);
         compareCastResult(
                 CastExecutors.resolve(new TinyIntType(false), new FloatType(false)), (byte) 1, 1F);
         compareCastResult(
@@ -69,9 +72,11 @@ public class CastExecutorTest {
                 (short) 123,
                 (byte) 123);
         compareCastResult(
-                CastExecutors.resolve(new SmallIntType(false), new IntType(false)), (short) 1, 1);
+                CastExecutors.resolve(new SmallIntType(false), DataTypes.INT().notNull()),
+                (short) 1,
+                1);
         compareCastResult(
-                CastExecutors.resolve(new SmallIntType(false), new BigIntType(false)),
+                CastExecutors.resolve(new SmallIntType(false), DataTypes.BIGINT().notNull()),
                 (short) 1,
                 1L);
         compareCastResult(
@@ -84,15 +89,20 @@ public class CastExecutorTest {
                 1D);
 
         // int to other numeric
-        compareCastResult(CastExecutors.resolve(new IntType(false), new BigIntType(false)), 1, 1L);
-        compareCastResult(CastExecutors.resolve(new IntType(false), new FloatType(false)), 1, 1F);
-        compareCastResult(CastExecutors.resolve(new IntType(false), new DoubleType(false)), 1, 1D);
+        compareCastResult(
+                CastExecutors.resolve(DataTypes.INT().notNull(), DataTypes.BIGINT().notNull()),
+                1,
+                1L);
+        compareCastResult(
+                CastExecutors.resolve(DataTypes.INT().notNull(), new FloatType(false)), 1, 1F);
+        compareCastResult(
+                CastExecutors.resolve(DataTypes.INT().notNull(), new DoubleType(false)), 1, 1D);
 
         // bigint to other numeric
         compareCastResult(
-                CastExecutors.resolve(new BigIntType(false), new FloatType(false)), 1L, 1F);
+                CastExecutors.resolve(DataTypes.BIGINT().notNull(), new FloatType(false)), 1L, 1F);
         compareCastResult(
-                CastExecutors.resolve(new BigIntType(false), new DoubleType(false)), 1L, 1D);
+                CastExecutors.resolve(DataTypes.BIGINT().notNull(), new DoubleType(false)), 1L, 1D);
 
         // float to double
         compareCastResult(
@@ -110,11 +120,11 @@ public class CastExecutorTest {
                 (short) 1,
                 DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
-                CastExecutors.resolve(new IntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(DataTypes.INT().notNull(), new DecimalType(10, 2)),
                 1,
                 DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
-                CastExecutors.resolve(new BigIntType(false), new DecimalType(10, 2)),
+                CastExecutors.resolve(DataTypes.BIGINT().notNull(), new DecimalType(10, 2)),
                 1L,
                 DecimalUtils.castFrom(1, 10, 2));
         compareCastResult(
@@ -162,9 +172,11 @@ public class CastExecutorTest {
                 true,
                 (short) 1);
         compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new IntType(false)), true, 1);
+                CastExecutors.resolve(new BooleanType(false), DataTypes.INT().notNull()), true, 1);
         compareCastResult(
-                CastExecutors.resolve(new BooleanType(false), new BigIntType(false)), true, 1L);
+                CastExecutors.resolve(new BooleanType(false), DataTypes.BIGINT().notNull()),
+                true,
+                1L);
         compareCastResult(
                 CastExecutors.resolve(new BooleanType(false), new FloatType(false)), true, 1F);
         compareCastResult(
@@ -186,9 +198,11 @@ public class CastExecutorTest {
                 (short) 1,
                 true);
         compareCastResult(
-                CastExecutors.resolve(new IntType(false), new BooleanType(false)), 0, false);
+                CastExecutors.resolve(DataTypes.INT().notNull(), new BooleanType(false)), 0, false);
         compareCastResult(
-                CastExecutors.resolve(new BigIntType(false), new BooleanType(false)), 12L, true);
+                CastExecutors.resolve(DataTypes.BIGINT().notNull(), new BooleanType(false)),
+                12L,
+                true);
     }
 
     // To string rules
@@ -209,13 +223,13 @@ public class CastExecutorTest {
 
         // int to string
         compareCastResult(
-                CastExecutors.resolve(new IntType(false), new VarCharType(5)),
+                CastExecutors.resolve(DataTypes.INT().notNull(), new VarCharType(5)),
                 1,
                 BinaryString.fromString("1"));
 
         // bigint to string
         compareCastResult(
-                CastExecutors.resolve(new BigIntType(false), new VarCharType(5)),
+                CastExecutors.resolve(DataTypes.BIGINT().notNull(), new VarCharType(5)),
                 1L,
                 BinaryString.fromString("1"));
 
@@ -418,13 +432,13 @@ public class CastExecutorTest {
 
         // string to int
         compareCastResult(
-                CastExecutors.resolve(new VarCharType(5), new IntType(false)),
+                CastExecutors.resolve(new VarCharType(5), DataTypes.INT().notNull()),
                 BinaryString.fromString("1"),
                 1);
 
         // string to bigint
         compareCastResult(
-                CastExecutors.resolve(new VarCharType(5), new BigIntType(false)),
+                CastExecutors.resolve(new VarCharType(5), DataTypes.BIGINT().notNull()),
                 BinaryString.fromString("1"),
                 1L);
 

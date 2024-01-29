@@ -23,15 +23,14 @@ import org.apache.paimon.format.TableFieldStatsExtractorTest;
 import org.apache.paimon.format.orc.filter.OrcTableStatsExtractor;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -62,8 +61,8 @@ public class OrcTableStatsExtractorTest extends TableFieldStatsExtractorTest {
                         new VarBinaryType(8),
                         new TinyIntType(),
                         new SmallIntType(),
-                        new IntType(),
-                        new BigIntType(),
+                        DataTypes.INT(),
+                        DataTypes.BIGINT(),
                         new FloatType(),
                         new DoubleType(),
                         new DecimalType(5, 2),
@@ -74,7 +73,7 @@ public class OrcTableStatsExtractorTest extends TableFieldStatsExtractorTest {
                         new LocalZonedTimestampType(3),
                         // orc reader & writer currently cannot preserve a high precision timestamp
                         // new TimestampType(9),
-                        new ArrayType(new IntType()),
+                        new ArrayType(DataTypes.INT()),
                         new MapType(new VarCharType(8), new VarCharType(8)),
                         new MultisetType(new VarCharType(8)))
                 .build();

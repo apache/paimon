@@ -18,15 +18,13 @@
 
 package org.apache.paimon.index;
 
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Objects;
-
-import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of index file. */
 public class IndexFileMeta {
@@ -96,10 +94,10 @@ public class IndexFileMeta {
 
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
-        fields.add(new DataField(0, "_INDEX_TYPE", newStringType(false)));
-        fields.add(new DataField(1, "_FILE_NAME", newStringType(false)));
-        fields.add(new DataField(2, "_FILE_SIZE", new BigIntType(false)));
-        fields.add(new DataField(3, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(0, "_INDEX_TYPE", DataTypes.STRING().notNull()));
+        fields.add(new DataField(1, "_FILE_NAME", DataTypes.STRING().notNull()));
+        fields.add(new DataField(2, "_FILE_SIZE", DataTypes.BIGINT().notNull()));
+        fields.add(new DataField(3, "_ROW_COUNT", DataTypes.BIGINT().notNull()));
         return new RowType(fields);
     }
 }

@@ -21,8 +21,8 @@ package org.apache.paimon.format.avro;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -208,7 +208,7 @@ public class AvroSchemaConverter {
         } else {
             MultisetType multisetType = (MultisetType) type;
             keyType = multisetType.getElementType();
-            valueType = new IntType();
+            valueType = DataTypes.INT();
         }
         if (keyType.getTypeRoot() != DataTypeRoot.VARCHAR
                 && keyType.getTypeRoot() != DataTypeRoot.CHAR) {

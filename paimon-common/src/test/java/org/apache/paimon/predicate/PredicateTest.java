@@ -20,7 +20,7 @@ package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -37,7 +37,7 @@ public class PredicateTest {
 
     @Test
     public void testEqual() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.equal(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -56,7 +56,7 @@ public class PredicateTest {
 
     @Test
     public void testEqualNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.equal(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -70,7 +70,7 @@ public class PredicateTest {
 
     @Test
     public void testNotEqual() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.notEqual(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(true);
@@ -90,7 +90,7 @@ public class PredicateTest {
 
     @Test
     public void testNotEqualNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.notEqual(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -104,7 +104,7 @@ public class PredicateTest {
 
     @Test
     public void testGreater() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.greaterThan(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -126,7 +126,7 @@ public class PredicateTest {
 
     @Test
     public void testGreaterNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.greaterThan(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -140,7 +140,7 @@ public class PredicateTest {
 
     @Test
     public void testGreaterOrEqual() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.greaterOrEqual(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -161,7 +161,7 @@ public class PredicateTest {
 
     @Test
     public void testGreaterOrEqualNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.greaterOrEqual(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -175,7 +175,7 @@ public class PredicateTest {
 
     @Test
     public void testLess() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.lessThan(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(true);
@@ -196,7 +196,7 @@ public class PredicateTest {
 
     @Test
     public void testLessNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.lessThan(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -210,7 +210,7 @@ public class PredicateTest {
 
     @Test
     public void testLessOrEqual() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.lessOrEqual(0, 5);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(true);
@@ -230,7 +230,7 @@ public class PredicateTest {
 
     @Test
     public void testLessOrEqualNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.lessOrEqual(0, null);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -244,7 +244,7 @@ public class PredicateTest {
 
     @Test
     public void testIsNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.isNull(0);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(false);
@@ -259,7 +259,7 @@ public class PredicateTest {
 
     @Test
     public void testIsNotNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.isNotNull(0);
 
         assertThat(predicate.test(GenericRow.of(4))).isEqualTo(true);
@@ -275,7 +275,7 @@ public class PredicateTest {
 
     @Test
     public void testIn() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.in(0, Arrays.asList(1, 3));
         assertThat(predicate).isInstanceOf(CompoundPredicate.class);
 
@@ -293,7 +293,7 @@ public class PredicateTest {
 
     @Test
     public void testInNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.in(0, Arrays.asList(1, null, 3));
         assertThat(predicate).isInstanceOf(CompoundPredicate.class);
 
@@ -311,7 +311,7 @@ public class PredicateTest {
 
     @Test
     public void testNotIn() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.notIn(0, Arrays.asList(1, 3));
         assertThat(predicate).isInstanceOf(CompoundPredicate.class);
 
@@ -333,7 +333,7 @@ public class PredicateTest {
 
     @Test
     public void testNotInNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.notIn(0, Arrays.asList(1, null, 3));
         assertThat(predicate).isInstanceOf(CompoundPredicate.class);
 
@@ -358,7 +358,7 @@ public class PredicateTest {
 
     @Test
     public void testLargeIn() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         List<Object> literals = new ArrayList<>();
         literals.add(1);
         literals.add(3);
@@ -384,7 +384,7 @@ public class PredicateTest {
 
     @Test
     public void testLargeInNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         List<Object> literals = new ArrayList<>();
         literals.add(1);
         literals.add(null);
@@ -411,7 +411,7 @@ public class PredicateTest {
 
     @Test
     public void testLargeNotIn() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         List<Object> literals = new ArrayList<>();
         literals.add(1);
         literals.add(3);
@@ -441,7 +441,7 @@ public class PredicateTest {
 
     @Test
     public void testLargeNotInNull() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         List<Object> literals = new ArrayList<>();
         literals.add(1);
         literals.add(null);
@@ -475,7 +475,8 @@ public class PredicateTest {
 
     @Test
     public void testAnd() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.INT()));
         Predicate predicate = PredicateBuilder.and(builder.equal(0, 3), builder.equal(1, 5));
 
         assertThat(predicate.test(GenericRow.of(4, 5))).isEqualTo(false);
@@ -514,7 +515,8 @@ public class PredicateTest {
 
     @Test
     public void testOr() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        PredicateBuilder builder =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.INT()));
         Predicate predicate = PredicateBuilder.or(builder.equal(0, 3), builder.equal(1, 5));
 
         assertThat(predicate.test(GenericRow.of(4, 6))).isEqualTo(false);
@@ -553,7 +555,7 @@ public class PredicateTest {
 
     @Test
     public void testUnknownStats() {
-        PredicateBuilder builder = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate predicate = builder.equal(0, 5);
 
         assertThat(test(predicate, 3, new FieldStats[] {new FieldStats(null, null, 3L)}))
@@ -566,39 +568,41 @@ public class PredicateTest {
 
     @Test
     public void testPredicateToString() {
-        PredicateBuilder builder1 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder1 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p1 = builder1.equal(0, 5);
         assertThat(p1.toString()).isEqualTo("Equal(f0, 5)");
 
-        PredicateBuilder builder2 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder2 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p2 = builder2.greaterThan(0, 5);
         assertThat(p2.toString()).isEqualTo("GreaterThan(f0, 5)");
 
-        PredicateBuilder builder3 = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        PredicateBuilder builder3 =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.INT()));
         Predicate p3 = PredicateBuilder.and(builder3.equal(0, 3), builder3.equal(1, 5));
         assertThat(p3.toString()).isEqualTo("And([Equal(f0, 3), Equal(f1, 5)])");
 
-        PredicateBuilder builder4 = new PredicateBuilder(RowType.of(new IntType(), new IntType()));
+        PredicateBuilder builder4 =
+                new PredicateBuilder(RowType.of(DataTypes.INT(), DataTypes.INT()));
         Predicate p4 = PredicateBuilder.or(builder4.equal(0, 3), builder4.equal(1, 5));
         assertThat(p4.toString()).isEqualTo("Or([Equal(f0, 3), Equal(f1, 5)])");
 
-        PredicateBuilder builder5 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder5 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p5 = builder5.isNotNull(0);
         assertThat(p5.toString()).isEqualTo("IsNotNull(f0)");
 
-        PredicateBuilder builder6 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder6 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p6 = builder6.in(0, Arrays.asList(1, null, 3, 4));
         assertThat(p6.toString())
                 .isEqualTo(
                         "Or([Or([Or([Equal(f0, 1), Equal(f0, null)]), Equal(f0, 3)]), Equal(f0, 4)])");
 
-        PredicateBuilder builder7 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder7 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p7 = builder7.notIn(0, Arrays.asList(1, null, 3, 4));
         assertThat(p7.toString())
                 .isEqualTo(
                         "And([And([And([NotEqual(f0, 1), NotEqual(f0, null)]), NotEqual(f0, 3)]), NotEqual(f0, 4)])");
 
-        PredicateBuilder builder8 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder8 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         List<Object> literals = new ArrayList<>();
         for (int i = 1; i <= 21; i++) {
             literals.add(i);
@@ -608,7 +612,7 @@ public class PredicateTest {
                 .isEqualTo(
                         "In(f0, [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21])");
 
-        PredicateBuilder builder9 = new PredicateBuilder(RowType.of(new IntType()));
+        PredicateBuilder builder9 = new PredicateBuilder(RowType.of(DataTypes.INT()));
         Predicate p9 = builder9.notIn(0, literals);
         assertThat(p9.toString())
                 .isEqualTo(

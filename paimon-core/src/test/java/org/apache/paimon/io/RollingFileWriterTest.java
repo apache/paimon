@@ -27,7 +27,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.StatsCollectorFactories;
@@ -48,7 +48,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class RollingFileWriterTest {
 
     private static final RowType SCHEMA =
-            RowType.of(new DataType[] {new IntType()}, new String[] {"id"});
+            RowType.of(new DataType[] {DataTypes.INT()}, new String[] {"id"});
 
     /**
      * Set a very small target file size, so that we will roll over to a new file even if writing

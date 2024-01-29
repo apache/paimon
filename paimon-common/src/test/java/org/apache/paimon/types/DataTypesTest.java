@@ -90,12 +90,13 @@ public class DataTypesTest {
 
     @Test
     void testIntType() {
-        assertThat(new IntType()).satisfies(baseAssertions("INT", new IntType(false)));
+        assertThat(DataTypes.INT()).satisfies(baseAssertions("INT", DataTypes.INT().notNull()));
     }
 
     @Test
     void testBigIntType() {
-        assertThat(new BigIntType()).satisfies(baseAssertions("BIGINT", new BigIntType(false)));
+        assertThat(DataTypes.BIGINT())
+                .satisfies(baseAssertions("BIGINT", DataTypes.BIGINT().notNull()));
     }
 
     @Test
@@ -239,7 +240,7 @@ public class DataTypesTest {
 
     private static final DataType UDT_NAME_TYPE = new VarCharType();
 
-    private static final DataType UDT_SETTING_TYPE = new IntType();
+    private static final DataType UDT_SETTING_TYPE = DataTypes.INT();
 
     private static final DataType UDT_TIMESTAMP_TYPE = new TimestampType();
 

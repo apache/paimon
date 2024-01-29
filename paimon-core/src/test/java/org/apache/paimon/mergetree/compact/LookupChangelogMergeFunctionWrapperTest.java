@@ -29,7 +29,6 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
 import org.assertj.core.util.Lists;
@@ -301,9 +300,11 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         projection ->
                                 new FirstRowMergeFunction(
                                         new RowType(
-                                                Lists.list(new DataField(0, "f0", new IntType()))),
+                                                Lists.list(
+                                                        new DataField(0, "f0", DataTypes.INT()))),
                                         new RowType(
-                                                Lists.list(new DataField(1, "f1", new IntType()))),
+                                                Lists.list(
+                                                        new DataField(1, "f1", DataTypes.INT()))),
                                         false),
                         highLevel::contains);
 

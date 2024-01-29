@@ -36,10 +36,10 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ArrayListMultimap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
@@ -66,12 +66,11 @@ public class AggregationFieldsTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "field_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "field_type", SerializationUtils.newStringType(false)),
-                            new DataField(2, "function", SerializationUtils.newStringType(true)),
-                            new DataField(
-                                    3, "function_options", SerializationUtils.newStringType(true)),
-                            new DataField(4, "comment", SerializationUtils.newStringType(true))));
+                            new DataField(0, "field_name", DataTypes.STRING().notNull()),
+                            new DataField(1, "field_type", DataTypes.STRING().notNull()),
+                            new DataField(2, "function", DataTypes.STRING()),
+                            new DataField(3, "function_options", DataTypes.STRING()),
+                            new DataField(4, "comment", DataTypes.STRING())));
 
     private final FileIO fileIO;
     private final Path location;

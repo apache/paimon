@@ -36,7 +36,6 @@ import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.factories.DynamicTableFactory;
-import org.apache.flink.table.types.logical.IntType;
 import org.apache.flink.table.types.logical.RowType;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -76,7 +75,7 @@ public class KafkaLogStoreFactoryTest {
                         "",
                         CoreOptions.LogChangelogMode.AUTO,
                         CoreOptions.LogConsistency.TRANSACTIONAL,
-                        RowType.of(new IntType(), new IntType()),
+                        RowType.of(DataTypes.INT(), DataTypes.INT()),
                         new int[] {0},
                         dynamicOptions);
 

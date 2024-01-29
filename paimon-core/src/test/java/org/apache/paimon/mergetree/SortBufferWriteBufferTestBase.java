@@ -32,10 +32,8 @@ import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.ReusingKeyValue;
 import org.apache.paimon.utils.ReusingTestData;
@@ -63,9 +61,11 @@ public abstract class SortBufferWriteBufferTestBase {
 
     protected final SortBufferWriteBuffer table =
             new SortBufferWriteBuffer(
-                    new RowType(Collections.singletonList(new DataField(0, "key", new IntType()))),
                     new RowType(
-                            Collections.singletonList(new DataField(1, "value", new BigIntType()))),
+                            Collections.singletonList(new DataField(0, "key", DataTypes.INT()))),
+                    new RowType(
+                            Collections.singletonList(
+                                    new DataField(1, "value", DataTypes.BIGINT()))),
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
                     128,
@@ -255,8 +255,8 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             return FirstRowMergeFunction.factory(
-                            new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))),
+                            new RowType(Lists.list(new DataField(0, "f0", DataTypes.INT()))),
+                            new RowType(Lists.list(new DataField(1, "f1", DataTypes.BIGINT()))),
                             new Options())
                     .create();
         }

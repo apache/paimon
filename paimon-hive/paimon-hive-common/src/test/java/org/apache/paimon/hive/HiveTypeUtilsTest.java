@@ -21,7 +21,6 @@ package org.apache.paimon.hive;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.VarCharType;
 
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfo;
@@ -96,7 +95,7 @@ public class HiveTypeUtilsTest {
         TypeInfo rowTypeInfo =
                 HiveTypeUtils.toTypeInfo(
                         DataTypes.ROW(
-                                new DataField(0, "id", new IntType()),
+                                new DataField(0, "id", DataTypes.INT()),
                                 new DataField(1, "name", new VarCharType(Integer.MAX_VALUE))));
         assertThat(rowTypeInfo.getTypeName()).isEqualTo("struct<id:int,name:string>");
 

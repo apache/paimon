@@ -21,7 +21,7 @@ package org.apache.paimon.manifest;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -37,8 +37,6 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
-
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 
 /** Entry of a manifest file, representing an addition / deletion of a data file. */
 public class ManifestEntry {
@@ -86,9 +84,9 @@ public class ManifestEntry {
     public static RowType schema() {
         List<DataField> fields = new ArrayList<>();
         fields.add(new DataField(0, "_KIND", new TinyIntType(false)));
-        fields.add(new DataField(1, "_PARTITION", newBytesType(false)));
-        fields.add(new DataField(2, "_BUCKET", new IntType(false)));
-        fields.add(new DataField(3, "_TOTAL_BUCKETS", new IntType(false)));
+        fields.add(new DataField(1, "_PARTITION", DataTypes.BYTES().notNull()));
+        fields.add(new DataField(2, "_BUCKET", DataTypes.INT().notNull()));
+        fields.add(new DataField(3, "_TOTAL_BUCKETS", DataTypes.INT().notNull()));
         fields.add(new DataField(4, "_FILE", DataFileMeta.schema()));
         return new RowType(fields);
     }

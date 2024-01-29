@@ -25,13 +25,11 @@ import org.apache.paimon.predicate.IsNotNull;
 import org.apache.paimon.predicate.IsNull;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
 
@@ -48,28 +46,28 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SchemaEvolutionUtilTest {
     private final List<DataField> keyFields =
             Arrays.asList(
-                    new DataField(0, "key_1", new IntType()),
-                    new DataField(1, "key_2", new IntType()),
-                    new DataField(2, "key_3", new IntType()));
+                    new DataField(0, "key_1", DataTypes.INT()),
+                    new DataField(1, "key_2", DataTypes.INT()),
+                    new DataField(2, "key_3", DataTypes.INT()));
     private final List<DataField> dataFields =
             Arrays.asList(
-                    new DataField(0, "a", new IntType()),
-                    new DataField(1, "b", new IntType()),
-                    new DataField(2, "c", new IntType()),
-                    new DataField(3, "d", new IntType()));
+                    new DataField(0, "a", DataTypes.INT()),
+                    new DataField(1, "b", DataTypes.INT()),
+                    new DataField(2, "c", DataTypes.INT()),
+                    new DataField(3, "d", DataTypes.INT()));
     private final List<DataField> tableFields1 =
             Arrays.asList(
-                    new DataField(1, "c", new BigIntType()),
+                    new DataField(1, "c", DataTypes.BIGINT()),
                     new DataField(3, "a", new FloatType()),
-                    new DataField(5, "d", new IntType()),
-                    new DataField(6, "e", new IntType()));
+                    new DataField(5, "d", DataTypes.INT()),
+                    new DataField(6, "e", DataTypes.INT()));
     private final List<DataField> tableFields2 =
             Arrays.asList(
                     new DataField(1, "c", new DoubleType()),
                     new DataField(3, "d", new DecimalType(10, 2)),
-                    new DataField(5, "f", new BigIntType()),
+                    new DataField(5, "f", DataTypes.BIGINT()),
                     new DataField(7, "a", new FloatType()),
-                    new DataField(8, "b", new IntType()),
+                    new DataField(8, "b", DataTypes.INT()),
                     new DataField(9, "e", new DoubleType()));
 
     @Test

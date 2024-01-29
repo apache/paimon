@@ -27,7 +27,6 @@ import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
@@ -437,7 +436,7 @@ public class BinaryRowTest {
         writer.writeRow(
                 0,
                 GenericRow.of(fromString("1"), 1),
-                new InternalRowSerializer(RowType.of(VarCharType.STRING_TYPE, new IntType())));
+                new InternalRowSerializer(RowType.of(VarCharType.STRING_TYPE, DataTypes.INT())));
         writer.setNullAt(1);
         writer.complete();
 

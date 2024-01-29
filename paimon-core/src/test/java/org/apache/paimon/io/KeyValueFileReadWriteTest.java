@@ -35,9 +35,8 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.StatsTestUtils;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CloseableIterator;
@@ -160,7 +159,7 @@ public class KeyValueFileReadWriteTest {
         RowType projectedKeyType =
                 RowType.builder()
                         .fields(
-                                new DataType[] {new BigIntType(false)},
+                                new DataType[] {DataTypes.BIGINT().notNull()},
                                 new String[] {"key_orderId"})
                         .build();
         InternalRowSerializer projectedKeySerializer = new InternalRowSerializer(projectedKeyType);
@@ -204,10 +203,10 @@ public class KeyValueFileReadWriteTest {
         RowType projectedValueType =
                 RowType.of(
                         new DataType[] {
-                            new IntType(false),
-                            new BigIntType(),
+                            DataTypes.INT().notNull(),
+                            DataTypes.BIGINT(),
                             new VarCharType(false, 8),
-                            new IntType(false)
+                            DataTypes.INT().notNull()
                         },
                         new String[] {"shopId", "itemId", "dt", "hr"});
         InternalRowSerializer projectedValueSerializer =

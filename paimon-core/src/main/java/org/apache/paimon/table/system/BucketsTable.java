@@ -39,9 +39,8 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.BranchManager;
@@ -56,7 +55,6 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /**
@@ -76,10 +74,10 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     private static final RowType ROW_TYPE =
             RowType.of(
                     new DataType[] {
-                        new BigIntType(false),
-                        newBytesType(false),
-                        new IntType(false),
-                        newBytesType(false),
+                        DataTypes.BIGINT().notNull(),
+                        DataTypes.BYTES().notNull(),
+                        DataTypes.INT().notNull(),
+                        DataTypes.BYTES().notNull(),
                         new VarCharType(true, Integer.MAX_VALUE),
                         new VarCharType(false, Integer.MAX_VALUE)
                     },

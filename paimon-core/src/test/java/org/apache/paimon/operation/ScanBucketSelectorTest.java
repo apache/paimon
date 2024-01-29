@@ -21,7 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.operation.ScanBucketFilter.ScanBucketSelector;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
@@ -36,7 +36,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** Test for {@link ScanBucketSelector}. */
 public class ScanBucketSelectorTest {
 
-    private final RowType rowType = RowType.of(new IntType(), new IntType(), new IntType());
+    private final RowType rowType = RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
 
     private final PredicateBuilder builder = new PredicateBuilder(rowType);
 

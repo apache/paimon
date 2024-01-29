@@ -35,11 +35,9 @@ import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.SortBuffer;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
@@ -182,13 +180,13 @@ public class MergeSorter {
 
             // user key + sequenceNumber
             List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-            sortKeyTypes.add(new BigIntType(false));
+            sortKeyTypes.add(DataTypes.BIGINT().notNull());
 
             // row type
             List<DataField> fields = new ArrayList<>(keyType.getFields());
-            fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
+            fields.add(new DataField(0, SEQUENCE_NUMBER, DataTypes.BIGINT().notNull()));
             fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
-            fields.add(new DataField(2, "_LEVEL", new IntType(false)));
+            fields.add(new DataField(2, "_LEVEL", DataTypes.INT().notNull()));
             fields.addAll(valueType.getFields());
 
             this.buffer =

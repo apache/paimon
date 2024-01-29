@@ -38,7 +38,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -76,7 +76,7 @@ public class AppendOnlyWriterTest {
     private static final RowType SCHEMA =
             RowType.builder()
                     .fields(
-                            new DataType[] {new IntType(), new VarCharType(), new VarCharType()},
+                            new DataType[] {DataTypes.INT(), new VarCharType(), new VarCharType()},
                             new String[] {"id", "name", "dt"})
                     .build();
     private static final FieldStatsArraySerializer STATS_SERIALIZER =

@@ -20,7 +20,7 @@ package org.apache.paimon.data.serializer;
 
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -77,7 +77,7 @@ public final class InternalSerializers {
                 return new InternalArraySerializer(((ArrayType) type).getElementType());
             case MULTISET:
                 return new InternalMapSerializer(
-                        ((MultisetType) type).getElementType(), new IntType(false));
+                        ((MultisetType) type).getElementType(), DataTypes.INT().notNull());
             case MAP:
                 MapType mapType = (MapType) type;
                 return new InternalMapSerializer(mapType.getKeyType(), mapType.getValueType());

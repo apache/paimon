@@ -20,8 +20,8 @@ package org.apache.paimon.format.parquet;
 
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
@@ -141,7 +141,7 @@ public class ParquetSchemaConverter {
                         name,
                         MAP_REPEATED_NAME,
                         convertToParquetType("key", multisetType.getElementType()),
-                        convertToParquetType("value", new IntType(false)));
+                        convertToParquetType("value", DataTypes.INT().notNull()));
             case ROW:
                 RowType rowType = (RowType) type;
                 return new GroupType(repetition, name, convertToParquetTypes(rowType));

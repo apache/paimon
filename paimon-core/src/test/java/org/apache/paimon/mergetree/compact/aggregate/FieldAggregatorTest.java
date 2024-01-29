@@ -27,14 +27,12 @@ import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
-import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
@@ -84,7 +82,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldLastNonNullValueAgg() {
         FieldLastNonNullValueAgg fieldLastNonNullValueAgg =
-                new FieldLastNonNullValueAgg(new IntType());
+                new FieldLastNonNullValueAgg(DataTypes.INT());
         Integer accumulator = null;
         Integer inputField = 1;
         assertThat(fieldLastNonNullValueAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -96,7 +94,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldLastValueAgg() {
-        FieldLastValueAgg fieldLastValueAgg = new FieldLastValueAgg(new IntType());
+        FieldLastValueAgg fieldLastValueAgg = new FieldLastValueAgg(DataTypes.INT());
         Integer accumulator = null;
         Integer inputField = 1;
         assertThat(fieldLastValueAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -108,7 +106,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldFirstValueAgg() {
-        FieldFirstValueAgg fieldFirstValueAgg = new FieldFirstValueAgg(new IntType());
+        FieldFirstValueAgg fieldFirstValueAgg = new FieldFirstValueAgg(DataTypes.INT());
         assertThat(fieldFirstValueAgg.agg(null, 1)).isEqualTo(1);
         assertThat(fieldFirstValueAgg.agg(1, 2)).isEqualTo(1);
 
@@ -119,7 +117,7 @@ public class FieldAggregatorTest {
     @Test
     public void testFieldFirstNonNullValueAgg() {
         FieldFirstNonNullValueAgg fieldFirstNonNullValueAgg =
-                new FieldFirstNonNullValueAgg(new IntType());
+                new FieldFirstNonNullValueAgg(DataTypes.INT());
         assertThat(fieldFirstNonNullValueAgg.agg(null, null)).isNull();
         assertThat(fieldFirstNonNullValueAgg.agg(null, 1)).isEqualTo(1);
         assertThat(fieldFirstNonNullValueAgg.agg(1, 2)).isEqualTo(1);
@@ -139,7 +137,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldMaxAgg() {
-        FieldMaxAgg fieldMaxAgg = new FieldMaxAgg(new IntType());
+        FieldMaxAgg fieldMaxAgg = new FieldMaxAgg(DataTypes.INT());
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMaxAgg.agg(accumulator, inputField)).isEqualTo(10);
@@ -147,7 +145,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldMinAgg() {
-        FieldMinAgg fieldMinAgg = new FieldMinAgg(new IntType());
+        FieldMinAgg fieldMinAgg = new FieldMinAgg(DataTypes.INT());
         Integer accumulator = 1;
         Integer inputField = 10;
         assertThat(fieldMinAgg.agg(accumulator, inputField)).isEqualTo(1);
@@ -155,7 +153,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumIntAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new IntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(DataTypes.INT());
         assertThat(fieldSumAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldSumAgg.agg(1, 10)).isEqualTo(11);
         assertThat(fieldSumAgg.retract(10, 5)).isEqualTo(5);
@@ -164,7 +162,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldCountIntAgg() {
-        FieldCountAgg fieldCountAgg = new FieldCountAgg(new IntType());
+        FieldCountAgg fieldCountAgg = new FieldCountAgg(DataTypes.INT());
         assertThat(fieldCountAgg.agg(null, 10)).isEqualTo(1);
         assertThat(fieldCountAgg.agg(1, 5)).isEqualTo(2);
         assertThat(fieldCountAgg.agg(2, 15)).isEqualTo(3);
@@ -173,7 +171,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductIntAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new IntType());
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(DataTypes.INT());
         assertThat(fieldProductAgg.agg(null, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.agg(1, 10)).isEqualTo(10);
         assertThat(fieldProductAgg.retract(10, 5)).isEqualTo(2);
@@ -218,7 +216,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldSumLongAgg() {
-        FieldSumAgg fieldSumAgg = new FieldSumAgg(new BigIntType());
+        FieldSumAgg fieldSumAgg = new FieldSumAgg(DataTypes.BIGINT());
         assertThat(fieldSumAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldSumAgg.agg(1L, 10L)).isEqualTo(11L);
         assertThat(fieldSumAgg.retract(10L, 5L)).isEqualTo(5L);
@@ -227,7 +225,7 @@ public class FieldAggregatorTest {
 
     @Test
     public void testFieldProductLongAgg() {
-        FieldProductAgg fieldProductAgg = new FieldProductAgg(new BigIntType());
+        FieldProductAgg fieldProductAgg = new FieldProductAgg(DataTypes.BIGINT());
         assertThat(fieldProductAgg.agg(null, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.agg(1L, 10L)).isEqualTo(10L);
         assertThat(fieldProductAgg.retract(10L, 5L)).isEqualTo(2L);

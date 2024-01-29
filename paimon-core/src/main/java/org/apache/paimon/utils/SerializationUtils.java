@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
@@ -58,12 +59,20 @@ public class SerializationUtils {
         return buf;
     }
 
-    /** Create a bytes type VarBinaryType(VarBinaryType.MAX_LENGTH). */
+    /**
+     * Create a bytes type VarBinaryType(VarBinaryType.MAX_LENGTH).
+     *
+     * @deprecated Please use {@link DataTypes#BYTES()}.
+     */
     public static VarBinaryType newBytesType(boolean isNullable) {
         return new VarBinaryType(isNullable, VarBinaryType.MAX_LENGTH);
     }
 
-    /** Create a varchar type VarCharType(VarCharType.MAX_LENGTH). */
+    /**
+     * Create a varchar type VarCharType(VarCharType.MAX_LENGTH).
+     *
+     * @deprecated Please use {@link DataTypes#STRING()}.
+     */
     public static VarCharType newStringType(boolean isNullable) {
         return new VarCharType(isNullable, VarCharType.MAX_LENGTH);
     }

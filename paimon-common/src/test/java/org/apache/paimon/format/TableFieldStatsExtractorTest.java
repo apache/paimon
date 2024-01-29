@@ -36,8 +36,8 @@ import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
@@ -250,7 +250,7 @@ public abstract class TableFieldStatsExtractorTest {
     private InternalMap randomMultiset(MultisetType type) {
         int length = ThreadLocalRandom.current().nextInt(10);
         Map<Object, Object> javaMap = new HashMap<>(length);
-        IntType intType = new IntType(false);
+        DataType intType = DataTypes.INT().notNull();
         for (int i = 0; i < length; i++) {
             javaMap.put(createField(type.getElementType()), createField(intType));
         }

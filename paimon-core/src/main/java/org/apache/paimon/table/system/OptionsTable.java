@@ -35,6 +35,7 @@ import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
@@ -50,7 +51,6 @@ import java.util.Map;
 import java.util.Objects;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
-import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
 public class OptionsTable implements ReadonlyTable {
@@ -62,8 +62,8 @@ public class OptionsTable implements ReadonlyTable {
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "key", newStringType(false)),
-                            new DataField(1, "value", newStringType(false))));
+                            new DataField(0, "key", DataTypes.STRING().notNull()),
+                            new DataField(1, "value", DataTypes.STRING().notNull())));
 
     private final FileIO fileIO;
     private final Path location;

@@ -52,7 +52,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.SchemaEvolutionTableTestBase;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -136,8 +136,8 @@ public abstract class MergeTreeTestBase {
         configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
         configuration.set(CoreOptions.SORT_ENGINE, getSortEngine());
         options = new CoreOptions(configuration);
-        RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
-        RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
+        RowType keyType = new RowType(singletonList(new DataField(0, "k", DataTypes.INT())));
+        RowType valueType = new RowType(singletonList(new DataField(0, "v", DataTypes.INT())));
 
         String identifier = "avro";
         FileFormat flushingAvro = new FlushingFileFormat(identifier);
