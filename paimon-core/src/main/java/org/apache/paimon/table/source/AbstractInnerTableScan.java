@@ -48,6 +48,7 @@ import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -70,8 +71,21 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
         return this;
     }
 
+    @Override
     public AbstractInnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
         snapshotReader.withBucketFilter(bucketFilter);
+        return this;
+    }
+
+    @Override
+    public AbstractInnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+        snapshotReader.withPartitionFilter(partitionSpec);
+        return this;
+    }
+
+    @Override
+    public AbstractInnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+        snapshotReader.withLevelFilter(levelFilter);
         return this;
     }
 

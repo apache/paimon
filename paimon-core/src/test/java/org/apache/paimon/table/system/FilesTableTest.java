@@ -31,6 +31,8 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.FileStoreScan;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -38,6 +40,7 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
+import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -45,17 +48,18 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.FileNotFoundException;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
+import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link FilesTable}. */
 public class FilesTableTest extends TableTestBase {
-    private static final String tableName = "MyTable";
 
     private FileStoreTable table;
     private FileStoreScan scan;
@@ -64,6 +68,7 @@ public class FilesTableTest extends TableTestBase {
 
     @BeforeEach
     public void before() throws Exception {
+        String tableName = "MyTable";
         FileIO fileIO = LocalFileIO.create();
         Path tablePath = new Path(String.format("%s/%s.db/%s", warehouse, database, tableName));
         Schema schema =
@@ -92,6 +97,37 @@ public class FilesTableTest extends TableTestBase {
 
         // snapshot 2: append
         write(table, GenericRow.of(2, 1, 3), GenericRow.of(2, 2, 4));
+    }
+
+    @Test
+    public void testReadWithFilter() throws Exception {
+        compact(table, row(2), 0);
+        write(table, GenericRow.of(3, 1, 1));
+        assertThat(readPartBucketLevel(null))
+                .containsExactlyInAnyOrder("[1]-0-0", "[1]-0-0", "[1]-1-0", "[2]-0-5");
+
+        PredicateBuilder builder = new PredicateBuilder(FilesTable.TABLE_TYPE);
+        assertThat(readPartBucketLevel(builder.equal(0, "[2]")))
+                .containsExactlyInAnyOrder("[2]-0-5");
+        assertThat(readPartBucketLevel(builder.equal(1, 1))).containsExactlyInAnyOrder("[1]-1-0");
+        assertThat(readPartBucketLevel(builder.equal(5, 5))).containsExactlyInAnyOrder("[2]-0-5");
+    }
+
+    private List<String> readPartBucketLevel(Predicate predicate) throws IOException {
+        ReadBuilder readBuilder = filesTable.newReadBuilder().withFilter(predicate);
+        List<String> rows = new ArrayList<>();
+        readBuilder
+                .newRead()
+                .createReader(readBuilder.newScan().plan())
+                .forEachRemaining(
+                        row ->
+                                rows.add(
+                                        row.getString(0)
+                                                + "-"
+                                                + row.getInt(1)
+                                                + "-"
+                                                + row.getInt(5)));
+        return rows;
     }
 
     @Test
