@@ -29,6 +29,7 @@ import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 
 import io.debezium.data.Bits;
+import io.debezium.data.EnumSet;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
 import io.debezium.time.Date;
@@ -41,6 +42,7 @@ import org.apache.kafka.connect.json.JsonConverterConfig;
 import javax.annotation.Nullable;
 
 import java.math.BigDecimal;
+import java.math.BigInteger;
 import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
@@ -61,7 +63,8 @@ public class DebeziumSchemaUtils {
             String debeziumType,
             @Nullable String className,
             TypeMapping typeMapping,
-            JsonNode origin) {
+            JsonNode origin,
+            Map<String, String> parameters) {
         if (rawValue == null) {
             return null;
         }
@@ -87,9 +90,14 @@ public class DebeziumSchemaUtils {
         } else if ("bytes".equals(debeziumType) && decimalLogicalName().equals(className)) {
             // MySQL numeric, fixed, decimal
             try {
-                new BigDecimal(rawValue);
-            } catch (NumberFormatException e) {
-                throw new IllegalArgumentException(
+                byte[] bytes = Base64.getDecoder().decode(rawValue);
+                transformed =
+                        new BigDecimal(
+                                        new BigInteger(bytes),
+                                        Integer.parseInt(parameters.get("scale")))
+                                .toPlainString();
+            } catch (Exception e) {
+                throw new RuntimeException(
                         "Invalid big decimal value "
                                 + rawValue
                                 + ". Make sure that in the `customConverterConfigs` "
@@ -209,6 +217,10 @@ public class DebeziumSchemaUtils {
 
         if (MicroTime.SCHEMA_NAME.equals(className)) {
             return DataTypes.TIME();
+        }
+
+        if (EnumSet.LOGICAL_NAME.equals(className)) {
+            return DataTypes.ARRAY(DataTypes.STRING());
         }
 
         return fromDebeziumType(debeziumType);
