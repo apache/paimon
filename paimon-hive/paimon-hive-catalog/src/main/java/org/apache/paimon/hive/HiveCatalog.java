@@ -438,6 +438,7 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             // sync to hive hms
             Table table = client.getTable(identifier.getDatabaseName(), identifier.getObjectName());
+            updateHmsTablePars(table, schema);
             updateHmsTable(table, identifier, schema);
             client.alter_table(
                     identifier.getDatabaseName(), identifier.getObjectName(), table, true);
@@ -563,6 +564,10 @@ public class HiveCatalog extends AbstractCatalog {
 
         // update location
         locationHelper.specifyTableLocation(table, getDataTableLocation(identifier).toString());
+    }
+
+    private void updateHmsTablePars(Table table, TableSchema schema) {
+        table.getParameters().putAll(convertToPropertiesPrefixKey(schema.options(), HIVE_PREFIX));
     }
 
     @VisibleForTesting
