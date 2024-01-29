@@ -187,17 +187,24 @@ public class SnapshotManager implements Serializable {
     public @Nullable Long earlierThanTimeMills(long timestampMills) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
+
         if (earliest == null || latest == null) {
             return null;
         }
 
-        for (long i = latest; i >= earliest; i--) {
-            long commitTime = snapshot(i).timeMillis();
-            if (commitTime < timestampMills) {
-                return i;
+        if (snapshot(earliest).timeMillis() >= timestampMills) {
+            return earliest - 1;
+        }
+
+        while (earliest < latest) {
+            long mid = (earliest + latest + 1) / 2;
+            if (snapshot(mid).timeMillis() < timestampMills) {
+                earliest = mid;
+            } else {
+                latest = mid - 1;
             }
         }
-        return earliest - 1;
+        return earliest;
     }
 
     /**
