@@ -35,6 +35,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMap
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.SerializerProvider;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.deser.std.StdDeserializer;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.module.SimpleModule;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
 import javax.annotation.Nullable;
@@ -126,6 +127,13 @@ public class JsonSerdeUtil {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    public static <T> ObjectNode setNode(ObjectNode node, String fieldName, T value) {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonNode nodeValue = OBJECT_MAPPER_INSTANCE.valueToTree(value);
+        node.set(fieldName, nodeValue);
+        return node;
     }
 
     public static <T> T fromJson(String json, Class<T> clazz) {

@@ -64,12 +64,12 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
  */
 public class DebeziumRecordParser extends RecordParser {
 
-    private static final String FIELD_SCHEMA = "schema";
-    protected static final String FIELD_PAYLOAD = "payload";
+    public static final String FIELD_SCHEMA = "schema";
+    public static final String FIELD_PAYLOAD = "payload";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_SOURCE = "source";
-    private static final String FIELD_PRIMARY = "pkNames";
+    public static final String FIELD_PRIMARY = "pkNames";
     private static final String FIELD_DB = "db";
     private static final String FIELD_TYPE = "op";
     private static final String OP_INSERT = "c";
@@ -81,6 +81,8 @@ public class DebeziumRecordParser extends RecordParser {
     private final Map<String, String> debeziumTypes = new HashMap<>();
     private final Map<String, String> classNames = new HashMap<>();
     private final Map<String, Map<String, String>> parameters = new HashMap<>();
+
+    private final List<String> primaryKeys = new ArrayList<>();
 
     public DebeziumRecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
@@ -121,7 +123,7 @@ public class DebeziumRecordParser extends RecordParser {
     @Override
     protected void setRoot(String record) {
         JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
-
+        preparePrimaryKeysIfNeed(node);
         hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
             root = node.get(FIELD_PAYLOAD);
@@ -132,6 +134,16 @@ public class DebeziumRecordParser extends RecordParser {
             }
         } else {
             root = node;
+        }
+    }
+
+    private void preparePrimaryKeysIfNeed(JsonNode node) {
+        primaryKeys.clear();
+        if (node.has(FIELD_PRIMARY)) {
+            ArrayNode primaryKeyNode = (ArrayNode) node.get(FIELD_PRIMARY);
+            for (JsonNode element : primaryKeyNode) {
+                primaryKeys.add(element.asText());
+            }
         }
     }
 
@@ -216,6 +228,11 @@ public class DebeziumRecordParser extends RecordParser {
         evalComputedColumns(resultMap, paimonFieldTypes);
 
         return resultMap;
+    }
+
+    @Override
+    protected List<String> extractPrimaryKeys() {
+        return primaryKeys;
     }
 
     @Override

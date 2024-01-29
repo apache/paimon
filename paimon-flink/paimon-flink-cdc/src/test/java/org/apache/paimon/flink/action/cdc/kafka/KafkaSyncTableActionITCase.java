@@ -33,6 +33,7 @@ import org.apache.flink.configuration.Configuration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -682,6 +683,94 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPrimaryKeys("id")
                         .withTableConfig(getBasicTableConfig())
                         .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.DOUBLE()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        List<String> expected =
+                Collections.singletonList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.140000104904175]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    public void testRecordWithPrimaryKeys(String format) throws Exception {
+        String topic = "no_schema_include_with_primary_keys";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines =
+                readLines("kafka/debezium/table/schema/primarykeys/debezium-data-1.txt");
+        Map<String, String> keyValues = new HashMap<>();
+        for (String line : lines) {
+            String[] splitLines = line.split(";");
+            if (splitLines.length > 1) {
+                keyValues.put(splitLines[0], splitLines[1]);
+            }
+        }
+        try {
+            writeRecordsToKafka(topic, keyValues);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        List<String> expected =
+                Arrays.asList(
+                        "+I[101, scooter, Small 2-wheel scooter, 3.14]",
+                        "+I[102, car battery, 12V car battery, 8.1]");
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    public void testSchemaIncludeRecordWithPrimaryKeys(String format) throws Exception {
+        String topic = "schema_include_with_primary_keys";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines =
+                readLines(
+                        "kafka/debezium/table/schema/primarykeys/debezium-data-with-schema-1.txt");
+        Map<String, String> keyValues = new HashMap<>();
+        for (String line : lines) {
+            String[] splitLines = line.split(";");
+            if (splitLines.length > 1) {
+                keyValues.put(splitLines[0], splitLines[1]);
+            }
+        }
+        try {
+            writeRecordsToKafka(topic, keyValues);
+        } catch (Exception e) {
+            throw new Exception("Failed to write debezium data to Kafka.", e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig).withTableConfig(getBasicTableConfig()).build();
         runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable(tableName);

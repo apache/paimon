@@ -20,6 +20,7 @@ package org.apache.paimon.flink.action.cdc.pulsar;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.utils.Pair;
 
 import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.ConfigOption;
@@ -34,6 +35,7 @@ import org.apache.flink.connector.pulsar.source.enumerator.cursor.StopCursor;
 import org.apache.flink.connector.pulsar.source.enumerator.subscriber.impl.TopicPatternSubscriber;
 import org.apache.flink.connector.pulsar.source.enumerator.topic.TopicPartition;
 import org.apache.flink.connector.pulsar.source.reader.PulsarPartitionSplitReader;
+import org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions;
 import org.apache.pulsar.client.api.Consumer;
 import org.apache.pulsar.client.api.ConsumerBuilder;
 import org.apache.pulsar.client.api.KeySharedPolicy;
@@ -170,6 +172,9 @@ public class PulsarActionUtils {
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
+                .setDeserializationSchema(
+                        new PulsarKeyValueDeserializationSchema(
+                                pulsarConfig.get(KafkaConnectorOptions.VALUE_FORMAT)))
                 .setDeserializationSchema(new SimpleStringSchema());
 
         pulsarConfig.getOptional(TOPIC).ifPresent(pulsarSourceBuilder::setTopics);
@@ -382,12 +387,12 @@ public class PulsarActionUtils {
         }
 
         @Override
-        public List<String> getRecords(int pollTimeOutMills) {
+        public List<Pair<String, String>> getRecords(int pollTimeOutMills) {
             try {
                 Message<String> message = consumer.receive(pollTimeOutMills, TimeUnit.MILLISECONDS);
                 return message == null
                         ? Collections.emptyList()
-                        : Collections.singletonList(message.getValue());
+                        : Collections.singletonList(Pair.of(message.getKey(), message.getValue()));
             } catch (PulsarClientException e) {
                 throw new RuntimeException(e);
             }

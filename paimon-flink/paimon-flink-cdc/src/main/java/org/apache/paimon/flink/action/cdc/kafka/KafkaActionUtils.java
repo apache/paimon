@@ -20,9 +20,9 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.flink.action.cdc.MessageQueueSchemaUtils;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
-import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.connector.kafka.source.KafkaSource;
 import org.apache.flink.connector.kafka.source.KafkaSourceBuilder;
@@ -34,7 +34,6 @@ import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.kafka.clients.admin.AdminClient;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.ConsumerRecords;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.consumer.OffsetResetStrategy;
@@ -83,12 +82,12 @@ public class KafkaActionUtils {
                     Pattern.compile(kafkaConfig.get(KafkaConnectorOptions.TOPIC_PATTERN)));
         }
 
-        KafkaValueOnlyDeserializationSchemaWrapper<String> schema =
-                new KafkaValueOnlyDeserializationSchemaWrapper<>(new SimpleStringSchema());
-        kafkaSourceBuilder.setDeserializer(schema);
-
-        kafkaSourceBuilder.setGroupId(kafkaPropertiesGroupId(kafkaConfig));
-
+        kafkaSourceBuilder
+                //                .setValueOnlyDeserializer(new SimpleStringSchema())
+                .setDeserializer(
+                        new KafkaKeyValueDeserializationSchema(
+                                kafkaConfig.get(KafkaConnectorOptions.VALUE_FORMAT)))
+                .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
         Properties properties = createKafkaProperties(kafkaConfig);
 
         StartupMode startupMode =
@@ -319,11 +318,11 @@ public class KafkaActionUtils {
         }
 
         @Override
-        public List<String> getRecords(int pollTimeOutMills) {
+        public List<Pair<String, String>> getRecords(int pollTimeOutMills) {
             ConsumerRecords<String, String> consumerRecords =
                     consumer.poll(Duration.ofMillis(pollTimeOutMills));
             return StreamSupport.stream(consumerRecords.records(topic).spliterator(), false)
-                    .map(ConsumerRecord::value)
+                    .map(record -> Pair.of(record.key(), record.value()))
                     .collect(Collectors.toList());
         }
 

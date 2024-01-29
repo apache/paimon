@@ -299,6 +299,29 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         kafkaProducer.close();
     }
 
+    void writeRecordsToKafka(String topic, Map<String, String> data) throws Exception {
+        Properties producerProperties = getStandardProps();
+        producerProperties.setProperty("retries", "0");
+        producerProperties.put(
+                "key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        producerProperties.put(
+                "value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        KafkaProducer kafkaProducer = new KafkaProducer(producerProperties);
+        for (Map.Entry<String, String> entry : data.entrySet()) {
+            try {
+                JsonNode keyNode = objectMapper.readTree(entry.getKey());
+                JsonNode valueNode = objectMapper.readTree(entry.getValue());
+                if (!StringUtils.isEmpty(entry.getValue())) {
+                    kafkaProducer.send(
+                            new ProducerRecord<>(topic, entry.getKey(), entry.getValue()));
+                }
+            } catch (Exception e) {
+                // ignore
+            }
+        }
+        kafkaProducer.close();
+    }
+
     /** Kafka container extension for junit5. */
     private static class KafkaContainerExtension extends KafkaContainer
             implements BeforeAllCallback, AfterAllCallback {

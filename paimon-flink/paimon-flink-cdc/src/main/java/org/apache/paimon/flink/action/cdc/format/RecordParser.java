@@ -176,7 +176,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 });
     }
 
-    private List<String> extractPrimaryKeys() {
+    protected List<String> extractPrimaryKeys() {
         ArrayNode pkNames = getNodeAs(root, primaryField(), ArrayNode.class);
         if (pkNames == null) {
             return Collections.emptyList();

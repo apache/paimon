@@ -21,7 +21,9 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.flink.action.cdc.SyncTableActionBase.SchemaRetrievalException;
 import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
+import org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.utils.Pair;
 
 import java.util.Collections;
 import java.util.List;
@@ -55,6 +57,7 @@ public class MessageQueueSchemaUtils {
         while (true) {
             Optional<Schema> schema =
                     consumer.getRecords(POLL_TIMEOUT_MILLIS).stream()
+                            .map(DebeziumSchemaUtils::extractPrimaryKeys)
                             .map(recordParser::buildSchema)
                             .filter(Objects::nonNull)
                             .findFirst();
@@ -89,7 +92,7 @@ public class MessageQueueSchemaUtils {
     /** Wrap the consumer for different message queues. */
     public interface ConsumerWrapper extends AutoCloseable {
 
-        List<String> getRecords(int pollTimeOutMills);
+        List<Pair<String, String>> getRecords(int pollTimeOutMills);
 
         String topic();
     }

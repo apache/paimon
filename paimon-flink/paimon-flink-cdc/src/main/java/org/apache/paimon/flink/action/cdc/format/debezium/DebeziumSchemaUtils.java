@@ -19,14 +19,20 @@
 package org.apache.paimon.flink.action.cdc.format.debezium;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.format.DataFormat;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlTypeUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
 import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
@@ -46,15 +52,66 @@ import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser.FIELD_PAYLOAD;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser.FIELD_PRIMARY;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumRecordParser.FIELD_SCHEMA;
 
 /**
  * Utils to handle 'schema' field in debezium Json. TODO: The methods have many duplicate codes with
  * MySqlRecordParser. Need refactor.
  */
 public class DebeziumSchemaUtils {
+
+    /** Rewrite value. */
+    public static String rewriteValue(Pair<String, String> message, String format) {
+        DataFormat dataFormat = DataFormat.fromConfigString(format);
+        String value = message.getValue();
+        switch (dataFormat) {
+            case DEBEZIUM_JSON:
+                if (StringUtils.isBlank(message.getKey())) {
+                    return value;
+                } else {
+                    String key = message.getKey();
+                    Pair<String, String> keyValue = Pair.of(key, value);
+                    String newValue = extractPrimaryKeys(keyValue);
+                    return newValue;
+                }
+            default:
+                return value;
+        }
+    }
+
+    /** Append primary keys to value. */
+    public static String extractPrimaryKeys(Pair<String, String> record) {
+        String key = record.getKey();
+        if (StringUtils.isBlank(key)) {
+            return record.getValue();
+        }
+        try {
+            List<String> primaryKeys = Lists.newArrayList();
+            JsonNode keyNode = JsonSerdeUtil.fromJson(key, JsonNode.class);
+            JsonNode payload;
+            if (keyNode.has(FIELD_SCHEMA)) {
+                payload = keyNode.get(FIELD_PAYLOAD);
+            } else {
+                payload = keyNode;
+            }
+            payload.fieldNames().forEachRemaining(primaryKeys::add);
+            ObjectNode valueNode = JsonSerdeUtil.fromJson(record.getValue(), ObjectNode.class);
+
+            // append primary keys
+            JsonSerdeUtil.setNode(valueNode, FIELD_PRIMARY, primaryKeys);
+            return JsonSerdeUtil.writeValueAsString(valueNode);
+        } catch (JsonProcessingException e) {
+            throw new RuntimeException(
+                    "An error occurred when automatically attaching the debezium primary keys to Value",
+                    e);
+        }
+    }
 
     /** Transform raw string value according to schema. */
     public static String transformRawValue(
