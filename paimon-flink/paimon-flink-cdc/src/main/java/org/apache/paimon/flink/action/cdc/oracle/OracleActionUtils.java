@@ -89,10 +89,7 @@ public class OracleActionUtils {
                                     databaseName, schemaName, "%", new String[] {"TABLE"})) {
                         while (tables.next()) {
                             String tableName = tables.getString("TABLE_NAME");
-                            System.out.println(tableName);
                             String tableComment = tables.getString("REMARKS");
-                            System.out.println(tableComment);
-                            System.out.println("============");
                             Identifier identifier = Identifier.create(databaseName, tableName);
                             if (monitorTablePredication.test(tableName)) {
                                 Schema schema =
@@ -160,7 +157,7 @@ public class OracleActionUtils {
                 OptionsUtils.convertToPropertiesPrefixKey(
                         oracleConfig.toMap(), DebeziumOptions.DEBEZIUM_OPTIONS_PREFIX));
 
-        // Float类型时默认为io.debezium.data.VariableScaleDecimal
+        // Float type defaults to IO.Debezium.Data.VariableScaleDecimal
         debeziumProperties.put("decimal.handling.mode", "string");
         sourceBuilder.debeziumProperties(debeziumProperties);
 

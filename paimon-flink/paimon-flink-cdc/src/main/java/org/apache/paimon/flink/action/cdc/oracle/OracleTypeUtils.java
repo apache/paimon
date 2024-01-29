@@ -35,20 +35,13 @@ public class OracleTypeUtils {
     private static final String BINARY_DOUBLE = "BINARY_DOUBLE";
     private static final String DATE = "DATE";
     private static final String TIMESTAMP = "TIMESTAMP";
-    private static final String TIMESTAMP_WITH_TIME_ZONE = "TIMESTAMP WITH TIME ZONE";
     private static final String TIMESTAMP_WITH_LOCAL_TIME_ZONE = "TIMESTAMP WITH LOCAL TIME ZONE";
     private static final String CHAR = "CHAR";
     private static final String NCHAR = "NCHAR";
     private static final String VARCHAR = "VARCHAR";
     private static final String VARCHAR2 = "VARCHAR2";
     private static final String NVARCHAR2 = "NVARCHAR2";
-    private static final String CLOB = "CLOB";
-    private static final String NCLOB = "NCLOB";
-    private static final String BLOB = "BLOB";
-    private static final String SYS_XMLTYPE = "SYS.XMLTYPE";
     private static final String XMLTYPE = "XMLTYPE";
-    private static final String INTERVAL_DAY = "INTERVAL DAY";
-    private static final String INTERVAL_YEAR = "INTERVAL YEAR";
 
     public static DataType toDataType(
             String typeName,
@@ -58,23 +51,17 @@ public class OracleTypeUtils {
         if (typeMapping.containsMode(TO_STRING)) {
             return DataTypes.STRING();
         }
-        typeName = concatenateSubstring(typeName);
+        typeName = getRealTypeName(typeName);
         precision = precision == null ? 0 : precision;
         scale = scale == null ? 0 : scale;
-        // refer:
-        // https://ververica.github.io/flink-cdc-connectors/master/content/connectors/oracle-cdc.html#data-type-mapping
         switch (typeName.toUpperCase()) {
             case CHAR:
             case NCHAR:
             case NVARCHAR2:
             case VARCHAR:
             case VARCHAR2:
-            case CLOB:
-            case NCLOB:
             case XMLTYPE:
-            case SYS_XMLTYPE:
             case FLOAT:
-            case TIMESTAMP_WITH_TIME_ZONE:
             case TIMESTAMP_WITH_LOCAL_TIME_ZONE:
                 return DataTypes.STRING();
             case BINARY_FLOAT:
@@ -84,11 +71,6 @@ public class OracleTypeUtils {
             case DATE:
             case TIMESTAMP:
                 return DataTypes.TIMESTAMP(6);
-            case BLOB:
-                return DataTypes.BYTES();
-            case INTERVAL_DAY:
-            case INTERVAL_YEAR:
-                return DataTypes.BIGINT();
             case NUMBER:
                 if (precision > 0 && scale > 0) {
                     return DataTypes.STRING();
@@ -112,20 +94,15 @@ public class OracleTypeUtils {
         }
     }
 
-    protected static String concatenateSubstring(String input) {
-        // 查找左括号的位置
+    protected static String getRealTypeName(String input) {
         int leftParenIndex = input.indexOf('(');
-
-        // 查找右括号的位置
         int rightParenIndex = input.indexOf(')');
 
-        // 如果找到左括号和右括号，则拼接左括号左边的部分和右括号右边的部分
         if (leftParenIndex != -1 && rightParenIndex != -1) {
             String leftPart = input.substring(0, leftParenIndex);
             String rightPart = input.substring(rightParenIndex + 1);
             return leftPart + rightPart;
         } else {
-            // 如果没有找到左括号，则返回原字符串
             return input;
         }
     }

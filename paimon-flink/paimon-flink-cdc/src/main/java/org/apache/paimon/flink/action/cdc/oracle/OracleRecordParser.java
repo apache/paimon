@@ -37,7 +37,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
-import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
+import com.ververica.cdc.connectors.oracle.source.config.OracleSourceOptions;
 import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.data.Bits;
 import io.debezium.time.Date;
@@ -98,7 +98,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
     private final CdcMetadataConverter[] metadataConverters;
 
     public OracleRecordParser(
-            Configuration postgresConfig,
+            Configuration oracleConfig,
             boolean caseSensitive,
             List<ComputedColumn> computedColumns,
             TypeMapping typeMapping,
@@ -110,7 +110,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         objectMapper
                 .configure(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS, true)
                 .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
-        String stringifyServerTimeZone = postgresConfig.get(PostgresSourceOptions.SERVER_TIME_ZONE);
+        String stringifyServerTimeZone = oracleConfig.get(OracleSourceOptions.SERVER_TIME_ZONE);
         this.serverTimeZone =
                 stringifyServerTimeZone == null
                         ? ZoneId.systemDefault()
@@ -124,10 +124,6 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
         databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
-        if (root.payload().op().equals("c")) {
-            System.out.println(root.payload().after());
-            System.out.println("!!!!!!!!");
-        }
         extractRecords().forEach(out::collect);
     }
 
@@ -135,7 +131,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         Map<String, DebeziumEvent.Field> afterFields = schema.afterFields();
         Preconditions.checkArgument(
                 !afterFields.isEmpty(),
-                "PostgresRecordParser only supports debezium JSON with schema. "
+                "OracleRecordParser only supports debezium JSON with schema. "
                         + "Please make sure that `includeSchema` is true "
                         + "in the JsonDebeziumDeserializationSchema you created");
 
@@ -160,7 +156,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
 
     /**
      * Extract field types from json records, see <a
-     * href="https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-data-types">postgresql-data-types</a>.
+     * href="https://debezium.io/documentation/reference/stable/connectors/oracle.html#oracle-data-types">oracle-data-types</a>.
      */
     private DataType extractFieldType(DebeziumEvent.Field field) {
         switch (field.type()) {
@@ -242,7 +238,6 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                             fieldTypes,
                             Collections.emptyList(),
                             new CdcRecord(RowKind.INSERT, after)));
-            // records.add((createRecord(RowKind.INSERT,after)));
         }
 
         return records;
@@ -256,7 +251,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
         DebeziumEvent.Field schema =
                 Preconditions.checkNotNull(
                         root.schema(),
-                        "PostgresRecordParser only supports debezium JSON with schema. "
+                        "OracleRecordParser only supports debezium JSON with schema. "
                                 + "Please make sure that `includeSchema` is true "
                                 + "in the JsonDebeziumDeserializationSchema you created");
 
@@ -277,7 +272,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
 
             if (Bits.LOGICAL_NAME.equals(className)) {
                 // transform little-endian form to normal order
-                // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-basic-types
+                // https://debezium.io/documentation/reference/stable/connectors/oracle.html#oracle-basic-types
                 byte[] littleEndian = Base64.getDecoder().decode(oldValue);
                 byte[] bigEndian = new byte[littleEndian.length];
                 for (int i = 0; i < littleEndian.length; i++) {
@@ -307,7 +302,7 @@ public class OracleRecordParser implements FlatMapFunction<String, RichCdcMultip
                 }
             }
             // pay attention to the temporal types
-            // https://debezium.io/documentation/reference/stable/connectors/postgresql.html#postgresql-temporal-types
+            // https://debezium.io/documentation/reference/stable/connectors/oracle.html#oracle-temporal-types
             else if (Date.SCHEMA_NAME.equals(className)) {
                 // date
                 newValue = DateTimeUtils.toLocalDate(Integer.parseInt(oldValue)).toString();

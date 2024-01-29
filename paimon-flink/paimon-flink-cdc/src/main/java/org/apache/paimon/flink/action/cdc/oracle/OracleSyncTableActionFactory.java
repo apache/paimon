@@ -50,13 +50,13 @@ public class OracleSyncTableActionFactory extends SyncTableActionFactoryBase {
     @Override
     public void printHelp() {
         System.out.println(
-                "Action \"postgres_sync_table\" creates a streaming job "
-                        + "with a Flink PostgreSQL CDC source and a Paimon table sink to consume CDC events.");
+                "Action \"oracle_sync_table\" creates a streaming job "
+                        + "with a Flink Oracle CDC source and a Paimon table sink to consume CDC events.");
         System.out.println();
 
         System.out.println("Syntax:");
         System.out.println(
-                "  postgres_sync_table --warehouse <warehouse_path> --database <database_name> "
+                "  oracle_sync_table --warehouse <warehouse_path> --database <database_name> "
                         + "--table <table_name> "
                         + "--table <table_name> "
                         + "[--partition_keys <partition_keys>] "
@@ -64,7 +64,7 @@ public class OracleSyncTableActionFactory extends SyncTableActionFactoryBase {
                         + "[--type_mapping <option1,option2...>] "
                         + "[--computed_column <'column_name=expr_name(args[, ...])'> [--computed_column ...]] "
                         + "[--metadata_column <metadata_column>] "
-                        + "[--postgres_conf <postgres_cdc_source_conf> [--postgres_conf <postgres_cdc_source_conf> ...]] "
+                        + "[--oracle_conf <oracle_cdc_source_conf> [--oracle_conf <oracle_cdc_source_conf> ...]] "
                         + "[--catalog_conf <paimon_catalog_conf> [--catalog_conf <paimon_catalog_conf> ...]] "
                         + "[--table_conf <paimon_table_sink_conf> [--table_conf <paimon_table_sink_conf> ...]]");
         System.out.println();
@@ -78,11 +78,11 @@ public class OracleSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println("Primary keys syntax:");
         System.out.println("  key1,key2,...");
-        System.out.println("Primary keys will be derived from PostgreSQL tables if not specified.");
+        System.out.println("Primary keys will be derived from Oracle tables if not specified.");
         System.out.println();
 
         System.out.println(
-                "--type_mapping is used to specify how to map PostgreSQL type to Paimon type. Please see the doc for usage.");
+                "--type_mapping is used to specify how to map Oracle type to Paimon type. Please see the doc for usage.");
         System.out.println();
 
         System.out.println("Please see doc for usage of --computed_column.");
@@ -92,14 +92,14 @@ public class OracleSyncTableActionFactory extends SyncTableActionFactoryBase {
                 "--metadata_column is used to specify which metadata columns to include in the output schema of the connector. Please see the doc for usage.");
         System.out.println();
 
-        System.out.println("PostgresSQL CDC source conf syntax:");
+        System.out.println("Oracle CDC source conf syntax:");
         System.out.println("  key=value");
         System.out.println(
                 "'hostname', 'username', 'password', 'database-name', 'schema-name', 'table-name' and 'slot.name' "
                         + "are required configurations, others are optional.");
         System.out.println(
                 "For a complete list of supported configurations, "
-                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#connector-options");
+                        + "see https://ververica.github.io/flink-cdc-connectors/master/content/connectors/oracle-cdc.html#connector-options");
         System.out.println();
 
         System.out.println("Paimon catalog and table sink conf syntax:");
@@ -111,19 +111,19 @@ public class OracleSyncTableActionFactory extends SyncTableActionFactoryBase {
 
         System.out.println("Examples:");
         System.out.println(
-                "  postgres_sync_table \\\n"
+                "  oracle_sync_table \\\n"
                         + "    --warehouse hdfs:///path/to/warehouse \\\n"
                         + "    --database test_db \\\n"
                         + "    --table test_table \\\n"
                         + "    --partition_keys pt \\\n"
                         + "    --primary_keys pt,uid \\\n"
-                        + "    --postgres_conf hostname=127.0.0.1 \\\n"
-                        + "    --postgres_conf username=root \\\n"
-                        + "    --postgres_conf password=123456 \\\n"
-                        + "    --postgres_conf database-name=source_db \\\n"
-                        + "    --postgres_conf schema-name=public \\\n"
-                        + "    --postgres_conf table-name='source_table' \\\n"
-                        + "    --postgres_conf slot.name=flink \\\n"
+                        + "    --oracle_conf hostname=127.0.0.1 \\\n"
+                        + "    --oracle_conf username=root \\\n"
+                        + "    --oracle_conf password=123456 \\\n"
+                        + "    --oracle_conf database-name=source_db \\\n"
+                        + "    --oracle_conf schema-name=public \\\n"
+                        + "    --oracle_conf table-name='source_table' \\\n"
+                        + "    --oracle_conf slot.name=flink \\\n"
                         + "    --catalog_conf metastore=hive \\\n"
                         + "    --catalog_conf uri=thrift://hive-metastore:9083 \\\n"
                         + "    --table_conf bucket=4 \\\n"

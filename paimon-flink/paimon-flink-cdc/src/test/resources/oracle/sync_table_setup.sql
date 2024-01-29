@@ -14,11 +14,6 @@
 -- See the License for the specific language governing permissions and
 -- limitations under the License.
 
--- In production you would almost certainly limit the replication user must be on the follower (slave) machine,
--- to prevent other clients accessing the log from other machines. For example, 'replicator'@'follower.acme.com'.
--- However, in this database we'll grant the test user 'paimonuser' all privileges:
---
-
 -- ################################################################################
 --  OracleSyncTableActionITCase
 -- ################################################################################

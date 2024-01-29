@@ -41,35 +41,19 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
- * An {@link Action} which synchronize one or multiple PostgreSQL tables into one Paimon table.
+ * An {@link Action} which synchronize one or multiple Oracle tables into one Paimon table.
  *
- * <p>You should specify PostgreSQL source table in {@code postgresConfig}. See <a
- * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/postgres-cdc.html#connector-options">document
+ * <p>You should specify Oracle source table in {@code OracleConfig}. See <a
+ * href="https://ververica.github.io/flink-cdc-connectors/master/content/connectors/oracle-cdc.html#connector-options">document
  * of flink-cdc-connectors</a> for detailed keys and values.
  *
  * <p>If the specified Paimon table does not exist, this action will automatically create the table.
- * Its schema will be derived from all specified PostgreSQL tables. If the Paimon table already
- * exists, its schema will be compared against the schema of all specified PostgreSQL tables.
+ * Its schema will be derived from all specified Oracle tables. If the Paimon table already exists,
+ * its schema will be compared against the schema of all specified Oracle tables.
  *
  * <p>This action supports a limited number of schema changes. Currently, the framework can not drop
  * columns, so the behaviors of `DROP` will be ignored, `RENAME` will add a new column. Currently
  * supported schema changes includes:
- *
- * <ul>
- *   <li>Adding columns.
- *   <li>Altering column types. More specifically,
- *       <ul>
- *         <li>altering from a string type (char, varchar, text) to another string type with longer
- *             length,
- *         <li>altering from a binary type (binary, varbinary) to another binary type with longer
- *             length,
- *         <li>altering from an integer type (smallint, int, bigint) to another integer type with
- *             wider range,
- *         <li>altering from a floating-point type (float, double) to another floating-point type
- *             with wider range,
- *       </ul>
- *       are supported.
- * </ul>
  */
 public class OracleSyncTableAction extends SyncTableActionBase {
 
@@ -80,13 +64,13 @@ public class OracleSyncTableAction extends SyncTableActionBase {
             String database,
             String table,
             Map<String, String> catalogConfig,
-            Map<String, String> postgresConfig) {
+            Map<String, String> oracleConfig) {
         super(
                 warehouse,
                 database,
                 table,
                 catalogConfig,
-                postgresConfig,
+                oracleConfig,
                 SyncJobHandler.SourceType.ORACLE);
     }
 
@@ -100,14 +84,6 @@ public class OracleSyncTableAction extends SyncTableActionBase {
         return tableInfo.schema();
     }
 
-    //    protected MySqlSource<String> buildSource() {
-    //        String tableList =
-    //                mySqlSchemasInfo.pkTables().stream()
-    //                        .map(JdbcSchemasInfo.JdbcSchemaInfo::identifier)
-    //                        .map(i -> i.getDatabaseName() + "\\." + i.getObjectName())
-    //                        .collect(Collectors.joining("|"));
-    //        return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
-    //    }
     @Override
     protected JdbcIncrementalSource<String> buildSource() {
         List<JdbcSchemasInfo.JdbcSchemaInfo> pkTables = oracleSchemasInfo.pkTables();
