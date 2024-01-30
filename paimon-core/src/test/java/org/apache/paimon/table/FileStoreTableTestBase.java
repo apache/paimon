@@ -1261,6 +1261,14 @@ public abstract class FileStoreTableTestBase {
             commit.commit(1, write.prepareCommit(false, 2));
         }
 
+        // Validate data in main branch
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+
         // Validate data in branch1
         assertThat(
                         getResult(
@@ -1278,6 +1286,14 @@ public abstract class FileStoreTableTestBase {
             write.write(rowData(4, 40, 400L));
             commit.commit(2, write.prepareCommit(false, 3));
         }
+
+        // Validate data in main branch
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                BATCH_ROW_TO_STRING))
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         // Verify data in branch1
         assertThat(

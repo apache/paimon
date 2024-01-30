@@ -97,7 +97,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
             String branchName) {
-        this.partitionStatsConverter = new FieldStatsArraySerializer(partitionType);
         this.partitionType = partitionType;
         this.bucketKeyFilter = bucketKeyFilter;
         this.snapshotManager = snapshotManager;

@@ -75,7 +75,9 @@ public class BranchManager {
     public void createBranch(String branchName, String tagName) {
         checkArgument(
                 !branchName.equals(DEFAULT_MAIN_BRANCH),
-                "Branch name 'main' is the default branch and cannot be used.");
+                String.format(
+                        "Branch name '%s' is the default branch and cannot be used.",
+                        DEFAULT_MAIN_BRANCH));
         checkArgument(!StringUtils.isBlank(branchName), "Branch name '%s' is blank.", branchName);
         checkArgument(!branchExists(branchName), "Branch name '%s' already exists.", branchName);
         checkArgument(tagManager.tagExists(tagName), "Tag name '%s' not exists.", tagName);
