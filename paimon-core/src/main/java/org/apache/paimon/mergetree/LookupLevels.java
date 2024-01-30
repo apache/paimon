@@ -171,10 +171,10 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter =
-                        lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
-                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+        LookupStoreWriter kvWriter =
+                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
+        LookupStoreFactory.Context context;
+        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             DataOutputSerializer valueOut = new DataOutputSerializer(32);
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
@@ -193,9 +193,11 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
+        } finally {
+            context = kvWriter.close();
         }
 
-        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile));
+        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile, context));
     }
 
     @Override

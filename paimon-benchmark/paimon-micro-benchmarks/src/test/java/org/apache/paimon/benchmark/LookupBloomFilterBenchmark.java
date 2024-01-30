@@ -137,7 +137,6 @@ public class LookupBloomFilterBenchmark {
         for (byte[] input : inputs) {
             writer.put(input, value);
         }
-        writer.close();
-        return factory.createReader(file);
+        return factory.createReader(file, writer.close());
     }
 }
