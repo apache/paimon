@@ -43,13 +43,13 @@ public class FileBasedBloomFilter {
     public FileBasedBloomFilter(
             RandomAccessFile file,
             CacheManager cacheManager,
-            long numRecords,
+            long expectedEntries,
             long readOffset,
             int readLength) {
         this.file = file;
         this.cacheManager = cacheManager;
-        checkArgument(numRecords >= 0);
-        this.filter = new BloomFilter(numRecords, readLength);
+        checkArgument(expectedEntries >= 0);
+        this.filter = new BloomFilter(expectedEntries, readLength);
         this.readOffset = readOffset;
         this.readLength = readLength;
         this.accessCount = 0;

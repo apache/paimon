@@ -41,8 +41,8 @@ public class HashLookupStoreFactory implements LookupStoreFactory {
     }
 
     @Override
-    public HashLookupStoreReader createReader(File file) throws IOException {
-        return new HashLookupStoreReader(cacheManager, cachePageSize, file);
+    public HashLookupStoreReader createReader(File file, Context context) throws IOException {
+        return new HashLookupStoreReader(file, (HashContext) context, cacheManager, cachePageSize);
     }
 
     @Override

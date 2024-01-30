@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
@@ -68,8 +69,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int[] lastValuesLength;
     // Data length
     private long[] dataLengths;
-    // Index length
-    private long indexesLength;
     // Max offset length
     private int[] maxOffsetLengths;
     // Number of keys
@@ -79,6 +78,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int valueCount;
     // Number of collisions
     private int collisions;
+
     @Nullable private final BloomFilter.Builder bloomFilter;
 
     HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
@@ -157,7 +157,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     }
 
     @Override
-    public void close() throws IOException {
+    public Context close() throws IOException {
         // Close the data and index streams
         for (DataOutputStream dos : dataStreams) {
             if (dos != null) {
@@ -177,17 +177,63 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         // Prepare files to merge
         List<File> filesToMerge = new ArrayList<>();
 
-        try {
+        int bloomFilterBytes = bloomFilter == null ? 0 : bloomFilter.getBuffer().size();
+        HashContext context =
+                new HashContext(
+                        bloomFilter != null,
+                        bloomFilter == null ? 0 : bloomFilter.expectedEntries(),
+                        bloomFilterBytes,
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new long[keyCounts.length]);
 
-            // Write metadata file
-            File metadataFile = new File(tempFolder, "metadata.dat");
-            metadataFile.deleteOnExit();
-            FileOutputStream metadataOutputStream = new FileOutputStream(metadataFile);
-            DataOutputStream metadataDataOutputStream = new DataOutputStream(metadataOutputStream);
-            writeMetadata(metadataDataOutputStream);
-            metadataDataOutputStream.close();
-            metadataOutputStream.close();
-            filesToMerge.add(metadataFile);
+        long indexesLength = bloomFilterBytes;
+        long datasLength = 0;
+        for (int i = 0; i < this.keyCounts.length; i++) {
+            if (this.keyCounts[i] > 0) {
+                // Write the key Count
+                context.keyCounts[i] = keyCounts[i];
+
+                // Write slot count
+                int slots = (int) Math.round(keyCounts[i] / loadFactor);
+                context.slots[i] = slots;
+
+                // Write slot size
+                int offsetLength = maxOffsetLengths[i];
+                context.slotSizes[i] = i + offsetLength;
+
+                // Write index offset
+                context.indexOffsets[i] = (int) indexesLength;
+
+                // Increment index length
+                indexesLength += (long) (i + offsetLength) * slots;
+
+                // Write data length
+                context.dataOffsets[i] = datasLength;
+
+                // Increment data length
+                datasLength += dataLengths[i];
+            }
+        }
+
+        // adjust data offsets
+        for (int i = 0; i < context.dataOffsets.length; i++) {
+            context.dataOffsets[i] = indexesLength + context.dataOffsets[i];
+        }
+
+        try {
+            // Write bloom filter file
+            if (bloomFilter != null) {
+                File bloomFilterFile = new File(tempFolder, "bloomfilter.dat");
+                bloomFilterFile.deleteOnExit();
+                try (FileOutputStream bfOutputStream = new FileOutputStream(bloomFilterFile)) {
+                    bfOutputStream.write(bloomFilter.getBuffer().getArray());
+                    LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+                }
+                filesToMerge.add(bloomFilterFile);
+            }
 
             // Build index file
             for (int i = 0; i < indexFiles.length; i++) {
@@ -209,80 +255,11 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             // Merge and write to output
             checkFreeDiskSpace(filesToMerge);
             mergeFiles(filesToMerge, outputStream);
+            return context;
         } finally {
             outputStream.close();
             cleanup(filesToMerge);
         }
-    }
-
-    private void writeMetadata(DataOutputStream dataOutputStream) throws IOException {
-        // Write time
-        dataOutputStream.writeLong(System.currentTimeMillis());
-
-        // Prepare
-        int keyLengthCount = getNumKeyCount();
-        int maxKeyLength = keyCounts.length - 1;
-
-        // Write size (number of keys)
-        dataOutputStream.writeInt(keyCount);
-
-        // Write the number of different key length
-        dataOutputStream.writeInt(keyLengthCount);
-
-        // Write the max value for keyLength
-        dataOutputStream.writeInt(maxKeyLength);
-
-        // Write whether the bloom filter is enabled.
-        dataOutputStream.writeBoolean(bloomFilter != null);
-
-        if (bloomFilter != null) {
-            dataOutputStream.writeLong(bloomFilter.getNumRecords());
-            dataOutputStream.writeInt(bloomFilter.getBuffer().size());
-
-            // Write the bloom filter start index
-            dataOutputStream.writeInt(dataOutputStream.size() + Integer.SIZE / Byte.SIZE);
-
-            dataOutputStream.write(bloomFilter.getBuffer().getArray());
-            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
-        }
-
-        // For each keyLength
-        long datasLength = 0L;
-        for (int i = 0; i < keyCounts.length; i++) {
-            if (keyCounts[i] > 0) {
-                // Write the key length
-                dataOutputStream.writeInt(i);
-
-                // Write key count
-                dataOutputStream.writeInt(keyCounts[i]);
-
-                // Write slot count
-                int slots = (int) Math.round(keyCounts[i] / loadFactor);
-                dataOutputStream.writeInt(slots);
-
-                // Write slot size
-                int offsetLength = maxOffsetLengths[i];
-                dataOutputStream.writeInt(i + offsetLength);
-
-                // Write index offset
-                dataOutputStream.writeInt((int) indexesLength);
-
-                // Increment index length
-                indexesLength += (long) (i + offsetLength) * slots;
-
-                // Write data length
-                dataOutputStream.writeLong(datasLength);
-
-                // Increment data length
-                datasLength += dataLengths[i];
-            }
-        }
-
-        // Write the position of the index and the data
-        int indexOffset =
-                dataOutputStream.size() + (Integer.SIZE / Byte.SIZE) + (Long.SIZE / Byte.SIZE);
-        dataOutputStream.writeInt(indexOffset);
-        dataOutputStream.writeLong(indexOffset + indexesLength);
     }
 
     private File buildIndex(int keyLength) throws IOException {

@@ -24,24 +24,29 @@ package org.apache.paimon.lookup.hash;
 
 import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.io.cache.CacheManager;
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.testutils.junit.parameterized.ParameterizedTestExtension;
+import org.apache.paimon.testutils.junit.parameterized.Parameters;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.VarLengthIntUtils;
 
 import org.apache.commons.math3.random.RandomDataGenerator;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.TestTemplate;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.MethodSource;
 
 import java.io.File;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.Set;
@@ -51,6 +56,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link HashLookupStoreFactory}. */
+@ExtendWith(ParameterizedTestExtension.class)
 public class HashLookupStoreFactoryTest {
 
     @TempDir Path tempDir;
@@ -58,8 +64,20 @@ public class HashLookupStoreFactoryTest {
     private final RandomDataGenerator random = new RandomDataGenerator();
     private final int pageSize = 1024;
 
+    private final boolean enableBloomFilter;
+
     private File file;
     private HashLookupStoreFactory factory;
+
+    public HashLookupStoreFactoryTest(List<Object> var) {
+        this.enableBloomFilter = (Boolean) var.get(0);
+    }
+
+    @SuppressWarnings("unused")
+    @Parameters(name = "enableBf-{0}")
+    public static List<List<Object>> getVarSeg() {
+        return Arrays.asList(Collections.singletonList(true), Collections.singletonList(false));
+    }
 
     @BeforeEach
     public void setUp() throws IOException {
@@ -70,10 +88,6 @@ public class HashLookupStoreFactoryTest {
         if (!file.createNewFile()) {
             throw new IOException("Can not create file: " + file);
         }
-    }
-
-    public static Object[] enableBloomFilter() {
-        return new Object[] {false, true};
     }
 
     private BloomFilter.Builder createBloomFiler(boolean enabled) {
@@ -91,46 +105,43 @@ public class HashLookupStoreFactoryTest {
         return str.getBytes(StandardCharsets.UTF_8);
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testEmpty(boolean enableBloomFilter) throws IOException {
+    @TestTemplate
+    public void testEmpty() throws IOException {
         HashLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(enableBloomFilter));
-        writer.close();
+        Context context = writer.close();
 
         assertThat(file.exists()).isTrue();
 
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
 
         assertThat(reader.lookup(toBytes(1))).isNull();
 
         reader.close();
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testOneKey(boolean enableBloomFilter) throws IOException {
+    @TestTemplate
+    public void testOneKey() throws IOException {
         HashLookupStoreWriter writer =
                 factory.createWriter(file, createBloomFiler(enableBloomFilter));
         writer.put(toBytes(1), toBytes("foo"));
-        writer.close();
+        Context context = writer.close();
 
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         assertThat(reader.lookup(toBytes(1))).isEqualTo(toBytes("foo"));
         reader.close();
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testTwoFirstKeyLength(boolean enableBloomFilter) throws IOException {
+    @TestTemplate
+    public void testTwoFirstKeyLength() throws IOException {
         int key1 = 1;
         int key2 = 245;
 
         // Write
-        writeStore(enableBloomFilter, file, new Object[] {key1, key2}, new Object[] {1, 6});
+        Context context = writeStore(file, new Object[] {key1, key2}, new Object[] {1, 6});
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         assertThat(reader.lookup(toBytes(key1))).isEqualTo(toBytes(1));
         assertThat(reader.lookup((toBytes(key2)))).isEqualTo(toBytes(6));
         assertThat(reader.lookup(toBytes(0))).isNull();
@@ -140,17 +151,16 @@ public class HashLookupStoreFactoryTest {
         assertThat(reader.lookup(toBytes(1245))).isNull();
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testKeyLengthGap(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testKeyLengthGap() throws IOException {
         int key1 = 1;
         int key2 = 2450;
 
         // Write
-        writeStore(enableBf, file, new Object[] {key1, key2}, new Object[] {1, 6});
+        Context context = writeStore(file, new Object[] {key1, key2}, new Object[] {1, 6});
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         assertThat(reader.lookup(toBytes(key1))).isEqualTo(toBytes(1));
         assertThat(reader.lookup((toBytes(key2)))).isEqualTo(toBytes(6));
         assertThat(reader.lookup(toBytes(0))).isNull();
@@ -162,17 +172,16 @@ public class HashLookupStoreFactoryTest {
         assertThat(reader.lookup(toBytes(2454441))).isNull();
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testKeyLengthStartTwo(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testKeyLengthStartTwo() throws IOException {
         int key1 = 245;
         int key2 = 2450;
 
         // Write
-        writeStore(enableBf, file, new Object[] {key1, key2}, new Object[] {1, 6});
+        Context context = writeStore(file, new Object[] {key1, key2}, new Object[] {1, 6});
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         assertThat(reader.lookup(toBytes(key1))).isEqualTo(toBytes(1));
         assertThat(reader.lookup((toBytes(key2)))).isEqualTo(toBytes(6));
         assertThat(reader.lookup(toBytes(6))).isNull();
@@ -183,9 +192,8 @@ public class HashLookupStoreFactoryTest {
         assertThat(reader.lookup(toBytes(2454441))).isNull();
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testDataOnTwoBuffers(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testDataOnTwoBuffers() throws IOException {
         Object[] keys = new Object[] {1, 2, 3};
         Object[] values =
                 new Object[] {
@@ -200,18 +208,17 @@ public class HashLookupStoreFactoryTest {
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d);
 
-        writeStore(factory, enableBf, file, keys, values);
+        Context context = writeStore(factory, file, keys, values);
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
         }
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testDataSizeOnTwoBuffers(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testDataSizeOnTwoBuffers() throws IOException {
         Object[] keys = new Object[] {1, 2, 3};
         Object[] values =
                 new Object[] {
@@ -231,71 +238,61 @@ public class HashLookupStoreFactoryTest {
                 new HashLookupStoreFactory(
                         new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d);
 
-        writeStore(enableBf, file, keys, values);
+        Context context = writeStore(file, keys, values);
 
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
         }
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadStringToString(boolean enableBf) throws IOException {
-        testReadKeyToString(generateStringKeys(100), enableBf);
+    @TestTemplate
+    public void testReadStringToString() throws IOException {
+        testReadKeyToString(generateStringKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadIntToString(boolean enableBf) throws IOException {
-        testReadKeyToString(generateIntKeys(100), enableBf);
+    @TestTemplate
+    public void testReadIntToString() throws IOException {
+        testReadKeyToString(generateIntKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadDoubleToString(boolean enableBf) throws IOException {
-        testReadKeyToString(generateDoubleKeys(100), enableBf);
+    @TestTemplate
+    public void testReadDoubleToString() throws IOException {
+        testReadKeyToString(generateDoubleKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadLongToString(boolean enableBf) throws IOException {
-        testReadKeyToString(generateLongKeys(100), enableBf);
+    @TestTemplate
+    public void testReadLongToString() throws IOException {
+        testReadKeyToString(generateLongKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadStringToInt(boolean enableBf) throws IOException {
-        testReadKeyToInt(generateStringKeys(100), enableBf);
+    @TestTemplate
+    public void testReadStringToInt() throws IOException {
+        testReadKeyToInt(generateStringKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadByteToInt(boolean enableBf) throws IOException {
-        testReadKeyToInt(generateByteKeys(100), enableBf);
+    @TestTemplate
+    public void testReadByteToInt() throws IOException {
+        testReadKeyToInt(generateByteKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadIntToInt(boolean enableBf) throws IOException {
-        testReadKeyToInt(generateIntKeys(100), enableBf);
+    @TestTemplate
+    public void testReadIntToInt() throws IOException {
+        testReadKeyToInt(generateIntKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadCompoundToString(boolean enableBf) throws IOException {
-        testReadKeyToString(generateCompoundKeys(100), enableBf);
+    @TestTemplate
+    public void testReadCompoundToString() throws IOException {
+        testReadKeyToString(generateCompoundKeys(100));
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testReadCompoundByteToString(boolean enableBf) throws IOException {
-        testReadKeyToString(new Object[] {generateCompoundByteKey()}, enableBf);
+    @TestTemplate
+    public void testReadCompoundByteToString() throws IOException {
+        testReadKeyToString(new Object[] {generateCompoundByteKey()});
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testCacheExpiration(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testCacheExpiration() throws IOException {
         int len = 1000;
         ThreadLocalRandom rnd = ThreadLocalRandom.current();
         Object[] keys = new Object[len];
@@ -306,32 +303,31 @@ public class HashLookupStoreFactoryTest {
         }
 
         // Write
-        writeStore(enableBf, file, keys, values);
+        Context context = writeStore(file, keys, values);
 
         // Read
         factory =
                 new HashLookupStoreFactory(new CacheManager(new MemorySize(8096)), pageSize, 0.75d);
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
         }
     }
 
-    @ParameterizedTest
-    @MethodSource(value = "enableBloomFilter")
-    public void testIterate(boolean enableBf) throws IOException {
+    @TestTemplate
+    public void testIterate() throws IOException {
         Integer[] keys = generateIntKeys(100);
         String[] values = generateStringData(keys.length, 12);
 
         // Write
-        writeStore(enableBf, file, keys, values);
+        Context context = writeStore(file, keys, values);
 
         // Sets
         Set<Integer> keysSet = new HashSet<>(Arrays.asList(keys));
         Set<String> valuesSet = new HashSet<>(Arrays.asList(values));
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
         Iterator<Map.Entry<byte[], byte[]>> itr = reader.iterator();
         for (int i = 0; i < keys.length; i++) {
             assertThat(itr.hasNext()).isTrue();
@@ -351,13 +347,13 @@ public class HashLookupStoreFactoryTest {
 
     // UTILITY
 
-    private void testReadKeyToString(Object[] keys, boolean enableBf) throws IOException {
+    private void testReadKeyToString(Object[] keys) throws IOException {
         // Write
         Object[] values = generateStringData(keys.length, 10);
-        writeStore(enableBf, file, keys, values);
+        Context context = writeStore(file, keys, values);
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
 
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
@@ -366,13 +362,13 @@ public class HashLookupStoreFactoryTest {
         reader.close();
     }
 
-    private void testReadKeyToInt(Object[] keys, boolean enableBf) throws IOException {
+    private void testReadKeyToInt(Object[] keys) throws IOException {
         // Write
         Integer[] values = generateIntData(keys.length);
-        writeStore(enableBf, file, keys, values);
+        Context context = writeStore(file, keys, values);
 
         // Read
-        HashLookupStoreReader reader = factory.createReader(file);
+        HashLookupStoreReader reader = factory.createReader(file, context);
 
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));
@@ -381,23 +377,19 @@ public class HashLookupStoreFactoryTest {
         reader.close();
     }
 
-    private void writeStore(boolean enableBf, File location, Object[] keys, Object[] values)
-            throws IOException {
-        writeStore(factory, enableBf, location, keys, values);
+    private Context writeStore(File location, Object[] keys, Object[] values) throws IOException {
+        return writeStore(factory, location, keys, values);
     }
 
-    private void writeStore(
-            HashLookupStoreFactory factory,
-            boolean enableBf,
-            File location,
-            Object[] keys,
-            Object[] values)
+    private Context writeStore(
+            HashLookupStoreFactory factory, File location, Object[] keys, Object[] values)
             throws IOException {
-        HashLookupStoreWriter writer = factory.createWriter(location, createBloomFiler(enableBf));
+        HashLookupStoreWriter writer =
+                factory.createWriter(location, createBloomFiler(enableBloomFilter));
         for (int i = 0; i < keys.length; i++) {
             writer.put(toBytes(keys[i]), toBytes(values[i]));
         }
-        writer.close();
+        return writer.close();
     }
 
     private Integer[] generateIntKeys(int count) {
