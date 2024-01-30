@@ -313,10 +313,10 @@ guaranteed to be accurate. The following behaviors may occur when processing ret
 upstreams send `+I['A', 'B']` and `-U['A']` respectively. If the table receives `-U['A']` first, it can do nothing; then it receives
 `+I['A', 'B']`, the merge result will be `+I['A', 'B']` instead of `+I['B']`.
 
-2. The retract field from one input stream will retract the result merged from multiple upstreams. For example, the table 
-uses `merge_map`, and one upstream send `+I[1->A]`, another upstream send `+I[1->B]`, `-D[1->B]` later. The table will merge
-two insert values to `+I[1->B]`, and then the `-D[1->B]` will retract the result, so the final merge result is empty map 
-instead of `+I[1->A]`
+2. The retract message from one upstream will retract the result merged from multiple upstreams. For example, the table 
+uses `merge_map`, and one upstream sends `+I[1->A]`, another upstream sends `+I[1->B]`, `-D[1->B]` later. The table will 
+merge two insert values to `+I[1->B]` first, and then the `-D[1->B]` will retract the whole result, so the final result 
+is an empty map instead of `+I[1->A]`
 
 ## First Row
 
