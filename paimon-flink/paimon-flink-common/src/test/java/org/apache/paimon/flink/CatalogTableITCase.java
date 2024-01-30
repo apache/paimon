@@ -37,6 +37,7 @@ import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -628,6 +629,32 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                         : (StringUtils.endsWith(tableName, "APPEND_ONLY")
                                                 ? ","
                                                 : "[5],[10]")));
+    }
+
+    @Test
+    public void testFilesTableWithFilter() {
+        tEnv.getConfig().set(TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_WITH_FILTER (k INT, p INT, v INT, PRIMARY KEY (k, p) NOT ENFORCED) "
+                        + "PARTITIONED BY (p) WITH ('bucket'='2')");
+        sql("INSERT INTO T_WITH_FILTER VALUES (1, 2, 3), (4, 5, 6)");
+        sql("CALL sys.compact('default.T_WITH_FILTER')");
+        sql("INSERT INTO T_WITH_FILTER VALUES (7, 8, 9)");
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files"))
+                .containsExactlyInAnyOrder(
+                        Row.of("[2]", 0, 5), Row.of("[5]", 0, 5), Row.of("[8]", 1, 0));
+
+        assertThat(
+                        sql(
+                                "SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE `partition`='[2]'"))
+                .containsExactlyInAnyOrder(Row.of("[2]", 0, 5));
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE bucket=0"))
+                .containsExactlyInAnyOrder(Row.of("[2]", 0, 5), Row.of("[5]", 0, 5));
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE level=0"))
+                .containsExactlyInAnyOrder(Row.of("[8]", 1, 0));
     }
 
     @Nonnull

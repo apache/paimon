@@ -316,6 +316,30 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         }
 
         @Override
+        public InnerTableScan withLimit(int limit) {
+            batchScan.withLimit(limit);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+            batchScan.withPartitionFilter(partitionSpec);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+            batchScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            batchScan.withLevelFilter(levelFilter);
+            return this;
+        }
+
+        @Override
         public Plan plan() {
             return batchScan.plan();
         }
