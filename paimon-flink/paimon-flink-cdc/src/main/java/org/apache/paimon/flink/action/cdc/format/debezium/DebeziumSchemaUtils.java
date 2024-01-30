@@ -36,7 +36,6 @@ import io.debezium.time.MicroTime;
 import io.debezium.time.MicroTimestamp;
 import io.debezium.time.Timestamp;
 import io.debezium.time.ZonedTimestamp;
-import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 
 import javax.annotation.Nullable;
@@ -55,6 +54,8 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_
  * MySqlRecordParser. Need refactor.
  */
 public class DebeziumSchemaUtils {
+
+    public static final String DECIMAL_LOGICAL_NAME = "org.apache.kafka.connect.data.Decimal";
 
     /** Transform raw string value according to schema. */
     public static String transformRawValue(
@@ -85,7 +86,7 @@ public class DebeziumSchemaUtils {
         } else if (("bytes".equals(debeziumType) && className == null)) {
             // MySQL binary, varbinary, blob
             transformed = new String(Base64.getDecoder().decode(rawValue));
-        } else if ("bytes".equals(debeziumType) && Decimal.LOGICAL_NAME.equals(className)) {
+        } else if ("bytes".equals(debeziumType) && DECIMAL_LOGICAL_NAME.equals(className)) {
             // MySQL numeric, fixed, decimal
             try {
                 new BigDecimal(rawValue);
@@ -176,7 +177,7 @@ public class DebeziumSchemaUtils {
                 case Bits.LOGICAL_NAME:
                     int length = Integer.parseInt(parameters.get("length"));
                     return DataTypes.BINARY((length + 7) / 8);
-                case Decimal.LOGICAL_NAME:
+                case DECIMAL_LOGICAL_NAME:
                     String precision = parameters.get("connect.decimal.precision");
                     if (precision == null) {
                         return DataTypes.DECIMAL(20, 0);

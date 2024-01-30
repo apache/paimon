@@ -334,6 +334,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.apache.kafka</pattern>
                                     <shadedPattern>org.apache.flink.kafka.shaded.org.apache.kafka</shadedPattern>
+                                    <!-- TODO Constants will be shaded. see https://issues.apache.org/jira/browse/MSHADE-156 -->
+                                    <excludes>
+                                        <exclude>org.apache.kafka.connect.data.Decimal</exclude>
+                                    </excludes>
                                 </relocation>
                             </relocations>
                         </configuration>
