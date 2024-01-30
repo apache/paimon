@@ -22,6 +22,7 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldCollectAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldMergeMapAgg;
 import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.utils.BlockingIterator;
+import org.apache.paimon.utils.CommonTestUtils;
 
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.types.Row;
@@ -31,6 +32,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.math.BigDecimal;
+import java.time.Duration;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.Arrays;
@@ -1509,6 +1511,68 @@ public class PreAggregationITCase {
             checkOneRecord(result.get(0), 1, "paimon", "paimon");
             checkOneRecord(result.get(1), 2, "A", "A", "B", "B", "B", "C");
             checkOneRecord(result.get(2), 3, "car", "watch");
+        }
+
+        @Test
+        public void testRetractWithAggregation() throws Exception {
+            sql("CREATE TABLE INPUT (id INT PRIMARY KEY NOT ENFORCED, f0 ARRAY<STRING>)");
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'aggregation',"
+                            + "  'fields.f0.aggregate-function' = 'collect'"
+                            + ")");
+
+            sql(
+                    "INSERT INTO INPUT VALUES "
+                            + "(1, CAST (NULL AS ARRAY<STRING>)), "
+                            + "(2, ARRAY['A', 'B'])");
+            sql("INSERT INTO INPUT VALUES (2, ARRAY['C', 'D'])");
+
+            innerTestRetract();
+        }
+
+        @Test
+        public void testRetractWithPartialUpdate() throws Exception {
+            sql("CREATE TABLE INPUT (id INT PRIMARY KEY NOT ENFORCED, f0 ARRAY<STRING>, f1 INT)");
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>,"
+                            + "  f1 INT"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'partial-update',"
+                            + "  'fields.f0.aggregate-function' = 'collect',"
+                            + "  'fields.f1.sequence-group' = 'f0'"
+                            + ")");
+
+            sql(
+                    "INSERT INTO INPUT VALUES "
+                            + "(1, CAST (NULL AS ARRAY<STRING>), 10), "
+                            + "(2, ARRAY['A', 'B'], 10)");
+            sql("INSERT INTO INPUT VALUES (2, ARRAY['C', 'D'], 20)");
+
+            innerTestRetract();
+        }
+
+        private void innerTestRetract() throws Exception {
+            CloseableIterator<Row> insert =
+                    streamSqlIter(
+                            "INSERT INTO test_collect SELECT * FROM INPUT /*+ OPTIONS('scan.snapshot-id'='1') */");
+
+            CommonTestUtils.waitUtil(
+                    () -> sql("SELECT * FROM test_collect").size() == 2,
+                    Duration.ofMinutes(2),
+                    Duration.ofMillis(100));
+
+            List<Row> result = sql("SELECT * FROM test_collect");
+            checkOneRecord(result.get(0), 1);
+            // if not retracted, the result would be ['A', 'B', 'C', 'D']
+            checkOneRecord(result.get(1), 2, "C", "D");
+
+            insert.close();
         }
 
         private void checkOneRecord(Row row, int id, String... elements) {

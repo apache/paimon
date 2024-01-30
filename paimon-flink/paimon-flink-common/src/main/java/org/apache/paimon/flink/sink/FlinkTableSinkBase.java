@@ -83,7 +83,8 @@ public abstract class FlinkTableSinkBase
                 return requestedMode;
             }
 
-            if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
+            MergeEngine mergeEngine = options.get(MERGE_ENGINE);
+            if (mergeEngine == MergeEngine.AGGREGATE || mergeEngine == MergeEngine.PARTIAL_UPDATE) {
                 return requestedMode;
             }
 
