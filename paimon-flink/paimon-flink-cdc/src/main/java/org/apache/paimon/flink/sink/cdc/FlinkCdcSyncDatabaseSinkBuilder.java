@@ -149,8 +149,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperatorUtils.getSideOutput(
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
                 .keyBy(t -> t.f0)
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
                 .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> partitioned =
