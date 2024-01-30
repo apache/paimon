@@ -234,6 +234,10 @@ This file is based on the checkstyle file of Apache Beam.
 			<property name="illegalPkgs" value="com.github.ben-manes.caffeine"/>
 			<message key="import.illegal" value="{0}; Use paimon-shade-caffeine instead."/>
 		</module>
+		<module name="IllegalImport">
+			<property name="illegalPkgs" value="io.netty"/>
+			<message key="import.illegal" value="{0}; Use paimon-shade-netty instead."/>
+		</module>
 
 		<module name="RedundantModifier">
 			<!-- Checks for redundant modifiers on various symbol definitions.

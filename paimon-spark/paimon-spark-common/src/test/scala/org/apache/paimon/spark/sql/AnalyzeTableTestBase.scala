@@ -24,10 +24,10 @@ import org.apache.paimon.stats.ColStats
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.plans.logical.Statistics
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
-
-import java.util.concurrent.TimeUnit
 
 abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
@@ -283,7 +283,32 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
   }
 
-  private def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
+  test("Paimon analyze: spark use table stats") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val stats = getScanStatistic("SELECT * FROM T")
+    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
+  }
+
+  protected def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
     fileIO.listStatus(new Path(tableLocation, "statistics")).length
+  }
+
+  protected def getScanStatistic(sql: String): Statistics = {
+    val relation = spark
+      .sql(sql)
+      .queryExecution
+      .optimizedPlan
+      .collectFirst { case relation: DataSourceV2ScanRelation => relation }
+      .get
+    relation.computeStats()
   }
 }

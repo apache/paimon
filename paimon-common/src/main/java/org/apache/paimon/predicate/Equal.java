@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -39,9 +38,9 @@ public class Equal extends NullFalseLeafBinaryFunction {
     }
 
     @Override
-    public boolean test(DataType type, long rowCount, FieldStats fieldStats, Object literal) {
-        return compareLiteral(type, literal, fieldStats.minValue()) >= 0
-                && compareLiteral(type, literal, fieldStats.maxValue()) <= 0;
+    public boolean test(
+            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal) {
+        return compareLiteral(type, literal, min) >= 0 && compareLiteral(type, literal, max) <= 0;
     }
 
     @Override

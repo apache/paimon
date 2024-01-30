@@ -33,7 +33,7 @@ import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -61,7 +61,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 /** Default implementation of {@link FileStoreScan}. */
 public abstract class AbstractFileStoreScan implements FileStoreScan {
 
-    private final FieldStatsArraySerializer partitionStatsConverter;
     private final RowType partitionType;
     private final SnapshotManager snapshotManager;
     private final ManifestFile.Factory manifestFileFactory;
@@ -382,10 +381,17 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
 
     /** Note: Keep this thread-safe. */
     private boolean filterManifestFileMeta(ManifestFileMeta manifest) {
+        if (partitionFilter == null) {
+            return true;
+        }
+
+        BinaryTableStats stats = manifest.partitionStats();
         return partitionFilter == null
                 || partitionFilter.test(
                         manifest.numAddedFiles() + manifest.numDeletedFiles(),
-                        manifest.partitionStats().fields(partitionStatsConverter));
+                        stats.minValues(),
+                        stats.maxValues(),
+                        stats.nullCounts());
     }
 
     /** Note: Keep this thread-safe. */

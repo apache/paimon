@@ -55,6 +55,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private final boolean writeBufferSpillable;
     private final int sortMaxFan;
+    private final String sortCompression;
     private final IOManager ioManager;
 
     private final RowType keyType;
@@ -80,6 +81,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     public MergeTreeWriter(
             boolean writeBufferSpillable,
             int sortMaxFan,
+            String sortCompression,
             IOManager ioManager,
             CompactManager compactManager,
             long maxSequenceNumber,
@@ -92,6 +94,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             WriterMetrics writerMetrics) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
+        this.sortCompression = sortCompression;
         this.ioManager = ioManager;
         this.keyType = writerFactory.keyType();
         this.valueType = writerFactory.valueType();
@@ -139,6 +142,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         memoryPool,
                         writeBufferSpillable,
                         sortMaxFan,
+                        sortCompression,
                         ioManager);
     }
 

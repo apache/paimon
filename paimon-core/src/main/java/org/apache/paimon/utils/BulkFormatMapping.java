@@ -44,7 +44,7 @@ public class BulkFormatMapping {
     private final FormatReaderFactory bulkFormat;
 
     public BulkFormatMapping(
-            int[] indexMapping,
+            @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable Pair<int[], RowType> partitionPair,
             FormatReaderFactory bulkFormat) {

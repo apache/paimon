@@ -21,6 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.predicate.FieldStatsUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 
@@ -265,7 +266,11 @@ public class PredicateConverterTest {
         IntStream.range(0, rowCountList.size())
                 .forEach(
                         i ->
-                                assertThat(predicate.test(rowCountList.get(i), statsList.get(i)))
+                                assertThat(
+                                                FieldStatsUtils.test(
+                                                        predicate,
+                                                        rowCountList.get(i),
+                                                        statsList.get(i)))
                                         .isEqualTo(expectedForStats.get(i)));
     }
 

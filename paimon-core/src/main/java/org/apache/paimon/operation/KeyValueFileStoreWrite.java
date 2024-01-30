@@ -170,6 +170,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         return new MergeTreeWriter(
                 bufferSpillable(),
                 options.localSortMaxNumFileHandles(),
+                options.spillCompression(),
                 ioManager,
                 compactManager,
                 getMaxSequenceNumber(restoreFiles),

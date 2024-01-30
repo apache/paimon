@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -37,8 +36,7 @@ public class IsNotNull extends LeafUnaryFunction {
     }
 
     @Override
-    public boolean test(DataType type, long rowCount, FieldStats fieldStats) {
-        Long nullCount = fieldStats.nullCount();
+    public boolean test(DataType type, long rowCount, Object min, Object max, Long nullCount) {
         return nullCount == null || nullCount < rowCount;
     }
 

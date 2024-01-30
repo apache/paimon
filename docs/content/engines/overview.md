@@ -35,7 +35,7 @@ Apache Spark and Apache Hive.
 | Engine |    Version    | Batch Read | Batch Write | Create Table | Alter Table | Streaming Write | Streaming Read | Batch Overwrite |
 |:------:|:-------------:|:----------:|:-----------:|:------------:|:-----------:|:---------------:|:--------------:|:---------------:|
 | Flink  |  1.14 - 1.18  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |
-| Spark  |   3.1 - 3.5   |     ✅      |      ✅      |      ✅       |      ✅      |        ✅        |    ✅(3.3+)     |        ❌        |
+| Spark  |   3.1 - 3.5   |     ✅      |      ✅      |      ✅       |      ✅      |        ✅        |    ✅(3.3+)     |        ✅        |
 |  Hive  |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |
 | Spark  |      2.4      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
 | Trino  |   358 - 422   |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
