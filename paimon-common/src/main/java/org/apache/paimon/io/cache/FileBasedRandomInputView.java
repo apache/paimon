@@ -19,14 +19,14 @@
 package org.apache.paimon.io.cache;
 
 import org.apache.paimon.data.AbstractPagedInputView;
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.SeekableDataInputView;
+import org.apache.paimon.io.cache.CacheKey.PageIndexCacheKey;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.utils.MathUtils;
 
 import java.io.Closeable;
 import java.io.EOFException;
-import java.io.File;
-import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.util.ArrayList;
@@ -43,23 +43,19 @@ import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
 public class FileBasedRandomInputView extends AbstractPagedInputView
         implements SeekableDataInputView, Closeable {
 
-    private final RandomAccessFile file;
-    private final long fileLength;
+    private final PageFileInput input;
     private final CacheManager cacheManager;
     private final Map<Integer, SegmentContainer> segments;
-    private final int segmentSize;
     private final int segmentSizeBits;
     private final int segmentSizeMask;
 
     private int currentSegmentIndex;
 
-    public FileBasedRandomInputView(File file, CacheManager cacheManager, int segmentSize)
-            throws FileNotFoundException {
-        this.file = new RandomAccessFile(file, "r");
-        this.fileLength = file.length();
+    public FileBasedRandomInputView(PageFileInput input, CacheManager cacheManager) {
+        this.input = input;
         this.cacheManager = cacheManager;
         this.segments = new HashMap<>();
-        this.segmentSize = segmentSize;
+        int segmentSize = input.pageSize();
         this.segmentSizeBits = MathUtils.log2strict(segmentSize);
         this.segmentSizeMask = segmentSize - 1;
 
@@ -68,8 +64,8 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
 
     @Override
     public void setReadPosition(long position) {
-        final int offset = (int) (position & this.segmentSizeMask);
-        this.currentSegmentIndex = positionToSegmentIndex(position);
+        int offset = (int) (position & this.segmentSizeMask);
+        this.currentSegmentIndex = (int) (position >>> this.segmentSizeBits);
         MemorySegment segment = getCurrentPage();
         seekInput(segment, offset, getLimitForSegment(segment));
     }
@@ -77,11 +73,13 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
     private MemorySegment getCurrentPage() {
         SegmentContainer container = segments.get(currentSegmentIndex);
         if (container == null || container.accessCount == REFRESH_COUNT) {
-            long offset = segmentIndexToPosition(currentSegmentIndex);
-            int length = (int) Math.min(segmentSize, fileLength - offset);
-            container =
-                    new SegmentContainer(
-                            cacheManager.getPage(file, offset, length, this::invalidPage));
+            int pageIndex = currentSegmentIndex;
+            MemorySegment segment =
+                    cacheManager.getPage(
+                            CacheKey.forPageIndex(input.file(), input.pageSize(), pageIndex),
+                            key -> input.readPage(pageIndex),
+                            this::invalidPage);
+            container = new SegmentContainer(segment);
             segments.put(currentSegmentIndex, container);
         }
         return container.access();
@@ -90,7 +88,7 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
     @Override
     protected MemorySegment nextSegment(MemorySegment current) throws EOFException {
         currentSegmentIndex++;
-        if (segmentIndexToPosition(currentSegmentIndex) >= fileLength) {
+        if ((long) currentSegmentIndex << segmentSizeBits >= input.uncompressBytes()) {
             throw new EOFException();
         }
 
@@ -102,8 +100,8 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
         return segment.size();
     }
 
-    private void invalidPage(long position, int length) {
-        segments.remove(positionToSegmentIndex(position));
+    private void invalidPage(CacheKey key) {
+        segments.remove(((PageIndexCacheKey) key).pageIndex());
     }
 
     @Override
@@ -111,25 +109,11 @@ public class FileBasedRandomInputView extends AbstractPagedInputView
         // copy out to avoid ConcurrentModificationException
         List<Integer> pages = new ArrayList<>(segments.keySet());
         pages.forEach(
-                page -> {
-                    long offset = segmentIndexToPosition(page);
-                    int length = (int) Math.min(segmentSize, fileLength - offset);
-                    cacheManager.invalidPage(file, offset, length);
-                });
+                page ->
+                        cacheManager.invalidPage(
+                                CacheKey.forPageIndex(input.file(), input.pageSize(), page)));
 
-        file.close();
-    }
-
-    private int positionToSegmentIndex(long position) {
-        return (int) (position >>> this.segmentSizeBits);
-    }
-
-    private long segmentIndexToPosition(int segmentIndex) {
-        return (long) segmentIndex << segmentSizeBits;
-    }
-
-    public RandomAccessFile file() {
-        return file;
+        input.close();
     }
 
     private static class SegmentContainer {

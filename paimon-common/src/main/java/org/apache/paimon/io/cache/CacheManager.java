@@ -28,9 +28,6 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Remo
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.util.Objects;
-import java.util.function.BiConsumer;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
@@ -61,16 +58,12 @@ public class CacheManager {
         return cache;
     }
 
-    public MemorySegment getPage(
-            RandomAccessFile file,
-            long readOffset,
-            int readLength,
-            BiConsumer<Long, Integer> cleanCallback) {
-        CacheKey key = new CacheKey(file, readOffset, readLength);
+    public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
         CacheValue value = cache.getIfPresent(key);
         while (value == null || value.isClosed) {
             try {
-                value = new CacheValue(key.read(), cleanCallback);
+                this.fileReadCount++;
+                value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -79,8 +72,8 @@ public class CacheManager {
         return value.segment;
     }
 
-    public void invalidPage(RandomAccessFile file, long readOffset, int readLength) {
-        cache.invalidate(new CacheKey(file, readOffset, readLength));
+    public void invalidPage(CacheKey key) {
+        cache.invalidate(key);
     }
 
     private int weigh(CacheKey cacheKey, CacheValue cacheValue) {
@@ -89,63 +82,23 @@ public class CacheManager {
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
         value.isClosed = true;
-        value.cleanCallback.accept(key.offset, key.length);
+        value.callback.onRemoval(key);
     }
 
     public int fileReadCount() {
         return fileReadCount;
     }
 
-    private class CacheKey {
-
-        private final RandomAccessFile file;
-        private final long offset;
-        private final int length;
-
-        private CacheKey(RandomAccessFile file, long offset, int length) {
-            this.file = file;
-            this.offset = offset;
-            this.length = length;
-        }
-
-        private MemorySegment read() throws IOException {
-            byte[] bytes = new byte[length];
-            file.seek(offset);
-            file.readFully(bytes);
-            fileReadCount++;
-            return MemorySegment.wrap(bytes);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            CacheKey cacheKey = (CacheKey) o;
-            return Objects.equals(file, cacheKey.file)
-                    && offset == cacheKey.offset
-                    && length == cacheKey.length;
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(file, offset, length);
-        }
-    }
-
     private static class CacheValue {
 
         private final MemorySegment segment;
-        private final BiConsumer<Long, Integer> cleanCallback;
+        private final CacheCallback callback;
 
         private boolean isClosed = false;
 
-        private CacheValue(MemorySegment segment, BiConsumer<Long, Integer> cleanCallback) {
+        private CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;
-            this.cleanCallback = cleanCallback;
+            this.callback = callback;
         }
     }
 }

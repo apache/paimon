@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.io.PageFileOutput;
 import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.utils.BloomFilter;
@@ -37,7 +38,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -57,7 +57,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private final double loadFactor;
     // Output
     private final File tempFolder;
-    private final OutputStream outputStream;
+    private final File outputFile;
     // Index stream
     private File[] indexFiles;
     private DataOutputStream[] indexStreams;
@@ -84,6 +84,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
             throws IOException {
         this.loadFactor = loadFactor;
+        this.outputFile = file;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(
                     "Illegal load factor = " + loadFactor + ", should be between 0.0 and 1.0.");
@@ -93,7 +94,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         if (!tempFolder.mkdir()) {
             throw new IOException("Can not create temp folder: " + tempFolder);
         }
-        this.outputStream = new BufferedOutputStream(new FileOutputStream(file));
         this.indexStreams = new DataOutputStream[0];
         this.dataStreams = new DataOutputStream[0];
         this.indexFiles = new File[0];
@@ -223,7 +223,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             context.dataOffsets[i] = indexesLength + context.dataOffsets[i];
         }
 
-        try {
+        try (PageFileOutput output = PageFileOutput.create(outputFile)) {
             // Write bloom filter file
             if (bloomFilter != null) {
                 File bloomFilterFile = new File(tempFolder, "bloomfilter.dat");
@@ -254,12 +254,15 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
             // Merge and write to output
             checkFreeDiskSpace(filesToMerge);
-            mergeFiles(filesToMerge, outputStream);
-            return context;
+            mergeFiles(filesToMerge, output);
         } finally {
-            outputStream.close();
             cleanup(filesToMerge);
         }
+
+        LOG.info(
+                "Compressed Total store size: {} Mb",
+                new DecimalFormat("#,##0.0").format(outputFile.length() / (1024 * 1024)));
+        return context;
     }
 
     private File buildIndex(int keyLength) throws IOException {
@@ -377,7 +380,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     }
 
     // Merge files to the provided fileChannel
-    private void mergeFiles(List<File> inputFiles, OutputStream outputStream) throws IOException {
+    private void mergeFiles(List<File> inputFiles, PageFileOutput output) throws IOException {
         long startTime = System.nanoTime();
 
         // Merge files
@@ -391,7 +394,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
                     byte[] buffer = new byte[8192];
                     int length;
                     while ((length = bufferedInputStream.read(buffer)) > 0) {
-                        outputStream.write(buffer, 0, length);
+                        output.write(buffer, 0, length);
                     }
                 } finally {
                     bufferedInputStream.close();

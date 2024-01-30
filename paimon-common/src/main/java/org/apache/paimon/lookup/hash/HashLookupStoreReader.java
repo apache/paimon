@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.FileBasedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
@@ -81,13 +82,14 @@ public class HashLookupStoreReader
         dataOffsets = context.dataOffsets;
 
         LOG.info("Opening file {}", file.getName());
-        // Create Mapped file in read-only mode
-        inputView = new FileBasedRandomInputView(file, cacheManager, cachePageSize);
+
+        PageFileInput fileInput = PageFileInput.create(file, cachePageSize);
+        inputView = new FileBasedRandomInputView(fileInput, cacheManager);
 
         if (context.bloomFilterEnabled) {
             bloomFilter =
                     new FileBasedBloomFilter(
-                            inputView.file(),
+                            fileInput,
                             cacheManager,
                             context.bloomFilterExpectedEntries,
                             0,
