@@ -104,7 +104,7 @@ INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 ```
 
-For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
+For `fields.<field-name>.sequence-group`, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
 ### Aggregation For Partial Update
 
