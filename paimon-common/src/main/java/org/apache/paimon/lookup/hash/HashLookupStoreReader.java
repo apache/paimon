@@ -18,6 +18,7 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.io.cache.FileBasedRandomInputView;
@@ -63,7 +64,11 @@ public class HashLookupStoreReader
     @Nullable private FileBasedBloomFilter bloomFilter;
 
     HashLookupStoreReader(
-            File file, HashContext context, CacheManager cacheManager, int cachePageSize)
+            File file,
+            HashContext context,
+            CacheManager cacheManager,
+            int cachePageSize,
+            @Nullable BlockCompressionFactory compressionFactory)
             throws IOException {
         // File path
         if (!file.exists()) {
@@ -83,7 +88,13 @@ public class HashLookupStoreReader
 
         LOG.info("Opening file {}", file.getName());
 
-        PageFileInput fileInput = PageFileInput.create(file, cachePageSize);
+        PageFileInput fileInput =
+                PageFileInput.create(
+                        file,
+                        cachePageSize,
+                        compressionFactory,
+                        context.uncompressBytes,
+                        context.compressPages);
         inputView = new FileBasedRandomInputView(fileInput, cacheManager);
 
         if (context.bloomFilterEnabled) {

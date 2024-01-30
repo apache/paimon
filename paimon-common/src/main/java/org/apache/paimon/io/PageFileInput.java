@@ -18,6 +18,10 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -36,8 +40,23 @@ public interface PageFileInput extends Closeable {
 
     byte[] readPosition(long position, int length) throws IOException;
 
-    static PageFileInput create(File file, int pageSize) throws IOException {
+    static PageFileInput create(
+            File file,
+            int pageSize,
+            @Nullable BlockCompressionFactory compressionFactory,
+            long uncompressBytes,
+            @Nullable long[] compressPagePositions)
+            throws IOException {
         RandomAccessFile accessFile = new RandomAccessFile(file, "r");
-        return new UncompressedPageFileInput(accessFile, pageSize);
+        if (compressionFactory == null) {
+            return new UncompressedPageFileInput(accessFile, pageSize);
+        } else {
+            return new CompressedPageFileInput(
+                    accessFile,
+                    pageSize,
+                    compressionFactory,
+                    uncompressBytes,
+                    compressPagePositions);
+        }
     }
 }

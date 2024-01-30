@@ -68,7 +68,8 @@ public class FileBasedRandomInputViewTest {
         File file = writeFile(bytes);
         CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
         FileBasedRandomInputView view =
-                new FileBasedRandomInputView(PageFileInput.create(file, 1024), cacheManager);
+                new FileBasedRandomInputView(
+                        PageFileInput.create(file, 1024, null, 0, null), cacheManager);
 
         // read first one
         // this assertThatCode check the ConcurrentModificationException is not threw.

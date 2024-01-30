@@ -130,7 +130,7 @@ public class LookupBloomFilterBenchmark {
         Arrays.fill(value, (byte) 1);
         HashLookupStoreFactory factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(10)), 16 * 1024, 0.75);
+                        new CacheManager(MemorySize.ofMebiBytes(10)), 16 * 1024, 0.75, "none");
 
         File file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         HashLookupStoreWriter writer = factory.createWriter(file, filter);

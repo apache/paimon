@@ -18,6 +18,10 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+
+import javax.annotation.Nullable;
+
 import java.io.Closeable;
 import java.io.File;
 import java.io.IOException;
@@ -27,7 +31,12 @@ public interface PageFileOutput extends Closeable {
 
     void write(byte[] bytes, int off, int len) throws IOException;
 
-    static PageFileOutput create(File file) throws IOException {
-        return new UncompressedPageFileOutput(file);
+    static PageFileOutput create(
+            File file, int pageSize, @Nullable BlockCompressionFactory compressionFactory)
+            throws IOException {
+        if (compressionFactory == null) {
+            return new UncompressedPageFileOutput(file);
+        }
+        return new CompressedPageFileOutput(file, pageSize, compressionFactory);
     }
 }
