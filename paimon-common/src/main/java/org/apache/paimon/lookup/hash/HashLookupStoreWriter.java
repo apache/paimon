@@ -18,6 +18,8 @@
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.io.CompressedPageFileOutput;
 import org.apache.paimon.io.PageFileOutput;
 import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.lookup.LookupStoreWriter;
@@ -81,10 +83,20 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
     @Nullable private final BloomFilter.Builder bloomFilter;
 
-    HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
+    @Nullable private final BlockCompressionFactory compressionFactory;
+    private final int compressPageSize;
+
+    HashLookupStoreWriter(
+            double loadFactor,
+            File file,
+            @Nullable BloomFilter.Builder bloomFilter,
+            @Nullable BlockCompressionFactory compressionFactory,
+            int compressPageSize)
             throws IOException {
         this.loadFactor = loadFactor;
         this.outputFile = file;
+        this.compressionFactory = compressionFactory;
+        this.compressPageSize = compressPageSize;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(
                     "Illegal load factor = " + loadFactor + ", should be between 0.0 and 1.0.");
@@ -187,7 +199,9 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
                         new int[keyCounts.length],
                         new int[keyCounts.length],
                         new int[keyCounts.length],
-                        new long[keyCounts.length]);
+                        new long[keyCounts.length],
+                        0,
+                        null);
 
         long indexesLength = bloomFilterBytes;
         long datasLength = 0;
@@ -223,7 +237,9 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             context.dataOffsets[i] = indexesLength + context.dataOffsets[i];
         }
 
-        try (PageFileOutput output = PageFileOutput.create(outputFile)) {
+        PageFileOutput output =
+                PageFileOutput.create(outputFile, compressPageSize, compressionFactory);
+        try {
             // Write bloom filter file
             if (bloomFilter != null) {
                 File bloomFilterFile = new File(tempFolder, "bloomfilter.dat");
@@ -257,11 +273,17 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             mergeFiles(filesToMerge, output);
         } finally {
             cleanup(filesToMerge);
+            output.close();
         }
 
         LOG.info(
                 "Compressed Total store size: {} Mb",
                 new DecimalFormat("#,##0.0").format(outputFile.length() / (1024 * 1024)));
+
+        if (output instanceof CompressedPageFileOutput) {
+            CompressedPageFileOutput compressedOutput = (CompressedPageFileOutput) output;
+            context = context.copy(compressedOutput.uncompressBytes(), compressedOutput.pages());
+        }
         return context;
     }
 
@@ -471,15 +493,5 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             dataLengths[keyLength]++;
         }
         return dos;
-    }
-
-    private int getNumKeyCount() {
-        int res = 0;
-        for (int count : keyCounts) {
-            if (count != 0) {
-                res++;
-            }
-        }
-        return res;
     }
 }

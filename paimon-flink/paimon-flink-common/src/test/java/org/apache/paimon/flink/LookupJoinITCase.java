@@ -524,11 +524,17 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testLookupPartialUpdate() throws Exception {
+        testLookupPartialUpdate("none");
+        testLookupPartialUpdate("zstd");
+    }
+
+    private void testLookupPartialUpdate(String compression) throws Exception {
         sql(
                 "CREATE TABLE DIM2 (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH"
                         + " ('merge-engine'='partial-update',"
                         + " 'changelog-producer'='full-compaction',"
                         + " 'changelog-producer.compaction-interval'='1 s',"
+                        + String.format(" 'lookup.cache-spill-compression'='%s',", compression)
                         + " 'continuous.discovery-interval'='10 ms')");
         sql("INSERT INTO DIM2 VALUES (1, CAST(NULL AS INT), 111, CAST(NULL AS INT))");
         String query =
@@ -543,6 +549,9 @@ public class LookupJoinITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(1, 11, 111, 1111));
 
         iterator.close();
+
+        sql("DROP TABLE DIM2");
+        sql("TRUNCATE TABLE T");
     }
 
     @ParameterizedTest

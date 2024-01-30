@@ -41,6 +41,9 @@ public class HashContext implements Context {
     // Offset of the data for different key length
     final long[] dataOffsets;
 
+    final long uncompressBytes;
+    final long[] compressPages;
+
     public HashContext(
             boolean bloomFilterEnabled,
             long bloomFilterExpectedEntries,
@@ -49,7 +52,9 @@ public class HashContext implements Context {
             int[] slotSizes,
             int[] slots,
             int[] indexOffsets,
-            long[] dataOffsets) {
+            long[] dataOffsets,
+            long uncompressBytes,
+            long[] compressPages) {
         this.bloomFilterEnabled = bloomFilterEnabled;
         this.bloomFilterExpectedEntries = bloomFilterExpectedEntries;
         this.bloomFilterBytes = bloomFilterBytes;
@@ -58,5 +63,21 @@ public class HashContext implements Context {
         this.slots = slots;
         this.indexOffsets = indexOffsets;
         this.dataOffsets = dataOffsets;
+        this.uncompressBytes = uncompressBytes;
+        this.compressPages = compressPages;
+    }
+
+    public HashContext copy(long uncompressBytes, long[] compressPages) {
+        return new HashContext(
+                bloomFilterEnabled,
+                bloomFilterExpectedEntries,
+                bloomFilterBytes,
+                keyCounts,
+                slotSizes,
+                slots,
+                indexOffsets,
+                dataOffsets,
+                uncompressBytes,
+                compressPages);
     }
 }

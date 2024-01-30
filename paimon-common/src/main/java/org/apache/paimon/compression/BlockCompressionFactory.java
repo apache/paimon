@@ -37,12 +37,10 @@ public interface BlockCompressionFactory {
 
     /** Creates {@link BlockCompressionFactory} according to the configuration. */
     @Nullable
-    static BlockCompressionFactory create(@Nullable String compression) {
-        if (compression == null) {
-            return null;
-        }
-
+    static BlockCompressionFactory create(String compression) {
         switch (compression.toUpperCase()) {
+            case "NONE":
+                return null;
             case "LZ4":
                 return new Lz4BlockCompressionFactory();
             case "LZO":

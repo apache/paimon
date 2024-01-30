@@ -366,7 +366,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<MemorySize> CACHE_PAGE_SIZE =
             key("cache-page-size")
                     .memoryType()
-                    .defaultValue(MemorySize.parse("16 kb"))
+                    .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size for caching.");
 
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
@@ -728,6 +728,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.MAX_VALUE)
                     .withDescription(
                             "Max disk size for lookup cache, you can use this option to limit the use of local disks.");
+
+    public static final ConfigOption<String> LOOKUP_CACHE_SPILL_COMPRESSION =
+            key("lookup.cache-spill-compression")
+                    .stringType()
+                    .defaultValue("lz4")
+                    .withDescription(
+                            "Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.");
 
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
             key("lookup.cache-max-memory-size")

@@ -43,7 +43,6 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
@@ -65,25 +64,31 @@ public class HashLookupStoreFactoryTest {
     private final int pageSize = 1024;
 
     private final boolean enableBloomFilter;
+    private final String compress;
 
     private File file;
     private HashLookupStoreFactory factory;
 
     public HashLookupStoreFactoryTest(List<Object> var) {
         this.enableBloomFilter = (Boolean) var.get(0);
+        this.compress = (String) var.get(1);
     }
 
     @SuppressWarnings("unused")
-    @Parameters(name = "enableBf-{0}")
+    @Parameters(name = "enableBf&compress-{0}")
     public static List<List<Object>> getVarSeg() {
-        return Arrays.asList(Collections.singletonList(true), Collections.singletonList(false));
+        return Arrays.asList(
+                Arrays.asList(true, "none"),
+                Arrays.asList(false, "none"),
+                Arrays.asList(false, "lz4"),
+                Arrays.asList(true, "lz4"));
     }
 
     @BeforeEach
     public void setUp() throws IOException {
         this.factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d);
+                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d, compress);
         this.file = new File(tempDir.toFile(), UUID.randomUUID().toString());
         if (!file.createNewFile()) {
             throw new IOException("Can not create file: " + file);
@@ -206,7 +211,7 @@ public class HashLookupStoreFactoryTest {
 
         factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d);
+                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d, compress);
 
         Context context = writeStore(factory, file, keys, values);
 
@@ -236,7 +241,7 @@ public class HashLookupStoreFactoryTest {
 
         factory =
                 new HashLookupStoreFactory(
-                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d);
+                        new CacheManager(MemorySize.ofMebiBytes(1)), pageSize, 0.75d, compress);
 
         Context context = writeStore(file, keys, values);
 
@@ -307,7 +312,8 @@ public class HashLookupStoreFactoryTest {
 
         // Read
         factory =
-                new HashLookupStoreFactory(new CacheManager(new MemorySize(8096)), pageSize, 0.75d);
+                new HashLookupStoreFactory(
+                        new CacheManager(new MemorySize(8096)), pageSize, 0.75d, compress);
         HashLookupStoreReader reader = factory.createReader(file, context);
         for (int i = 0; i < keys.length; i++) {
             assertThat(reader.lookup(toBytes(keys[i]))).isEqualTo(toBytes(values[i]));

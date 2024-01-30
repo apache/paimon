@@ -85,7 +85,8 @@ public class LocalTableQuery implements TableQuery {
                 new HashLookupStoreFactory(
                         new CacheManager(options.lookupCacheMaxMemory()),
                         options.cachePageSize(),
-                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR));
+                        options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
+                        options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION));
 
         if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP) {
             startLevel = 1;

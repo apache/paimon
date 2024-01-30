@@ -53,7 +53,11 @@ public class FileBasedBloomFilterTest {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
-                        PageFileInput.create(file, 1000), cacheManager, 100, 0, 1000);
+                        PageFileInput.create(file, 1024, null, 0, null),
+                        cacheManager,
+                        100,
+                        0,
+                        1000);
 
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());
