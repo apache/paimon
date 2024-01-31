@@ -46,6 +46,8 @@ public class SchemaSerializer
     public void serialize(TableSchema tableSchema, JsonGenerator generator) throws IOException {
         generator.writeStartObject();
 
+        generator.writeNumberField("version", tableSchema.version());
+
         generator.writeNumberField("id", tableSchema.id());
 
         generator.writeArrayFieldStart("fields");
