@@ -24,9 +24,11 @@ import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.types.MapType;
 
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Map;
+import java.util.Set;
 
-/** Collect elements into an ARRAY. */
+/** Merge two maps. */
 public class FieldMergeMapAgg extends FieldAggregator {
 
     public static final String NAME = "merge_map";
@@ -68,5 +70,33 @@ public class FieldMergeMapAgg extends FieldAggregator {
                     keyGetter.getElementOrNull(keyArray, i),
                     valueGetter.getElementOrNull(valueArray, i));
         }
+    }
+
+    @Override
+    public Object retract(Object accumulator, Object retractField) {
+        if (accumulator == null) {
+            return null;
+        }
+
+        InternalMap acc = (InternalMap) accumulator;
+        InternalMap retract = (InternalMap) retractField;
+
+        InternalArray retractKeyArray = retract.keyArray();
+        Set<Object> retractKeys = new HashSet<>();
+        for (int i = 0; i < retractKeyArray.size(); i++) {
+            retractKeys.add(keyGetter.getElementOrNull(retractKeyArray, i));
+        }
+
+        Map<Object, Object> resultMap = new HashMap<>();
+        InternalArray accKeyArray = acc.keyArray();
+        InternalArray accValueArray = acc.valueArray();
+        for (int i = 0; i < accKeyArray.size(); i++) {
+            Object accKey = keyGetter.getElementOrNull(accKeyArray, i);
+            if (!retractKeys.contains(accKey)) {
+                resultMap.put(accKey, valueGetter.getElementOrNull(accValueArray, i));
+            }
+        }
+
+        return new GenericMap(resultMap);
     }
 }
