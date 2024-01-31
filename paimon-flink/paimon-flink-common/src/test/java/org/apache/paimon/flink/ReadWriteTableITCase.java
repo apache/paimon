@@ -1838,6 +1838,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             options.put(SINK_PARALLELISM.key(), configParallelism.toString());
         }
         options.put("path", getTempFilePath(UUID.randomUUID().toString()));
+        options.put("bucket", "1");
 
         DynamicTableFactory.Context context =
                 new FactoryUtil.DefaultDynamicTableContext(
