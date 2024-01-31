@@ -93,6 +93,33 @@ public class RetryingMetaStoreClientFactory {
                                                     new ConcurrentHashMap<>(),
                                                     clientClassName,
                                                     true))
+                    // for hive 3.x,
+                    // and some metastore client classes providing constructors only for 2.x
+                    .put(
+                            new Class<?>[] {
+                                Configuration.class,
+                                Class[].class,
+                                Object[].class,
+                                ConcurrentHashMap.class,
+                                String.class
+                            },
+                            (getProxyMethod, hiveConf, clientClassName) ->
+                                    (IMetaStoreClient)
+                                            getProxyMethod.invoke(
+                                                    null,
+                                                    hiveConf,
+                                                    new Class[] {
+                                                        HiveConf.class,
+                                                        HiveMetaHookLoader.class,
+                                                        Boolean.class
+                                                    },
+                                                    new Object[] {
+                                                        hiveConf,
+                                                        (HiveMetaHookLoader) (tbl -> null),
+                                                        true
+                                                    },
+                                                    new ConcurrentHashMap<>(),
+                                                    clientClassName))
                     .build();
 
     // If clientClassName is HiveMetaStoreClient,
