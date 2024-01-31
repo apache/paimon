@@ -19,8 +19,8 @@
 package org.apache.paimon.hive.procedure;
 
 import org.apache.paimon.flink.action.ActionITCaseBase;
-import org.apache.paimon.flink.action.MigrateTableAction;
-import org.apache.paimon.flink.procedure.MigrateFileProcedure;
+import org.apache.paimon.flink.action.MigrateDatabaseAction;
+import org.apache.paimon.flink.procedure.MigrateDatabaseProcedure;
 import org.apache.paimon.hive.TestHiveMetastore;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
@@ -42,14 +42,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Random;
 
-/** Tests for {@link MigrateFileProcedure}. */
-public class MigrateTableProcedureITCase extends ActionITCaseBase {
+import static org.apache.paimon.hive.procedure.MigrateTableProcedureITCase.data;
+
+/** Tests for {@link MigrateDatabaseProcedure}. */
+public class MigrateDatabaseProcedureITCase extends ActionITCaseBase {
 
     private static final TestHiveMetastore TEST_HIVE_METASTORE = new TestHiveMetastore();
 
-    private static final int PORT = 9084;
+    private static final int PORT = 9086;
 
     @BeforeEach
     public void beforeEach() {
@@ -96,16 +97,33 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE my_database");
+        tEnv.executeSql("USE my_database");
+
+        // write data into my_database.hivetable1
         tEnv.executeSql(
-                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                "CREATE TABLE hivetable1 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable");
+        tEnv.executeSql("INSERT INTO hivetable1 VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable1");
+
+        // write data into my_database.hivetable2
+        tEnv.executeSql(
+                "CREATE TABLE hivetable2 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable2 VALUES" + data(100)).await();
+
+        tEnv.executeSql("SHOW CREATE TABLE hivetable2");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r1 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r3 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -115,13 +133,19 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + "')");
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql(
-                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                        "CALL sys.migrate_database('hive', 'my_database', 'file.format="
                                 + format
                                 + "')")
                 .await();
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r2 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r4 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
     public void testUpgradeNonPartitionTable(String format) throws Exception {
@@ -132,14 +156,31 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
-        tEnv.executeSql("CREATE TABLE hivetable (id string, id2 int, id3 int) STORED AS " + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable");
+        tEnv.executeSql("CREATE DATABASE my_database");
+        tEnv.executeSql("USE my_database");
+
+        // write data into my_database.hivetable1
+        tEnv.executeSql(
+                "CREATE TABLE hivetable1 (id string, id2 int, id3 int) STORED AS " + format);
+        tEnv.executeSql("INSERT INTO hivetable1 VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable1");
+
+        // write data into my_database.hivetable2
+        tEnv.executeSql(
+                "CREATE TABLE hivetable2 (id string, id2 int, id3 int) STORED AS " + format);
+        tEnv.executeSql("INSERT INTO hivetable2 VALUES" + data(100)).await();
+
+        tEnv.executeSql("SHOW CREATE TABLE hivetable2");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r1 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r3 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -149,18 +190,24 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + "')");
         tEnv.useCatalog("PAIMON");
         tEnv.executeSql(
-                        "CALL sys.migrate_table('hive', 'default.hivetable', 'file.format="
+                        "CALL sys.migrate_database('hive', 'my_database', 'file.format="
                                 + format
                                 + "')")
                 .await();
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r2 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r4 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
+        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 
     @ParameterizedTest
     @ValueSource(strings = {"orc", "parquet", "avro"})
-    public void testMigrateAction(String format) throws Exception {
+    public void testMigrateDatabaseAction(String format) throws Exception {
         StreamExecutionEnvironment env = buildDefaultEnv(false);
 
         TableEnvironment tEnv =
@@ -168,27 +215,45 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         tEnv.executeSql("CREATE CATALOG HIVE WITH ('type'='hive')");
         tEnv.useCatalog("HIVE");
         tEnv.getConfig().setSqlDialect(SqlDialect.HIVE);
+        tEnv.executeSql("CREATE DATABASE my_database");
+        tEnv.executeSql("USE my_database");
+
+        // write data into my_database.hivetable1
         tEnv.executeSql(
-                "CREATE TABLE hivetable (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                "CREATE TABLE hivetable1 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
                         + format);
-        tEnv.executeSql("INSERT INTO hivetable VALUES" + data(100)).await();
-        tEnv.executeSql("SHOW CREATE TABLE hivetable");
+        tEnv.executeSql("INSERT INTO hivetable1 VALUES" + data(100)).await();
+        tEnv.executeSql("SHOW CREATE TABLE hivetable1");
+
+        // write data into my_database.hivetable2
+        tEnv.executeSql(
+                "CREATE TABLE hivetable2 (id string) PARTITIONED BY (id2 int, id3 int) STORED AS "
+                        + format);
+        tEnv.executeSql("INSERT INTO hivetable2 VALUES" + data(100)).await();
+
+        tEnv.executeSql("SHOW CREATE TABLE hivetable2");
 
         tEnv.getConfig().setSqlDialect(SqlDialect.DEFAULT);
         tEnv.executeSql("CREATE CATALOG PAIMON_GE WITH ('type'='paimon-generic')");
         tEnv.useCatalog("PAIMON_GE");
-        List<Row> r1 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r1 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r3 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
+
         Map<String, String> catalogConf = new HashMap<>();
         catalogConf.put("metastore", "hive");
         catalogConf.put("uri", "thrift://localhost:" + PORT);
-        MigrateTableAction migrateTableAction =
-                new MigrateTableAction(
+        MigrateDatabaseAction migrateDatabaseAction =
+                new MigrateDatabaseAction(
                         "hive",
                         System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname),
-                        "default.hivetable",
+                        "my_database",
                         catalogConf,
                         "");
-        migrateTableAction.run();
+        migrateDatabaseAction.run();
 
         tEnv.executeSql(
                 "CREATE CATALOG PAIMON WITH ('type'='paimon', 'metastore' = 'hive', 'uri' = 'thrift://localhost:"
@@ -197,27 +262,14 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
                         + System.getProperty(HiveConf.ConfVars.METASTOREWAREHOUSE.varname)
                         + "')");
         tEnv.useCatalog("PAIMON");
-        List<Row> r2 = ImmutableList.copyOf(tEnv.executeSql("SELECT * FROM hivetable").collect());
+        List<Row> r2 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable1").collect());
+        List<Row> r4 =
+                ImmutableList.copyOf(
+                        tEnv.executeSql("SELECT * FROM my_database.hivetable2").collect());
 
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
-    }
-
-    protected static String data(int i) {
-        Random random = new Random();
-        StringBuilder stringBuilder = new StringBuilder();
-        for (int m = 0; m < i; m++) {
-            stringBuilder.append("(");
-            stringBuilder.append("\"");
-            stringBuilder.append('a' + m);
-            stringBuilder.append("\",");
-            stringBuilder.append(random.nextInt(10));
-            stringBuilder.append(",");
-            stringBuilder.append(random.nextInt(10));
-            stringBuilder.append(")");
-            if (m != i - 1) {
-                stringBuilder.append(",");
-            }
-        }
-        return stringBuilder.toString();
+        Assertions.assertThatList(r3).containsExactlyInAnyOrderElementsOf(r4);
     }
 }
