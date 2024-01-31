@@ -69,7 +69,7 @@ under the License.
 
         <dependency>
             <groupId>org.apache.hive</groupId>
-            <artifactId>hive-exec</artifactId>
+            <artifactId>hive-metastore</artifactId>
             <version>${hive.version}</version>
             <scope>provided</scope>
             <exclusions>
