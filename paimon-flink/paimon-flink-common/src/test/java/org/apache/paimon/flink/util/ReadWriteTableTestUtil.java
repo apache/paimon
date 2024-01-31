@@ -121,7 +121,11 @@ public class ReadWriteTableTestUtil {
             Map<String, String> options) {
         // "-" is not allowed in the table name.
         String table = ("MyTable_" + UUID.randomUUID()).replace("-", "_");
-        sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, options));
+        Map<String, String> newOptions = new HashMap<>(options);
+        if (!newOptions.containsKey("bucket")) {
+            newOptions.put("bucket", "1");
+        }
+        sEnv.executeSql(buildDdl(table, fieldsSpec, primaryKeys, partitionKeys, newOptions));
         return table;
     }
 
