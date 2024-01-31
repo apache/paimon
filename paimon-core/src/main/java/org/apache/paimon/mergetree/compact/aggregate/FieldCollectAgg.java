@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.HashSet;
+import java.util.Iterator;
 import java.util.List;
 import java.util.function.BiFunction;
 
@@ -146,5 +147,51 @@ public class FieldCollectAgg extends FieldAggregator {
             }
         }
         return false;
+    }
+
+    @Override
+    public Object retract(Object accumulator, Object retractField) {
+        if (accumulator == null) {
+            return null;
+        }
+
+        InternalArray acc = (InternalArray) accumulator;
+        InternalArray retract = (InternalArray) retractField;
+
+        List<Object> retractedElements = new ArrayList<>();
+        for (int i = 0; i < retract.size(); i++) {
+            retractedElements.add(elementGetter.getElementOrNull(retract, i));
+        }
+
+        List<Object> accElements = new ArrayList<>();
+        for (int i = 0; i < acc.size(); i++) {
+            Object candidate = elementGetter.getElementOrNull(acc, i);
+            if (!retract(retractedElements, candidate)) {
+                accElements.add(candidate);
+            }
+        }
+        return new GenericArray(accElements.toArray());
+    }
+
+    private boolean retract(List<Object> list, Object element) {
+        Iterator<Object> iterator = list.iterator();
+        while (iterator.hasNext()) {
+            Object o = iterator.next();
+            if (equals(o, element)) {
+                iterator.remove();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private boolean equals(Object a, Object b) {
+        if (a == null && b == null) {
+            return true;
+        } else if (a == null || b == null) {
+            return false;
+        } else {
+            return equaliser == null ? a.equals(b) : equaliser.apply(a, b);
+        }
     }
 }

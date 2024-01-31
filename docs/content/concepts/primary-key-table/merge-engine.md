@@ -104,7 +104,7 @@ INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
 SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
 ```
 
-For fields.<fieldName>.sequence-group, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
+For `fields.<field-name>.sequence-group`, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
 
 ### Aggregation For Partial Update
 
@@ -295,14 +295,28 @@ Current supported aggregate functions and data types are:
 * `merge_map`:
   The merge_map function merge input maps. It only supports MAP type.
 
-Only `sum`, `product` and `count` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
-If you allow some functions to ignore retraction messages, you can configure:
-`'fields.${field_name}.ignore-retract'='true'`.
-
 {{< hint info >}}
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
 [changelog producer]({{< ref "concepts/primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
+
+### Retract
+
+Only `sum`, `product`, `count`, `collect` and `merge_map` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+If you allow some functions to ignore retraction messages, you can configure:
+`'fields.${field_name}.ignore-retract'='true'`.
+
+NOTE: The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not 
+guaranteed to be accurate. The following behaviors may occur when processing retraction messages:
+
+1. It might fail to handle retraction messages if records are disordered. For example, the table uses `collect`, and the 
+upstreams send `+I['A', 'B']` and `-U['A']` respectively. If the table receives `-U['A']` first, it can do nothing; then it receives
+`+I['A', 'B']`, the merge result will be `+I['A', 'B']` instead of `+I['B']`.
+
+2. The retract message from one upstream will retract the result merged from multiple upstreams. For example, the table 
+uses `merge_map`, and one upstream sends `+I[1->A]`, another upstream sends `+I[1->B]`, `-D[1->B]` later. The table will 
+merge two insert values to `+I[1->B]` first, and then the `-D[1->B]` will retract the whole result, so the final result 
+is an empty map instead of `+I[1->A]`
 
 ## First Row
 
