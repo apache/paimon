@@ -66,7 +66,7 @@ public class RowDataChannelComputerTest {
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "k"),
-                                new HashMap<>(),
+                                Collections.singletonMap("bucket", "1"),
                                 ""));
 
         ThreadLocalRandom random = ThreadLocalRandom.current();

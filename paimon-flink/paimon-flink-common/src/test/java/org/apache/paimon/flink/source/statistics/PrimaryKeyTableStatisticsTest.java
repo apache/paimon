@@ -23,6 +23,7 @@ import org.apache.paimon.flink.source.DataTableSource;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
@@ -57,13 +58,14 @@ public class PrimaryKeyTableStatisticsTest extends FileStoreTableStatisticsTestB
 
     @Override
     FileStoreTable createStoreTable() throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        conf.set(CoreOptions.BUCKET, 1);
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
+        Schema.Builder builder = schemaBuilder();
+        builder.options(options.toMap());
         TableSchema tableSchema =
                 new SchemaManager(LocalFileIO.create(), tablePath)
-                        .createTable(
-                                schemaBuilder().partitionKeys("pt").primaryKey("pt", "a").build());
+                        .createTable(builder.partitionKeys("pt").primaryKey("pt", "a").build());
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
 }

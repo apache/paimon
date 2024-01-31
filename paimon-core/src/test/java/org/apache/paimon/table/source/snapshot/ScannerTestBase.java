@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.GenericRow;
@@ -151,6 +152,9 @@ public abstract class ScannerTestBase {
         List<String> primaryKeys = new ArrayList<>();
         if (withPrimaryKeys) {
             primaryKeys = Arrays.asList("pt", "a");
+        }
+        if (!conf.contains(CoreOptions.BUCKET)) {
+            conf.set(CoreOptions.BUCKET, 1);
         }
         TableSchema tableSchema =
                 schemaManager.createTable(
