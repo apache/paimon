@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.MergeEngine;
@@ -83,8 +84,12 @@ public abstract class FlinkTableSinkBase
                 return requestedMode;
             }
 
-            MergeEngine mergeEngine = options.get(MERGE_ENGINE);
-            if (mergeEngine == MergeEngine.AGGREGATE || mergeEngine == MergeEngine.PARTIAL_UPDATE) {
+            if (options.get(MERGE_ENGINE) == MergeEngine.AGGREGATE) {
+                return requestedMode;
+            }
+
+            if (options.get(MERGE_ENGINE) == MergeEngine.PARTIAL_UPDATE
+                    && new CoreOptions(options).definedAggFunc()) {
                 return requestedMode;
             }
 

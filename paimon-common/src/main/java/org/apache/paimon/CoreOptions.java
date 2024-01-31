@@ -1162,6 +1162,15 @@ public class CoreOptions implements Serializable {
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 
+    public boolean definedAggFunc() {
+        for (String key : options.toMap().keySet()) {
+            if (key.startsWith(FIELDS_PREFIX) && key.endsWith(AGG_FUNCTION)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public String fieldAggFunc(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
