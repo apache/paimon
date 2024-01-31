@@ -72,7 +72,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     // Max offset length
     private int[] maxOffsetLengths;
     // Number of keys
-    private int keyCount;
     private int[] keyCounts;
     // Number of values
     private int valueCount;
@@ -149,7 +148,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             valueCount++;
         }
 
-        keyCount++;
         keyCounts[keyLength]++;
         if (bloomFilter != null) {
             bloomFilter.addHash(MurmurHashUtils.hashBytes(key));
@@ -171,7 +169,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         }
 
         // Stats
-        LOG.info("Number of keys: {}", keyCount);
+        LOG.info("Number of keys: {}", getNumKeyCount());
         LOG.info("Number of values: {}", valueCount);
 
         // Prepare files to merge
