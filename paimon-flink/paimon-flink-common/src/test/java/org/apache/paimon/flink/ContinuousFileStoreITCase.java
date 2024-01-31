@@ -49,8 +49,8 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED) WITH('changelog-producer'='input')");
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')",
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED) WITH('changelog-producer'='input') WITH ('bucket' = '1')");
     }
 
     @Test
