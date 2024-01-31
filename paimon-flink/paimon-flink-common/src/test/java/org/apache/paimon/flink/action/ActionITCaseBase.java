@@ -109,6 +109,9 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         catalog.createDatabase(database, true);
+        if (!options.containsKey("bucket")) {
+            options.put("bucket", "1");
+        }
         catalog.createTable(
                 identifier,
                 new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
