@@ -119,6 +119,7 @@ class StoreMultiCommitterTest {
         Options firstOptions = new Options();
         firstOptions.set(
                 CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.PROCESS_TIME);
+        firstOptions.setString("bucket", "-1");
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
@@ -132,7 +133,7 @@ class StoreMultiCommitterTest {
                         rowType2.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.emptyMap(),
+                        Collections.singletonMap("bucket", "1"),
                         "");
         createTestTables(
                 catalog,
