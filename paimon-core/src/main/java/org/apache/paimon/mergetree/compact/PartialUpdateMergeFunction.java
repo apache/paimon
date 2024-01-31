@@ -144,7 +144,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(i, field);
                 }
             } else {
-                Long currentSeq = sequenceGen.generateNullable(kv.value());
+                Long currentSeq = sequenceGen.generateNullable(kv.value(), kv.valueKind());
                 if (currentSeq != null) {
                     Long previousSeq = sequenceGen.generateNullable(row);
                     if (previousSeq == null || currentSeq >= previousSeq) {
@@ -162,7 +162,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         for (int i = 0; i < getters.length; i++) {
             SequenceGenerator sequenceGen = fieldSequences.get(i);
             if (sequenceGen != null) {
-                Long currentSeq = sequenceGen.generateNullable(kv.value());
+                Long currentSeq = sequenceGen.generateNullable(kv.value(), kv.valueKind());
                 if (currentSeq != null) {
                     Long previousSeq = sequenceGen.generateNullable(row);
                     FieldAggregator aggregator = fieldAggregators.get(i);

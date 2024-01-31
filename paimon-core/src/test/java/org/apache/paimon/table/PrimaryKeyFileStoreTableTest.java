@@ -294,12 +294,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 binaryRow(1),
                                 0,
                                 rowData ->
-                                        (rowData.getRowKind() == RowKind.INSERT
-                                                                || rowData.getRowKind()
-                                                                        == RowKind.UPDATE_AFTER
-                                                        ? "+"
-                                                        : "-")
-                                                + rowData.getInt(0)
+                                        rowData.getInt(0)
                                                 + "|"
                                                 + rowData.getInt(1)
                                                 + "|"
@@ -308,7 +303,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                                 + (!rowData.isNullAt(3) ? rowData.getInt(3) : null)
                                                 + "|"
                                                 + rowData.getString(4)))
-                .isEqualTo(Arrays.asList("+1|10|102|null|a3", "+1|11|100|1685530986|a4"));
+                .isEqualTo(Arrays.asList("1|10|102|null|a3", "1|11|100|1685530986|a4"));
     }
 
     @Test

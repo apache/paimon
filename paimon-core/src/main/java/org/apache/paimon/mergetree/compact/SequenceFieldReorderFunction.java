@@ -75,7 +75,7 @@ public class SequenceFieldReorderFunction implements ReorderFunction<KeyValue> {
         long autoSequence = kv.sequenceNumber();
         KeyValue copy =
                 new KeyValue().replace(keySerializer.copy(kv.key()), autoSequence, null, null);
-        Long actualSequence = sequenceGenerator.generateNullable(kv.value());
+        Long actualSequence = sequenceGenerator.generateNullable(kv.value(), kv.valueKind());
         if (actualSequence != null) {
             // add for sorting.
             svList.add(

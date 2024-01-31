@@ -103,18 +103,27 @@ public class SequenceGenerator {
 
     @Nullable
     public Long generateNullable(InternalRow row) {
+        return generateNullable(row, row.getRowKind());
+    }
+
+    @Nullable
+    public Long generateNullable(InternalRow row, RowKind rowKind) {
         Long sequence = generator.generateNullable(row, index);
-        return sequence != null ? withPaddings(row, sequence) : null;
+        return sequence != null ? withPaddings(sequence, rowKind) : null;
     }
 
     public long generate(InternalRow row) {
-        return withPaddings(row, generator.generate(row, index));
+        return generate(row, row.getRowKind());
     }
 
-    private long withPaddings(InternalRow row, long sequence) {
+    public long generate(InternalRow row, RowKind rowKind) {
+        return withPaddings(generator.generate(row, index), rowKind);
+    }
+
+    private long withPaddings(long sequence, RowKind rowKind) {
         for (SequenceAutoPadding padding : paddings) {
             if (padding == SequenceAutoPadding.ROW_KIND_FLAG) {
-                sequence = addRowKindFlag(sequence, row.getRowKind());
+                sequence = addRowKindFlag(sequence, rowKind);
             } else {
                 throw new UnsupportedOperationException("Unknown sequence padding mode " + padding);
             }

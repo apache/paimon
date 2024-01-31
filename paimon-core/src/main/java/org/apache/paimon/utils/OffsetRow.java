@@ -45,11 +45,6 @@ public class OffsetRow implements InternalRow {
         return this;
     }
 
-    public OffsetRow replace(RowKind rowKind) {
-        setRowKind(rowKind);
-        return this;
-    }
-
     @Override
     public int getFieldCount() {
         return arity;
