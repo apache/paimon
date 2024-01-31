@@ -33,6 +33,9 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
+
 /** A {@link JsonSerializer} for {@link TableSchema}. */
 public class SchemaSerializer
         implements JsonSerializer<TableSchema>, JsonDeserializer<TableSchema> {
@@ -82,6 +85,9 @@ public class SchemaSerializer
 
     @Override
     public TableSchema deserialize(JsonNode node) {
+        JsonNode versionNode = node.get("version");
+        int version = versionNode == null ? PAIMON_07_VERSION : versionNode.asInt();
+
         int id = node.get("id").asInt();
 
         Iterator<JsonNode> fieldJsons = node.get("fields").elements();
@@ -111,6 +117,10 @@ public class SchemaSerializer
             String key = optionsKeys.next();
             options.put(key, optionsJson.get(key).asText());
         }
+        if (version == PAIMON_07_VERSION && !options.containsKey(BUCKET.key())) {
+            // the default value of BUCKET in old version is 1
+            options.put(BUCKET.key(), "1");
+        }
 
         JsonNode commentNode = node.get("comment");
         String comment = null;
@@ -121,6 +131,7 @@ public class SchemaSerializer
         long timeMillis = node.get("timeMillis") == null ? 0 : node.get("timeMillis").asLong();
 
         return new TableSchema(
+                version,
                 id,
                 fields,
                 highestFieldId,

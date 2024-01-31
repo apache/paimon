@@ -45,6 +45,12 @@ public class TableSchema implements Serializable {
 
     private static final long serialVersionUID = 1L;
 
+    public static final int PAIMON_07_VERSION = 1;
+    private static final int CURRENT_VERSION = 2;
+
+    // version of schema for paimon
+    private final int version;
+
     private final long id;
 
     private final List<DataField> fields;
@@ -71,6 +77,7 @@ public class TableSchema implements Serializable {
             Map<String, String> options,
             @Nullable String comment) {
         this(
+                CURRENT_VERSION,
                 id,
                 fields,
                 highestFieldId,
@@ -82,6 +89,7 @@ public class TableSchema implements Serializable {
     }
 
     public TableSchema(
+            int version,
             long id,
             List<DataField> fields,
             int highestFieldId,
@@ -90,6 +98,7 @@ public class TableSchema implements Serializable {
             Map<String, String> options,
             @Nullable String comment,
             long timeMillis) {
+        this.version = version;
         this.id = id;
         this.fields = fields;
         this.highestFieldId = highestFieldId;
@@ -104,6 +113,10 @@ public class TableSchema implements Serializable {
 
         // try to validate bucket keys
         originalBucketKeys();
+    }
+
+    public int version() {
+        return version;
     }
 
     public long id() {
@@ -261,6 +274,7 @@ public class TableSchema implements Serializable {
 
     public TableSchema copy(Map<String, String> newOptions) {
         return new TableSchema(
+                version,
                 id,
                 fields,
                 highestFieldId,
