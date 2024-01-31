@@ -55,7 +55,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -83,7 +82,8 @@ public class OperatorSourceTest {
                         .column("b", DataTypes.INT())
                         .column("c", DataTypes.INT())
                         .primaryKey("a")
-                        .options(Collections.singletonMap(CONSUMER_ID.key(), "my_consumer"))
+                        .option(CONSUMER_ID.key(), "my_consumer")
+                        .option("bucket", "1")
                         .build();
         Identifier identifier = Identifier.create("default", "t");
         catalog.createDatabase("default", false);

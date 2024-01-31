@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -101,6 +102,7 @@ public class CdcRecordStoreMultiWriteOperatorTest {
         catalog.createDatabase(databaseName, true);
         Options conf = new Options();
         conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
+        conf.set(CoreOptions.BUCKET, 1);
 
         RowType rowType1 =
                 RowType.of(
