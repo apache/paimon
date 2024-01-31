@@ -29,5 +29,6 @@ public interface ExpireSnapshots {
 
     ExpireSnapshots maxDeletes(int maxDeletes);
 
+    /** @return How many snapshots have been expired. */
     int expire();
 }
