@@ -1251,8 +1251,9 @@ public class CoreOptions implements Serializable {
     public int sortSpillThreshold() {
         Integer maxSortedRunNum = options.get(SORT_SPILL_THRESHOLD);
         if (maxSortedRunNum == null) {
-            int stopNum = numSortedRunStopTrigger();
-            maxSortedRunNum = Math.max(stopNum, stopNum + 1);
+            maxSortedRunNum = numSortedRunStopTrigger() + 1;
+        } else {
+            maxSortedRunNum = Math.max(numSortedRunStopTrigger() + 1, maxSortedRunNum);
         }
         checkArgument(maxSortedRunNum > 1, "The sort spill threshold cannot be smaller than 2.");
         return maxSortedRunNum;
@@ -1340,7 +1341,7 @@ public class CoreOptions implements Serializable {
         if (stopTrigger == null) {
             stopTrigger = numSortedRunCompactionTrigger() + 1;
         }
-        return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
+        return Math.max(numSortedRunCompactionTrigger() + 1, stopTrigger);
     }
 
     public int numLevels() {
