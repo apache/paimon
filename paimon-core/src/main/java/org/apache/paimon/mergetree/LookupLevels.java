@@ -133,19 +133,19 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     private KeyValue lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
 
-        byte[] keyBytes = keySerializer.serializeToBytes(key);
-
         while (lookupFile == null || lookupFile.isClosed) {
             lookupFile = createLookupFile(file);
             lookupFiles.put(file.fileName(), lookupFile);
         }
 
+        byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
         if (valueBytes == null) {
             return null;
         }
         InternalRow value = valueSerializer.deserialize(valueBytes);
-        long sequenceNumber = MemorySegment.wrap(valueBytes).getLong(valueBytes.length - 9);
+        long sequenceNumber =
+                MemorySegment.wrap(valueBytes).getLongBigEndian(valueBytes.length - 9);
         RowKind rowKind = RowKind.fromByteValue(valueBytes[valueBytes.length - 1]);
         return new KeyValue()
                 .replace(key, sequenceNumber, rowKind, value)
