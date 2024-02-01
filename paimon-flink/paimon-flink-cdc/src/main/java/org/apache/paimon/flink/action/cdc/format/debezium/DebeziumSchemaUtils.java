@@ -55,8 +55,6 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_
  */
 public class DebeziumSchemaUtils {
 
-    public static final String DECIMAL_LOGICAL_NAME = "org.apache.kafka.connect.data.Decimal";
-
     /** Transform raw string value according to schema. */
     public static String transformRawValue(
             @Nullable String rawValue,
@@ -86,7 +84,7 @@ public class DebeziumSchemaUtils {
         } else if (("bytes".equals(debeziumType) && className == null)) {
             // MySQL binary, varbinary, blob
             transformed = new String(Base64.getDecoder().decode(rawValue));
-        } else if ("bytes".equals(debeziumType) && DECIMAL_LOGICAL_NAME.equals(className)) {
+        } else if ("bytes".equals(debeziumType) && decimalLogicalName().equals(className)) {
             // MySQL numeric, fixed, decimal
             try {
                 new BigDecimal(rawValue);
@@ -172,34 +170,45 @@ public class DebeziumSchemaUtils {
 
     public static DataType toDataType(
             String debeziumType, @Nullable String className, Map<String, String> parameters) {
-        if (className != null) {
-            switch (className) {
-                case Bits.LOGICAL_NAME:
-                    int length = Integer.parseInt(parameters.get("length"));
-                    return DataTypes.BINARY((length + 7) / 8);
-                case DECIMAL_LOGICAL_NAME:
-                    String precision = parameters.get("connect.decimal.precision");
-                    if (precision == null) {
-                        return DataTypes.DECIMAL(20, 0);
-                    }
+        if (className == null) {
+            return fromDebeziumType(debeziumType);
+        }
 
-                    int p = Integer.parseInt(precision);
-                    if (p > DecimalType.MAX_PRECISION) {
-                        return DataTypes.STRING();
-                    } else {
-                        int scale = Integer.parseInt(parameters.get("scale"));
-                        return DataTypes.DECIMAL(p, scale);
-                    }
-                case Date.SCHEMA_NAME:
-                    return DataTypes.DATE();
-                case Timestamp.SCHEMA_NAME:
-                    return DataTypes.TIMESTAMP(3);
-                case MicroTimestamp.SCHEMA_NAME:
-                case ZonedTimestamp.SCHEMA_NAME:
-                    return DataTypes.TIMESTAMP(6);
-                case MicroTime.SCHEMA_NAME:
-                    return DataTypes.TIME();
+        if (Bits.LOGICAL_NAME.equals(className)) {
+            int length = Integer.parseInt(parameters.get("length"));
+            return DataTypes.BINARY((length + 7) / 8);
+        }
+
+        if (decimalLogicalName().equals(className)) {
+            String precision = parameters.get("connect.decimal.precision");
+            if (precision == null) {
+                return DataTypes.DECIMAL(20, 0);
             }
+
+            int p = Integer.parseInt(precision);
+            if (p > DecimalType.MAX_PRECISION) {
+                return DataTypes.STRING();
+            } else {
+                int scale = Integer.parseInt(parameters.get("scale"));
+                return DataTypes.DECIMAL(p, scale);
+            }
+        }
+
+        if (Date.SCHEMA_NAME.equals(className)) {
+            return DataTypes.DATE();
+        }
+
+        if (Timestamp.SCHEMA_NAME.equals(className)) {
+            return DataTypes.TIMESTAMP(3);
+        }
+
+        if (MicroTimestamp.SCHEMA_NAME.equals(className)
+                || ZonedTimestamp.SCHEMA_NAME.equals(className)) {
+            return DataTypes.TIMESTAMP(6);
+        }
+
+        if (MicroTime.SCHEMA_NAME.equals(className)) {
+            return DataTypes.TIME();
         }
 
         return fromDebeziumType(debeziumType);
@@ -228,5 +237,17 @@ public class DebeziumSchemaUtils {
             default:
                 return DataTypes.STRING();
         }
+    }
+
+    /**
+     * get decimal logical name.
+     *
+     * <p>Using the maven shade plugin will shade the constant value. see <a
+     * href="https://issues.apache.org/jira/browse/MSHADE-156">...</a> so the string
+     * org.apache.kafka.connect.data.Decimal is shaded to org.apache.flink.kafka.shaded
+     * .org.apache.kafka.connect.data.Decimal.
+     */
+    public static String decimalLogicalName() {
+        return "org.apache.#.connect.data.Decimal".replace("#", "kafka");
     }
 }

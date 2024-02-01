@@ -74,7 +74,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCase
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
-import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.DECIMAL_LOGICAL_NAME;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
@@ -206,7 +206,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
             case "string":
                 return DataTypes.STRING();
             case "bytes":
-                if (DECIMAL_LOGICAL_NAME.equals(field.name())) {
+                if (decimalLogicalName().equals(field.name())) {
                     int precision = field.parameters().get("connect.decimal.precision").asInt();
                     int scale = field.parameters().get("scale").asInt();
                     return DataTypes.DECIMAL(precision, scale);
@@ -299,7 +299,7 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
             } else if (("bytes".equals(postgresSqlType) && className == null)) {
                 // binary, varbinary
                 newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(postgresSqlType) && DECIMAL_LOGICAL_NAME.equals(className)) {
+            } else if ("bytes".equals(postgresSqlType) && decimalLogicalName().equals(className)) {
                 // numeric, decimal
                 try {
                     new BigDecimal(oldValue);
