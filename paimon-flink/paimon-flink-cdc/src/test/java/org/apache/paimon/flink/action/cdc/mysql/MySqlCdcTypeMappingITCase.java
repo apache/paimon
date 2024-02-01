@@ -343,6 +343,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                         .excludingTables("all_types_table")
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(TO_STRING.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -419,6 +420,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(TO_NULLABLE.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -477,6 +479,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(CHAR_TO_STRING.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -543,6 +546,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(LONGTEXT_TO_BYTES.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -612,6 +616,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(BIGINT_UNSIGNED_TO_BIGINT.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 

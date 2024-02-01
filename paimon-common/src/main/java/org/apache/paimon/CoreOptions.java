@@ -71,7 +71,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
-                    .defaultValue(1)
+                    .defaultValue(-1)
                     .withDescription("Bucket number for file store.");
 
     @Immutable

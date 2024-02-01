@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
 import org.apache.paimon.flink.sink.CommittableTypeInfo;
@@ -355,6 +356,7 @@ public class CdcRecordStoreWriteOperatorTest {
             RowType rowType, List<String> partitions, List<String> primaryKeys) throws Exception {
         Options conf = new Options();
         conf.set(CdcRecordStoreWriteOperator.RETRY_SLEEP_TIME, Duration.ofMillis(10));
+        conf.set(CoreOptions.BUCKET, 1);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

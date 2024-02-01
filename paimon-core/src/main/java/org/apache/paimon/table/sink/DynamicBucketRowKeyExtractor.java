@@ -41,6 +41,8 @@ public class DynamicBucketRowKeyExtractor extends RowKeyExtractor {
 
     @Override
     public int bucket() {
-        throw new IllegalArgumentException("Can't extract bucket from row in dynamic bucket mode.");
+        throw new IllegalArgumentException(
+                "Can't extract bucket from row in dynamic bucket mode, "
+                        + "you should use 'TableWrite.write(InternalRow row, int bucket)' method.");
     }
 }

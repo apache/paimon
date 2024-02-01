@@ -96,7 +96,8 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
 
     @Test
     public void testLookupRemoteTable() throws Throwable {
-        sql("CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT)");
+        sql(
+                "CREATE TABLE DIM (i INT PRIMARY KEY NOT ENFORCED, j INT, k1 INT, k2 INT) WITH ('bucket' = '1')");
         ServiceProxy proxy = launchQueryServer("DIM");
 
         proxy.write(GenericRow.of(1, 11, 111, 1111));

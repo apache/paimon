@@ -36,6 +36,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -145,7 +146,7 @@ public class CdcRecordKeyAndBucketExtractorTest {
                         ROW_TYPE.getFields(),
                         Arrays.asList("pt1", "pt2"),
                         Arrays.asList("pt1", "pt2", "k1", "k2"),
-                        new HashMap<>(),
+                        Collections.singletonMap("bucket", "1"),
                         ""));
     }
 }
