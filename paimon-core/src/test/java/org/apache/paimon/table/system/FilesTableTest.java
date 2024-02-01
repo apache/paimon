@@ -173,8 +173,8 @@ public class FilesTableTest extends TableTestBase {
             DataFileMeta file = fileEntry.file();
             String minKey = String.valueOf(file.minKey().getInt(0));
             String maxKey = String.valueOf(file.maxKey().getInt(0));
-            String minSequenceNumber = String.valueOf(file.minSequenceNumber());
-            String maxSequenceNumber = String.valueOf(file.maxSequenceNumber());
+            int minValue = file.valueStats().minValues().getInt(2);
+            int maxValue = file.valueStats().maxValues().getInt(2);
             expectedRow.add(
                     GenericRow.of(
                             BinaryString.fromString(Arrays.toString(new String[] {partition})),
@@ -192,11 +192,11 @@ public class FilesTableTest extends TableTestBase {
                             BinaryString.fromString(
                                     String.format(
                                             "{col1=%s, pk=%s, pt=%s}",
-                                            minSequenceNumber, minKey, partition)),
+                                            minValue, minKey, partition)),
                             BinaryString.fromString(
                                     String.format(
                                             "{col1=%s, pk=%s, pt=%s}",
-                                            maxSequenceNumber, maxKey, partition)),
+                                            maxValue, maxKey, partition)),
                             file.minSequenceNumber(),
                             file.maxSequenceNumber(),
                             file.creationTime()));
