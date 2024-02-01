@@ -1579,6 +1579,10 @@ public class CoreOptions implements Serializable {
         return options.get(SINK_WATERMARK_TIME_ZONE);
     }
 
+    public boolean deduplicateIgnoreDelete() {
+        return options.get(DEDUPLICATE_IGNORE_DELETE);
+    }
+
     public Map<String, String> getFieldDefaultValues() {
         Map<String, String> defaultValues = new HashMap<>();
         String fieldPrefix = FIELDS_PREFIX + ".";

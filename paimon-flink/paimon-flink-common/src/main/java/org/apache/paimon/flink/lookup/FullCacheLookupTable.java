@@ -57,6 +57,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final RowType projectedType;
     private final TableStreamingReader reader;
     private final boolean sequenceFieldEnabled;
+    protected final boolean deduplicateIgnoreDelete;
 
     public FullCacheLookupTable(Context context) throws IOException {
         this.context = context;
@@ -70,6 +71,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.sequenceFieldEnabled =
                 table.primaryKeys().size() > 0
                         && new CoreOptions(table.options()).sequenceField().isPresent();
+        this.deduplicateIgnoreDelete = new CoreOptions(table.options()).deduplicateIgnoreDelete();
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
         if (sequenceFieldEnabled) {
             projectedType = projectedType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT());

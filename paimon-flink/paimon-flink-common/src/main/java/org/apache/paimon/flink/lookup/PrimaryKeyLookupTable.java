@@ -100,6 +100,12 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                 }
             }
 
+            if (this.deduplicateIgnoreDelete
+                    && (row.getRowKind() == RowKind.DELETE
+                            || row.getRowKind() == RowKind.UPDATE_BEFORE)) {
+                continue;
+            }
+
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
                 if (predicate == null || predicate.test(row)) {
                     tableState.put(primaryKeyRow, row);
