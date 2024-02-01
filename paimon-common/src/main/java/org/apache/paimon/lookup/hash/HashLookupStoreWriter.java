@@ -494,14 +494,4 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         }
         return dos;
     }
-
-    private int getNumKeyCount() {
-        int res = 0;
-        for (int count : keyCounts) {
-            if (count != 0) {
-                res++;
-            }
-        }
-        return res;
-    }
 }

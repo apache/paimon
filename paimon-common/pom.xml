@@ -296,6 +296,11 @@ under the License.
                                     <pattern>it.unimi.dsi.fastutil</pattern>
                                     <shadedPattern>org.apache.paimon.shade.it.unimi.dsi.fastutil</shadedPattern>
                                 </relocation>
+                                <!-- Same to paimon-format. -->
+                                <relocation>
+                                    <pattern>io.airlift</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.io.airlift</shadedPattern>
+                                </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>
                         </configuration>
