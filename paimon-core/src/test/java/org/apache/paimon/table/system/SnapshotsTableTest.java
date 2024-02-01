@@ -123,7 +123,8 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.changelogRecordCount(),
                             plan.files(FileKind.ADD).size(),
                             plan.files(FileKind.DELETE).size(),
-                            snapshot.watermark()));
+                            snapshot.watermark(),
+                            null));
         }
 
         return expectedRow;

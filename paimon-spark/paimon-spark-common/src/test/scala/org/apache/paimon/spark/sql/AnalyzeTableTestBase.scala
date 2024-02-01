@@ -47,6 +47,11 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(2L, stats.mergedRecordCount().getAsLong)
     Assertions.assertTrue(stats.mergedRecordSize().isPresent)
     Assertions.assertTrue(stats.colStats().isEmpty)
+
+    checkAnswer(
+      spark.sql(
+        "SELECT commit_kind, substring(statistics, 1, 13) FROM `T$snapshots` WHERE snapshot_id = '3'"),
+      Row("ANALYZE", "{\n  \"snapshot") :: Nil)
   }
 
   test("Paimon analyze: analyze no scan") {

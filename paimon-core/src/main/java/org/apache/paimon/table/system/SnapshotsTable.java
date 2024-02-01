@@ -30,6 +30,8 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -98,7 +100,9 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(11, "changelog_record_count", new BigIntType(true)),
                             new DataField(12, "added_file_count", new IntType(true)),
                             new DataField(13, "delete_file_count", new IntType(true)),
-                            new DataField(14, "watermark", new BigIntType(true))));
+                            new DataField(14, "watermark", new BigIntType(true)),
+                            new DataField(
+                                    15, "statistics", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -230,8 +234,10 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             Path location = ((SnapshotsSplit) split).location;
             Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
+            StatsFileHandler statsFileHandler = dataTable.store().newStatsFileHandler();
             Iterator<InternalRow> rows =
-                    Iterators.transform(snapshots, snapshot -> toRow(snapshot, dataTable));
+                    Iterators.transform(
+                            snapshots, snapshot -> toRow(snapshot, dataTable, statsFileHandler));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -240,7 +246,8 @@ public class SnapshotsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Snapshot snapshot, FileStoreTable dataTable) {
+        private InternalRow toRow(
+                Snapshot snapshot, FileStoreTable dataTable, StatsFileHandler statsFileHandler) {
             FileStoreScan.Plan plan = dataTable.store().newScan().withSnapshot(snapshot).plan();
             return GenericRow.of(
                     snapshot.id(),
@@ -260,7 +267,12 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.changelogRecordCount(),
                     plan.files(FileKind.ADD).size(),
                     plan.files(FileKind.DELETE).size(),
-                    snapshot.watermark());
+                    snapshot.watermark(),
+                    statsFileHandler
+                            .readStats(snapshot)
+                            .map(Statistics::toString)
+                            .map(BinaryString::fromString)
+                            .orElse(null));
         }
     }
 }
