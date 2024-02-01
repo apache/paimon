@@ -17,8 +17,9 @@
  */
 package org.apache.paimon.spark.sql
 
+import org.apache.paimon.spark.util.CTERelationRefHelper
+
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GetStructField, NamedExpression, ScalarSubquery}
-import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
 class PaimonOptimizationTest extends PaimonOptimizationTestBase {
 
@@ -28,7 +29,9 @@ class PaimonOptimizationTest extends PaimonOptimizationTestBase {
       cteIndex: Int,
       output: Seq[Attribute],
       fieldIndex: Int): NamedExpression = {
-    GetStructField(ScalarSubquery(CTERelationRef(cteIndex, _resolved = true, output)), fieldIndex)
+    GetStructField(
+      ScalarSubquery(CTERelationRefHelper.createCTERelationRef(cteIndex, _resolved = true, output)),
+      fieldIndex)
       .as("scalarsubquery()")
   }
 }
