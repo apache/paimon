@@ -172,7 +172,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
                 .build();
 
         // enable failure when running jobs if needed
-        FailingFileIO.reset(failingName, 10, 10000);
+        FailingFileIO.reset(failingName, 2, 10000);
         if (unawareBucketMode) {
             // there's a compact operator which won't terminate
             env.executeAsync();
