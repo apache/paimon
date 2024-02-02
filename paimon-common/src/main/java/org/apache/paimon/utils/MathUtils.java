@@ -95,10 +95,10 @@ public class MathUtils {
     }
 
     /** Safely increments the given int value by one, ensuring that no overflow occurs. */
-    public static int incrementSafely(int value) {
-        if (value < Integer.MAX_VALUE) {
-            return value + 1;
+    public static int incrementSafely(int a) {
+        if (a == Integer.MAX_VALUE) {
+            return a;
         }
-        return value;
+        return a + 1;
     }
 }
