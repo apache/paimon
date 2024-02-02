@@ -96,7 +96,7 @@ For streaming reads, records are produced in the following order:
 You can define watermark for reading Paimon tables:
 
 ```sql
-CREATE TABLE T (
+CREATE TABLE t (
     `user` BIGINT,
     product STRING,
     order_time TIMESTAMP(3),
@@ -168,7 +168,7 @@ The following is an example of creating the Append table and specifying the buck
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
                          product_id BIGINT,
                          price DOUBLE,
                          sales BIGINT

@@ -280,11 +280,11 @@ The following SQL drops the partitions of the paimon table.
 For flink sql, you can specify the partial columns of partition columns, and you can also specify multiple partition values at the same time.
 
 ```sql
-ALTER TABLE MyTable DROP PARTITION (`id` = 1);
+ALTER TABLE my_table DROP PARTITION (`id` = 1);
 
-ALTER TABLE MyTable DROP PARTITION (`id` = 1, `name` = 'paimon');
+ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
 
-ALTER TABLE MyTable DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
+ALTER TABLE my_table DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
 
 ```
 
@@ -295,7 +295,7 @@ ALTER TABLE MyTable DROP PARTITION (`id` = 1), PARTITION (`id` = 2);
 For spark sql, you need to specify all the partition columns.
 
 ```sql
-ALTER TABLE MyTable DROP PARTITION (`id` = 1, `name` = 'paimon');
+ALTER TABLE my_table DROP PARTITION (`id` = 1, `name` = 'paimon');
 ```
 
 {{< /tab >}}

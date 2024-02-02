@@ -101,7 +101,7 @@ The following is an example of creating the Append table and specifying the buck
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     product_id BIGINT,
     price DOUBLE,
     sales BIGINT

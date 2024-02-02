@@ -37,7 +37,7 @@ there will be some cases that lead to data disorder. At this time, you can use a
 {{< tabs "sequence.field" >}}
 {{< tab "Flink" >}}
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     pk BIGINT PRIMARY KEY NOT ENFORCED,
     v1 DOUBLE,
     v2 BIGINT,

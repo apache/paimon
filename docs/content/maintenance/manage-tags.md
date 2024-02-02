@@ -63,7 +63,7 @@ Example, configure table to create a tag at 0:10 every day, with a maximum reten
 
 ```sql
 -- Flink SQL
-CREATE TABLE T (
+CREATE TABLE t (
     k INT PRIMARY KEY NOT ENFORCED,
     f0 INT,
     ...
@@ -74,15 +74,15 @@ CREATE TABLE T (
     'tag.num-retained-max' = '90'
 );
 
-INSERT INTO T SELECT ...;
+INSERT INTO t SELECT ...;
 
 -- Spark SQL
 
 -- Read latest snapshot
-SELECT * FROM T;
+SELECT * FROM t;
 
 -- Read Tag snapshot
-SELECT * FROM T VERSION AS OF '2023-07-26';
+SELECT * FROM t VERSION AS OF '2023-07-26';
 
 -- Read Incremental between Tags
 SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');

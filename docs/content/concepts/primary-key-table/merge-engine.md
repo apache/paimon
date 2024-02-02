@@ -76,7 +76,7 @@ So we introduce sequence group mechanism for partial-update tables. It can solve
 See example:
 
 ```sql
-CREATE TABLE T (
+CREATE TABLE t (
     k INT,
     a INT,
     b INT,
@@ -91,17 +91,17 @@ CREATE TABLE T (
     'fields.g_2.sequence-group'='c,d'
 );
 
-INSERT INTO T VALUES (1, 1, 1, 1, 1, 1, 1);
+INSERT INTO t VALUES (1, 1, 1, 1, 1, 1, 1);
 
 -- g_2 is null, c, d should not be updated
-INSERT INTO T VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT));
+INSERT INTO t VALUES (1, 2, 2, 2, 2, 2, CAST(NULL AS INT));
 
-SELECT * FROM T; -- output 1, 2, 2, 2, 1, 1, 1
+SELECT * FROM t; -- output 1, 2, 2, 2, 1, 1, 1
 
 -- g_1 is smaller, a, b should not be updated
-INSERT INTO T VALUES (1, 3, 3, 1, 3, 3, 3);
+INSERT INTO t VALUES (1, 3, 3, 1, 3, 3, 3);
 
-SELECT * FROM T; -- output 1, 2, 2, 2, 3, 3, 3
+SELECT * FROM t; -- output 1, 2, 2, 2, 3, 3, 3
 ```
 
 For `fields.<field-name>.sequence-group`, valid comparative data types include: DECIMAL, TINYINT, SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP, and TIMESTAMP_LTZ.
@@ -113,7 +113,7 @@ You can specify aggregation function for the input field, all the functions in t
 See example:
 
 ```sql
-CREATE TABLE T (
+CREATE TABLE t (
           k INT,
           a INT,
           b INT,
@@ -127,13 +127,13 @@ CREATE TABLE T (
      'fields.c.sequence-group' = 'd',
      'fields.d.aggregate-function' = 'sum'
  );
-INSERT INTO T VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
-INSERT INTO T VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
-INSERT INTO T VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
+INSERT INTO t VALUES (1, 1, 1, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 1, 1);
+INSERT INTO t VALUES (1, 2, 2, CAST(NULL AS INT), CAST(NULL AS INT));
+INSERT INTO t VALUES (1, CAST(NULL AS INT), CAST(NULL AS INT), 2, 2);
 
 
-SELECT * FROM T; -- output 1, 2, 1, 2, 3
+SELECT * FROM t; -- output 1, 2, 1, 2, 3
 ```
 
 ## Aggregation
@@ -151,7 +151,7 @@ Each field not part of the primary keys can be given an aggregate function, spec
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     product_id BIGINT,
     price DOUBLE,
     sales BIGINT,
