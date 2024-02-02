@@ -80,7 +80,7 @@ You can join the snapshots table and schemas table to get the fields of given sn
 
 ```sql
 SELECT s.snapshot_id, t.schema_id, t.fields 
-    FROM MyTable$snapshots s JOIN MyTable$schemas t 
+    FROM my_table$snapshots s JOIN my_table$schemas t 
     ON s.schema_id=t.schema_id where s.snapshot_id=100;
 ```
 
