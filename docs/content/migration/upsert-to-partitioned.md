@@ -135,7 +135,7 @@ CREATE TABLE mydb.t (
 INSERT INTO t VALUES (1, '10', '100'), (2, '20', '200');
 
 -- create tag '2023-10-16' for snapshot 1
-CALL sys.create_tag('mydb.T', '2023-10-16', 1);
+CALL sys.create_tag('mydb.t', '2023-10-16', 1);
 
 -- new data in '2023-10-17'
 INSERT INTO t VALUES (3, '30', '300'), (4, '40', '400');

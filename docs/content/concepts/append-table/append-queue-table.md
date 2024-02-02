@@ -105,7 +105,7 @@ CREATE TABLE t (
 
 -- launch a bounded streaming job to read paimon_table
 SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
- TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
+ TUMBLE(TABLE t, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
 You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),

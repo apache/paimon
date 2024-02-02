@@ -125,7 +125,7 @@ Inserting jobs on the table should be stopped prior to dropping tables, or table
 
 ### Partitioned Tables
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL creates a table named `my_table` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "partitions-example" >}}
 

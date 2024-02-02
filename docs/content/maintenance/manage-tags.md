@@ -190,7 +190,7 @@ public class DeleteTag {
 {{< tab "Spark" >}}
 Run the following sql:
 ```sql
-CALL delete_tag(table => 'test.T', tag => 'test_tag');
+CALL delete_tag(table => 'test.t', tag => 'test_tag');
 ```
 
 {{< /tab >}}
