@@ -194,8 +194,10 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
         listColumnVector.lengths[rowId] = arrayData.size();
         listColumnVector.offsets[rowId] = listColumnVector.childCount;
         listColumnVector.childCount += listColumnVector.lengths[rowId];
-        listColumnVector.child.ensureSize(
-                listColumnVector.childCount, listColumnVector.offsets[rowId] != 0);
+        ensureSize(
+                listColumnVector.child,
+                listColumnVector.childCount,
+                listColumnVector.offsets[rowId] != 0);
 
         InternalRow convertedRowData = convert(arrayData, arrayType.getElementType());
         for (int i = 0; i < arrayData.size(); i++) {
@@ -221,10 +223,14 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
         mapColumnVector.lengths[rowId] = mapData.size();
         mapColumnVector.offsets[rowId] = mapColumnVector.childCount;
         mapColumnVector.childCount += mapColumnVector.lengths[rowId];
-        mapColumnVector.keys.ensureSize(
-                mapColumnVector.childCount, mapColumnVector.offsets[rowId] != 0);
-        mapColumnVector.values.ensureSize(
-                mapColumnVector.childCount, mapColumnVector.offsets[rowId] != 0);
+        ensureSize(
+                mapColumnVector.keys,
+                mapColumnVector.childCount,
+                mapColumnVector.offsets[rowId] != 0);
+        ensureSize(
+                mapColumnVector.values,
+                mapColumnVector.childCount,
+                mapColumnVector.offsets[rowId] != 0);
 
         InternalRow convertedKeyRowData = convert(keyArray, mapType.getKeyType());
         InternalRow convertedValueRowData = convert(valueArray, mapType.getValueType());
@@ -255,6 +261,13 @@ public class RowDataVectorizer extends Vectorizer<InternalRow> {
         for (int i = 0; i < structRow.getFieldCount(); i++) {
             ColumnVector cv = structColumnVector.fields[i];
             setColumn(rowId, cv, rowType.getTypeAt(i), structRow, i);
+        }
+    }
+
+    private static void ensureSize(ColumnVector cv, int size, boolean preserveData) {
+        int currentLength = cv.isNull.length;
+        if (currentLength < size) {
+            cv.ensureSize(Math.max(currentLength * 2, size), preserveData);
         }
     }
 
