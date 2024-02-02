@@ -1340,7 +1340,7 @@ public class CoreOptions implements Serializable {
         if (stopTrigger == null) {
             stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
         }
-        return stopTrigger;
+        return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
 
     public int numLevels() {
