@@ -42,9 +42,9 @@ object CTERelationRefHelper {
       _resolved: Boolean,
       output: Seq[Attribute]): CTERelationRef = {
     val value = if (hasStreamingField) {
-      ctorm(cteId, _resolved, output, false)
+      ctorm(cteId, _resolved, output, false, None)
     } else {
-      ctorm(cteId, _resolved, output)
+      ctorm(cteId, _resolved, output, None)
     }
     value.asInstanceOf[CTERelationRef]
   }
