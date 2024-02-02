@@ -30,6 +30,7 @@ import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
+import org.apache.paimon.utils.MathUtils;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.StringUtils;
 
@@ -1258,8 +1259,7 @@ public class CoreOptions implements Serializable {
     public int sortSpillThreshold() {
         Integer maxSortedRunNum = options.get(SORT_SPILL_THRESHOLD);
         if (maxSortedRunNum == null) {
-            int stopNum = numSortedRunStopTrigger();
-            maxSortedRunNum = Math.max(stopNum, stopNum + 1);
+            maxSortedRunNum = MathUtils.incrementSafely(numSortedRunStopTrigger());
         }
         checkArgument(maxSortedRunNum > 1, "The sort spill threshold cannot be smaller than 2.");
         return maxSortedRunNum;
@@ -1345,7 +1345,7 @@ public class CoreOptions implements Serializable {
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
-            stopTrigger = numSortedRunCompactionTrigger() + 1;
+            stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
         }
         return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
@@ -1354,7 +1354,9 @@ public class CoreOptions implements Serializable {
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         Integer numLevels = options.get(NUM_LEVELS);
-        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
+        if (numLevels == null) {
+            numLevels = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
+        }
         return numLevels;
     }
 
