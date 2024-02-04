@@ -28,7 +28,6 @@ import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.parser.{ParseException, ParserInterface}
 import org.apache.spark.sql.catalyst.parser.extensions.PaimonSqlExtensionsParser.{NonReservedContext, QuotedIdentifierContext}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
-import org.apache.spark.sql.catalyst.trees.Origin
 import org.apache.spark.sql.internal.VariableSubstitution
 import org.apache.spark.sql.types.{DataType, StructType}
 
@@ -220,23 +219,15 @@ case object PaimonParseErrorListener extends BaseErrorListener {
 }
 
 /**
- * Copied from Apache Spark A [[ParseException]] is an [[AnalysisException]] that is thrown during
- * the parse process. It contains fields and an extended error message that make reporting and
- * diagnosing errors easier.
+ * Copied from Apache Spark [[ParseException]], it contains fields and an extended error message
+ * that make reporting and diagnosing errors easier.
  */
 class PaimonParseException(
     val command: Option[String],
     message: String,
-    val start: Origin,
-    val stop: Origin)
-  extends AnalysisException(message, start.line, start.startPosition) {
-
-  def this(message: String, ctx: ParserRuleContext) =
-    this(
-      Option(PaimonParserUtils.command(ctx)),
-      message,
-      PaimonParserUtils.position(ctx.getStart),
-      PaimonParserUtils.position(ctx.getStop))
+    start: Origin,
+    stop: Origin)
+  extends Exception {
 
   override def getMessage: String = {
     val builder = new StringBuilder
