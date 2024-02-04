@@ -85,7 +85,7 @@ SELECT * FROM t;
 SELECT * FROM t VERSION AS OF '2023-07-26';
 
 -- Read Incremental between Tags
-SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');
+SELECT * FROM paimon_incremental_query('t', '2023-07-25', '2023-07-26');
 ```
 
 See [Query Tables]({{< ref "how-to/querying-tables" >}}) to see more query for engines.
@@ -135,12 +135,12 @@ public class CreateTag {
 {{< tab "Spark" >}}
 Run the following sql:
 ```sql
-CALL create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2);
+CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2);
 ```
 
 To create a tag based on the latest snapshot id, run the following sql:
 ```sql
-CALL create_tag(table => 'test.T', tag => 'test_tag');
+CALL create_tag(table => 'test.t', tag => 'test_tag');
 ```
 
 {{< /tab >}}
@@ -251,7 +251,7 @@ public class RollbackTo {
 Run the following sql:
 
 ```sql
-CALL rollback(table => 'test.T', version => '2');
+CALL rollback(table => 'test.t', version => '2');
 ```
 
 {{< /tab >}}

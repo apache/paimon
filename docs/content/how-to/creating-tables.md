@@ -30,7 +30,7 @@ under the License.
 
 Tables created in Paimon [catalogs]({{< ref "how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
-The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named `my_table` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "primary-keys-example" >}}
 
@@ -335,7 +335,7 @@ CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT
 );
-CREATE TABLE MyTableAs AS SELECT * FROM MyTable;
+CREATE TABLE my_table As AS SELECT * FROM my_table;
 
 /* partitioned table */
 CREATE TABLE my_table_partition (
@@ -469,7 +469,7 @@ CREATE TABLE my_table_like WITH ('connector' = 'paimon') LIKE my_table;
 
 Users can specify table properties to enable features or improve performance of Paimon. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
+The following SQL creates a table named `my_table` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
 {{< tabs "table-properties-example" >}}
 
@@ -588,7 +588,7 @@ Paimon external tables can be used in any catalog. If you do not want to create 
 Please **DO NOT** use this mode. We recommend using the Paimon Catalog way. The current reservation is only for compatibility.
 {{< /hint >}}
 
-Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs:///path/to/table`.
+Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `my_table` with five columns, where the base path of table files is `hdfs:///path/to/table`.
 
 ```sql
 CREATE TABLE my_table (
