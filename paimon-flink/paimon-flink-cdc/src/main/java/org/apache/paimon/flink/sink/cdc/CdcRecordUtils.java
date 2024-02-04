@@ -82,10 +82,10 @@ public class CdcRecordUtils {
     public static Optional<GenericRow> toGenericRow(CdcRecord record, List<DataField> dataFields) {
         GenericRow genericRow = new GenericRow(record.kind(), dataFields.size());
         List<String> fieldNames =
-                dataFields.stream().map(DataField::name).collect(Collectors.toList());
+                dataFields.stream().map(DataField::name).map(String::toLowerCase).collect(Collectors.toList());
 
         for (Map.Entry<String, String> field : record.fields().entrySet()) {
-            String key = field.getKey();
+            String key = field.getKey().toLowerCase();
             String value = field.getValue();
 
             int idx = fieldNames.indexOf(key);
