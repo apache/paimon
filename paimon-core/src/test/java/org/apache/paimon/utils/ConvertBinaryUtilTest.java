@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark;
-
-import org.apache.paimon.utils.ConvertBinaryUtil;
+package org.apache.paimon.utils;
 
 import org.junit.Assert;
 import org.junit.jupiter.api.Test;
