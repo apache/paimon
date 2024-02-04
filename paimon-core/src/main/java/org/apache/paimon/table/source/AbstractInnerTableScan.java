@@ -114,7 +114,7 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
 
         // read from consumer id
         String consumerId = options.consumerId();
-        if (consumerId != null && !options.consumerIgnoreProgress()) {
+        if (isStreaming && consumerId != null && !options.consumerIgnoreProgress()) {
             ConsumerManager consumerManager = snapshotReader.consumerManager();
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
