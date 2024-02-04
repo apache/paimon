@@ -25,6 +25,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.CASE_SENSITIVE;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF;
@@ -64,6 +65,10 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
+        if (params.has(CASE_SENSITIVE)) {
+            action.caseSensitive(Boolean.parseBoolean(params.get(CASE_SENSITIVE)));
+        }
+
         return Optional.of(action);
     }
 
@@ -81,6 +86,7 @@ public class KafkaSyncDatabaseActionFactory implements ActionFactory {
                 "  kafka_sync_database --warehouse <warehouse_path> --database <database_name> "
                         + "[--table_prefix <paimon_table_prefix>] "
                         + "[--table_suffix <paimon_table_suffix>] "
+                        + "[--case_sensitive <true/false>] "
                         + "[--including_tables <table_name|name_regular_expr>] "
                         + "[--excluding_tables <table_name|name_regular_expr>] "
                         + "[--type_mapping <option1,option2...>] "

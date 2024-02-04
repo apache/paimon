@@ -70,8 +70,6 @@ import java.util.function.Function;
 
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnCaseConvertAndDuplicateCheck;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
 import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
@@ -236,13 +234,11 @@ public class PostgresRecordParser implements FlatMapFunction<String, RichCdcMult
 
         Map<String, String> before = extractRow(root.payload().before());
         if (!before.isEmpty()) {
-            before = mapKeyCaseConvert(before, caseSensitive, recordKeyDuplicateErrMsg(before));
             records.add(createRecord(RowKind.DELETE, before));
         }
 
         Map<String, String> after = extractRow(root.payload().after());
         if (!after.isEmpty()) {
-            after = mapKeyCaseConvert(after, caseSensitive, recordKeyDuplicateErrMsg(after));
             LinkedHashMap<String, DataType> fieldTypes = extractFieldTypes(root.schema());
             records.add(
                     new RichCdcMultiplexRecord(

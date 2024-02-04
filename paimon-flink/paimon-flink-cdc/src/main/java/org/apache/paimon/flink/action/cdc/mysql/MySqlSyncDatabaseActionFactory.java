@@ -27,6 +27,7 @@ import org.apache.paimon.flink.action.cdc.TypeMapping;
 import java.util.Arrays;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.CASE_SENSITIVE;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
@@ -78,6 +79,10 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
             action.withTypeMapping(TypeMapping.parse(options));
         }
 
+        if (params.has(CASE_SENSITIVE)) {
+            action.caseSensitive(Boolean.parseBoolean(params.get(CASE_SENSITIVE)));
+        }
+
         return Optional.of(action);
     }
 
@@ -95,6 +100,7 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
         System.out.println(
                 "  mysql_sync_database --warehouse <warehouse_path> --database <database_name> "
                         + "[--ignore_incompatible <true/false>] "
+                        + "[--case_sensitive <true/false>] "
                         + "[--merge_shards <true/false>] "
                         + "[--table_prefix <paimon_table_prefix>] "
                         + "[--table_suffix <paimon_table_suffix>] "
@@ -112,6 +118,11 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
                 "--ignore_incompatible is default false, in this case, if MySQL table name exists in Paimon "
                         + "and their schema is incompatible, an exception will be thrown. "
                         + "You can specify it to true explicitly to ignore the incompatible tables and exception.");
+        System.out.println();
+
+        System.out.println(
+                "--case_sensitive is default false, in this case, if the MySQL table name is case-sensitive, "
+                        + "you can set it to true.");
         System.out.println();
 
         System.out.println(

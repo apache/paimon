@@ -30,6 +30,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.CASE_SENSITIVE;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.COMPUTED_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PARTITION_KEYS;
@@ -90,6 +91,10 @@ public abstract class SyncTableActionFactoryBase implements ActionFactory {
         if (params.has(TYPE_MAPPING)) {
             String[] options = params.get(TYPE_MAPPING).split(",");
             action.withTypeMapping(TypeMapping.parse(options));
+        }
+
+        if (params.has(CASE_SENSITIVE)) {
+            action.caseSensitive(Boolean.parseBoolean(params.get(CASE_SENSITIVE)));
         }
     }
 }

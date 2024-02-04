@@ -54,7 +54,6 @@ import java.util.stream.StreamSupport;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.columnDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.listCaseConvert;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCaseConvert;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
@@ -205,7 +204,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                         paimonFieldTypes,
                         caseSensitive,
                         columnDuplicateErrMsg(tableName == null ? "UNKNOWN" : tableName));
-        data = mapKeyCaseConvert(data, caseSensitive, recordKeyDuplicateErrMsg(data));
         List<String> primaryKeys = listCaseConvert(extractPrimaryKeys(), caseSensitive);
 
         return new RichCdcMultiplexRecord(

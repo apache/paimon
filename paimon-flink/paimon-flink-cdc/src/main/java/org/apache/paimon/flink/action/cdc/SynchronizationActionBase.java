@@ -56,7 +56,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected final String database;
     protected final Configuration cdcSourceConfig;
     protected final SyncJobHandler syncJobHandler;
-    protected final boolean caseSensitive;
+    protected boolean caseSensitive = false;
 
     protected Map<String, String> tableConfig = new HashMap<>();
     protected TypeMapping typeMapping = TypeMapping.defaultMapping();
@@ -72,8 +72,6 @@ public abstract class SynchronizationActionBase extends ActionBase {
         this.database = database;
         this.cdcSourceConfig = Configuration.fromMap(cdcSourceConfig);
         this.syncJobHandler = syncJobHandler;
-        this.caseSensitive = catalog.caseSensitive();
-
         this.syncJobHandler.registerJdbcDriver();
     }
 
@@ -84,6 +82,11 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     public SynchronizationActionBase withTypeMapping(TypeMapping typeMapping) {
         this.typeMapping = typeMapping;
+        return this;
+    }
+
+    public SynchronizationActionBase caseSensitive(boolean caseSensitive) {
+        this.caseSensitive = caseSensitive;
         return this;
     }
 
