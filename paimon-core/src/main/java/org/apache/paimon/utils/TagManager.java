@@ -74,7 +74,7 @@ public class TagManager {
         return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
     }
 
-    public String branchTag(String branchName) {
+    public List<String> branchTags(String branchName) {
         try {
             List<Path> tagPaths =
                     listVersionedFileStatus(
@@ -83,12 +83,10 @@ public class TagManager {
                                     TAG_PREFIX)
                             .map(FileStatus::getPath)
                             .collect(Collectors.toList());
-            checkArgument(
-                    tagPaths.size() == 1,
-                    String.format(
-                            "There are multiple tags %s for branch %s",
-                            tagPaths.size(), branchName));
-            return tagPaths.get(0).getName().substring(TAG_PREFIX.length());
+            checkArgument(tagPaths.size() > 0, "There should be at least one tag in the branch.");
+            return tagPaths.stream()
+                    .map(p -> p.getName().substring(TAG_PREFIX.length()))
+                    .collect(Collectors.toList());
         } catch (IOException e) {
             throw new RuntimeException(e);
         }

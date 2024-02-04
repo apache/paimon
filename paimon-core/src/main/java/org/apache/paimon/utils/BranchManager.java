@@ -151,7 +151,7 @@ public class BranchManager {
                             .collect(Collectors.toList());
             for (Path path : paths) {
                 String branchName = path.getName().substring(BRANCH_PREFIX.length());
-                branchTags.put(branchName, tagManager.branchTag(branchName));
+                branchTags.put(branchName, tagManager.branchTags(branchName).get(0));
             }
         } catch (IOException e) {
             throw new RuntimeException(e);

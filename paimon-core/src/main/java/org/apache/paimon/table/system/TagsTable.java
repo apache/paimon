@@ -219,7 +219,8 @@ public class TagsTable implements ReadonlyTable {
                                             .add(branch));
 
             Iterator<InternalRow> rows =
-                    Iterators.transform(nameToSnapshot.entrySet().iterator(), tag -> toRow(tag, tagBranches));
+                    Iterators.transform(
+                            nameToSnapshot.entrySet().iterator(), tag -> toRow(tag, tagBranches));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -228,7 +229,8 @@ public class TagsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Map.Entry<String, Snapshot> tag, Map<String, List<String>> tagBranches) {
+        private InternalRow toRow(
+                Map.Entry<String, Snapshot> tag, Map<String, List<String>> tagBranches) {
             Snapshot snapshot = tag.getValue();
             List<String> branches = tagBranches.get(tag.getKey());
             return GenericRow.of(
