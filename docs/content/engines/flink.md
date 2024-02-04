@@ -357,7 +357,7 @@ table options syntax: we use string to represent table options. The format is 'k
          TO compact a table. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>partitions: partition filter.</li>
-            <li>order_strategy: 'order' or 'zorder' or 'none'. Left empty for 'none'.</li>
+            <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>table_options: additional dynamic options of the table.</li>
       </td>
