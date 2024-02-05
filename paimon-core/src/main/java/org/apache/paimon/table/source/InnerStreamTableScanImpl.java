@@ -168,13 +168,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                     && supportStreamingReadOverwrite) {
                 LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan overwritePlan =
-                        followUpScanner.getOverwriteChangesPlan(nextSnapshotId, snapshotReader);
+                        followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
                 currentWatermark = overwritePlan.watermark();
                 nextSnapshotId++;
                 return overwritePlan;
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
-                SnapshotReader.Plan plan = followUpScanner.scan(nextSnapshotId, snapshotReader);
+                SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
                 nextSnapshotId++;
                 return plan;
