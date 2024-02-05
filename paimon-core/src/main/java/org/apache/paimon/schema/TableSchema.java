@@ -18,8 +18,6 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
@@ -28,7 +26,6 @@ import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
-import java.io.IOException;
 import java.io.Serializable;
 import java.util.Arrays;
 import java.util.Collections;
@@ -276,15 +273,6 @@ public class TableSchema implements Serializable {
 
     public static TableSchema fromJson(String json) {
         return JsonSerdeUtil.fromJson(json, TableSchema.class);
-    }
-
-    public static TableSchema fromPath(FileIO fileIO, Path path) {
-        try {
-            String json = fileIO.readFileUtf8(path);
-            return TableSchema.fromJson(json);
-        } catch (IOException e) {
-            throw new RuntimeException("Fails to read schema from path " + path, e);
-        }
     }
 
     @Override
