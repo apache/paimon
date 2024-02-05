@@ -943,14 +943,7 @@ public abstract class FileStoreTableTestBase {
         table.createBranch("test-branch", "test-tag");
 
         // verify that branch file exist
-        TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager =
-                new BranchManager(
-                        fileIO,
-                        tablePath,
-                        new SnapshotManager(fileIO, tablePath),
-                        new TagManager(fileIO, tablePath),
-                        new SchemaManager(fileIO, tablePath));
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists("test-branch")).isTrue();
 
         // verify test-tag in test-branch is equal to snapshot 2
@@ -1034,14 +1027,7 @@ public abstract class FileStoreTableTestBase {
         table.deleteBranch("branch1");
 
         // verify that branch file not exist
-        TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager =
-                new BranchManager(
-                        fileIO,
-                        tablePath,
-                        new SnapshotManager(fileIO, tablePath),
-                        new TagManager(fileIO, tablePath),
-                        new SchemaManager(fileIO, tablePath));
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists("branch1")).isFalse();
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))
@@ -1509,13 +1495,7 @@ public abstract class FileStoreTableTestBase {
 
         // verify that branch1 file exist
         TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager =
-                new BranchManager(
-                        fileIO,
-                        tablePath,
-                        new SnapshotManager(fileIO, tablePath),
-                        new TagManager(fileIO, tablePath),
-                        new SchemaManager(fileIO, tablePath));
+        BranchManager branchManager = table.branchManager();
         assertThat(branchManager.branchExists(BRANCH_NAME)).isTrue();
 
         // Verify branch1 and the main branch have the same data

@@ -41,7 +41,6 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate keyFilter;
     private Predicate valueFilter;
-    private String branchName;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
