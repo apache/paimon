@@ -168,7 +168,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
 
     @Test
     public void testSystemTableTimeTravel() throws Exception {
-        spark.sql("CREATE TABLE t (k INT, v STRING)");
+        spark.sql("CREATE TABLE t (k INT, v STRING) TBLPROPERTIES ('bucket' = '1')");
 
         // snapshot 1
         writeTable(

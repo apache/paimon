@@ -46,7 +46,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -142,11 +141,11 @@ public class CompactDatabaseAction extends ActionBase {
                                                 table.getClass().getName()));
                                 continue;
                             }
+                            Map<String, String> dynamicOptions =
+                                    new HashMap<>(tableOptions.toMap());
+                            dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
                             FileStoreTable fileStoreTable =
-                                    (FileStoreTable)
-                                            table.copy(
-                                                    Collections.singletonMap(
-                                                            CoreOptions.WRITE_ONLY.key(), "false"));
+                                    (FileStoreTable) table.copy(dynamicOptions);
                             tableMap.put(fullTableName, fileStoreTable);
                         } else {
                             LOG.debug("The table {} is excluded.", fullTableName);

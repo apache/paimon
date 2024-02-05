@@ -62,6 +62,7 @@ public class PaimonRecordReaderTest {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, tempDir.toString());
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set("bucket", "1");
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

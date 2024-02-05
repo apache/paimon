@@ -23,6 +23,8 @@ import io.airlift.compress.lzo.LzoDecompressor;
 import io.airlift.compress.zstd.ZstdCompressor;
 import io.airlift.compress.zstd.ZstdDecompressor;
 
+import javax.annotation.Nullable;
+
 /**
  * Each compression codec has an implementation of {@link BlockCompressionFactory} to create
  * compressors and decompressors.
@@ -34,8 +36,11 @@ public interface BlockCompressionFactory {
     BlockDecompressor getDecompressor();
 
     /** Creates {@link BlockCompressionFactory} according to the configuration. */
+    @Nullable
     static BlockCompressionFactory create(String compression) {
         switch (compression.toUpperCase()) {
+            case "NONE":
+                return null;
             case "LZ4":
                 return new Lz4BlockCompressionFactory();
             case "LZO":

@@ -393,7 +393,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                                 ROW_TYPE.getFields(),
                                 Arrays.asList("dt", "hh"),
                                 Arrays.asList("dt", "hh", "k"),
-                                Collections.emptyMap(),
+                                Collections.singletonMap("bucket", "1"),
                                 ""));
         return FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
     }
@@ -405,7 +405,7 @@ public class CompactorSinkITCase extends AbstractTestBase {
                         ROW_TYPE.getFields(),
                         Collections.emptyList(),
                         Collections.singletonList("k"),
-                        Collections.emptyMap(),
+                        Collections.singletonMap("bucket", "1"),
                         "");
         catalog.createTable(tableIdentifier, tableSchema, false);
         return (FileStoreTable) catalog.getTable(tableIdentifier);

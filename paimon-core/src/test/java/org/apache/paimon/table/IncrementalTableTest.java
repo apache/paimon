@@ -50,6 +50,7 @@ public class IncrementalTableTest extends TableTestBase {
                         .column("col1", DataTypes.INT())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
+                        .option("bucket", "1")
                         .build();
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
@@ -161,6 +162,7 @@ public class IncrementalTableTest extends TableTestBase {
                         .column("col1", DataTypes.INT())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
+                        .option("bucket", "1")
                         .build();
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);
@@ -211,6 +213,7 @@ public class IncrementalTableTest extends TableTestBase {
                         .column("col1", DataTypes.INT())
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
+                        .option("bucket", "1")
                         .build();
         catalog.createTable(identifier, schema, true);
         Table table = catalog.getTable(identifier);

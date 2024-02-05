@@ -125,13 +125,13 @@ public class BloomFilter {
 
         private final MemorySegment buffer;
         private final BloomFilter filter;
-        private final long numRecords;
+        private final long expectedEntries;
 
-        Builder(MemorySegment buffer, long numRecords) {
+        Builder(MemorySegment buffer, long expectedEntries) {
             this.buffer = buffer;
-            this.filter = new BloomFilter(numRecords, buffer.size());
+            this.filter = new BloomFilter(expectedEntries, buffer.size());
             filter.setMemorySegment(buffer, 0);
-            this.numRecords = numRecords;
+            this.expectedEntries = expectedEntries;
         }
 
         public boolean testHash(int hash) {
@@ -146,8 +146,8 @@ public class BloomFilter {
             return buffer;
         }
 
-        public long getNumRecords() {
-            return numRecords;
+        public long expectedEntries() {
+            return expectedEntries;
         }
 
         @VisibleForTesting

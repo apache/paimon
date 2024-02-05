@@ -94,6 +94,7 @@ public abstract class CommitterOperatorTestBase {
     protected FileStoreTable createFileStoreTable(Consumer<Options> setOptions) throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.setString("bucket", "1");
         setOptions.accept(conf);
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         schemaManager.createTable(

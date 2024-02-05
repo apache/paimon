@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io.cache;
 
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
 
@@ -66,7 +67,9 @@ public class FileBasedRandomInputViewTest {
 
         File file = writeFile(bytes);
         CacheManager cacheManager = new CacheManager(MemorySize.ofKibiBytes(128));
-        FileBasedRandomInputView view = new FileBasedRandomInputView(file, cacheManager, 1024);
+        FileBasedRandomInputView view =
+                new FileBasedRandomInputView(
+                        PageFileInput.create(file, 1024, null, 0, null), cacheManager);
 
         // read first one
         // this assertThatCode check the ConcurrentModificationException is not threw.

@@ -34,7 +34,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>bucket</h5></td>
-            <td style="word-wrap: break-word;">1</td>
+            <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
             <td>Bucket number for file store.</td>
         </tr>
@@ -46,7 +46,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>cache-page-size</h5></td>
-            <td style="word-wrap: break-word;">16 kb</td>
+            <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
             <td>Memory page size for caching.</td>
         </tr>
@@ -272,6 +272,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
             <td>Max memory size for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"lz4"</td>
+            <td>String</td>
+            <td>Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache.bloom.filter.enabled</h5></td>

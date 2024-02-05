@@ -51,7 +51,6 @@ import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
-import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -80,6 +79,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCase
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
@@ -276,7 +276,7 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
             } else if (("bytes".equals(mySqlType) && className == null)) {
                 // MySQL binary, varbinary, blob
                 newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(mySqlType) && Decimal.LOGICAL_NAME.equals(className)) {
+            } else if ("bytes".equals(mySqlType) && decimalLogicalName().equals(className)) {
                 // MySQL numeric, fixed, decimal
                 try {
                     new BigDecimal(oldValue);

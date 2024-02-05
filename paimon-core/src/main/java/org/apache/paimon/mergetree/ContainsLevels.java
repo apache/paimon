@@ -154,10 +154,10 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter =
-                        lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
-                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+        LookupStoreWriter kvWriter =
+                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
+        LookupStoreFactory.Context context;
+        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
             while ((batch = reader.readBatch()) != null) {
@@ -170,9 +170,11 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
+        } finally {
+            context = kvWriter.close();
         }
 
-        return new ContainsFile(localFile, lookupStoreFactory.createReader(localFile));
+        return new ContainsFile(localFile, lookupStoreFactory.createReader(localFile, context));
     }
 
     @Override

@@ -62,10 +62,11 @@ class DeleteFromTableTest extends PaimonSparkTestBase {
   }
 
   test(s"test delete with primary key") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id INT, name STRING, dt STRING)
-                 |TBLPROPERTIES ('primary-key' = 'id', 'merge-engine' = 'deduplicate')
-                 |""".stripMargin)
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, name STRING, dt STRING)
+         |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = 'deduplicate')
+         |""".stripMargin)
 
     spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22'), (3, 'c', '33')")
 
@@ -81,10 +82,11 @@ class DeleteFromTableTest extends PaimonSparkTestBase {
   }
 
   test(s"test delete with non-primary key") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id INT, name STRING, dt STRING)
-                 |TBLPROPERTIES ('primary-key' = 'id', 'merge-engine' = 'deduplicate')
-                 |""".stripMargin)
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id INT, name STRING, dt STRING)
+         |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = 'deduplicate')
+         |""".stripMargin)
 
     spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22'), (3, 'c', '33'), (4, 'a', '44')")
 

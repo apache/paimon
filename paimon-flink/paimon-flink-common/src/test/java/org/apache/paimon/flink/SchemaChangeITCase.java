@@ -847,14 +847,15 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     @Test
     public void testSetAndResetImmutableOptions() throws Exception {
         // bucket-key is immutable
-        sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
+        sql("CREATE TABLE T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')");
 
         assertThatThrownBy(() -> sql("ALTER TABLE T1 SET ('bucket-key' = 'c')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'bucket-key' is not supported yet.");
 
-        sql("CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket-key' = 'c')");
+        sql(
+                "CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)

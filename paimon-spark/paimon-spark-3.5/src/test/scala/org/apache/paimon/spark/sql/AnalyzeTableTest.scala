@@ -17,45 +17,4 @@
  */
 package org.apache.paimon.spark.sql
 
-import org.junit.jupiter.api.Assertions
-
-class AnalyzeTableTest extends AnalyzeTableTestBase {
-
-  test("Paimon analyze: spark use col stats") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
-                 |USING PAIMON
-                 |TBLPROPERTIES ('primary-key'='id')
-                 |""".stripMargin)
-
-    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
-    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
-    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
-
-    val stats = getScanStatistic("SELECT * FROM T")
-    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
-    Assertions.assertEquals(4, stats.attributeStats.size)
-  }
-
-  test("Paimon analyze: partition filter push down hit") {
-    spark.sql(s"""
-                 |CREATE TABLE T (id INT, name STRING, pt INT)
-                 |TBLPROPERTIES ('primary-key'='id, pt', 'bucket'='2')
-                 |PARTITIONED BY (pt)
-                 |""".stripMargin)
-
-    spark.sql("INSERT INTO T VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2), (4, 'd', 3)")
-    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
-
-    // paimon will reserve partition filter and not return it to spark, we need to ensure stats are filtered correctly.
-    // partition push down hit
-    var sql = "SELECT * FROM T WHERE pt < 1"
-    Assertions.assertEquals(0L, getScanStatistic(sql).rowCount.get.longValue())
-    checkAnswer(spark.sql(sql), Nil)
-
-    // partition push down not hit
-    sql = "SELECT * FROM T WHERE id < 1"
-    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue())
-    checkAnswer(spark.sql(sql), Nil)
-  }
-}
+class AnalyzeTableTest extends AnalyzeTableTestBase {}

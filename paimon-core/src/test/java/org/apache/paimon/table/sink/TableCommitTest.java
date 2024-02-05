@@ -194,8 +194,9 @@ public class TableCommitTest {
                         new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
                         new String[] {"k", "v"});
 
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, path);
+        Options options = new Options();
+        options.set(CoreOptions.PATH, path);
+        options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), new Path(path)),
@@ -203,7 +204,7 @@ public class TableCommitTest {
                                 rowType.getFields(),
                                 Collections.emptyList(),
                                 Collections.singletonList("k"),
-                                conf.toMap(),
+                                options.toMap(),
                                 ""));
 
         FileStoreTable table =

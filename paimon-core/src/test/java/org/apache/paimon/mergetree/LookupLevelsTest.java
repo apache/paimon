@@ -86,29 +86,29 @@ public class LookupLevelsTest {
                 new Levels(
                         comparator,
                         Arrays.asList(
-                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
-                                newFile(2, kv(2, 22), kv(5, 55))),
+                                newFile(1, kv(1, 11, 1), kv(3, 33, 2), kv(5, 5, 3)),
+                                newFile(2, kv(2, 22, 4), kv(5, 55, 5))),
                         3);
         LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
         KeyValue kv = lookupLevels.lookup(row(1), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(1);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(11);
 
         // only in level 2
         kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(4);
         assertThat(kv.level()).isEqualTo(2);
         assertThat(kv.value().getInt(1)).isEqualTo(22);
 
         // both in level 1 and level 2
         kv = lookupLevels.lookup(row(5), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(3);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(5);
 
@@ -226,15 +226,20 @@ public class LookupLevelsTest {
                                 .createRecordReader(
                                         0, file.fileName(), file.fileSize(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
-                new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
+                new HashLookupStoreFactory(
+                        new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
                 Duration.ofHours(1),
                 maxDiskSize,
                 rowCount -> BloomFilter.builder(rowCount, 0.05));
     }
 
     private KeyValue kv(int key, int value) {
+        return kv(key, value, UNKNOWN_SEQUENCE);
+    }
+
+    private KeyValue kv(int key, int value, long seqNumber) {
         return new KeyValue()
-                .replace(GenericRow.of(key), RowKind.INSERT, GenericRow.of(key, value));
+                .replace(GenericRow.of(key), seqNumber, RowKind.INSERT, GenericRow.of(key, value));
     }
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {

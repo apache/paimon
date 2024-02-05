@@ -574,7 +574,7 @@ s
             <li>older_than: timestamp before which snapshots will be removed.</li>
             <li>max_deletes: the maximum number of snapshots that can be deleted at once.</li>
       </td>
-      <td>CALL sys.expire_snapshots(table => 'default.T', retainMax => 10)</td>
+      <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
     </tr>
     </tbody>
 </table>

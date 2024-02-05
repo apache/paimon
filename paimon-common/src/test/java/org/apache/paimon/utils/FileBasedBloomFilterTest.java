@@ -20,6 +20,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
@@ -30,7 +31,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.File;
 import java.io.IOException;
-import java.io.RandomAccessFile;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -53,7 +53,11 @@ public class FileBasedBloomFilterTest {
         CacheManager cacheManager = new CacheManager(MemorySize.ofMebiBytes(1));
         FileBasedBloomFilter filter =
                 new FileBasedBloomFilter(
-                        new RandomAccessFile(file, "r"), cacheManager, 100, 0, 1000);
+                        PageFileInput.create(file, 1024, null, 0, null),
+                        cacheManager,
+                        100,
+                        0,
+                        1000);
 
         Arrays.stream(inputs)
                 .forEach(i -> Assertions.assertThat(filter.testHash(Integer.hashCode(i))).isTrue());

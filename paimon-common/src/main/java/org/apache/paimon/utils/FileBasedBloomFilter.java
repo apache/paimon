@@ -21,10 +21,10 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.io.PageFileInput;
+import org.apache.paimon.io.cache.CacheKey;
 import org.apache.paimon.io.cache.CacheManager;
 import org.apache.paimon.memory.MemorySegment;
-
-import java.io.RandomAccessFile;
 
 import static org.apache.paimon.io.cache.CacheManager.REFRESH_COUNT;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -32,7 +32,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Util to apply a built bloom filter . */
 public class FileBasedBloomFilter {
 
-    private final RandomAccessFile file;
+    private final PageFileInput input;
     private final CacheManager cacheManager;
     private final BloomFilter filter;
     private final long readOffset;
@@ -41,15 +41,15 @@ public class FileBasedBloomFilter {
     private int accessCount;
 
     public FileBasedBloomFilter(
-            RandomAccessFile file,
+            PageFileInput input,
             CacheManager cacheManager,
-            long numRecords,
+            long expectedEntries,
             long readOffset,
             int readLength) {
-        this.file = file;
+        this.input = input;
         this.cacheManager = cacheManager;
-        checkArgument(numRecords >= 0);
-        this.filter = new BloomFilter(numRecords, readLength);
+        checkArgument(expectedEntries >= 0);
+        this.filter = new BloomFilter(expectedEntries, readLength);
         this.readOffset = readOffset;
         this.readLength = readLength;
         this.accessCount = 0;
@@ -62,10 +62,9 @@ public class FileBasedBloomFilter {
         if (accessCount == REFRESH_COUNT || filter.getMemorySegment() == null) {
             MemorySegment segment =
                     cacheManager.getPage(
-                            file,
-                            readOffset,
-                            readLength,
-                            (position, length) -> filter.unsetMemorySegment());
+                            CacheKey.forPosition(input.file(), readOffset, readLength),
+                            key -> input.readPosition(readOffset, readLength),
+                            key -> filter.unsetMemorySegment());
             filter.setMemorySegment(segment, 0);
             accessCount = 0;
         }

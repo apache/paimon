@@ -25,7 +25,7 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 
 import org.apache.parquet.Preconditions
-import org.apache.spark.sql.{Row, SparkSession, Utils}
+import org.apache.spark.sql.{Row, SparkSession, StatsUtils}
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.catalyst.util.DateTimeUtils
@@ -56,11 +56,12 @@ case class PaimonAnalyzeTableColumnCommand(
 
     // compute stats
     val attributes = getColumnsToAnalyze(relation, columnNames, allColumns)
-    val totalSize = Utils.calculateTotalSize(
+    val totalSize = StatsUtils.calculateTotalSize(
       sparkSession.sessionState,
       table.name(),
       Some(table.location().toUri))
-    val (mergedRecordCount, colStats) = Utils.computeColumnStats(sparkSession, relation, attributes)
+    val (mergedRecordCount, colStats) =
+      StatsUtils.computeColumnStats(sparkSession, relation, attributes)
 
     val totalRecordCount = currentSnapshot.totalRecordCount()
     Preconditions.checkState(
@@ -111,7 +112,7 @@ case class PaimonAnalyzeTableColumnCommand(
     }
     columnsToAnalyze.foreach {
       attr =>
-        if (!Utils.analyzeSupportsType(attr.dataType)) {
+        if (!StatsUtils.analyzeSupportsType(attr.dataType)) {
           throw new UnsupportedOperationException(
             s"Analyzing on col: ${attr.name}, data type: ${attr.dataType} is not supported.")
         }
@@ -146,11 +147,12 @@ case class PaimonAnalyzeTableColumnCommand(
   }
 
   /**
-   * Convert data from spark type to paimon, only cover datatype meet [[Utils.hasMinMax]] currently.
+   * Convert data from spark type to paimon, only cover datatype meet [[StatsUtils.hasMinMax]]
+   * currently.
    */
   private def toPaimonData(o: Any, dataType: DataType): Any = {
     dataType match {
-      case d if !Utils.hasMinMax(d) =>
+      case d if !StatsUtils.hasMinMax(d) =>
         // should not reach here
         throw new UnsupportedOperationException(s"Unsupported data type $d, value is $o.")
       case _: DecimalType =>

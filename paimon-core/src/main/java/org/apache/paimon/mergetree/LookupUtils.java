@@ -81,7 +81,7 @@ public class LookupUtils {
             SortedRun level,
             BiFunctionWithIOE<InternalRow, DataFileMeta, T> lookup)
             throws IOException {
-        if (!level.nonEmpty()) {
+        if (level.isEmpty()) {
             return null;
         }
         List<DataFileMeta> files = level.files();

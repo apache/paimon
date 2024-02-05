@@ -781,8 +781,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testReadOptimizedTable() {
-        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
+        innerTestReadOptimizedTable();
 
+        sql("DROP TABLE T");
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
+        innerTestReadOptimizedTable();
+    }
+
+    private void innerTestReadOptimizedTable() {
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql(

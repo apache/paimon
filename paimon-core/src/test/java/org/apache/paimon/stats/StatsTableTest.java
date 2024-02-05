@@ -19,6 +19,7 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.AbstractFileStore;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,6 +46,7 @@ public class StatsTableTest extends TableTestBase {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
+        options.set(CoreOptions.BUCKET, 1);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())

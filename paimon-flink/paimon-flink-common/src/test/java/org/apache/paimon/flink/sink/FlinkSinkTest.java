@@ -62,7 +62,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -263,22 +262,23 @@ public class FlinkSinkTest {
 
     private FileStoreTable createFileStoreTable() throws Exception {
         org.apache.paimon.fs.Path tablePath = new org.apache.paimon.fs.Path(tempPath.toString());
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
-                                Arrays.asList("pk"),
-                                conf.toMap(),
+                                Collections.singletonList("pk"),
+                                options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
                 FileIOFinder.find(tablePath),
                 tablePath,
                 tableSchema,
-                conf,
+                options,
                 new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 

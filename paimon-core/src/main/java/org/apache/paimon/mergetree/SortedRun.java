@@ -72,8 +72,12 @@ public class SortedRun {
         return files;
     }
 
+    public boolean isEmpty() {
+        return files.isEmpty();
+    }
+
     public boolean nonEmpty() {
-        return !files.isEmpty();
+        return !isEmpty();
     }
 
     public long totalSize() {

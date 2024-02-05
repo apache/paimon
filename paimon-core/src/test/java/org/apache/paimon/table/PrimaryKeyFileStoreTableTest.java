@@ -1319,6 +1319,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1333,9 +1334,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        configure.accept(conf);
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(BUCKET, 1);
+        configure.accept(options);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1343,7 +1345,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "a"),
-                                conf.toMap(),
+                                options.toMap(),
                                 ""));
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }
