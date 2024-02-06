@@ -20,6 +20,7 @@ package org.apache.paimon.spark.procedure
 import org.apache.paimon.spark.PaimonSparkTestBase
 import org.apache.paimon.spark.analysis.NoSuchProcedureException
 
+import org.apache.spark.sql.catalyst.parser.extensions.PaimonParseException
 import org.assertj.core.api.Assertions.assertThatThrownBy
 
 abstract class ProcedureTestBase extends PaimonSparkTestBase {
@@ -29,7 +30,18 @@ abstract class ProcedureTestBase extends PaimonSparkTestBase {
                  |CREATE TABLE T (id INT, name STRING, dt STRING)
                  |""".stripMargin)
 
-    assertThatThrownBy(() => spark.sql("CALL unknown_procedure(table => 'test.T')"))
+    assertThatThrownBy(() => spark.sql("CALL sys.unknown_procedure(table => 'test.T')"))
       .isInstanceOf(classOf[NoSuchProcedureException])
+  }
+
+  test(s"test parse exception") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING)
+                 |""".stripMargin)
+
+    // Using Chinese comma to simulate parser exception
+    assertThatThrownBy(
+      () => spark.sql("CALL sys.expire_snapshots(table => 'test.T'，retain_max => 1)"))
+      .isInstanceOf(classOf[PaimonParseException])
   }
 }
