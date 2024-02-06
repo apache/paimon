@@ -107,8 +107,10 @@ class TagsTableTest extends TableTestBase {
                         tag -> {
                             if (tag.equals("2023-07-17")) {
                                 return Collections.singletonList("2023-07-17-branch1");
-                            } else {
+                            } else if (tag.equals("2023-07-18")) {
                                 return Arrays.asList("2023-07-18-branch1", "2023-07-18-branch2");
+                            } else {
+                                return new ArrayList<>();
                             }
                         });
         List<InternalRow> result = read(tagsTable);
