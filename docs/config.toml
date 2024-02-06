@@ -64,12 +64,12 @@ pygmentsUseClasses = true
     ["JavaDocs", "//paimon.apache.org/docs/master/api/java/"],
   ]
 
-  StableDocs = "https://paimon.apache.org/docs/0.6"
+  StableDocs = "https://paimon.apache.org/docs/0.7"
 
   PreviousDocs = [
     ["master", "https://paimon.apache.org/docs/master"],
-    ["stable", "https://paimon.apache.org/docs/0.6"],
-    ["0.6", "https://paimon.apache.org/docs/0.6"],
+    ["stable", "https://paimon.apache.org/docs/0.7"],
+    ["0.7", "https://paimon.apache.org/docs/0.7"],
   ]
 
   BookSection = '/'
