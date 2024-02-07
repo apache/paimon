@@ -75,6 +75,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.io.DataFilePathFactory.BUCKET_PATH_PREFIX;
 import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.io.DataFilePathFactory.DATA_FILE_PREFIX;
+import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for {@link OrphanFilesClean}. */
@@ -186,6 +187,16 @@ public class OrphanFilesCleanTest {
                 manifestDir,
                 fileNum,
                 Arrays.asList("manifest-list-", "manifest-", "index-manifest-", "UNKNOWN-"));
+        shouldBeDeleted += fileNum;
+
+        // create branch1 by tag
+        table.createBranch("branch1", allTags.get(0));
+
+        // branch snapshot
+        addNonUsedFiles(
+                new Path(getBranchPath(tablePath, "branch1") + "/snapshot"),
+                fileNum,
+                Collections.singletonList("UNKNOWN"));
         shouldBeDeleted += fileNum;
 
         // randomly expire snapshots
