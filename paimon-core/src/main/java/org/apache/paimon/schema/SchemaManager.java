@@ -482,7 +482,7 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private Path schemaDirectory() {
+    public Path schemaDirectory() {
         return new Path(tableRoot + "/schema");
     }
 

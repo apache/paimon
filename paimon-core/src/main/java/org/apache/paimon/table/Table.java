@@ -96,6 +96,10 @@ public interface Table extends Serializable {
     @Experimental
     void deleteBranch(String branchName);
 
+    /** Merge a branch to main branch. */
+    @Experimental
+    void mergeBranch(String branchName);
+
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental
     ExpireSnapshots newExpireSnapshots();
