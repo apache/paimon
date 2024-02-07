@@ -68,6 +68,10 @@ public class BranchManager {
         return new Path(tablePath + "/branch");
     }
 
+    public static Path branchDirectory(Path tablePath) {
+        return new Path(tablePath + "/branch");
+    }
+
     /** Return the path string of a branch. */
     public static String getBranchPath(Path tablePath, String branchName) {
         return tablePath.toString() + "/branch/" + BRANCH_PREFIX + branchName;

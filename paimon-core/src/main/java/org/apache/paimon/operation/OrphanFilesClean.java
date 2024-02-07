@@ -321,6 +321,7 @@ public class OrphanFilesClean {
         paimonFileDirs.add(new Path(location, "manifest"));
         paimonFileDirs.add(new Path(location, "index"));
         paimonFileDirs.add(new Path(location, "statistics"));
+        paimonFileDirs.add(new Path(location, "branch"));
         paimonFileDirs.addAll(listAndCleanDataDirs(location, partitionKeysNum));
 
         return paimonFileDirs;

@@ -43,8 +43,8 @@ import java.util.function.BinaryOperator;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
-import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.*;
+import static org.apache.paimon.utils.FileUtils.listOriginalVersionedFiles;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 
 /** Manager for {@link Snapshot}, providing utility methods related to paths and snapshot hints. */
@@ -253,6 +253,17 @@ public class SnapshotManager implements Serializable {
                         .map(this::snapshotPath)
                         .collect(Collectors.toList());
 
+        List<String> allBranchNames =
+                listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
+                        .collect(Collectors.toList());
+        for (String branchName : allBranchNames) {
+            List<Path> branchPaths =
+                    listVersionedFiles(fileIO, branchSnapshotDirectory(branchName), SNAPSHOT_PREFIX)
+                            .map(this::snapshotPath)
+                            .collect(Collectors.toList());
+            paths.addAll(branchPaths);
+        }
+
         List<Snapshot> snapshots = new ArrayList<>();
         for (Path path : paths) {
             Snapshot.safelyFromPath(fileIO, path).ifPresent(snapshots::add);
@@ -267,12 +278,26 @@ public class SnapshotManager implements Serializable {
      */
     public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
         try {
-            FileStatus[] statuses = fileIO.listStatus(snapshotDirectory());
-            if (statuses == null) {
+            List<FileStatus> statuses =
+                    Arrays.stream(fileIO.listStatus(snapshotDirectory()))
+                            .collect(Collectors.toList());
+
+            // find all branch name
+            List<String> allBranchNames =
+                    listOriginalVersionedFiles(fileIO, branchDirectory(tablePath), BRANCH_PREFIX)
+                            .collect(Collectors.toList());
+            for (String branchName : allBranchNames) {
+                List<FileStatus> branchStatuses =
+                        Arrays.stream(fileIO.listStatus(branchSnapshotDirectory(branchName)))
+                                .collect(Collectors.toList());
+                statuses.addAll(branchStatuses);
+            }
+
+            if (statuses.size() == 0) {
                 return Collections.emptyList();
             }
 
-            return Arrays.stream(statuses)
+            return statuses.stream()
                     .filter(fileStatusFilter)
                     .map(FileStatus::getPath)
                     .filter(nonSnapshotFileFilter())
