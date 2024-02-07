@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.system;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -26,8 +27,11 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -47,8 +51,10 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -72,7 +78,8 @@ public class TagsTable implements ReadonlyTable {
                             new DataField(1, "snapshot_id", new BigIntType(false)),
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
-                            new DataField(4, "record_count", new BigIntType(true))));
+                            new DataField(4, "record_count", new BigIntType(true)),
+                            new DataField(5, "branches", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -192,16 +199,28 @@ public class TagsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             Path location = ((TagsSplit) split).location;
-            SortedMap<Snapshot, List<String>> tags = new TagManager(fileIO, location).tags();
+            Options options = new Options();
+            options.set(CoreOptions.PATH, location.toUri().toString());
+            FileStoreTable table = FileStoreTableFactory.create(fileIO, options);
+            SortedMap<Snapshot, List<String>> tags = table.tagManager().tags();
             Map<String, Snapshot> nameToSnapshot = new LinkedHashMap<>();
             for (Map.Entry<Snapshot, List<String>> tag : tags.entrySet()) {
                 for (String tagName : tag.getValue()) {
                     nameToSnapshot.put(tagName, tag.getKey());
                 }
             }
+            Map<String, List<String>> tagBranches = new HashMap<>();
+            table.branchManager()
+                    .branches()
+                    .forEach(
+                            (branch, tag) ->
+                                    tagBranches
+                                            .computeIfAbsent(tag, key -> new ArrayList<>())
+                                            .add(branch));
 
             Iterator<InternalRow> rows =
-                    Iterators.transform(nameToSnapshot.entrySet().iterator(), this::toRow);
+                    Iterators.transform(
+                            nameToSnapshot.entrySet().iterator(), tag -> toRow(tag, tagBranches));
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -210,15 +229,18 @@ public class TagsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Map.Entry<String, Snapshot> tag) {
+        private InternalRow toRow(
+                Map.Entry<String, Snapshot> tag, Map<String, List<String>> tagBranches) {
             Snapshot snapshot = tag.getValue();
+            List<String> branches = tagBranches.get(tag.getKey());
             return GenericRow.of(
                     BinaryString.fromString(tag.getKey()),
                     snapshot.id(),
                     snapshot.schemaId(),
                     Timestamp.fromLocalDateTime(
                             DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                    snapshot.totalRecordCount());
+                    snapshot.totalRecordCount(),
+                    BinaryString.fromString(branches == null ? "[]" : branches.toString()));
         }
     }
 }

@@ -27,6 +27,7 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.types.DataTypes;
@@ -38,20 +39,23 @@ import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link TagsTable}. */
-public class TagsTableTest extends TableTestBase {
+class TagsTableTest extends TableTestBase {
 
     private static final String tableName = "MyTable";
     private TagsTable tagsTable;
     private TagManager tagManager;
 
     @BeforeEach
-    public void before() throws Exception {
+    void before() throws Exception {
         Identifier identifier = identifier(tableName);
         Schema schema =
                 Schema.newBuilder()
@@ -82,13 +86,39 @@ public class TagsTableTest extends TableTestBase {
     }
 
     @Test
-    public void testTagsTable() throws Exception {
-        List<InternalRow> expectRow = getExceptedResult();
+    void testTagsTable() throws Exception {
+        List<InternalRow> expectRow =
+                getExceptedResult(
+                        key -> {
+                            return new ArrayList<>();
+                        });
         List<InternalRow> result = read(tagsTable);
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    private List<InternalRow> getExceptedResult() {
+    @Test
+    void testTagBranchesTable() throws Exception {
+        Table table = catalog.getTable(identifier(tableName));
+        table.createBranch("2023-07-17-branch1", "2023-07-17");
+        table.createBranch("2023-07-18-branch1", "2023-07-18");
+        table.createBranch("2023-07-18-branch2", "2023-07-18");
+        List<InternalRow> expectRow =
+                getExceptedResult(
+                        tag -> {
+                            if (tag.equals("2023-07-17")) {
+                                return Collections.singletonList("2023-07-17-branch1");
+                            } else if (tag.equals("2023-07-18")) {
+                                return Arrays.asList("2023-07-18-branch1", "2023-07-18-branch2");
+                            } else {
+                                return new ArrayList<>();
+                            }
+                        });
+        List<InternalRow> result = read(tagsTable);
+        assertThat(result).containsExactlyElementsOf(expectRow);
+    }
+
+    private List<InternalRow> getExceptedResult(
+            Function<String, List<String>> tagBranchesFunction) {
         List<InternalRow> internalRows = new ArrayList<>();
         for (Map.Entry<Snapshot, List<String>> tag : tagManager.tags().entrySet()) {
             Snapshot snapshot = tag.getKey();
@@ -100,7 +130,9 @@ public class TagsTableTest extends TableTestBase {
                                 snapshot.schemaId(),
                                 Timestamp.fromLocalDateTime(
                                         DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                                snapshot.totalRecordCount()));
+                                snapshot.totalRecordCount(),
+                                BinaryString.fromString(
+                                        tagBranchesFunction.apply(tagName).toString())));
             }
         }
         return internalRows;
