@@ -31,6 +31,8 @@ public interface DataTable extends InnerTable {
 
     SnapshotReader newSnapshotReader();
 
+    SnapshotReader newSnapshotReader(String branchName);
+
     CoreOptions coreOptions();
 
     SnapshotManager snapshotManager();

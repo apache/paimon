@@ -64,6 +64,7 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -91,8 +92,16 @@ public class SchemaManager implements Serializable {
 
     /** @return latest schema. */
     public Optional<TableSchema> latest() {
+        return latest(DEFAULT_MAIN_BRANCH);
+    }
+
+    public Optional<TableSchema> latest(String branchName) {
+        Path directoryPath =
+                branchName.equals(DEFAULT_MAIN_BRANCH)
+                        ? schemaDirectory()
+                        : branchSchemaDirectory(branchName);
         try {
-            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
+            return listVersionedFiles(fileIO, directoryPath, SCHEMA_PREFIX)
                     .reduce(Math::max)
                     .map(this::schema);
         } catch (IOException e) {
@@ -480,6 +489,10 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     public Path toSchemaPath(long id) {
         return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
+    }
+
+    public Path branchSchemaDirectory(String branchName) {
+        return new Path(getBranchPath(tableRoot, branchName) + "/schema");
     }
 
     public Path branchSchemaPath(String branchName, long schemaId) {

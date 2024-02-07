@@ -71,6 +71,8 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+
 /**
  * Default implementation of {@link FileStoreCommit}.
  *
@@ -112,6 +114,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     private final int manifestMergeMinCount;
     private final boolean dynamicPartitionOverwrite;
     @Nullable private final Comparator<InternalRow> keyComparator;
+    private final String branchName;
 
     @Nullable private Lock lock;
     private boolean ignoreEmptyCommit;
@@ -137,6 +140,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             int manifestMergeMinCount,
             boolean dynamicPartitionOverwrite,
             @Nullable Comparator<InternalRow> keyComparator,
+            String branchName,
             StatsFileHandler statsFileHandler) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
@@ -155,6 +159,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         this.manifestMergeMinCount = manifestMergeMinCount;
         this.dynamicPartitionOverwrite = dynamicPartitionOverwrite;
         this.keyComparator = keyComparator;
+        this.branchName = branchName;
+
         this.lock = null;
         this.ignoreEmptyCommit = true;
         this.commitMetrics = null;
@@ -233,7 +239,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // we can skip conflict checking in tryCommit method.
                 // This optimization is mainly used to decrease the number of times we read from
                 // files.
-                latestSnapshot = snapshotManager.latestSnapshot();
+                latestSnapshot = snapshotManager.latestSnapshot(branchName);
                 if (latestSnapshot != null) {
                     // it is possible that some partitions only have compact changes,
                     // so we need to contain all changes
@@ -254,6 +260,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.APPEND,
                                 safeLatestSnapshotId,
+                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -283,6 +290,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 safeLatestSnapshotId,
+                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -428,6 +436,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
                                 null,
+                                branchName,
                                 null);
                 generatedSnapshot += 1;
             }
@@ -523,6 +532,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
                 null,
+                branchName,
                 statsFileName);
     }
 
@@ -596,10 +606,11 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             @Nullable Long safeLatestSnapshotId,
+            String branchName,
             @Nullable String statsFileName) {
         int cnt = 0;
         while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot(branchName);
             cnt++;
             if (tryCommitOnce(
                     tableFiles,
@@ -611,6 +622,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     commitKind,
                     latestSnapshot,
                     safeLatestSnapshotId,
+                    branchName,
                     statsFileName)) {
                 break;
             }
@@ -672,6 +684,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshot,
                     null,
+                    branchName,
                     null)) {
                 break;
             }
@@ -690,10 +703,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Snapshot.CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
             @Nullable Long safeLatestSnapshotId,
+            String branchName,
             @Nullable String newStatsFileName) {
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
-        Path newSnapshotPath = snapshotManager.snapshotPath(newSnapshotId);
+        Path newSnapshotPath =
+                branchName.equals(DEFAULT_MAIN_BRANCH)
+                        ? snapshotManager.snapshotPath(newSnapshotId)
+                        : snapshotManager.branchSnapshotPath(branchName, newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit table files to snapshot #" + newSnapshotId);
@@ -775,7 +792,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 newIndexManifest = indexManifest;
             }
 
-            long latestSchemaId = schemaManager.latest().get().id();
+            long latestSchemaId = schemaManager.latest(branchName).get().id();
 
             // write new stats or inherit from the previous snapshot
             String statsFileName = null;
@@ -840,7 +857,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         boolean committed =
                                 fileIO.writeFileUtf8(newSnapshotPath, newSnapshot.toJson());
                         if (committed) {
-                            snapshotManager.commitLatestHint(newSnapshotId);
+                            snapshotManager.commitLatestHint(newSnapshotId, branchName);
                         }
                         return committed;
                     };

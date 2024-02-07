@@ -53,6 +53,8 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+
 /**
  * Base {@link FileStore} implementation.
  *
@@ -169,6 +171,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
+    }
+
+    public FileStoreCommitImpl newCommit(String commitUser, String branchName) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -186,6 +192,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
+                branchName,
                 newStatsFileHandler());
     }
 

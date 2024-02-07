@@ -69,6 +69,11 @@ public class TagManager {
         return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
     }
 
+    /** Return the path of tag directory in branch. */
+    public Path branchTagDirectory(String branchName) {
+        return new Path(getBranchPath(tablePath, branchName) + "/tag");
+    }
+
     /** Return the path of a tag in branch. */
     public Path branchTagPath(String branchName, String tagName) {
         return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
