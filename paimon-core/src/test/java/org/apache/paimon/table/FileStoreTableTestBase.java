@@ -1041,32 +1041,7 @@ public abstract class FileStoreTableTestBase {
     public void testMergeBranch() throws Exception {
         FileStoreTable table = createFileStoreTable();
 
-        try (StreamTableWrite write = table.newWrite(commitUser);
-                StreamTableCommit commit = table.newCommit(commitUser)) {
-            write.write(rowData(1, 10, 100L));
-            commit.commit(0, write.prepareCommit(false, 1));
-        }
-
-        assertThat(
-                        getResult(
-                                table.newRead(),
-                                toSplits(table.newSnapshotReader().read().dataSplits()),
-                                BATCH_ROW_TO_STRING))
-                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
-
-        table.createTag("tag1", 1);
-        table.createBranch("branch1", "tag1");
-
-        // verify that branch1 file exist
-        TraceableFileIO fileIO = new TraceableFileIO();
-        BranchManager branchManager =
-                new BranchManager(
-                        fileIO,
-                        tablePath,
-                        new SnapshotManager(fileIO, tablePath),
-                        new TagManager(fileIO, tablePath),
-                        new SchemaManager(fileIO, tablePath));
-        assertThat(branchManager.branchExists("branch1")).isTrue();
+        generateBranch(table);
 
         // Verify branch1 and the main branch have the same data
         assertThat(
@@ -1074,7 +1049,7 @@ public abstract class FileStoreTableTestBase {
                                 table.newRead(),
                                 toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
-                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         // Test for unsupported branch name
         assertThatThrownBy(() -> table.mergeBranch("test-branch"))
@@ -1103,7 +1078,7 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // Validate data in main branch not changed
@@ -1112,7 +1087,7 @@ public abstract class FileStoreTableTestBase {
                                 table.newRead(),
                                 toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
-                .containsExactlyInAnyOrder("1|10|100|binary|varbinary|mapKey:mapVal|multiset");
+                .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
 
         // Merge branch1 to main branch
         table.mergeBranch("branch1");
@@ -1124,7 +1099,7 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // verify snapshot in branch1 and main branch is same
@@ -1159,7 +1134,7 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader("branch1").read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
                         "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
@@ -1171,7 +1146,7 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset");
 
         // Merge branch1 to main branch again
@@ -1184,7 +1159,7 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader().read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder(
-                        "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                        "0|0|0|binary|varbinary|mapKey:mapVal|multiset",
                         "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                         "3|30|300|binary|varbinary|mapKey:mapVal|multiset",
                         "4|40|400|binary|varbinary|mapKey:mapVal|multiset");
