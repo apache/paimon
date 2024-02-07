@@ -27,7 +27,6 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
@@ -246,10 +245,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             return;
         }
 
-        List<? extends FileStoreWrite.State<?>> states = write.checkpoint();
         write.close();
         write = newTableWrite(newTable);
-        write.restore((List) states);
     }
 
     @VisibleForTesting
