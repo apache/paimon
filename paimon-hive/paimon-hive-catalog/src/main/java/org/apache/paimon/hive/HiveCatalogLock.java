@@ -63,6 +63,11 @@ public class HiveCatalogLock implements CatalogLock {
         }
     }
 
+    @Override
+    public String getLock() {
+        return null;
+    }
+
     private long lock(String database, String table)
             throws UnknownHostException, TException, InterruptedException {
         final LockComponent lockComponent =

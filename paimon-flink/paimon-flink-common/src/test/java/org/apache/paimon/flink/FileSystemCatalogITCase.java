@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -38,6 +39,8 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -144,6 +147,76 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).containsEntry("opt3", "value4");
         assertThat(tableOptions).doesNotContainKey("fs.allow-hadoop-fallback");
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
+    }
+
+    @Test
+    public void testFileSystemCatalogLock() throws Exception {
+        tEnv.executeSql(
+                String.format(
+                        "CREATE CATALOG fs_with_lock WITH ("
+                                + "'type'='paimon', "
+                                + "'warehouse'='%s', "
+                                + "'table-default.opt1'='value1', "
+                                + "'table-default.opt2'='value2', "
+                                + "'table-default.opt3'='value3', "
+                                + "'fs.allow-hadoop-fallback'='false',"
+                                + "'lock.enabled'='true'"
+                                + ")",
+                        path));
+        tEnv.useCatalog("fs_with_lock");
+        CatalogLock.Factory lockFactory =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get())
+                        .catalog()
+                        .lockFactory()
+                        .get();
+
+        AtomicInteger count = new AtomicInteger(0);
+        List<Thread> threads = new ArrayList<>();
+        Callable<Void> unsafeIncrement =
+                () -> {
+                    int nextCount = count.get() + 1;
+                    Thread.sleep(1);
+                    count.set(nextCount);
+                    return null;
+                };
+        for (int i = 0; i < 10; i++) {
+            Thread thread =
+                    new Thread(
+                            () -> {
+                                CatalogLock lock = lockFactory.create();
+                                for (int j = 0; j < 10; j++) {
+                                    try {
+                                        System.out.println(
+                                                Thread.currentThread().getName()
+                                                        + "拿道锁"
+                                                        + lock.getLock()
+                                                        + "再进行第"
+                                                        + j
+                                                        + "次");
+                                        lock.runWithLock("test_db", "t", unsafeIncrement);
+                                    } catch (Exception e) {
+                                        throw new RuntimeException(e);
+                                    }
+                                }
+                            });
+            thread.setName(String.valueOf(i));
+            thread.start();
+            threads.add(thread);
+            //            CatalogLock lock = lockFactory.create();
+            //            for (int j = 0; j < 10; j++) {
+            //                try {
+            //                    lock.runWithLock("test_db", "t", unsafeIncrement);
+            //                } catch (Exception e) {
+            //                    throw new RuntimeException(e);
+            //                }
+            //            }
+        }
+
+        for (Thread thread : threads) {
+            thread.join();
+        }
+
+        assertThat(count.get()).isEqualTo(100);
     }
 
     private void innerTestWriteRead() throws Exception {
