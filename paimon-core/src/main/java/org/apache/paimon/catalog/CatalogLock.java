@@ -35,8 +35,6 @@ public interface CatalogLock extends Closeable {
     /** Run with catalog lock. The caller should tell catalog the database and table name. */
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
 
-    String getLock();
-
     /** Factory to create {@link CatalogLock}. */
     interface Factory extends Serializable {
         CatalogLock create();
