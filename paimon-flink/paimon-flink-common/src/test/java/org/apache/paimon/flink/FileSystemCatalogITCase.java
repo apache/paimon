@@ -156,9 +156,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                         "CREATE CATALOG fs_with_lock WITH ("
                                 + "'type'='paimon', "
                                 + "'warehouse'='%s', "
-                                + "'table-default.opt1'='value1', "
-                                + "'table-default.opt2'='value2', "
-                                + "'table-default.opt3'='value3', "
                                 + "'fs.allow-hadoop-fallback'='false',"
                                 + "'lock.enabled'='true'"
                                 + ")",
@@ -186,30 +183,14 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                                 CatalogLock lock = lockFactory.create();
                                 for (int j = 0; j < 10; j++) {
                                     try {
-                                        System.out.println(
-                                                Thread.currentThread().getName()
-                                                        + "拿道锁"
-                                                        + lock.getLock()
-                                                        + "再进行第"
-                                                        + j
-                                                        + "次");
                                         lock.runWithLock("test_db", "t", unsafeIncrement);
                                     } catch (Exception e) {
                                         throw new RuntimeException(e);
                                     }
                                 }
                             });
-            thread.setName(String.valueOf(i));
             thread.start();
             threads.add(thread);
-            //            CatalogLock lock = lockFactory.create();
-            //            for (int j = 0; j < 10; j++) {
-            //                try {
-            //                    lock.runWithLock("test_db", "t", unsafeIncrement);
-            //                } catch (Exception e) {
-            //                    throw new RuntimeException(e);
-            //                }
-            //            }
         }
 
         for (Thread thread : threads) {
