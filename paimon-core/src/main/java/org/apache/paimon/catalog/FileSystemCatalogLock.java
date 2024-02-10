@@ -179,13 +179,15 @@ public class FileSystemCatalogLock implements CatalogLock {
 
     @Override
     public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        try {
-            while (!tryLock()) {
-                Thread.sleep(1000);
+        synchronized (LOCK_FILE_NAME) {
+            try {
+                while (!tryLock()) {
+                    Thread.sleep(1000);
+                }
+                return callable.call();
+            } finally {
+                unlock();
             }
-            return callable.call();
-        } finally {
-            unlock();
         }
     }
 
