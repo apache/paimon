@@ -30,6 +30,7 @@ import org.apache.paimon.utils.TagManager;
 import org.junit.jupiter.api.Test;
 
 import java.util.Collections;
+import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.init;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -67,15 +68,47 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         BranchManager branchManager = table.branchManager();
-        callProcedure(
-                String.format(
-                        "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
-                        database, tableName));
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            createAction(
+                            CreateBranchAction.class,
+                            "create_branch",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--branch_name",
+                            "branch_name",
+                            "--tag_name",
+                            "tag2")
+                    .run();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
+                            database, tableName));
+        }
         assertThat(branchManager.branchExists("branch_name")).isTrue();
 
-        callProcedure(
-                String.format(
-                        "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            createAction(
+                            DeleteBranchAction.class,
+                            "delete_branch",
+                            "--warehouse",
+                            warehouse,
+                            "--database",
+                            database,
+                            "--table",
+                            tableName,
+                            "--branch_name",
+                            "branch_name")
+                    .run();
+        } else {
+            callProcedure(
+                    String.format(
+                            "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
+        }
         assertThat(branchManager.branchExists("branch_name")).isFalse();
     }
 }
