@@ -103,7 +103,7 @@ You can create a tag with given name and snapshot ID.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    create-tag \
+    create_tag \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
@@ -160,7 +160,7 @@ Run the following command:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    delete-tag \
+    delete_tag \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
