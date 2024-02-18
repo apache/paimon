@@ -148,10 +148,15 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.Factory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(HiveCatalogLock.createFactory(hiveConf, clientClassName))
-                : Optional.empty();
+    public Optional<CatalogLock.LockFactory> lockFactory() {
+        return lockEnabled() ? Optional.of(HiveCatalogLock.createFactory()) : Optional.empty();
+    }
+
+    @Override
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(
+                new HiveCatalogLock.HiveLockContext(
+                        new SerializableHiveConf(hiveConf), clientClassName));
     }
 
     private boolean lockEnabled() {
