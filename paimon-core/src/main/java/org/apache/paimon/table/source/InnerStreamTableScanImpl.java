@@ -144,6 +144,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
 
             if (!snapshotManager.snapshotExists(nextSnapshotId)) {
                 Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+                Long latestSnapshotId = snapshotManager.latestSnapshotId();
                 if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
                     throw new OutOfRangeException(
                             String.format(
@@ -151,6 +152,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                                             + "1. increase the snapshot expiration time. "
                                             + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
                                     nextSnapshotId));
+                }
+                if (latestSnapshotId == null || latestSnapshotId < nextSnapshotId - 1) {
+                    throw new RuntimeException(
+                            String.format(
+                                    "The latest snapshot with id %s is smaller than current snapshot id %s. "
+                                            + "Maybe the paimon table doesn't exist now, please check it",
+                                    latestSnapshotId, nextSnapshotId - 1));
                 }
                 LOG.debug(
                         "Next snapshot id {} does not exist, wait for the snapshot generation.",
