@@ -15,16 +15,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.exception;
+package org.apache.paimon.gateway.reader;
 
-/** Custom runtime exception. */
-public class RemoteException extends RuntimeException {
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.table.sink.BatchTableWrite;
 
-    public RemoteException(String message) {
-        super(message);
-    }
+import java.io.Serializable;
 
-    public RemoteException(String message, Throwable cause) {
-        super(message, cause);
-    }
+/** Defines a strategy for writing data and retrieving schema. */
+public interface WriteStrategy extends Serializable {
+
+    void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
+            throws Exception;
+
+    Schema retrieveSchema() throws Exception;
 }

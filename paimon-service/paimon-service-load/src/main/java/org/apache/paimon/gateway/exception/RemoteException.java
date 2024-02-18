@@ -15,20 +15,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.reader;
+package org.apache.paimon.gateway.exception;
 
-import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.sink.BatchTableWrite;
+/** Custom runtime exception. */
+public class RemoteException extends RuntimeException {
 
-/** Strategy implementation for writing data to Excel format using batch table writes. */
-public class ExcelWriteStrategy implements WriteStrategy {
+    public RemoteException(String message) {
+        super(message);
+    }
 
-    @Override
-    public void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
-            throws Exception {}
-
-    @Override
-    public Schema retrieveSchema() throws Exception {
-        return null;
+    public RemoteException(String message, Throwable cause) {
+        super(message, cause);
     }
 }

@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.config;
+package org.apache.paimon.gateway.config;
 
 /** dfdf. */
 public class NettyServerConfig {

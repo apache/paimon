@@ -16,12 +16,16 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.handler;
+package org.apache.paimon.gateway.handler;
 
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.DefaultFullHttpResponse;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpResponseStatus;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpVersion;
+import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.LastHttpContent;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.reader.ExcelWriteStrategy;
-import org.apache.paimon.reader.WriteStrategy;
+import org.apache.paimon.gateway.reader.ExcelWriteStrategy;
+import org.apache.paimon.gateway.reader.WriteStrategy;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -49,7 +53,7 @@ import org.slf4j.LoggerFactory;
 import java.util.List;
 import java.util.Optional;
 
-import static org.apache.paimon.utils.HttpServerResponseUtil.response;
+import static org.apache.paimon.gateway.utils.HttpServerResponseUtil.response;
 
 /** An HTTP handler for loading data into a catalog, handling various HTTP events and requests. */
 @ChannelHandler.Sharable
@@ -173,6 +177,11 @@ public class LoadHttpHandler extends SimpleChannelInboundHandler<HttpObject> {
                             + "    \"WriteDataTimeMs\": 1933,\n"
                             + "    \"CommitAndPublishTimeMs\": 106\n"
                             + "}");
+        }
+        if (msg instanceof LastHttpContent) {
+            // 所有的数据块都已经接收完毕
+            ctx.writeAndFlush(new DefaultFullHttpResponse(HttpVersion.HTTP_1_1, HttpResponseStatus.OK));
+            // 这里可以清理资源，比如关闭文件输出流等
         }
     }
 

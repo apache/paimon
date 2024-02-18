@@ -15,18 +15,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.reader;
+package org.apache.paimon.gateway.reader;
 
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.sink.BatchTableWrite;
 
-import java.io.Serializable;
+/** Strategy implementation for writing data to Excel format using batch table writes. */
+public class ExcelWriteStrategy implements WriteStrategy {
 
-/** Defines a strategy for writing data and retrieving schema. */
-public interface WriteStrategy extends Serializable {
+    @Override
+    public void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
+            throws Exception {}
 
-    void writer(BatchTableWrite batchTableWrite, String content, String columnSeparator)
-            throws Exception;
-
-    Schema retrieveSchema() throws Exception;
+    @Override
+    public Schema retrieveSchema() throws Exception {
+        return null;
+    }
 }

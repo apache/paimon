@@ -16,15 +16,15 @@
  * limitations under the License.
  */
 
-package org.apache.paimon;
+package org.apache.paimon.gateway;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.config.NettyServerConfig;
-import org.apache.paimon.exception.RemoteException;
+import org.apache.paimon.gateway.config.NettyServerConfig;
+import org.apache.paimon.gateway.exception.RemoteException;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.handler.LoadHttpHandler;
+import org.apache.paimon.gateway.handler.LoadHttpHandler;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
 
@@ -40,17 +40,14 @@ import org.apache.flink.shaded.netty4.io.netty.channel.epoll.EpollServerSocketCh
 import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
 import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpContentDecompressor;
 import org.apache.flink.shaded.netty4.io.netty.handler.codec.http.HttpServerCodec;
 import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
-import org.apache.flink.shaded.netty4.io.netty.handler.timeout.IdleStateHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 import static org.apache.flink.shaded.netty4.io.netty.channel.epoll.Epoll.isAvailable;
