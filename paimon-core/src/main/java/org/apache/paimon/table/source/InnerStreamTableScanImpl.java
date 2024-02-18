@@ -153,10 +153,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                                             + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
                                     nextSnapshotId));
                 }
-                if (latestSnapshotId == null || latestSnapshotId < nextSnapshotId - 1) {
+                if (nextSnapshotId > 1
+                        && (latestSnapshotId == null || latestSnapshotId < nextSnapshotId - 1)) {
                     throw new RuntimeException(
                             String.format(
-                                    "The latest snapshot with id %s is smaller than current snapshot id %s. "
+                                    "The latest snapshot with id %s is smaller than current snapshot id %s, "
                                             + "Maybe the paimon table doesn't exist now, please check it",
                                     latestSnapshotId, nextSnapshotId - 1));
                 }
@@ -242,6 +243,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     @Override
     public Long checkpoint() {
         return nextSnapshotId;
+    }
+
+    @Nullable
+    public Long latestSnapshotId() {
+        return snapshotManager.latestSnapshotId();
     }
 
     @Nullable
