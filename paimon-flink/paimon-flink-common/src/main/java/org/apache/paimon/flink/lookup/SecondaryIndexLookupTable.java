@@ -21,6 +21,7 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.RocksDBSetState;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -67,6 +68,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     @Override
     public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
             throws IOException {
+        Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
@@ -90,7 +92,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                     indexState.retract(secKeyRow.replaceRow(previous), primaryKeyRow);
                 }
 
-                if (recordFilter().test(row)) {
+                if (predicate == null || predicate.test(row)) {
                     tableState.put(primaryKeyRow, row);
                     indexState.add(secKeyRow.replaceRow(row), primaryKeyRow);
                 } else {

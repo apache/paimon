@@ -36,6 +36,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -88,10 +89,10 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
         Snapshot snapshot = table.snapshotManager().snapshot(2);
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(2);
-        Map<Snapshot, String> tags = table.tagManager().tags();
+        Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
         assertThat(tags.get(snapshot))
-                .isEqualTo(AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + 2);
+                .containsOnly(AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + 2);
     }
 
     @Test
@@ -139,10 +140,10 @@ public class AutoTagForSavepointCommitterOperatorTest extends CommitterOperatorT
         assertThat(snapshot).isNotNull();
         assertThat(snapshot.id()).isEqualTo(checkpointId);
 
-        Map<Snapshot, String> tags = table.tagManager().tags();
+        Map<Snapshot, List<String>> tags = table.tagManager().tags();
         assertThat(tags).containsOnlyKeys(snapshot);
         assertThat(tags.get(snapshot))
-                .isEqualTo(
+                .containsOnly(
                         AutoTagForSavepointCommitterOperator.SAVEPOINT_TAG_PREFIX + checkpointId);
     }
 

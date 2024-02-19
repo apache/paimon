@@ -30,7 +30,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
@@ -59,6 +58,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
+    protected static final String DB_LOCATION_PROP = "location";
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -94,7 +94,7 @@ public abstract class AbstractCatalog implements Catalog {
     protected abstract boolean databaseExistsImpl(String databaseName);
 
     @Override
-    public void createDatabase(String name, boolean ignoreIfExists)
+    public void createDatabase(String name, boolean ignoreIfExists, Map<String, String> properties)
             throws DatabaseAlreadyExistException {
         if (isSystemDatabase(name)) {
             throw new ProcessSystemDatabaseException();
@@ -105,21 +105,34 @@ public abstract class AbstractCatalog implements Catalog {
             }
             throw new DatabaseAlreadyExistException(name);
         }
-
-        createDatabaseImpl(name);
+        createDatabaseImpl(name, properties);
     }
+
+    @Override
+    public Map<String, String> loadDatabaseProperties(String name)
+            throws DatabaseNotExistException {
+        if (isSystemDatabase(name)) {
+            return Collections.emptyMap();
+        }
+        if (!databaseExists(name)) {
+            throw new DatabaseNotExistException(name);
+        }
+        return loadDatabasePropertiesImpl(name);
+    }
+
+    protected abstract Map<String, String> loadDatabasePropertiesImpl(String name);
 
     @Override
     public void dropPartition(Identifier identifier, Map<String, String> partitionSpec)
             throws TableNotExistException {
         Table table = getTable(identifier);
-        AbstractFileStoreTable fileStoreTable = (AbstractFileStoreTable) table;
+        FileStoreTable fileStoreTable = (FileStoreTable) table;
         FileStoreCommit commit = fileStoreTable.store().newCommit(UUID.randomUUID().toString());
         commit.dropPartitions(
                 Collections.singletonList(partitionSpec), BatchWriteBuilder.COMMIT_IDENTIFIER);
     }
 
-    protected abstract void createDatabaseImpl(String name) throws DatabaseAlreadyExistException;
+    protected abstract void createDatabaseImpl(String name, Map<String, String> properties);
 
     @Override
     public void dropDatabase(String name, boolean ignoreIfNotExists, boolean cascade)
@@ -134,14 +147,14 @@ public abstract class AbstractCatalog implements Catalog {
             throw new DatabaseNotExistException(name);
         }
 
-        if (!cascade && !listTables(name).isEmpty()) {
+        if (!cascade && listTables(name).size() > 0) {
             throw new DatabaseNotEmptyException(name);
         }
 
         dropDatabaseImpl(name);
     }
 
-    protected abstract void dropDatabaseImpl(String name) throws DatabaseNotExistException;
+    protected abstract void dropDatabaseImpl(String name);
 
     @Override
     public List<String> listTables(String databaseName) throws DatabaseNotExistException {
@@ -432,8 +445,6 @@ public abstract class AbstractCatalog implements Catalog {
             } else if (change instanceof SchemaChange.RenameColumn) {
                 SchemaChange.RenameColumn rename = (SchemaChange.RenameColumn) change;
                 fieldNames.add(rename.newName());
-            } else {
-                // do nothing
             }
         }
         validateFieldNameCaseInsensitive(fieldNames);
@@ -445,7 +456,7 @@ public abstract class AbstractCatalog implements Catalog {
 
     private void validateAutoCreateClose(Map<String, String> options) {
         checkArgument(
-                !Boolean.valueOf(
+                !Boolean.parseBoolean(
                         options.getOrDefault(
                                 CoreOptions.AUTO_CREATE.key(),
                                 CoreOptions.AUTO_CREATE.defaultValue().toString())),

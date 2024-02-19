@@ -23,11 +23,14 @@ import org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils;
 import org.apache.paimon.flink.action.cdc.mongodb.MongoDBRecordParser;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlActionUtils;
 import org.apache.paimon.flink.action.cdc.mysql.MySqlRecordParser;
+import org.apache.paimon.flink.action.cdc.postgres.PostgresActionUtils;
+import org.apache.paimon.flink.action.cdc.postgres.PostgresRecordParser;
 import org.apache.paimon.flink.action.cdc.pulsar.PulsarActionUtils;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 
 import com.ververica.cdc.connectors.mongodb.source.config.MongoDBSourceOptions;
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import com.ververica.cdc.connectors.postgres.source.config.PostgresSourceOptions;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.api.connector.source.Source;
 import org.apache.flink.configuration.Configuration;
@@ -41,6 +44,7 @@ import java.util.Map;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.KAFKA_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
+import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.POSTGRES_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkOneRequiredOption;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.checkRequiredOptions;
@@ -85,6 +89,8 @@ public class SyncJobHandler {
     public void registerJdbcDriver() {
         if (sourceType == SourceType.MYSQL) {
             MySqlActionUtils.registerJdbcDriver();
+        } else if (sourceType == SourceType.POSTGRES) {
+            PostgresActionUtils.registerJdbcDriver();
         }
     }
 
@@ -108,6 +114,28 @@ public class SyncJobHandler {
                                     + " cannot be set for mysql_sync_database. "
                                     + "If you want to sync several MySQL tables into one Paimon table, "
                                     + "use mysql_sync_table instead.");
+                }
+                break;
+            case POSTGRES:
+                checkRequiredOptions(
+                        cdcSourceConfig,
+                        POSTGRES_CONF,
+                        PostgresSourceOptions.HOSTNAME,
+                        PostgresSourceOptions.USERNAME,
+                        PostgresSourceOptions.PASSWORD,
+                        PostgresSourceOptions.DATABASE_NAME,
+                        PostgresSourceOptions.SCHEMA_NAME,
+                        PostgresSourceOptions.SLOT_NAME);
+                if (isTableSync) {
+                    checkRequiredOptions(
+                            cdcSourceConfig, POSTGRES_CONF, PostgresSourceOptions.TABLE_NAME);
+                } else {
+                    checkArgument(
+                            !cdcSourceConfig.contains(PostgresSourceOptions.TABLE_NAME),
+                            PostgresSourceOptions.TABLE_NAME.key()
+                                    + " cannot be set for postgres_sync_database. "
+                                    + "If you want to sync several PostgreSQL tables into one Paimon table, "
+                                    + "use postgres_sync_table instead.");
                 }
                 break;
             case KAFKA:
@@ -177,6 +205,13 @@ public class SyncJobHandler {
                         computedColumns,
                         typeMapping,
                         metadataConverters);
+            case POSTGRES:
+                return new PostgresRecordParser(
+                        cdcSourceConfig,
+                        caseSensitive,
+                        computedColumns,
+                        typeMapping,
+                        metadataConverters);
             case KAFKA:
             case PULSAR:
                 DataFormat dataFormat = provideDataFormat();
@@ -212,12 +247,17 @@ public class SyncJobHandler {
         }
     }
 
+    public CdcMetadataConverter provideMetadataConverter(String column) {
+        return CdcMetadataProcessor.converter(sourceType, column);
+    }
+
     /** CDC source type. */
     public enum SourceType {
         MYSQL("MySQL Source", "MySQL-Paimon %s Sync: %s"),
         KAFKA("Kafka Source", "Kafka-Paimon %s Sync: %s"),
         MONGODB("MongoDB Source", "MongoDB-Paimon %s Sync: %s"),
-        PULSAR("Pulsar Source", "Pulsar-Paimon %s Sync: %s");
+        PULSAR("Pulsar Source", "Pulsar-Paimon %s Sync: %s"),
+        POSTGRES("Postgres Source", "Postgres-Paimon %s Sync: %s");
 
         private final String sourceName;
         private final String defaultJobNameFormat;

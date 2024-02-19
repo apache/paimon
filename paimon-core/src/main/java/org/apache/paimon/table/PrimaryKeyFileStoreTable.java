@@ -36,8 +36,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.query.TableQuery;
-import org.apache.paimon.table.query.TableQueryImpl;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKindGenerator;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
@@ -57,7 +56,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMap
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreTable} for primary key table. */
-public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
+class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -118,7 +117,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public SplitGenerator splitGenerator() {
+    protected SplitGenerator splitGenerator() {
         return new MergeTreeSplitGenerator(
                 store().newKeyComparator(),
                 store().options().splitTargetSize(),
@@ -131,7 +130,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
+    protected BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer() {
         return (scan, predicate) -> {
             // currently we can only perform filter push down on keys
             // consider this case:
@@ -209,7 +208,7 @@ public class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    public TableQuery newTableQuery() {
-        return new TableQueryImpl(this);
+    public LocalTableQuery newLocalTableQuery() {
+        return new LocalTableQuery(this);
     }
 }

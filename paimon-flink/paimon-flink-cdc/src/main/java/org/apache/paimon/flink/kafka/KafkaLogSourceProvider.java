@@ -103,9 +103,9 @@ public class KafkaLogSourceProvider implements LogSourceProvider {
         return KafkaSource.<RowData>builder()
                 .setTopics(topic)
                 .setStartingOffsets(toOffsetsInitializer(bucketOffsets))
-                .setProperties(properties)
                 .setDeserializer(createDeserializationSchema())
                 .setGroupId(UUID.randomUUID().toString())
+                .setProperties(properties)
                 .build();
     }
 

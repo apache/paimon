@@ -185,7 +185,7 @@ public class HiveTypeUtils {
 
         @Override
         public TypeInfo visit(LocalZonedTimestampType localZonedTimestampType) {
-            return TypeInfoFactory.timestampTypeInfo;
+            return LocalZonedTimestampTypeUtils.toHiveType(localZonedTimestampType);
         }
 
         @Override
@@ -254,6 +254,10 @@ public class HiveTypeUtils {
         }
 
         public DataType atomic(TypeInfo atomic) {
+            if (LocalZonedTimestampTypeUtils.isLocalZonedTimestampType(atomic)) {
+                return DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE();
+            }
+
             if (TypeInfoFactory.booleanTypeInfo.equals(atomic)) {
                 return DataTypes.BOOLEAN();
             } else if (TypeInfoFactory.byteTypeInfo.equals(atomic)) {

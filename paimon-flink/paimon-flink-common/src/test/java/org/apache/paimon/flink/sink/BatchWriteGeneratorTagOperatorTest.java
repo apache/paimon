@@ -87,6 +87,21 @@ public class BatchWriteGeneratorTagOperatorTest extends CommitterOperatorTest {
         assertThat(table.tagManager().tagCount()).isEqualTo(1);
         // The tag is consistent with the latest snapshot
         assertThat(tagManager.taggedSnapshot(tagName)).isEqualTo(snapshotManager.latestSnapshot());
+
+        // test tag expiration
+        table.createTag("many-tags-test1");
+        Thread.sleep(1_000);
+        table.createTag("many-tags-test2");
+        assertThat(tagManager.tagCount()).isEqualTo(3);
+
+        write.write(GenericRow.of(2, 20L));
+        tableCommit = table.newCommit(initialCommitUser);
+        tableCommit.commit(write.prepareCommit(false, 2));
+        // note that this tag has the same name with previous tag
+        // so the previous tag will be deleted
+        committerOperator.finish();
+
+        assertThat(tagManager.allTagNames()).containsOnly("many-tags-test2", tagName);
     }
 
     @Override

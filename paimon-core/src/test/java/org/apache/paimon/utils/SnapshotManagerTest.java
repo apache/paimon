@@ -73,6 +73,7 @@ public class SnapshotManagerTest {
                             null,
                             null,
                             null,
+                            null,
                             null);
             localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
@@ -106,6 +107,7 @@ public class SnapshotManagerTest {
                             0L,
                             Snapshot.CommitKind.APPEND,
                             i * 1000,
+                            null,
                             null,
                             null,
                             null,

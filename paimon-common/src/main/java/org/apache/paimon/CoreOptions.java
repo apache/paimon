@@ -74,7 +74,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
-                    .defaultValue(1)
+                    .defaultValue(-1)
                     .withDescription("Bucket number for file store.");
 
     @Immutable
@@ -286,6 +286,13 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 mb"))
                     .withDescription("Amount of data to spill records to disk in spilled sort.");
 
+    public static final ConfigOption<String> SPILL_COMPRESSION =
+            key("spill-compression")
+                    .stringType()
+                    .defaultValue("LZ4")
+                    .withDescription(
+                            "Compression for spill, currently lz4, lzo and zstd are supported.");
+
     public static final ConfigOption<Boolean> WRITE_ONLY =
             key("write-only")
                     .booleanType()
@@ -359,6 +366,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("64 kb"))
                     .withDescription("Memory page size.");
 
+    public static final ConfigOption<MemorySize> CACHE_PAGE_SIZE =
+            key("cache-page-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("64 kb"))
+                    .withDescription("Memory page size for caching.");
+
     public static final ConfigOption<MemorySize> TARGET_FILE_SIZE =
             key("target-file-size")
                     .memoryType()
@@ -410,6 +423,14 @@ public class CoreOptions implements Serializable {
                             "Percentage flexibility while comparing sorted run size for changelog mode table. If the candidate sorted run(s) "
                                     + "size is 1% smaller than the next sorted run's size, then include next sorted run "
                                     + "into this candidate set.");
+
+    public static final ConfigOption<Duration> COMPACTION_OPTIMIZATION_INTERVAL =
+            key("compaction.optimization-interval")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Implying how often to perform an optimization compaction, this configuration is used to "
+                                    + "ensure the query timeliness of the read-optimized system table.");
 
     public static final ConfigOption<Integer> COMPACTION_MIN_FILE_NUM =
             key("compaction.min.file-num")
@@ -530,6 +551,15 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "Optional tag name used in case of \"from-snapshot\" scan mode.");
+
+    @ExcludeFromDocumentation("Internal use only")
+    public static final ConfigOption<String> SCAN_VERSION =
+            key("scan.version")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specify the time travel version string used in 'VERSION AS OF' syntax. "
+                                    + "We will use tag when both tag and snapshot of that version exist.");
 
     public static final ConfigOption<Long> SCAN_BOUNDED_WATERMARK =
             key("scan.bounded.watermark")
@@ -709,11 +739,31 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Max disk size for lookup cache, you can use this option to limit the use of local disks.");
 
+    public static final ConfigOption<String> LOOKUP_CACHE_SPILL_COMPRESSION =
+            key("lookup.cache-spill-compression")
+                    .stringType()
+                    .defaultValue("lz4")
+                    .withDescription(
+                            "Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.");
+
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_MEMORY_SIZE =
             key("lookup.cache-max-memory-size")
                     .memoryType()
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription("Max memory size for lookup cache.");
+
+    public static final ConfigOption<Boolean> LOOKUP_CACHE_BLOOM_FILTER_ENABLED =
+            key("lookup.cache.bloom.filter.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether to enable the bloom filter for lookup cache.");
+
+    public static final ConfigOption<Double> LOOKUP_CACHE_BLOOM_FILTER_FPP =
+            key("lookup.cache.bloom.filter.fpp")
+                    .doubleType()
+                    .defaultValue(0.05)
+                    .withDescription(
+                            "Define the default false positive probability for lookup cache bloom filters.");
 
     public static final ConfigOption<Integer> READ_BATCH_SIZE =
             key("read.batch-size")
@@ -953,11 +1003,24 @@ public class CoreOptions implements Serializable {
                             "How long is the delay after the period ends before creating a tag."
                                     + " This can allow some late data to enter the Tag.");
 
+    public static final ConfigOption<TagPeriodFormatter> TAG_PERIOD_FORMATTER =
+            key("tag.period-formatter")
+                    .enumType(TagPeriodFormatter.class)
+                    .defaultValue(TagPeriodFormatter.WITH_DASHES)
+                    .withDescription("The date format for tag periods.");
+
     public static final ConfigOption<Integer> TAG_NUM_RETAINED_MAX =
             key("tag.num-retained-max")
                     .intType()
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
+
+    public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
+            key("snapshot.watermark-idle-timeout")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.");
 
     public static final ConfigOption<Integer> PARQUET_ENABLE_DICTIONARY =
             key("parquet.enable.dictionary")
@@ -1116,6 +1179,15 @@ public class CoreOptions implements Serializable {
                 .collect(Collectors.toMap(e -> Integer.valueOf(e.getKey()), Map.Entry::getValue));
     }
 
+    public boolean definedAggFunc() {
+        for (String key : options.toMap().keySet()) {
+            if (key.startsWith(FIELDS_PREFIX) && key.endsWith(AGG_FUNCTION)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public String fieldAggFunc(String fieldName) {
         return options.get(
                 key(FIELDS_PREFIX + "." + fieldName + "." + AGG_FUNCTION)
@@ -1196,8 +1268,7 @@ public class CoreOptions implements Serializable {
     public int sortSpillThreshold() {
         Integer maxSortedRunNum = options.get(SORT_SPILL_THRESHOLD);
         if (maxSortedRunNum == null) {
-            int stopNum = numSortedRunStopTrigger();
-            maxSortedRunNum = Math.max(stopNum, stopNum + 1);
+            maxSortedRunNum = MathUtils.incrementSafely(numSortedRunStopTrigger());
         }
         checkArgument(maxSortedRunNum > 1, "The sort spill threshold cannot be smaller than 2.");
         return maxSortedRunNum;
@@ -1232,6 +1303,10 @@ public class CoreOptions implements Serializable {
         return options.get(SORT_SPILL_BUFFER_SIZE).getBytes();
     }
 
+    public String spillCompression() {
+        return options.get(SPILL_COMPRESSION);
+    }
+
     public Duration continuousDiscoveryInterval() {
         return options.get(CONTINUOUS_DISCOVERY_INTERVAL);
     }
@@ -1246,6 +1321,14 @@ public class CoreOptions implements Serializable {
 
     public int pageSize() {
         return (int) options.get(PAGE_SIZE).getBytes();
+    }
+
+    public int cachePageSize() {
+        return (int) options.get(CACHE_PAGE_SIZE).getBytes();
+    }
+
+    public MemorySize lookupCacheMaxMemory() {
+        return options.get(LOOKUP_CACHE_MAX_MEMORY_SIZE);
     }
 
     public long targetFileSize() {
@@ -1263,10 +1346,15 @@ public class CoreOptions implements Serializable {
         return options.get(NUM_SORTED_RUNS_COMPACTION_TRIGGER);
     }
 
+    @Nullable
+    public Duration optimizedCompactionInterval() {
+        return options.get(COMPACTION_OPTIMIZATION_INTERVAL);
+    }
+
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
-            stopTrigger = numSortedRunCompactionTrigger() + 1;
+            stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
         }
         return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
@@ -1275,7 +1363,9 @@ public class CoreOptions implements Serializable {
         // By default, this ensures that the compaction does not fall to level 0, but at least to
         // level 1
         Integer numLevels = options.get(NUM_LEVELS);
-        numLevels = numLevels == null ? numSortedRunCompactionTrigger() + 1 : numLevels;
+        if (numLevels == null) {
+            numLevels = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
+        }
         return numLevels;
     }
 
@@ -1326,7 +1416,8 @@ public class CoreOptions implements Serializable {
                     || options.getOptional(SCAN_TIMESTAMP).isPresent()) {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
-                    || options.getOptional(SCAN_TAG_NAME).isPresent()) {
+                    || options.getOptional(SCAN_TAG_NAME).isPresent()
+                    || options.getOptional(SCAN_VERSION).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
                 return StartupMode.FROM_FILE_CREATION_TIME;
@@ -1371,6 +1462,10 @@ public class CoreOptions implements Serializable {
 
     public String scanTagName() {
         return options.get(SCAN_TAG_NAME);
+    }
+
+    public String scanVersion() {
+        return options.get(SCAN_VERSION);
     }
 
     public Pair<String, String> incrementalBetween() {
@@ -1497,8 +1592,16 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_CREATION_DELAY);
     }
 
+    public TagPeriodFormatter tagPeriodFormatter() {
+        return options.get(TAG_PERIOD_FORMATTER);
+    }
+
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public Duration snapshotWatermarkIdleTimeout() {
+        return options.get(SNAPSHOT_WATERMARK_IDLE_TIMEOUT);
     }
 
     public String sinkWatermarkTimeZone() {
@@ -2064,6 +2167,30 @@ public class CoreOptions implements Serializable {
         private final String description;
 
         TagCreationMode(String value, String description) {
+            this.value = value;
+            this.description = description;
+        }
+
+        @Override
+        public String toString() {
+            return value;
+        }
+
+        @Override
+        public InlineElement getDescription() {
+            return text(description);
+        }
+    }
+
+    /** The period format options for tag creation. */
+    public enum TagPeriodFormatter implements DescribedEnum {
+        WITH_DASHES("with_dashes", "Dates and hours with dashes, e.g., 'yyyy-MM-dd HH'"),
+        WITHOUT_DASHES("without_dashes", "Dates and hours without dashes, e.g., 'yyyyMMdd HH'");
+
+        private final String value;
+        private final String description;
+
+        TagPeriodFormatter(String value, String description) {
             this.value = value;
             this.description = description;
         }

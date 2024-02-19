@@ -23,6 +23,7 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
+import org.apache.paimon.flink.action.cdc.JdbcToPaimonTypeVisitor;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -412,6 +413,24 @@ public class MySqlTypeUtils {
             // When missing scale of the decimal, we
             // use the max scale to avoid parse error
             return isDecimalType(typeName) ? 18 : 0;
+        }
+    }
+
+    public static JdbcToPaimonTypeVisitor toPaimonTypeVisitor() {
+        return MySqlToPaimonTypeVisitor.INSTANCE;
+    }
+
+    private static class MySqlToPaimonTypeVisitor implements JdbcToPaimonTypeVisitor {
+
+        private static final MySqlToPaimonTypeVisitor INSTANCE = new MySqlToPaimonTypeVisitor();
+
+        @Override
+        public DataType visit(
+                String type,
+                @Nullable Integer length,
+                @Nullable Integer scale,
+                TypeMapping typeMapping) {
+            return toDataType(type, length, scale, typeMapping);
         }
     }
 }

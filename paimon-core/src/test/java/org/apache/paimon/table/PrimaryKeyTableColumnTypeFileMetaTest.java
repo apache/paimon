@@ -19,20 +19,24 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
 import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -65,11 +69,11 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
     @Override
     protected void validateStatsField(List<DataFileMeta> fileMetaList) {
         for (DataFileMeta fileMeta : fileMetaList) {
-            FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
-            assertThat(statsArray.length).isEqualTo(4);
+            BinaryTableStats stats = getTableValueStats(fileMeta);
+            assertThat(stats.maxValues().getFieldCount()).isEqualTo(4);
             for (int i = 0; i < 4; i++) {
-                assertThat(statsArray[i].minValue()).isNotNull();
-                assertThat(statsArray[i].maxValue()).isNotNull();
+                assertThat(stats.minValues().isNullAt(i)).isFalse();
+                assertThat(stats.maxValues().isNullAt(i)).isFalse();
             }
         }
     }
@@ -112,37 +116,40 @@ public class PrimaryKeyTableColumnTypeFileMetaTest extends ColumnTypeFileMetaTes
     /** We can only validate the values in primary keys for changelog with key table. */
     @Override
     protected void validateValuesWithNewSchema(
-            List<String> filesName, List<DataFileMeta> fileMetaList) {
+            Map<Long, TableSchema> tableSchemas,
+            long schemaId,
+            List<String> filesName,
+            List<DataFileMeta> fileMetaList) {
+        Function<Long, List<DataField>> schemaFields =
+                id -> tableSchemas.get(id).logicalTrimmedPrimaryKeysType().getFields();
+        FieldStatsConverters converters = new FieldStatsConverters(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
-            FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
-            assertThat(statsArray.length).isEqualTo(4);
+            BinaryTableStats stats = getTableValueStats(fileMeta);
+            FieldStatsArraySerializer serializer = converters.getOrCreate(fileMeta.schemaId());
+            InternalRow min = serializer.evolution(stats.minValues());
+            InternalRow max = serializer.evolution(stats.maxValues());
+            assertThat(min.getFieldCount()).isEqualTo(4);
             if (filesName.contains(fileMeta.fileName())) {
-                assertThat(statsArray[0].minValue())
-                        .isEqualTo(BinaryString.fromString("200       "));
-                assertThat(statsArray[0].maxValue())
-                        .isEqualTo(BinaryString.fromString("300       "));
+                assertThat(min.getString(0)).isEqualTo(BinaryString.fromString("200       "));
+                assertThat(max.getString(0)).isEqualTo(BinaryString.fromString("300       "));
 
-                assertThat(statsArray[1].minValue()).isEqualTo(BinaryString.fromString("201"));
-                assertThat(statsArray[1].maxValue()).isEqualTo(BinaryString.fromString("301"));
+                assertThat(min.getString(1)).isEqualTo(BinaryString.fromString("201"));
+                assertThat(max.getString(1)).isEqualTo(BinaryString.fromString("301"));
 
-                assertThat((Double) statsArray[2].minValue()).isEqualTo(202D);
-                assertThat((Double) statsArray[2].maxValue()).isEqualTo(302D);
+                assertThat(min.getDouble(2)).isEqualTo(202D);
+                assertThat(max.getDouble(2)).isEqualTo(302D);
 
-                assertThat((Integer) statsArray[3].minValue()).isEqualTo(203);
-                assertThat((Integer) statsArray[3].maxValue()).isEqualTo(303);
+                assertThat(min.getInt(3)).isEqualTo(203);
+                assertThat(max.getInt(3)).isEqualTo(303);
             } else {
-                assertThat(statsArray[0].minValue())
-                        .isEqualTo(statsArray[0].maxValue())
+                assertThat(min.getString(0))
+                        .isEqualTo(max.getString(0))
                         .isEqualTo(BinaryString.fromString("400"));
-                assertThat(statsArray[1].minValue())
-                        .isEqualTo(statsArray[1].maxValue())
+                assertThat(min.getString(1))
+                        .isEqualTo(max.getString(1))
                         .isEqualTo(BinaryString.fromString("401"));
-                assertThat((Double) statsArray[2].minValue())
-                        .isEqualTo((Double) statsArray[2].maxValue())
-                        .isEqualTo(402D);
-                assertThat((Integer) statsArray[3].minValue())
-                        .isEqualTo(statsArray[3].maxValue())
-                        .isEqualTo(403);
+                assertThat(min.getDouble(2)).isEqualTo(max.getDouble(2)).isEqualTo(402D);
+                assertThat(min.getInt(3)).isEqualTo(max.getInt(3)).isEqualTo(403);
             }
         }
     }

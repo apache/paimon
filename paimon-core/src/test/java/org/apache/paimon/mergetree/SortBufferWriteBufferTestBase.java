@@ -69,6 +69,7 @@ public abstract class SortBufferWriteBufferTestBase {
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
                     128,
+                    "lz4",
                     null);
 
     protected abstract boolean addOnly();

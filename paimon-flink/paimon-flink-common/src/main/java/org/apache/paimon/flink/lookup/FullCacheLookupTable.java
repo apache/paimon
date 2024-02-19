@@ -34,7 +34,6 @@ import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -67,7 +66,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table.coreOptions().toConfiguration(),
                         null);
         FileStoreTable table = context.table;
-        this.reader = new TableStreamingReader(table, context.projection, context.predicate);
+        this.reader = new TableStreamingReader(table, context.projection, context.tablePredicate);
         this.sequenceFieldEnabled =
                 table.primaryKeys().size() > 0
                         && new CoreOptions(table.options()).sequenceField().isPresent();
@@ -83,11 +82,12 @@ public abstract class FullCacheLookupTable implements LookupTable {
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
+        Predicate predicate = projectedPredicate();
         try (RecordReaderIterator<InternalRow> batch =
                 new RecordReaderIterator<>(reader.nextBatch(true, sequenceFieldEnabled))) {
             while (batch.hasNext()) {
                 InternalRow row = batch.next();
-                if (recordFilter().test(row)) {
+                if (predicate == null || predicate.test(row)) {
                     bulkLoadSorter.write(GenericRow.of(toKeyBytes(row), toValueBytes(row)));
                 }
             }
@@ -143,8 +143,9 @@ public abstract class FullCacheLookupTable implements LookupTable {
     public abstract void refresh(Iterator<InternalRow> input, boolean orderByLastField)
             throws IOException;
 
-    public Filter<InternalRow> recordFilter() {
-        return context.recordFilter;
+    @Nullable
+    public Predicate projectedPredicate() {
+        return context.projectedPredicate;
     }
 
     public abstract byte[] toKeyBytes(InternalRow row) throws IOException;
@@ -184,23 +185,23 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         public final FileStoreTable table;
         public final int[] projection;
-        public final @Nullable Predicate predicate;
+        @Nullable public final Predicate tablePredicate;
+        @Nullable public final Predicate projectedPredicate;
         public final File tempPath;
-        public final Filter<InternalRow> recordFilter;
         public final List<String> joinKey;
 
         public Context(
                 FileStoreTable table,
                 int[] projection,
-                @Nullable Predicate predicate,
+                @Nullable Predicate tablePredicate,
+                @Nullable Predicate projectedPredicate,
                 File tempPath,
-                Filter<InternalRow> recordFilter,
                 List<String> joinKey) {
             this.table = table;
             this.projection = projection;
-            this.predicate = predicate;
+            this.tablePredicate = tablePredicate;
+            this.projectedPredicate = projectedPredicate;
             this.tempPath = tempPath;
-            this.recordFilter = recordFilter;
             this.joinKey = joinKey;
         }
     }

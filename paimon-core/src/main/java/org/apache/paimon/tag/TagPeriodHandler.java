@@ -50,12 +50,30 @@ public interface TagPeriodHandler {
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
 
+    DateTimeFormatter HOUR_FORMATTER_WITHOUT_DASHES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .appendLiteral(" ")
+                    .appendValue(HOUR_OF_DAY, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
     DateTimeFormatter DAY_FORMATTER =
             new DateTimeFormatterBuilder()
                     .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
                     .appendLiteral('-')
                     .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
                     .appendLiteral('-')
+                    .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
+                    .toFormatter()
+                    .withResolverStyle(ResolverStyle.LENIENT);
+
+    DateTimeFormatter DAY_FORMATTER_WITHOUT_DASHES =
+            new DateTimeFormatterBuilder()
+                    .appendValue(YEAR, 1, 10, SignStyle.NORMAL)
+                    .appendValue(MONTH_OF_YEAR, 2, 2, SignStyle.NORMAL)
                     .appendValue(DAY_OF_MONTH, 2, 2, SignStyle.NORMAL)
                     .toFormatter()
                     .withResolverStyle(ResolverStyle.LENIENT);
@@ -69,6 +87,8 @@ public interface TagPeriodHandler {
     String timeToTag(LocalDateTime time);
 
     LocalDateTime nextTagTime(LocalDateTime time);
+
+    boolean isAutoTag(String tagName);
 
     /** Base implementation of {@link TagPeriodHandler}. */
     abstract class BaseTagPeriodHandler implements TagPeriodHandler {
@@ -106,10 +126,26 @@ public interface TagPeriodHandler {
         public LocalDateTime nextTagTime(LocalDateTime time) {
             return time.plus(onePeriod());
         }
+
+        @Override
+        public boolean isAutoTag(String tagName) {
+            try {
+                tagToTime(tagName);
+                return true;
+            } catch (Exception e) {
+                return false;
+            }
+        }
     }
 
     /** Hourly {@link TagPeriodHandler}. */
     class HourlyTagPeriodHandler extends BaseTagPeriodHandler {
+
+        CoreOptions.TagPeriodFormatter formatter;
+
+        public HourlyTagPeriodHandler(CoreOptions.TagPeriodFormatter formatter) {
+            this.formatter = formatter;
+        }
 
         static final Duration ONE_PERIOD = Duration.ofHours(1);
 
@@ -120,12 +156,25 @@ public interface TagPeriodHandler {
 
         @Override
         protected DateTimeFormatter formatter() {
-            return HOUR_FORMATTER;
+            switch (formatter) {
+                case WITH_DASHES:
+                    return HOUR_FORMATTER;
+                case WITHOUT_DASHES:
+                    return HOUR_FORMATTER_WITHOUT_DASHES;
+                default:
+                    throw new IllegalArgumentException("Unsupported date format type");
+            }
         }
     }
 
     /** Daily {@link TagPeriodHandler}. */
     class DailyTagPeriodHandler extends BaseTagPeriodHandler {
+
+        CoreOptions.TagPeriodFormatter formatter;
+
+        public DailyTagPeriodHandler(CoreOptions.TagPeriodFormatter formatter) {
+            this.formatter = formatter;
+        }
 
         static final Duration ONE_PERIOD = Duration.ofDays(1);
 
@@ -136,7 +185,14 @@ public interface TagPeriodHandler {
 
         @Override
         protected DateTimeFormatter formatter() {
-            return DAY_FORMATTER;
+            switch (formatter) {
+                case WITH_DASHES:
+                    return DAY_FORMATTER;
+                case WITHOUT_DASHES:
+                    return DAY_FORMATTER_WITHOUT_DASHES;
+                default:
+                    throw new IllegalArgumentException("Unsupported date format type");
+            }
         }
 
         @Override
@@ -165,9 +221,9 @@ public interface TagPeriodHandler {
     static TagPeriodHandler create(CoreOptions options) {
         switch (options.tagCreationPeriod()) {
             case DAILY:
-                return new DailyTagPeriodHandler();
+                return new DailyTagPeriodHandler(options.tagPeriodFormatter());
             case HOURLY:
-                return new HourlyTagPeriodHandler();
+                return new HourlyTagPeriodHandler(options.tagPeriodFormatter());
             case TWO_HOURS:
                 return new TwoHoursTagPeriodHandler();
             default:

@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-spark</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.7-SNAPSHOT</version>
+        <version>0.8-SNAPSHOT</version>
     </parent>
 
     <packaging>jar</packaging>
@@ -57,6 +57,13 @@ under the License.
             <groupId>com.github.davidmoten</groupId>
             <artifactId>hilbert-curve</artifactId>
             <version>0.2.2</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.spark</groupId>
+            <artifactId>spark-avro_2.12</artifactId>
+            <version>${spark.version}</version>
+            <scope>test</scope>
         </dependency>
 
         <dependency>

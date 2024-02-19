@@ -626,8 +626,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Column v1 have different types when merging schemas.\n"
-                                        + "Current table '{paimon_sync_table.incompatible_field_2}' field: `v1` INT ''\n"
-                                        + "To be merged table 'paimon_sync_table.incompatible_field_1' field: `v1` TIMESTAMP(0) ''"));
+                                        + "Current table '{paimon_sync_table.incompatible_field_1}' field: `v1` TIMESTAMP(0) ''\n"
+                                        + "To be merged table 'paimon_sync_table.incompatible_field_2' field: `v1` INT ''"));
     }
 
     @Test
@@ -667,7 +667,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 .satisfies(
                         anyCauseMatches(
                                 IllegalArgumentException.class,
-                                "Specified primary key 'pk' does not exist in source tables or computed columns."));
+                                "Specified primary key 'pk' does not exist in source tables or computed columns [pt, _id, v1]."));
     }
 
     @Test

@@ -25,12 +25,15 @@ org.apache.paimon.flink.action.DeleteTagActionFactory
 org.apache.paimon.flink.action.ResetConsumerActionFactory
 org.apache.paimon.flink.action.MigrateTableActionFactory
 org.apache.paimon.flink.action.RemoveOrphanFilesActionFactory
+org.apache.paimon.flink.action.QueryServiceActionFactory
 
 ### procedure factories
 org.apache.paimon.flink.procedure.CompactDatabaseProcedure
 org.apache.paimon.flink.procedure.CompactProcedure
 org.apache.paimon.flink.procedure.CreateTagProcedure
 org.apache.paimon.flink.procedure.DeleteTagProcedure
+org.apache.paimon.flink.procedure.CreateBranchProcedure
+org.apache.paimon.flink.procedure.DeleteBranchProcedure
 org.apache.paimon.flink.procedure.DropPartitionProcedure
 org.apache.paimon.flink.procedure.MergeIntoProcedure
 org.apache.paimon.flink.procedure.ResetConsumerProcedure
@@ -38,3 +41,5 @@ org.apache.paimon.flink.procedure.RollbackToProcedure
 org.apache.paimon.flink.procedure.MigrateTableProcedure
 org.apache.paimon.flink.procedure.MigrateFileProcedure
 org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
+org.apache.paimon.flink.procedure.QueryServiceProcedure
+org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure

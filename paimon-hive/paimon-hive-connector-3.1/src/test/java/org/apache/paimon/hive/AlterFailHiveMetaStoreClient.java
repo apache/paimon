@@ -46,7 +46,8 @@ public class AlterFailHiveMetaStoreClient extends HiveMetaStoreClient implements
     }
 
     @Override
-    public void alter_table(String defaultDatabaseName, String tblName, Table table)
+    public void alter_table(
+            String defaultDatabaseName, String tblName, Table table, boolean cascade)
             throws InvalidOperationException, MetaException, TException {
         throw new TException();
     }

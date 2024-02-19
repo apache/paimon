@@ -20,8 +20,6 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
-import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -57,7 +55,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
-public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
+public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase {
+
+    private static final String CANAL = "canal";
 
     @Test
     @Timeout(60)
@@ -1247,34 +1247,6 @@ public class KafkaCanalSyncTableActionITCase extends KafkaActionITCaseBase {
     @Test
     @Timeout(60)
     public void testWaterMarkSyncTable() throws Exception {
-        String topic = "watermark";
-        createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, readLines("kafka/canal/table/watermark/canal-data-1.txt"));
-
-        Map<String, String> kafkaConfig = getBasicKafkaConfig();
-        kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");
-        kafkaConfig.put(TOPIC.key(), topic);
-
-        Map<String, String> config = getBasicTableConfig();
-        config.put("tag.automatic-creation", "watermark");
-        config.put("tag.creation-period", "hourly");
-        config.put("scan.watermark.alignment.group", "alignment-group-1");
-        config.put("scan.watermark.alignment.max-drift", "20 s");
-        config.put("scan.watermark.alignment.update-interval", "1 s");
-
-        KafkaSyncTableAction action =
-                syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
-        runActionWithDefaultEnv(action);
-
-        AbstractFileStoreTable table =
-                (AbstractFileStoreTable) catalog.getTable(new Identifier(database, tableName));
-        while (true) {
-            if (table.snapshotManager().snapshotCount() > 0
-                    && table.snapshotManager().latestSnapshot().watermark()
-                            != -9223372036854775808L) {
-                return;
-            }
-            Thread.sleep(1000);
-        }
+        testWaterMarkSyncTable(CANAL);
     }
 }

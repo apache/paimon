@@ -37,10 +37,12 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
   protected var pushed: Array[(Filter, Predicate)] = Array.empty
 
+  protected var reservedFilters: Array[Filter] = Array.empty
+
   protected var pushDownLimit: Option[Int] = None
 
   override def build(): Scan = {
-    PaimonScan(table, requiredSchema, pushed.map(_._2), pushDownLimit)
+    PaimonScan(table, requiredSchema, pushed.map(_._2), reservedFilters, pushDownLimit)
   }
 
   /**
@@ -51,6 +53,7 @@ abstract class PaimonBaseScanBuilder(table: Table)
   override def pushFilters(filters: Array[Filter]): Array[Filter] = {
     val pushable = mutable.ArrayBuffer.empty[(Filter, Predicate)]
     val postScan = mutable.ArrayBuffer.empty[Filter]
+    val reserved = mutable.ArrayBuffer.empty[Filter]
 
     val converter = new SparkFilterConverter(table.rowType)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
@@ -59,7 +62,11 @@ abstract class PaimonBaseScanBuilder(table: Table)
         try {
           val predicate = converter.convert(filter)
           pushable.append((filter, predicate))
-          if (!predicate.visit(visitor)) postScan.append(filter)
+          if (!predicate.visit(visitor)) {
+            postScan.append(filter)
+          } else {
+            reserved.append(filter)
+          }
         } catch {
           case e: UnsupportedOperationException =>
             logWarning(e.getMessage)
@@ -69,6 +76,9 @@ abstract class PaimonBaseScanBuilder(table: Table)
 
     if (pushable.nonEmpty) {
       this.pushed = pushable.toArray
+    }
+    if (reserved.nonEmpty) {
+      this.reservedFilters = reserved.toArray
     }
     postScan.toArray
   }

@@ -19,7 +19,6 @@
 package org.apache.paimon.predicate;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -43,12 +42,17 @@ public class StartsWith extends NullFalseLeafBinaryFunction {
 
     @Override
     public boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, Object patternLiteral) {
-        BinaryString min = (BinaryString) fieldStats.minValue();
-        BinaryString max = (BinaryString) fieldStats.maxValue();
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            Object patternLiteral) {
+        BinaryString minStr = (BinaryString) min;
+        BinaryString maxStr = (BinaryString) max;
         BinaryString pattern = (BinaryString) patternLiteral;
-        return (min.startsWith(pattern) || min.compareTo(pattern) <= 0)
-                && (max.startsWith(pattern) || max.compareTo(pattern) >= 0);
+        return (minStr.startsWith(pattern) || minStr.compareTo(pattern) <= 0)
+                && (maxStr.startsWith(pattern) || maxStr.compareTo(pattern) >= 0);
     }
 
     @Override

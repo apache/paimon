@@ -32,7 +32,6 @@ import org.apache.paimon.utils.TypeUtils;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonProcessingException;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
-import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -73,8 +72,6 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected static final String FIELD_TABLE = "table";
     protected static final String FIELD_DATABASE = "database";
-    protected static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
     private final boolean caseSensitive;
     protected final TypeMapping typeMapping;
     protected final List<ComputedColumn> computedColumns;
@@ -122,7 +119,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
     }
 
     // use STRING type in default when we cannot get origin data types (most cases)
-    protected LinkedHashMap<String, DataType> fillDefaultStringTypes(JsonNode record) {
+    protected LinkedHashMap<String, DataType> fillDefaultTypes(JsonNode record) {
         LinkedHashMap<String, DataType> fieldTypes = new LinkedHashMap<>();
         record.fieldNames().forEachRemaining(name -> fieldTypes.put(name, DataTypes.STRING()));
         return fieldTypes;
@@ -141,9 +138,9 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
 
     protected Map<String, String> extractRowData(
             JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
-        paimonFieldTypes.putAll(fillDefaultStringTypes(record));
+        paimonFieldTypes.putAll(fillDefaultTypes(record));
         Map<String, Object> recordMap =
-                OBJECT_MAPPER.convertValue(record, new TypeReference<Map<String, Object>>() {});
+                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
                 recordMap.entrySet().stream()
                         .collect(
@@ -153,9 +150,8 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                                             if (Objects.nonNull(entry.getValue())
                                                     && !TypeUtils.isBasicType(entry.getValue())) {
                                                 try {
-                                                    return OBJECT_MAPPER
-                                                            .writer()
-                                                            .writeValueAsString(entry.getValue());
+                                                    return JsonSerdeUtil.writeValueAsString(
+                                                            entry.getValue());
                                                 } catch (JsonProcessingException e) {
                                                     LOG.error("Failed to deserialize record.", e);
                                                     return Objects.toString(entry.getValue());

@@ -310,7 +310,7 @@ public class RenameTable {
 
 You can use the catalog to alter a table, but you need to pay attention to the following points.
 
-- Add column cannot specify NOT NULL.
+- Column %s cannot specify NOT NULL in the %s table.
 - Cannot update partition column type in the table.
 - Cannot change nullability of primary key.
 - If the type of the column is nested row type, update the column type is not supported.

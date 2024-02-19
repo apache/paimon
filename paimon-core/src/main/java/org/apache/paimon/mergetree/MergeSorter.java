@@ -66,6 +66,7 @@ public class MergeSorter {
     private final SortEngine sortEngine;
     private final int spillThreshold;
     private final int spillSortMaxNumFiles;
+    private final String compression;
 
     private final MemorySegmentPool memoryPool;
 
@@ -79,6 +80,7 @@ public class MergeSorter {
         this.sortEngine = options.sortEngine();
         this.spillThreshold = options.sortSpillThreshold();
         this.spillSortMaxNumFiles = options.localSortMaxNumFileHandles();
+        this.compression = options.spillCompression();
         this.keyType = keyType;
         this.valueType = valueType;
         this.memoryPool =
@@ -197,7 +199,8 @@ public class MergeSorter {
                             DataTypes.ROW(sortKeyTypes.toArray(new DataType[0])),
                             new RowType(fields),
                             memoryPool,
-                            spillSortMaxNumFiles);
+                            spillSortMaxNumFiles,
+                            compression);
         }
 
         public boolean put(KeyValue keyValue) throws IOException {

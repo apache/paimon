@@ -27,5 +27,6 @@ case class PaimonScan(
     table: Table,
     requiredSchema: StructType,
     filters: Array[Predicate],
+    reservedFilters: Array[Filter],
     pushDownLimit: Option[Int])
-  extends PaimonBaseScan(table, requiredSchema, filters, pushDownLimit)
+  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)

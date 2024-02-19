@@ -94,6 +94,11 @@ public class SortUtils {
                 sinkParallelismValue == null
                         ? inputStream.getParallelism()
                         : Integer.parseInt(sinkParallelismValue);
+        if (sinkParallelism == -1) {
+            throw new UnsupportedOperationException(
+                    "The adaptive batch scheduler is not supported. Please set the sink parallelism using the key: "
+                            + FlinkConnectorOptions.SINK_PARALLELISM.key());
+        }
         final int sampleSize = sinkParallelism * 1000;
         final int rangeNum = sinkParallelism * 10;
 
@@ -155,7 +160,9 @@ public class SortUtils {
                                 longRowType,
                                 options.writeBufferSize(),
                                 options.pageSize(),
-                                options.localSortMaxNumFileHandles()))
+                                options.localSortMaxNumFileHandles(),
+                                options.spillCompression(),
+                                sinkParallelism))
                 .setParallelism(sinkParallelism)
                 // remove the key column from every row
                 .map(

@@ -54,6 +54,7 @@ public class TableSchemaTest {
                 new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "");
         assertThat(schema.crossPartitionUpdate()).isTrue();
 
+        options.put(BUCKET.key(), "1");
         assertThatThrownBy(() -> validateTableSchema(schema))
                 .hasMessageContaining("You should use dynamic bucket");
 

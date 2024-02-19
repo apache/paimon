@@ -18,8 +18,8 @@
 
 package org.apache.paimon.predicate;
 
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FieldStats;
 
 import java.io.Serializable;
 import java.util.List;
@@ -49,18 +49,14 @@ public class CompoundPredicate implements Predicate {
     }
 
     @Override
-    public boolean test(Object[] values) {
-        return function.test(values, children);
-    }
-
-    @Override
     public boolean test(InternalRow row) {
         return function.test(row, children);
     }
 
     @Override
-    public boolean test(long rowCount, FieldStats[] fieldStats) {
-        return function.test(rowCount, fieldStats, children);
+    public boolean test(
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts) {
+        return function.test(rowCount, minValues, maxValues, nullCounts, children);
     }
 
     @Override
@@ -95,12 +91,14 @@ public class CompoundPredicate implements Predicate {
     /** Evaluate the predicate result based on multiple {@link Predicate}s. */
     public abstract static class Function implements Serializable {
 
-        public abstract boolean test(Object[] values, List<Predicate> children);
-
         public abstract boolean test(InternalRow row, List<Predicate> children);
 
         public abstract boolean test(
-                long rowCount, FieldStats[] fieldStats, List<Predicate> children);
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts,
+                List<Predicate> children);
 
         public abstract Optional<Predicate> negate(List<Predicate> children);
 

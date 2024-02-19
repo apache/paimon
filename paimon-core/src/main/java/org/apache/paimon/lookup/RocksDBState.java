@@ -111,7 +111,8 @@ public abstract class RocksDBState<K, V, CacheV> {
                 RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
                 options.writeBufferSize() / 2,
                 options.pageSize(),
-                options.localSortMaxNumFileHandles());
+                options.localSortMaxNumFileHandles(),
+                options.spillCompression());
     }
 
     /** A class wraps byte[] to implement equals and hashCode. */

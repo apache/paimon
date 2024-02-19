@@ -20,11 +20,11 @@ package org.apache.paimon.service.network;
 
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufAllocator;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandlerContext;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedInput;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandlerContext;
+import org.apache.paimon.shade.netty4.io.netty.handler.stream.ChunkedInput;
+import org.apache.paimon.shade.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 
 /**
  * A {@link ByteBuf} instance to be consumed in chunks by {@link ChunkedWriteHandler}, respecting

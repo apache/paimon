@@ -22,7 +22,7 @@ import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
 import org.apache.paimon.flink.sink.CompactionTaskTypeInfo;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.EndOfScanException;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -52,7 +52,7 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
     private static final Logger LOG = LoggerFactory.getLogger(BucketUnawareCompactSource.class);
     private static final String COMPACTION_COORDINATOR_NAME = "Compaction Coordinator";
 
-    private final AppendOnlyFileStoreTable table;
+    private final FileStoreTable table;
     private final boolean streaming;
     private final long scanInterval;
     private final Predicate filter;
@@ -61,7 +61,7 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
     private volatile boolean isRunning = true;
 
     public BucketUnawareCompactSource(
-            AppendOnlyFileStoreTable table,
+            FileStoreTable table,
             boolean isStreaming,
             long scanInterval,
             @Nullable Predicate filter) {
