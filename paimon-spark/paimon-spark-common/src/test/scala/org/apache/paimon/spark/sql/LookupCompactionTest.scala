@@ -78,22 +78,6 @@ class LookupCompactionTest extends PaimonSparkTestBase {
     }
   }
 
-  test("Paimon lookup compaction: drop delete") {
-
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id INT, name STRING, count INT)
-         |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'changelog-producer' = 'lookup', 'num-levels' = '2')
-         |""".stripMargin)
-    val table = loadTable("T")
-
-    spark.sql("INSERT INTO T VALUES (1, 'a', 1), (2, 'b', 2)")
-    // set num-levels = 2 to make sure that this delete operation can trigger drop delete
-    spark.sql("DELETE FROM T WHERE id = 1")
-
-    Assertions.assertEquals(1, table.snapshotManager().latestSnapshot().totalRecordCount())
-  }
-
   private def dataFileCount(files: Array[FileStatus]): Int = {
     files.count(f => f.getPath.getName.startsWith("data"))
   }

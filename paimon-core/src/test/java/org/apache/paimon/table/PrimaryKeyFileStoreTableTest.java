@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -80,6 +81,7 @@ import java.util.function.Function;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -1163,6 +1165,43 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     public void testTableQueryForNormal() throws Exception {
         FileStoreTable table = createFileStoreTable();
         innerTestTableQuery(table);
+    }
+
+    @Test
+    public void testLookupWithDropDelete() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(CHANGELOG_PRODUCER, LOOKUP);
+                            conf.set("num-levels", "2");
+                        });
+        IOManager ioManager = IOManager.create(tablePath.toString());
+        StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(rowData(1, 1, 100L));
+        write.write(rowData(1, 2, 200L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        // set num-levels = 2 to make sure that this delete can trigger compaction with drop delete
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 1, 100L));
+        commit.commit(1, write.prepareCommit(true, 0));
+        write.close();
+        commit.close();
+
+        Snapshot latestSnapshot = table.newSnapshotReader().snapshotManager().latestSnapshot();
+        assertThat(latestSnapshot.commitKind()).isEqualTo(COMPACT);
+        assertThat(latestSnapshot.totalRecordCount()).isEqualTo(1);
+
+        assertThat(
+                        getResult(
+                                table.newRead(),
+                                toSplits(table.newSnapshotReader().read().dataSplits()),
+                                binaryRow(1),
+                                0,
+                                BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Collections.singletonList(
+                                "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     private void innerTestTableQuery(FileStoreTable table) throws Exception {
