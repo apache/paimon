@@ -18,6 +18,7 @@
 
 package org.apache.paimon.mergetree.compact;
 
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -33,6 +34,10 @@ import java.io.UncheckedIOException;
 import java.util.Comparator;
 import java.util.List;
 
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
+
 /**
  * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
  * involving level 0 files.
@@ -42,6 +47,8 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
     private final LookupLevels lookupLevels;
 
     public LookupMergeTreeCompactRewriter(
+            int maxLevel,
+            MergeEngine mergeEngine,
             LookupLevels lookupLevels,
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
@@ -51,6 +58,8 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
             RecordEqualiser valueEqualiser,
             boolean changelogRowDeduplicate) {
         super(
+                maxLevel,
+                mergeEngine,
                 readerFactory,
                 writerFactory,
                 keyComparator,
@@ -68,8 +77,25 @@ public class LookupMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
     }
 
     @Override
-    protected boolean upgradeChangelog(int outputLevel, DataFileMeta file) {
-        return file.level() == 0;
+    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
+        if (file.level() != 0) {
+            return NO_CHANGELOG;
+        }
+
+        if (outputLevel == maxLevel) {
+            return CHANGELOG_NO_REWRITE;
+        }
+
+        // DEDUPLICATE retains the latest records as the final result, so merging has no impact on
+        // it at all
+        if (mergeEngine == MergeEngine.DEDUPLICATE) {
+            return CHANGELOG_NO_REWRITE;
+        }
+
+        // other merge engines must rewrite file, because some records that are already at higher
+        // level may be merged
+        // See LookupMergeFunction, it just returns newly records.
+        return CHANGELOG_WITH_REWRITE;
     }
 
     @Override

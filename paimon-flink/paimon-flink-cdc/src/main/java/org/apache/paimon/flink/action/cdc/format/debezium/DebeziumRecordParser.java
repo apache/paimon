@@ -22,16 +22,26 @@ import org.apache.paimon.flink.action.cdc.ComputedColumn;
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.flink.action.cdc.format.RecordParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.node.ArrayNode;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 
+import static org.apache.paimon.utils.JsonSerdeUtil.getNodeAs;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
@@ -54,7 +64,7 @@ import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 public class DebeziumRecordParser extends RecordParser {
 
     private static final String FIELD_SCHEMA = "schema";
-    private static final String FIELD_PAYLOAD = "payload";
+    protected static final String FIELD_PAYLOAD = "payload";
     private static final String FIELD_BEFORE = "before";
     private static final String FIELD_AFTER = "after";
     private static final String FIELD_SOURCE = "source";
@@ -65,6 +75,11 @@ public class DebeziumRecordParser extends RecordParser {
     private static final String OP_UPDATE = "u";
     private static final String OP_DELETE = "d";
     private static final String OP_READE = "r";
+
+    private boolean hasSchema;
+    private final Map<String, String> debeziumTypes = new HashMap<>();
+    private final Map<String, String> classNames = new HashMap<>();
+    private final Map<String, Map<String, String>> parameters = new HashMap<>();
 
     public DebeziumRecordParser(
             boolean caseSensitive, TypeMapping typeMapping, List<ComputedColumn> computedColumns) {
@@ -105,11 +120,96 @@ public class DebeziumRecordParser extends RecordParser {
     @Override
     protected void setRoot(String record) {
         JsonNode node = JsonSerdeUtil.fromJson(record, JsonNode.class);
+
+        hasSchema = false;
         if (node.has(FIELD_SCHEMA)) {
             root = node.get(FIELD_PAYLOAD);
+            JsonNode schema = node.get(FIELD_SCHEMA);
+            if (!isNull(schema)) {
+                parseSchema(schema);
+                hasSchema = true;
+            }
         } else {
             root = node;
         }
+    }
+
+    private void parseSchema(JsonNode schema) {
+        debeziumTypes.clear();
+        classNames.clear();
+        parameters.clear();
+
+        ArrayNode schemaFields = getNodeAs(schema, "fields", ArrayNode.class);
+        Preconditions.checkNotNull(schemaFields);
+
+        ArrayNode fields = null;
+        for (int i = 0; i < schemaFields.size(); i++) {
+            JsonNode node = schemaFields.get(i);
+            if (getString(node, "field").equals("after")) {
+                fields = getNodeAs(node, "fields", ArrayNode.class);
+                break;
+            } else if (getString(node, "field").equals("before")) {
+                if (fields == null) {
+                    fields = getNodeAs(node, "fields", ArrayNode.class);
+                }
+            }
+        }
+        Preconditions.checkNotNull(fields);
+
+        for (JsonNode node : fields) {
+            String field = getString(node, "field");
+
+            debeziumTypes.put(field, getString(node, "type"));
+            classNames.put(field, getString(node, "name"));
+
+            JsonNode parametersNode = node.get("parameters");
+            Map<String, String> parametersMap =
+                    isNull(parametersNode)
+                            ? Collections.emptyMap()
+                            : JsonSerdeUtil.convertValue(
+                                    parametersNode,
+                                    new TypeReference<HashMap<String, String>>() {});
+
+            parameters.put(field, parametersMap);
+        }
+    }
+
+    @Nullable
+    private String getString(JsonNode node, String fieldName) {
+        JsonNode fieldValue = node.get(fieldName);
+        return isNull(fieldValue) ? null : fieldValue.asText();
+    }
+
+    @Override
+    protected Map<String, String> extractRowData(
+            JsonNode record, LinkedHashMap<String, DataType> paimonFieldTypes) {
+        if (!hasSchema) {
+            return super.extractRowData(record, paimonFieldTypes);
+        }
+
+        Map<String, Object> recordMap =
+                JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
+        LinkedHashMap<String, String> resultMap = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : recordMap.entrySet()) {
+            String fieldName = entry.getKey();
+            String rawValue = Objects.toString(entry.getValue(), null);
+            String debeziumType = debeziumTypes.get(fieldName);
+            String className = classNames.get(fieldName);
+
+            String transformed =
+                    DebeziumSchemaUtils.transformRawValue(
+                            rawValue, debeziumType, className, typeMapping, record.get(fieldName));
+            resultMap.put(fieldName, transformed);
+
+            paimonFieldTypes.put(
+                    fieldName,
+                    DebeziumSchemaUtils.toDataType(
+                            debeziumType, className, parameters.get(fieldName)));
+        }
+
+        evalComputedColumns(resultMap, paimonFieldTypes);
+
+        return resultMap;
     }
 
     @Override

@@ -18,7 +18,7 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.operation.FileStoreCommit
-import org.apache.paimon.table.AbstractFileStoreTable
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{FileStorePathFactory, RowDataPartitionComputer}
@@ -58,7 +58,7 @@ trait PaimonPartitionManagement extends SupportsPartitionManagement {
       partitionKeys.asScala.toArray)
     val partitionMap = rowDataPartitionComputer.generatePartValues(new SparkRow(tableRowType, row))
     getTable match {
-      case table: AbstractFileStoreTable =>
+      case table: FileStoreTable =>
         val commit: FileStoreCommit = table.store.newCommit(UUID.randomUUID.toString)
         commit.dropPartitions(
           Collections.singletonList(partitionMap),

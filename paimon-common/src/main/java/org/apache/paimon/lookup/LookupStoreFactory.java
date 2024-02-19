@@ -18,8 +18,15 @@
 
 package org.apache.paimon.lookup;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.BloomFilter;
+
+import javax.annotation.Nullable;
+
 import java.io.File;
 import java.io.IOException;
+import java.util.function.Function;
 
 /**
  * A key-value store for lookup, key-value store should be single binary file written once and ready
@@ -32,7 +39,26 @@ import java.io.IOException;
  */
 public interface LookupStoreFactory {
 
-    LookupStoreWriter createWriter(File file) throws IOException;
+    LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
+            throws IOException;
 
-    LookupStoreReader createReader(File file) throws IOException;
+    LookupStoreReader createReader(File file, Context context) throws IOException;
+
+    static Function<Long, BloomFilter.Builder> bfGenerator(Options options) {
+        Function<Long, BloomFilter.Builder> bfGenerator = rowCount -> null;
+        if (options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_ENABLED)) {
+            double bfFpp = options.get(CoreOptions.LOOKUP_CACHE_BLOOM_FILTER_FPP);
+            bfGenerator =
+                    rowCount -> {
+                        if (rowCount > 0) {
+                            return BloomFilter.builder(rowCount, bfFpp);
+                        }
+                        return null;
+                    };
+        }
+        return bfGenerator;
+    }
+
+    /** Context between writer and reader. */
+    interface Context {}
 }

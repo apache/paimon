@@ -35,10 +35,15 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.stats.ColStats;
+import org.apache.paimon.stats.Statistics;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.testutils.assertj.AssertionUtils;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -644,8 +649,6 @@ public class FileStoreCommitTest {
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
         // check data
-        RowDataToObjectArrayConverter partitionConverter =
-                new RowDataToObjectArrayConverter(TestKeyValueGenerator.DEFAULT_PART_TYPE);
         org.apache.paimon.predicate.Predicate partitionFilter =
                 partitions.stream()
                         .map(
@@ -657,7 +660,7 @@ public class FileStoreCommitTest {
 
         List<KeyValue> expectedKvs = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
-            if (partitionFilter.test(partitionConverter.convert(entry.getKey()))) {
+            if (partitionFilter.test(entry.getKey())) {
                 continue;
             }
             expectedKvs.addAll(entry.getValue());
@@ -772,6 +775,69 @@ public class FileStoreCommitTest {
         snapshot = store.snapshotManager().latestSnapshot();
         file = indexFileHandler.scan(snapshot.id(), HASH_INDEX, part2, 2);
         assertThat(file).isEmpty();
+    }
+
+    @Test
+    public void testWriteStats() throws Exception {
+        TestFileStore store = createStore(false, 1, CoreOptions.ChangelogProducer.NONE);
+        StatsFileHandler statsFileHandler = store.newStatsFileHandler();
+        FileStoreCommitImpl fileStoreCommit = store.newCommit();
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        Snapshot latestSnapshot = store.snapshotManager().latestSnapshot();
+
+        // Analyze and check
+        HashMap<String, ColStats<?>> fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 10L, 1L, 10L, 0L, 8L, 8L));
+        Statistics fakeStats =
+                new Statistics(
+                        latestSnapshot.id(),
+                        latestSnapshot.schemaId(),
+                        10L,
+                        1000L,
+                        fakeColStatsMap);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        Optional<Statistics> readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // New snapshot will inherit last snapshot's stats
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // When table schema is modified, new snapshot will not inherit last snapshot's stats
+        ArrayList<DataField> newFields =
+                new ArrayList<>(TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields());
+        newFields.add(new DataField(-1, "newField", DataTypes.INT()));
+        store.mergeSchema(new RowType(false, newFields), true);
+        store.commitData(generateDataList(10), gen::getPartition, kv -> 0, Collections.emptyMap());
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isEmpty();
+
+        // Then we need to analyze again
+        latestSnapshot = store.snapshotManager().latestSnapshot();
+        fakeColStatsMap = new HashMap<>();
+        fakeColStatsMap.put("orderId", ColStats.newColStats(3, 30L, 1L, 30L, 0L, 8L, 8L));
+        fakeStats =
+                new Statistics(
+                        latestSnapshot.id(),
+                        latestSnapshot.schemaId(),
+                        30L,
+                        3000L,
+                        fakeColStatsMap);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
+
+        // Analyze without col stats and check
+        latestSnapshot = store.snapshotManager().latestSnapshot();
+        fakeStats = new Statistics(latestSnapshot.id(), latestSnapshot.schemaId(), 30L, 3000L);
+        fileStoreCommit.commitStatistics(fakeStats, Long.MAX_VALUE);
+        readStats = statsFileHandler.readStats();
+        assertThat(readStats).isPresent();
+        assertThat(readStats.get()).isEqualTo(fakeStats);
     }
 
     private TestFileStore createStore(boolean failing) throws Exception {

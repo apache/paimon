@@ -26,6 +26,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.DataType;
@@ -34,6 +35,8 @@ import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
 import org.apache.paimon.types.FloatType;
 import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.MapType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.SmallIntType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
@@ -114,15 +117,15 @@ public class FieldAggregatorTest {
     }
 
     @Test
-    public void testFieldFirstNotNullValueAgg() {
-        FieldFirstNotNullValueAgg fieldFirstNotNullValueAgg =
-                new FieldFirstNotNullValueAgg(new IntType());
-        assertThat(fieldFirstNotNullValueAgg.agg(null, null)).isNull();
-        assertThat(fieldFirstNotNullValueAgg.agg(null, 1)).isEqualTo(1);
-        assertThat(fieldFirstNotNullValueAgg.agg(1, 2)).isEqualTo(1);
+    public void testFieldFirstNonNullValueAgg() {
+        FieldFirstNonNullValueAgg fieldFirstNonNullValueAgg =
+                new FieldFirstNonNullValueAgg(new IntType());
+        assertThat(fieldFirstNonNullValueAgg.agg(null, null)).isNull();
+        assertThat(fieldFirstNonNullValueAgg.agg(null, 1)).isEqualTo(1);
+        assertThat(fieldFirstNonNullValueAgg.agg(1, 2)).isEqualTo(1);
 
-        fieldFirstNotNullValueAgg.reset();
-        assertThat(fieldFirstNotNullValueAgg.agg(1, 3)).isEqualTo(3);
+        fieldFirstNonNullValueAgg.reset();
+        assertThat(fieldFirstNonNullValueAgg.agg(1, 3)).isEqualTo(3);
     }
 
     @Test
@@ -387,6 +390,97 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFiledCollectAggWithRowType() {
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+
+        InternalArray result;
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(rowType);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        Object[] input1 =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(1, BinaryString.fromString("B"))
+                };
+        result = (InternalArray) agg.agg(null, new GenericArray(input1));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(input1);
+
+        Object[] input2 =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(2, BinaryString.fromString("A"))
+                };
+        result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("B")),
+                        GenericRow.of(2, BinaryString.fromString("A")));
+    }
+
+    @Test
+    public void testFiledCollectAggWithArrayType() {
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+
+        InternalArray result;
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(arrayType);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        Object[] input1 =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                };
+        result = (InternalArray) agg.agg(null, new GenericArray(input1));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(input1);
+
+        Object[] input2 =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}),
+                    new GenericArray(new Object[] {1, 2}),
+                    new GenericArray(new Object[] {2, 1})
+                };
+        result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {1, 2}),
+                        new GenericArray(new Object[] {2, 1}));
+    }
+
+    @Test
+    public void testFiledCollectAggWithMapType() {
+        MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
+        FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+
+        InternalArray result;
+        InternalArray.ElementGetter elementGetter = InternalArray.createElementGetter(mapType);
+
+        assertThat(agg.agg(null, null)).isNull();
+
+        Object[] input1 =
+                new Object[] {new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "A", 2, "B"))};
+        result = (InternalArray) agg.agg(null, new GenericArray(input1));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(input1);
+
+        Object[] input2 =
+                new Object[] {
+                    new GenericMap(toMap(1, "A")),
+                    new GenericMap(toMap(2, "B", 1, "A")),
+                    new GenericMap(toMap(1, "C"))
+                };
+        result = (InternalArray) agg.agg(new GenericArray(input1), new GenericArray(input2));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        new GenericMap(toMap(1, "A")),
+                        new GenericMap(toMap(1, "A", 2, "B")),
+                        new GenericMap(toMap(1, "C")));
+    }
+
+    @Test
     public void testFieldCollectAggWithoutDistinct() {
         FieldCollectAgg agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), false);
 
@@ -408,6 +502,178 @@ public class FieldAggregatorTest {
     }
 
     @Test
+    public void testFieldCollectAggRetractWithDistinct() {
+        FieldCollectAgg agg;
+        InternalArray.ElementGetter elementGetter;
+
+        // primitive type
+        agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+        elementGetter = InternalArray.createElementGetter(DataTypes.INT());
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(new int[] {1, 2, 3}),
+                                new GenericArray(new int[] {1}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(2, 3);
+
+        // row type
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+        elementGetter = InternalArray.createElementGetter(rowType);
+
+        Object[] accElements =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(1, BinaryString.fromString("B")),
+                    GenericRow.of(2, BinaryString.fromString("B"))
+                };
+        Object[] retractElements =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(2, BinaryString.fromString("B"))
+                };
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(GenericRow.of(1, BinaryString.fromString("B")));
+
+        // array type
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+        elementGetter = InternalArray.createElementGetter(arrayType);
+
+        accElements =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}),
+                    new GenericArray(new Object[] {1, 2}),
+                    new GenericArray(new Object[] {2, 1})
+                };
+        retractElements =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                };
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(new GenericArray(new Object[] {2, 1}));
+
+        // map type
+        MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+        elementGetter = InternalArray.createElementGetter(mapType);
+
+        accElements =
+                new Object[] {
+                    new GenericMap(toMap(1, "A")),
+                    new GenericMap(toMap(2, "B", 1, "A")),
+                    new GenericMap(toMap(1, "C"))
+                };
+        retractElements =
+                new Object[] {new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "A", 2, "B"))};
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(new GenericMap(toMap(1, "C")));
+    }
+
+    @Test
+    public void testFieldCollectAggRetractWithoutDistinct() {
+        FieldCollectAgg agg;
+        InternalArray.ElementGetter elementGetter;
+
+        // primitive type
+        agg = new FieldCollectAgg(DataTypes.ARRAY(DataTypes.INT()), true);
+        elementGetter = InternalArray.createElementGetter(DataTypes.INT());
+        InternalArray result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(new int[] {1, 1, 2, 2, 3}),
+                                new GenericArray(new int[] {1, 2, 3}));
+        assertThat(unnest(result, elementGetter)).containsExactlyInAnyOrder(1, 2);
+
+        // row type
+        RowType rowType = RowType.of(DataTypes.INT(), DataTypes.STRING());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(rowType), true);
+        elementGetter = InternalArray.createElementGetter(rowType);
+
+        Object[] accElements =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(1, BinaryString.fromString("B")),
+                    GenericRow.of(2, BinaryString.fromString("B"))
+                };
+        Object[] retractElements =
+                new Object[] {
+                    GenericRow.of(1, BinaryString.fromString("A")),
+                    GenericRow.of(2, BinaryString.fromString("B"))
+                };
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        GenericRow.of(1, BinaryString.fromString("A")),
+                        GenericRow.of(1, BinaryString.fromString("B")));
+
+        // array type
+        ArrayType arrayType = new ArrayType(DataTypes.INT());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(arrayType), true);
+        elementGetter = InternalArray.createElementGetter(arrayType);
+
+        accElements =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}),
+                    new GenericArray(new Object[] {1, 1}),
+                    new GenericArray(new Object[] {1, 2}),
+                    new GenericArray(new Object[] {2, 1})
+                };
+        retractElements =
+                new Object[] {
+                    new GenericArray(new Object[] {1, 1}), new GenericArray(new Object[] {1, 2})
+                };
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        new GenericArray(new Object[] {1, 1}),
+                        new GenericArray(new Object[] {2, 1}));
+
+        // map type
+        MapType mapType = new MapType(DataTypes.INT(), DataTypes.STRING());
+        agg = new FieldCollectAgg(DataTypes.ARRAY(mapType), true);
+        elementGetter = InternalArray.createElementGetter(mapType);
+
+        accElements =
+                new Object[] {
+                    new GenericMap(toMap(1, "A")),
+                    new GenericMap(toMap(1, "A")),
+                    new GenericMap(toMap(2, "B", 1, "A")),
+                    new GenericMap(toMap(1, "C"))
+                };
+        retractElements =
+                new Object[] {new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "A", 2, "B"))};
+        result =
+                (InternalArray)
+                        agg.retract(
+                                new GenericArray(accElements), new GenericArray(retractElements));
+
+        assertThat(unnest(result, elementGetter))
+                .containsExactlyInAnyOrder(
+                        new GenericMap(toMap(1, "A")), new GenericMap(toMap(1, "C")));
+    }
+
+    @Test
     public void testFieldMergeMapAgg() {
         FieldMergeMapAgg agg =
                 new FieldMergeMapAgg(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()));
@@ -424,6 +690,17 @@ public class FieldAggregatorTest {
         accumulator = agg.agg(accumulator, new GenericMap(toMap(1, "a", 3, "c")));
         assertThat(toJavaMap(accumulator))
                 .containsExactlyInAnyOrderEntriesOf(toMap(1, "a", 2, "B", 3, "c"));
+    }
+
+    @Test
+    public void testFieldMergeMapAggRetract() {
+        FieldMergeMapAgg agg =
+                new FieldMergeMapAgg(DataTypes.MAP(DataTypes.INT(), DataTypes.STRING()));
+        Object result =
+                agg.retract(
+                        new GenericMap(toMap(1, "A", 2, "B", 3, "C")),
+                        new GenericMap(toMap(1, "A", 2, "A")));
+        assertThat(toJavaMap(result)).containsExactlyInAnyOrderEntriesOf(toMap(3, "C"));
     }
 
     private Map<Object, Object> toMap(Object... kvs) {

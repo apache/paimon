@@ -66,9 +66,11 @@ If a message in a Kafka topic is a change event captured from another database u
 The JSON sources possibly missing some information. For example, Ogg and Maxwell format standards don't contain field 
 types; When you write JSON sources into Flink Kafka sink, it will only reserve data and row type and drop other information. 
 The synchronization job will try best to handle the problem as follows:
-1. If missing field types, Paimon will use 'STRING' type as default. 
-2. If missing database name or table name, you cannot do database synchronization, but you can still do table synchronization.
-3. If missing primary keys, the job might create non primary key table. You can set primary keys when submit job in table 
+1. Usually, debezium-json contains 'schema' field, from which Paimon will retrieve data types. Make sure your debezium 
+json has this field, or Paimon will use 'STRING' type.
+2. If missing field types, Paimon will use 'STRING' type as default. 
+3. If missing database name or table name, you cannot do database synchronization, but you can still do table synchronization.
+4. If missing primary keys, the job might create non primary key table. You can set primary keys when submit job in table 
 synchronization.
 {{< /hint >}}
 

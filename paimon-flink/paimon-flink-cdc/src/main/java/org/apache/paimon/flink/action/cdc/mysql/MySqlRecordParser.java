@@ -36,6 +36,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.JsonNode;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.ververica.cdc.connectors.mysql.source.config.MySqlSourceOptions;
+import io.debezium.connector.AbstractSourceInfo;
 import io.debezium.data.Bits;
 import io.debezium.data.geometry.Geometry;
 import io.debezium.data.geometry.Point;
@@ -50,7 +51,6 @@ import io.debezium.time.ZonedTimestamp;
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.util.Collector;
-import org.apache.kafka.connect.data.Decimal;
 import org.apache.kafka.connect.json.JsonConverterConfig;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -79,6 +79,7 @@ import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.mapKeyCase
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.recordKeyDuplicateErrMsg;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.flink.action.cdc.format.debezium.DebeziumSchemaUtils.decimalLogicalName;
 import static org.apache.paimon.utils.JsonSerdeUtil.isNull;
 
 /**
@@ -127,8 +128,8 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
     @Override
     public void flatMap(String rawEvent, Collector<RichCdcMultiplexRecord> out) throws Exception {
         root = objectMapper.readValue(rawEvent, DebeziumEvent.class);
-        currentTable = root.payload().source().table();
-        databaseName = root.payload().source().db();
+        currentTable = root.payload().source().get(AbstractSourceInfo.TABLE_NAME_KEY).asText();
+        databaseName = root.payload().source().get(AbstractSourceInfo.DATABASE_NAME_KEY).asText();
 
         if (root.payload().isSchemaChange()) {
             extractSchemaChange().forEach(out::collect);
@@ -275,7 +276,7 @@ public class MySqlRecordParser implements FlatMapFunction<String, RichCdcMultipl
             } else if (("bytes".equals(mySqlType) && className == null)) {
                 // MySQL binary, varbinary, blob
                 newValue = new String(Base64.getDecoder().decode(oldValue));
-            } else if ("bytes".equals(mySqlType) && Decimal.LOGICAL_NAME.equals(className)) {
+            } else if ("bytes".equals(mySqlType) && decimalLogicalName().equals(className)) {
                 // MySQL numeric, fixed, decimal
                 try {
                     new BigDecimal(oldValue);

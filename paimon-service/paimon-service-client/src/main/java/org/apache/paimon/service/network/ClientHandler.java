@@ -24,10 +24,11 @@ import org.apache.paimon.service.network.messages.MessageType;
 import org.apache.paimon.service.network.messages.RequestFailure;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandlerContext;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInboundHandlerAdapter;
-import org.apache.flink.shaded.netty4.io.netty.util.ReferenceCountUtil;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandlerContext;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelInboundHandlerAdapter;
+import org.apache.paimon.shade.netty4.io.netty.util.ReferenceCountUtil;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

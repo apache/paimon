@@ -591,6 +591,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, root);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set("bucket", "1");
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

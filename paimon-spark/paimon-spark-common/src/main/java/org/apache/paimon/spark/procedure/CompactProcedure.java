@@ -32,7 +32,6 @@ import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.SparkUtils;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -246,9 +245,8 @@ public class CompactProcedure extends BaseProcedure {
 
     private void compactUnAwareBucketTable(
             FileStoreTable table, @Nullable Predicate filter, JavaSparkContext javaSparkContext) {
-        AppendOnlyFileStoreTable fileStoreTable = (AppendOnlyFileStoreTable) table;
         List<AppendOnlyCompactionTask> compactionTasks =
-                new AppendOnlyTableCompactionCoordinator(fileStoreTable, false, filter).run();
+                new AppendOnlyTableCompactionCoordinator(table, false, filter).run();
         if (compactionTasks.isEmpty()) {
             return;
         }
@@ -271,7 +269,8 @@ public class CompactProcedure extends BaseProcedure {
                                 (FlatMapFunction<Iterator<byte[]>, CommitMessage>)
                                         taskIterator -> {
                                             AppendOnlyFileStoreWrite write =
-                                                    fileStoreTable.store().newWrite(commitUser);
+                                                    (AppendOnlyFileStoreWrite)
+                                                            table.store().newWrite(commitUser);
                                             CompactionTaskSerializer ser =
                                                     new CompactionTaskSerializer();
                                             ArrayList<CommitMessage> messages = new ArrayList<>();

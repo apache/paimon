@@ -19,6 +19,7 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.AbstractFileStore;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -27,7 +28,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.types.DataTypes;
@@ -45,6 +46,7 @@ public class StatsTableTest extends TableTestBase {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
+        options.set(CoreOptions.BUCKET, 1);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -64,7 +66,7 @@ public class StatsTableTest extends TableTestBase {
                 GenericRow.of(1, 3, 1),
                 GenericRow.of(2, 1, 1));
 
-        AbstractFileStoreTable storeTable = (AbstractFileStoreTable) table;
+        FileStoreTable storeTable = (FileStoreTable) table;
         AbstractFileStore<?> store = (AbstractFileStore<?>) storeTable.store();
         String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
 
@@ -73,18 +75,18 @@ public class StatsTableTest extends TableTestBase {
 
         // should have partition stats
         BinaryTableStats partitionStats = manifest.partitionStats();
-        assertThat(partitionStats.min().getInt(0)).isEqualTo(1);
-        assertThat(partitionStats.max().getInt(0)).isEqualTo(2);
+        assertThat(partitionStats.minValues().getInt(0)).isEqualTo(1);
+        assertThat(partitionStats.maxValues().getInt(0)).isEqualTo(2);
 
         // should not have record stats because of NONE mode
         ManifestFile manifestFile = store.manifestFileFactory().create();
         DataFileMeta file = manifestFile.read(manifest.fileName()).get(0).file();
         BinaryTableStats recordStats = file.valueStats();
-        assertThat(recordStats.min().isNullAt(0)).isTrue();
-        assertThat(recordStats.min().isNullAt(1)).isTrue();
-        assertThat(recordStats.min().isNullAt(2)).isTrue();
-        assertThat(recordStats.max().isNullAt(0)).isTrue();
-        assertThat(recordStats.max().isNullAt(1)).isTrue();
-        assertThat(recordStats.max().isNullAt(2)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(0)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(2)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(0)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(2)).isTrue();
     }
 }

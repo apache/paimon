@@ -93,6 +93,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
     public void testBatchCompact(String mode) throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put("bucket", "1");
 
         List<FileStoreTable> tables = new ArrayList<>();
 
@@ -174,6 +175,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         // test that dedicated compact job will expire snapshots
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "3");
         options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "3");
+        options.put("bucket", "1");
 
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
@@ -446,6 +448,7 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             throws Exception {
         Map<String, String> options = new HashMap<>();
         options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put("bucket", "1");
 
         List<FileStoreTable> compactionTables = new ArrayList<>();
         List<FileStoreTable> noCompactionTables = new ArrayList<>();

@@ -19,8 +19,10 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
@@ -66,21 +68,27 @@ public class FieldStatsArraySerializerTest {
                         Collections.EMPTY_MAP,
                         "");
 
-        int[] indexMapping =
-                SchemaEvolutionUtil.createIndexMapping(tableSchema.fields(), dataSchema.fields());
+        IndexCastMapping indexCastMapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        tableSchema.fields(), dataSchema.fields());
+        int[] indexMapping = indexCastMapping.getIndexMapping();
         CastExecutor<Object, Object>[] converterMapping =
                 (CastExecutor<Object, Object>[])
                         SchemaEvolutionUtil.createConvertMapping(
                                 tableSchema.fields(), dataSchema.fields(), indexMapping);
         FieldStatsArraySerializer fieldStatsArraySerializer =
                 new FieldStatsArraySerializer(
-                        tableSchema.logicalRowType(), indexMapping, converterMapping);
+                        tableSchema.logicalRowType(),
+                        indexMapping,
+                        converterMapping,
+                        indexCastMapping.getCastMapping());
         BinaryRow minRowData = row(1, 2, 3, 4);
         BinaryRow maxRowData = row(100, 99, 98, 97);
         Long[] nullCounts = new Long[] {1L, 0L, 10L, 100L};
-        BinaryTableStats dataTableStats = new BinaryTableStats(minRowData, maxRowData, nullCounts);
+        BinaryTableStats dataTableStats =
+                new BinaryTableStats(minRowData, maxRowData, BinaryArray.fromLongArray(nullCounts));
 
-        FieldStats[] fieldStatsArray = dataTableStats.fields(fieldStatsArraySerializer, 1000L);
+        FieldStats[] fieldStatsArray = fieldStatsArraySerializer.fromBinary(dataTableStats, 1000L);
         assertThat(fieldStatsArray.length).isEqualTo(tableSchema.fields().size()).isEqualTo(5);
         checkFieldStats(fieldStatsArray[0], 2, 99, 0L);
         checkFieldStats(fieldStatsArray[1], 4, 97, 100L);

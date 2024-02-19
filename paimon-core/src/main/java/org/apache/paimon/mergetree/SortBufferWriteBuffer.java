@@ -63,6 +63,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             MemorySegmentPool memoryPool,
             boolean spillable,
             int sortMaxFan,
+            String compression,
             IOManager ioManager) {
         this.keyType = keyType;
         this.valueType = valueType;
@@ -95,7 +96,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                                 memoryPool.pageSize(),
                                 inMemorySortBuffer,
                                 ioManager,
-                                sortMaxFan)
+                                sortMaxFan,
+                                compression)
                         : inMemorySortBuffer;
     }
 

@@ -19,9 +19,11 @@
 package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.factories.Factory;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
+import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.PipelineOptions;
@@ -46,6 +48,10 @@ public abstract class ProcedureBase implements Procedure, Factory {
         return this;
     }
 
+    protected Table table(String tableId) throws Catalog.TableNotExistException {
+        return catalog.getTable(Identifier.fromString(tableId));
+    }
+
     @Nullable
     protected String nullable(String arg) {
         return StringUtils.isBlank(arg) ? null : arg;
@@ -58,16 +64,20 @@ public abstract class ProcedureBase implements Procedure, Factory {
         action.withStreamExecutionEnvironment(env);
         action.build();
 
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
-        String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultJobName);
-        JobClient jobClient = env.executeAsync(name);
-        return execute(jobClient, conf.get(TABLE_DML_SYNC));
+        return execute(env, defaultJobName);
     }
 
     protected String[] execute(ProcedureContext procedureContext, JobClient jobClient) {
         StreamExecutionEnvironment env = procedureContext.getExecutionEnvironment();
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         return execute(jobClient, conf.get(TABLE_DML_SYNC));
+    }
+
+    protected String[] execute(StreamExecutionEnvironment env, String defaultJobName)
+            throws Exception {
+        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultJobName);
+        return execute(env.executeAsync(name), conf.get(TABLE_DML_SYNC));
     }
 
     private String[] execute(JobClient jobClient, boolean dmlSync) {

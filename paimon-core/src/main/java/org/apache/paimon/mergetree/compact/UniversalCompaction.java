@@ -26,6 +26,9 @@ import org.apache.paimon.mergetree.SortedRun;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.annotation.Nullable;
+
+import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
 
@@ -44,15 +47,37 @@ public class UniversalCompaction implements CompactStrategy {
     private final int sizeRatio;
     private final int numRunCompactionTrigger;
 
+    @Nullable private final Long opCompactionInterval;
+    @Nullable private Long lastOptimizedCompaction;
+
     public UniversalCompaction(int maxSizeAmp, int sizeRatio, int numRunCompactionTrigger) {
+        this(maxSizeAmp, sizeRatio, numRunCompactionTrigger, null);
+    }
+
+    public UniversalCompaction(
+            int maxSizeAmp,
+            int sizeRatio,
+            int numRunCompactionTrigger,
+            @Nullable Duration opCompactionInterval) {
         this.maxSizeAmp = maxSizeAmp;
         this.sizeRatio = sizeRatio;
         this.numRunCompactionTrigger = numRunCompactionTrigger;
+        this.opCompactionInterval =
+                opCompactionInterval == null ? null : opCompactionInterval.toMillis();
     }
 
     @Override
     public Optional<CompactUnit> pick(int numLevels, List<LevelSortedRun> runs) {
         int maxLevel = numLevels - 1;
+
+        if (opCompactionInterval != null) {
+            if (lastOptimizedCompaction == null
+                    || currentTimeMillis() - lastOptimizedCompaction > opCompactionInterval) {
+                LOG.debug("Universal compaction due to optimized compaction interval");
+                updateLastOptimizedCompaction();
+                return Optional.of(CompactUnit.fromLevelRuns(maxLevel, runs));
+            }
+        }
 
         // 1 checking for reducing size amplification
         CompactUnit unit = pickForSizeAmp(maxLevel, runs);
@@ -101,6 +126,7 @@ public class UniversalCompaction implements CompactStrategy {
 
         // size amplification = percentage of additional size
         if (candidateSize * 100 > maxSizeAmp * earliestRunSize) {
+            updateLastOptimizedCompaction();
             return CompactUnit.fromLevelRuns(maxLevel, runs);
         }
 
@@ -150,7 +176,7 @@ public class UniversalCompaction implements CompactStrategy {
     }
 
     @VisibleForTesting
-    static CompactUnit createUnit(List<LevelSortedRun> runs, int maxLevel, int runCount) {
+    CompactUnit createUnit(List<LevelSortedRun> runs, int maxLevel, int runCount) {
         int outputLevel;
         if (runCount == runs.size()) {
             outputLevel = maxLevel;
@@ -172,9 +198,18 @@ public class UniversalCompaction implements CompactStrategy {
         }
 
         if (runCount == runs.size()) {
+            updateLastOptimizedCompaction();
             outputLevel = maxLevel;
         }
 
         return CompactUnit.fromLevelRuns(outputLevel, runs.subList(0, runCount));
+    }
+
+    private void updateLastOptimizedCompaction() {
+        lastOptimizedCompaction = currentTimeMillis();
+    }
+
+    long currentTimeMillis() {
+        return System.currentTimeMillis();
     }
 }

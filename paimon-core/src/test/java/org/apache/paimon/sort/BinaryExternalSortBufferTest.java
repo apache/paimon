@@ -280,7 +280,8 @@ public class BinaryExternalSortBufferTest {
                 MemorySegmentPool.DEFAULT_PAGE_SIZE,
                 inMemorySortBuffer,
                 ioManager,
-                maxNumFileHandles);
+                maxNumFileHandles,
+                "lz4");
     }
 
     /** Mock reader for binary row. */

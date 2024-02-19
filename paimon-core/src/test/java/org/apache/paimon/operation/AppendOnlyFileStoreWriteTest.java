@@ -31,7 +31,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.types.DataTypes;
@@ -50,9 +50,9 @@ public class AppendOnlyFileStoreWriteTest {
 
     @Test
     public void testWritesInBatch() throws Exception {
-        AppendOnlyFileStoreTable table = createFileStoreTable();
+        FileStoreTable table = createFileStoreTable();
 
-        AppendOnlyFileStoreWrite write = table.store().newWrite("ss");
+        AppendOnlyFileStoreWrite write = (AppendOnlyFileStoreWrite) table.store().newWrite("ss");
         write.withExecutionMode(false);
 
         write.write(partition(0), 0, GenericRow.of(0, 0, 0));
@@ -101,7 +101,7 @@ public class AppendOnlyFileStoreWriteTest {
         Assertions.assertThat(records).isEqualTo(11);
     }
 
-    protected AppendOnlyFileStoreTable createFileStoreTable() throws Exception {
+    protected FileStoreTable createFileStoreTable() throws Exception {
         Catalog catalog = new FileSystemCatalog(LocalFileIO.create(), new Path(tempDir.toString()));
         Schema schema =
                 Schema.newBuilder()
@@ -114,7 +114,7 @@ public class AppendOnlyFileStoreWriteTest {
         Identifier identifier = Identifier.create("default", "test");
         catalog.createDatabase("default", false);
         catalog.createTable(identifier, schema, false);
-        return (AppendOnlyFileStoreTable) catalog.getTable(identifier);
+        return (FileStoreTable) catalog.getTable(identifier);
     }
 
     private BinaryRow partition(int i) {

@@ -22,11 +22,15 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
+import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
+import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
+import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoveQueryExecutor;
 import org.apache.paimon.lookup.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.CommitMessage;
@@ -42,6 +46,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.net.InetSocketAddress;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -51,6 +56,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.UUID;
 
+import static org.apache.paimon.service.ServiceManager.PRIMARY_KEY_LOOKUP;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FileStoreLookupFunction}. */
@@ -58,16 +64,26 @@ public class FileStoreLookupFunctionTest {
 
     private static final Random RANDOM = new Random();
 
+    @TempDir private Path tempDir;
+
     private final String commitUser = UUID.randomUUID().toString();
     private final TraceableFileIO fileIO = new TraceableFileIO();
-    private FileStoreLookupFunction fileStoreLookupFunction;
-    private FileStoreTable fileStoreTable;
-    @TempDir private Path tempDir;
+
+    private org.apache.paimon.fs.Path tablePath;
+    private FileStoreLookupFunction lookupFunction;
+    private FileStoreTable table;
 
     @BeforeEach
     public void before() throws Exception {
-        org.apache.paimon.fs.Path path = new org.apache.paimon.fs.Path(tempDir.toString());
-        SchemaManager schemaManager = new SchemaManager(fileIO, path);
+        tablePath = new org.apache.paimon.fs.Path(tempDir.toString());
+    }
+
+    private void createLookupFunction() throws Exception {
+        createLookupFunction(true, false);
+    }
+
+    private void createLookupFunction(boolean isPartition, boolean joinEqualPk) throws Exception {
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
@@ -82,31 +98,58 @@ public class FileStoreLookupFunctionTest {
         Schema schema =
                 new Schema(
                         rowType.getFields(),
-                        Collections.singletonList("pt"),
+                        isPartition ? Collections.singletonList("pt") : Collections.emptyList(),
                         Arrays.asList("pt", "k"),
                         conf.toMap(),
                         "");
         TableSchema tableSchema = schemaManager.createTable(schema);
-        fileStoreTable =
+        table =
                 FileStoreTableFactory.create(
                         fileIO, new org.apache.paimon.fs.Path(tempDir.toString()), tableSchema);
 
-        fileStoreLookupFunction =
-                new FileStoreLookupFunction(fileStoreTable, new int[] {0, 1}, new int[] {1}, null);
-        fileStoreLookupFunction.open(tempDir.toString());
+        lookupFunction =
+                new FileStoreLookupFunction(
+                        table,
+                        new int[] {0, 1},
+                        joinEqualPk ? new int[] {0, 1} : new int[] {1},
+                        null);
+        lookupFunction.open(tempDir.toString());
     }
 
     @AfterEach
     public void close() throws Exception {
-        if (fileStoreLookupFunction != null) {
-            fileStoreLookupFunction.close();
+        if (lookupFunction != null) {
+            lookupFunction.close();
         }
     }
 
     @Test
+    public void testDefaultLocalPartial() throws Exception {
+        createLookupFunction(false, true);
+        assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
+        QueryExecutor queryExecutor =
+                ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
+        assertThat(queryExecutor).isInstanceOf(LocalQueryExecutor.class);
+    }
+
+    @Test
+    public void testDefaultRemotePartial() throws Exception {
+        createLookupFunction(false, true);
+        ServiceManager serviceManager = new ServiceManager(fileIO, tablePath);
+        serviceManager.resetService(
+                PRIMARY_KEY_LOOKUP, new InetSocketAddress[] {new InetSocketAddress(1)});
+        lookupFunction.open(tempDir.toString());
+        assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
+        QueryExecutor queryExecutor =
+                ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
+        assertThat(queryExecutor).isInstanceOf(RemoveQueryExecutor.class);
+    }
+
+    @Test
     public void testLookupScanLeak() throws Exception {
+        createLookupFunction();
         commit(writeCommit(1));
-        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
                         TraceableFileIO.openInputStreams(
                                         s -> s.toString().contains(tempDir.toString()))
@@ -114,7 +157,7 @@ public class FileStoreLookupFunctionTest {
                 .isEqualTo(0);
 
         commit(writeCommit(10));
-        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
         assertThat(
                         TraceableFileIO.openInputStreams(
                                         s -> s.toString().contains(tempDir.toString()))
@@ -124,25 +167,26 @@ public class FileStoreLookupFunctionTest {
 
     @Test
     public void testLookupExpiredSnapshot() throws Exception {
+        createLookupFunction();
         commit(writeCommit(1));
-        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
 
         commit(writeCommit(2));
         commit(writeCommit(3));
         commit(writeCommit(4));
         commit(writeCommit(5));
-        fileStoreLookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {
-        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+        TableCommitImpl commit = table.newCommit(commitUser);
         commit.commit(messages);
         commit.close();
     }
 
     private List<CommitMessage> writeCommit(int number) throws Exception {
         List<CommitMessage> messages = new ArrayList<>();
-        StreamTableWrite writer = fileStoreTable.newStreamWriteBuilder().newWrite();
+        StreamTableWrite writer = table.newStreamWriteBuilder().newWrite();
         for (int i = 0; i < number; i++) {
             writer.write(randomRow());
             messages.addAll(writer.prepareCommit(true, i));

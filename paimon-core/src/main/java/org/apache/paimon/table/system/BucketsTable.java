@@ -44,6 +44,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -118,6 +119,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public BranchManager branchManager() {
+        return wrapped.branchManager();
+    }
+
+    @Override
     public String name() {
         return "__internal_buckets_" + wrapped.location().getName();
     }
@@ -140,6 +146,11 @@ public class BucketsTable implements DataTable, ReadonlyTable {
     @Override
     public SnapshotReader newSnapshotReader() {
         return wrapped.newSnapshotReader();
+    }
+
+    @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
+        return wrapped.newSnapshotReader(branchName);
     }
 
     @Override

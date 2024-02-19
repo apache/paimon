@@ -21,6 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.Test;
@@ -38,14 +39,14 @@ import java.util.stream.Collectors;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * Tests for {@link FileStoreExpireImpl}. Some files not in use may still remain after the test due
- * to the testing methods.
+ * Tests for {@link ExpireSnapshots}. Some files not in use may still remain after the test due to
+ * the testing methods.
  */
 public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
 
     @Test
     public void testExpireWithMissingFiles() throws Exception {
-        FileStoreExpire expire = store.newExpire(1, 1, 1);
+        ExpireSnapshots expire = store.newExpire(1, 1, 1);
 
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();

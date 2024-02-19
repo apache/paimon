@@ -18,22 +18,34 @@
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
-import org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
 
 import org.apache.spark.SparkConf
+import org.apache.spark.paimon.Utils
+
+import java.io.File
 
 class PaimonHiveTestBase extends PaimonSparkTestBase {
 
+  protected lazy val tempHiveDBDir: File = Utils.createTempDir
+
   protected lazy val testHiveMetastore: TestHiveMetastore = new TestHiveMetastore
+
+  protected val paimonHiveCatalogName: String = "paimon_hive"
 
   protected val hiveDbName: String = "test_hive"
 
+  /**
+   * Add spark_catalog ([[SparkGenericCatalog]] in hive) and paimon_hive ([[SparkCatalog]] in hive)
+   * catalog
+   */
   override protected def sparkConf: SparkConf = {
     super.sparkConf
-      .set("spark.sql.warehouse.dir", tempDBDir.getCanonicalPath)
+      .set("spark.sql.warehouse.dir", tempHiveDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
       .set("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog[_]].getName)
-      .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+      .set(s"spark.sql.catalog.$paimonHiveCatalogName", classOf[SparkCatalog].getName)
+      .set(s"spark.sql.catalog.$paimonHiveCatalogName.metastore", "hive")
+      .set(s"spark.sql.catalog.$paimonHiveCatalogName.warehouse", tempHiveDBDir.getCanonicalPath)
   }
 
   override protected def beforeAll(): Unit = {
@@ -41,7 +53,6 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.beforeAll()
     spark.sql(s"USE spark_catalog")
     spark.sql(s"CREATE DATABASE IF NOT EXISTS $hiveDbName")
-    spark.sql(s"USE $hiveDbName")
   }
 
   override protected def afterAll(): Unit = {
@@ -55,8 +66,9 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     }
   }
 
+  /** Default is spark_catalog */
   override protected def beforeEach(): Unit = {
     spark.sql(s"USE spark_catalog")
+    spark.sql(s"USE $hiveDbName")
   }
-
 }

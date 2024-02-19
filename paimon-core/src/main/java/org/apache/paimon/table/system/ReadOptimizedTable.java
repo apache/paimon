@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.DefaultValueAssigner;
-import org.apache.paimon.table.AbstractFileStoreTable;
 import org.apache.paimon.table.DataTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
@@ -34,6 +33,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.InnerTableScanImpl;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -55,10 +55,10 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
 
     public static final String READ_OPTIMIZED = "ro";
 
-    private final AbstractFileStoreTable dataTable;
+    private final FileStoreTable dataTable;
 
     public ReadOptimizedTable(FileStoreTable dataTable) {
-        this.dataTable = (AbstractFileStoreTable) dataTable;
+        this.dataTable = dataTable;
     }
 
     @Override
@@ -98,6 +98,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
+        return dataTable.newSnapshotReader(branchName);
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
                 coreOptions(),
@@ -134,6 +139,11 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public TagManager tagManager() {
         return dataTable.tagManager();
+    }
+
+    @Override
+    public BranchManager branchManager() {
+        return dataTable.branchManager();
     }
 
     @Override

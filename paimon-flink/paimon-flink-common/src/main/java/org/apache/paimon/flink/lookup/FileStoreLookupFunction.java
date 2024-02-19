@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkConnectorOptions.LookupCacheMode;
 import org.apache.paimon.flink.FlinkRowData;
@@ -25,12 +26,10 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateFilter;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
 import org.apache.paimon.utils.FileIOUtils;
-import org.apache.paimon.utils.TypeUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -61,6 +60,7 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_CACHE_MODE;
+import static org.apache.paimon.flink.query.RemoteTableQuery.isRemoteServiceAvailable;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CACHE_ROWS;
 import static org.apache.paimon.lookup.RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
@@ -139,10 +139,17 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         if (options.get(LOOKUP_CACHE_MODE) == LookupCacheMode.AUTO
                 && new HashSet<>(table.primaryKeys()).equals(new HashSet<>(joinKeys))) {
-            try {
+            if (isRemoteServiceAvailable(storeTable)) {
                 this.lookupTable =
-                        new PrimaryKeyPartialLookupTable(storeTable, projection, path, joinKeys);
-            } catch (UnsupportedOperationException ignore) {
+                        PrimaryKeyPartialLookupTable.createRemoteTable(
+                                storeTable, projection, joinKeys);
+            } else {
+                try {
+                    this.lookupTable =
+                            PrimaryKeyPartialLookupTable.createLocalTable(
+                                    storeTable, projection, path, joinKeys);
+                } catch (UnsupportedOperationException ignore2) {
+                }
             }
         }
 
@@ -152,8 +159,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                             storeTable,
                             projection,
                             predicate,
+                            createProjectedPredicate(projection),
                             path,
-                            createRecordFilter(projection),
                             joinKeys);
             this.lookupTable = FullCacheLookupTable.create(context, options.get(LOOKUP_CACHE_ROWS));
         }
@@ -161,7 +168,8 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         lookupTable.open();
     }
 
-    private PredicateFilter createRecordFilter(int[] projection) {
+    @Nullable
+    private Predicate createProjectedPredicate(int[] projection) {
         Predicate adjustedPredicate = null;
         if (predicate != null) {
             // adjust to projection index
@@ -173,8 +181,7 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
                                             .toArray())
                             .orElse(null);
         }
-        return new PredicateFilter(
-                TypeUtils.project(table.rowType(), projection), adjustedPredicate);
+        return adjustedPredicate;
     }
 
     public Collection<RowData> lookup(RowData keyRow) {
@@ -217,6 +224,11 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         refresh();
 
         nextLoadTime = System.currentTimeMillis() + refreshInterval.toMillis();
+    }
+
+    @VisibleForTesting
+    LookupTable lookupTable() {
+        return lookupTable;
     }
 
     private void refresh() throws Exception {

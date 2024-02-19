@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.manifest.ManifestCommittable;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -29,15 +29,15 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 /** Compaction Sink for unaware-bucket table. */
 public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionTask> {
 
-    private final AppendOnlyFileStoreTable table;
+    private final FileStoreTable table;
 
-    public UnawareBucketCompactionSink(AppendOnlyFileStoreTable table) {
+    public UnawareBucketCompactionSink(FileStoreTable table) {
         super(table, true);
         this.table = table;
     }
 
     public static DataStreamSink<?> sink(
-            AppendOnlyFileStoreTable table, DataStream<AppendOnlyCompactionTask> input) {
+            FileStoreTable table, DataStream<AppendOnlyCompactionTask> input) {
         return new UnawareBucketCompactionSink(table).sinkFrom(input);
     }
 

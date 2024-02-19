@@ -63,6 +63,7 @@ import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
 import static org.apache.paimon.operation.FileStoreTestUtils.partitionedData;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -722,6 +723,8 @@ public class FileDeletionTest {
                         Collections.emptyMap(),
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
+                        null,
+                        DEFAULT_MAIN_BRANCH,
                         null);
     }
 

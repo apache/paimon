@@ -35,7 +35,7 @@ import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.query.TableQuery;
+import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -262,6 +262,24 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBranchBatchReadWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        generateBranch(table);
+        writeBranchData(table);
+        List<Split> splits = toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Collections.singletonList(
+                                "1|10|1000|binary|varbinary|mapKey:mapVal|multiset"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testBatchProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
@@ -301,6 +319,31 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
         List<Split> splits =
                 toSplits(table.newSnapshotReader().withMode(ScanMode.DELTA).read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
+                .isEqualTo(
+                        Collections.singletonList(
+                                "-1|11|1001|binary|varbinary|mapKey:mapVal|multiset"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "-2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
+                                "+2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testBranchStreamingReadWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        generateBranch(table);
+        writeBranchData(table);
+
+        List<Split> splits =
+                toSplits(
+                        table.newSnapshotReader(BRANCH_NAME)
+                                .withMode(ScanMode.DELTA)
+                                .read()
+                                .dataSplits());
         TableRead read = table.newRead();
         assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
                 .isEqualTo(
@@ -589,6 +632,31 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 10, 1000L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(2, 21, 2001L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 11, 1001L));
+        write.write(rowData(2, 21, 20001L));
+        write.write(rowData(2, 22, 202L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 11, 1001L));
+        write.write(rowDataWithKind(RowKind.DELETE, 2, 20, 200L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+        commit.close();
+    }
+
+    private void writeBranchData(FileStoreTable table) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));
@@ -1176,7 +1244,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         List<CommitMessage> commitMessages1 = write.prepareCommit(true, 0);
         commit.commit(0, commitMessages1);
 
-        TableQuery query = table.newTableQuery();
+        LocalTableQuery query = table.newLocalTableQuery();
         query.withIOManager(ioManager);
 
         refreshTableService(query, commitMessages1);
@@ -1226,7 +1294,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         commit.close();
     }
 
-    private void refreshTableService(TableQuery query, List<CommitMessage> commitMessages) {
+    private void refreshTableService(LocalTableQuery query, List<CommitMessage> commitMessages) {
         for (CommitMessage m : commitMessages) {
             CommitMessageImpl msg = (CommitMessageImpl) m;
             query.refreshFiles(
@@ -1251,6 +1319,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     protected FileStoreTable overwriteTestFileStoreTable() throws Exception {
         Options conf = new Options();
         conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1265,9 +1334,10 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     private FileStoreTable createFileStoreTable(Consumer<Options> configure, RowType rowType)
             throws Exception {
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
-        configure.accept(conf);
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(BUCKET, 1);
+        configure.accept(options);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
@@ -1275,7 +1345,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 rowType.getFields(),
                                 Collections.singletonList("pt"),
                                 Arrays.asList("pt", "a"),
-                                conf.toMap(),
+                                options.toMap(),
                                 ""));
         return new PrimaryKeyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
     }

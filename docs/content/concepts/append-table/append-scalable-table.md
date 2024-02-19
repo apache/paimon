@@ -29,7 +29,7 @@ under the License.
 ## Definition
 
 By defining `'bucket' = '-1'` in table properties, you can assign a special mode (we call it "unaware-bucket mode") to this
-table (see [Example]({{< ref "#example-1" >}})). In this mode, all the things are different. We don't have
+table (see [Example]({{< ref "#example" >}})). In this mode, all the things are different. We don't have
 the concept of bucket anymore, and we don't guarantee the order of streaming read. We regard this table as a batch off-line table (
 although we can stream read and write still). All the records will go into one directory (for compatibility, we put them in bucket-0),
 and we do not maintain the order anymore. As we don't have the concept of bucket, we will not shuffle the input records by bucket anymore,

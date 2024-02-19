@@ -18,101 +18,52 @@
 
 package org.apache.paimon.stats;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FieldStats;
 
-import javax.annotation.Nullable;
-
-import java.util.Arrays;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.Preconditions.checkNotNull;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
 /** A serialized row bytes to cache {@link FieldStats}. */
 public class BinaryTableStats {
 
-    @Nullable private InternalRow row;
-    @Nullable private FieldStats[] cacheArray;
-    @Nullable private BinaryRow cacheMin;
-    @Nullable private BinaryRow cacheMax;
-    @Nullable private Long[] cacheNullCounts;
+    private final BinaryRow minValues;
+    private final BinaryRow maxValues;
+    private final BinaryArray nullCounts;
 
-    public BinaryTableStats(InternalRow row) {
-        this.row = row;
+    public BinaryTableStats(BinaryRow minValues, BinaryRow maxValues, BinaryArray nullCounts) {
+        this.minValues = minValues;
+        this.maxValues = maxValues;
+        this.nullCounts = nullCounts;
     }
 
-    public BinaryTableStats(BinaryRow cacheMin, BinaryRow cacheMax, Long[] cacheNullCounts) {
-        this(cacheMin, cacheMax, cacheNullCounts, null);
+    public BinaryRow minValues() {
+        return minValues;
     }
 
-    public BinaryTableStats(
-            BinaryRow cacheMin,
-            BinaryRow cacheMax,
-            Long[] cacheNullCounts,
-            @Nullable FieldStats[] cacheArray) {
-        this.cacheMin = cacheMin;
-        this.cacheMax = cacheMax;
-        this.cacheNullCounts = cacheNullCounts;
-        this.cacheArray = cacheArray;
+    public BinaryRow maxValues() {
+        return maxValues;
     }
 
-    public FieldStats[] fields(FieldStatsArraySerializer converter) {
-        return fields(converter, null);
+    public BinaryArray nullCounts() {
+        return nullCounts;
     }
 
-    public FieldStats[] fields(FieldStatsArraySerializer converter, @Nullable Long rowCount) {
-        if (cacheArray == null) {
-            cacheArray = converter.fromBinary(this, rowCount);
-        }
-        return cacheArray;
+    public InternalRow toRow() {
+        return GenericRow.of(
+                serializeBinaryRow(minValues), serializeBinaryRow(maxValues), nullCounts);
     }
 
-    public BinaryRow min() {
-        if (cacheMin == null) {
-            checkNotNull(row);
-            cacheMin = deserializeBinaryRow(this.row.getBinary(0));
-        }
-        return cacheMin;
-    }
-
-    public BinaryRow max() {
-        if (cacheMax == null) {
-            checkNotNull(row);
-            cacheMax = deserializeBinaryRow(this.row.getBinary(1));
-        }
-        return cacheMax;
-    }
-
-    public Long[] nullCounts() {
-        if (cacheNullCounts == null) {
-            checkNotNull(row);
-            InternalArray internalArray = row.getArray(2);
-            Long[] array = new Long[internalArray.size()];
-            for (int i = 0; i < array.length; i++) {
-                array[i] = internalArray.isNullAt(i) ? null : internalArray.getLong(i);
-            }
-            return array;
-        }
-        return cacheNullCounts;
-    }
-
-    public InternalRow toRowData() {
-        return row == null
-                ? GenericRow.of(
-                        serializeBinaryRow(min()),
-                        serializeBinaryRow(max()),
-                        new GenericArray(nullCounts()))
-                : row;
-    }
-
-    public static BinaryTableStats fromRowData(InternalRow row) {
-        return new BinaryTableStats(row);
+    public static BinaryTableStats fromRow(InternalRow row) {
+        return new BinaryTableStats(
+                deserializeBinaryRow(row.getBinary(0)),
+                deserializeBinaryRow(row.getBinary(1)),
+                BinaryArray.fromLongArray(row.getArray(2)));
     }
 
     @Override
@@ -124,15 +75,13 @@ public class BinaryTableStats {
             return false;
         }
         BinaryTableStats that = (BinaryTableStats) o;
-        return Objects.equals(min(), that.min())
-                && Objects.equals(max(), that.max())
-                && Arrays.equals(nullCounts(), that.nullCounts());
+        return Objects.equals(minValues, that.minValues)
+                && Objects.equals(maxValues, that.maxValues)
+                && Objects.equals(nullCounts, that.nullCounts);
     }
 
     @Override
     public int hashCode() {
-        int result = Objects.hash(min(), max());
-        result = 31 * result + Arrays.hashCode(nullCounts());
-        return result;
+        return Objects.hash(minValues, maxValues, nullCounts);
     }
 }
