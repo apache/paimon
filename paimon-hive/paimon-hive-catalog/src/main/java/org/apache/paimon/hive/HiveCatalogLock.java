@@ -114,10 +114,10 @@ public class HiveCatalogLock implements CatalogLock {
 
     /** Create a hive lock factory. */
     public static LockFactory createFactory() {
-        return new HiveCatalogLockLockFactory();
+        return new HiveCatalogLockFactory();
     }
 
-    private static class HiveCatalogLockLockFactory implements LockFactory {
+    private static class HiveCatalogLockFactory implements LockFactory {
 
         private static final long serialVersionUID = 1L;
 
