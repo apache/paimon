@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -70,10 +69,9 @@ public class BranchesTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(
                                     0, "branch_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "tag_name", SerializationUtils.newStringType(false)),
-                            new DataField(2, "latest_snapshot_id", new BigIntType(false)),
-                            new DataField(3, "snapshot_schema_id", new BigIntType(false)),
-                            new DataField(5, "record_count", new BigIntType(true)),
+                            new DataField(
+                                    1, "created_from_tag", SerializationUtils.newStringType(false)),
+                            new DataField(2, "created_from_snapshot", new BigIntType(false)),
                             new DataField(3, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
@@ -207,13 +205,10 @@ public class BranchesTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(TableBranch branch) {
-            Snapshot snapshot = branch.getSnapshot();
             return GenericRow.of(
                     BinaryString.fromString(branch.getBranchName()),
-                    BinaryString.fromString(branch.getTagName()),
-                    snapshot.id(),
-                    snapshot.schemaId(),
-                    snapshot.totalRecordCount(),
+                    BinaryString.fromString(branch.getCreatedFromTag()),
+                    branch.getCreatedFromSnapshot(),
                     Timestamp.fromLocalDateTime(
                             DateTimeUtils.toLocalDateTime(branch.getCreateTime())));
         }

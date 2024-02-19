@@ -213,10 +213,12 @@ public class TagsTable implements ReadonlyTable {
             table.branchManager()
                     .branches()
                     .forEach(
-                            (branch, tag) ->
+                            branch ->
                                     tagBranches
-                                            .computeIfAbsent(tag, key -> new ArrayList<>())
-                                            .add(branch));
+                                            .computeIfAbsent(
+                                                    branch.getCreatedFromTag(),
+                                                    key -> new ArrayList<>())
+                                            .add(branch.getBranchName()));
 
             Iterator<InternalRow> rows =
                     Iterators.transform(

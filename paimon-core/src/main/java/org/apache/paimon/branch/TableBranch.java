@@ -18,20 +18,19 @@
 
 package org.apache.paimon.branch;
 
-import org.apache.paimon.Snapshot;
-
 /** {@link TableBranch} has branch relevant information for table. */
 public class TableBranch {
     private final String branchName;
-    private final String tagName;
-    private final Snapshot snapshot;
+    private final String createdFromTag;
+    private final Long createdFromSnapshot;
 
     private final long createTime;
 
-    public TableBranch(String branchName, String tagName, Snapshot snapshot, long createTime) {
+    public TableBranch(
+            String branchName, String createdFromTag, Long createdFromSnapshot, long createTime) {
         this.branchName = branchName;
-        this.tagName = tagName;
-        this.snapshot = snapshot;
+        this.createdFromTag = createdFromTag;
+        this.createdFromSnapshot = createdFromSnapshot;
         this.createTime = createTime;
     }
 
@@ -39,12 +38,12 @@ public class TableBranch {
         return branchName;
     }
 
-    public String getTagName() {
-        return tagName;
+    public String getCreatedFromTag() {
+        return createdFromTag;
     }
 
-    public Snapshot getSnapshot() {
-        return snapshot;
+    public Long getCreatedFromSnapshot() {
+        return createdFromSnapshot;
     }
 
     public long getCreateTime() {

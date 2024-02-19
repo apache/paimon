@@ -21,7 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
@@ -32,9 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
 
@@ -179,11 +176,7 @@ public class BranchManager {
                 List<String> tags = snapshotTags.get(snapshot);
                 checkArgument(tags.size() == 1);
                 branches.add(
-                        new TableBranch(
-                                branchName,
-                                tags.get(0),
-                                snapshot,
-                                path.getValue()));
+                        new TableBranch(branchName, tags.get(0), snapshot.id(), path.getValue()));
             }
 
             return branches;
