@@ -150,7 +150,6 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                int x = Float.floatToIntBits(row.getFloat(index));
                 return 4;
             }
         };
@@ -173,7 +172,6 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                int x = row.getInt(index);
                 return 4;
             }
         };
