@@ -92,11 +92,23 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
-            if (orderByLastField) {
+            if (orderByLastField && sequenceGenerator != null) {
                 InternalRow previous = tableState.get(primaryKeyRow);
                 int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
-                    continue;
+                if (previous != null) {
+                    Long rowSequence = sequenceGenerator.generateNullable(row, row.getRowKind());
+                    if (rowSequence == null) {
+                        continue;
+                    }
+                    Long previousSequence =
+                            sequenceGenerator.generateNullable(previous, previous.getRowKind());
+                    if (previousSequence != null
+                            && (previousSequence > rowSequence
+                                    || (previousSequence.equals(rowSequence)
+                                            && previous.getLong(orderIndex)
+                                                    > row.getLong(orderIndex)))) {
+                        continue;
+                    }
                 }
             }
 

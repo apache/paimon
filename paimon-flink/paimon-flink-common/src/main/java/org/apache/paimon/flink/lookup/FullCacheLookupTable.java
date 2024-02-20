@@ -30,6 +30,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.MutableObjectIterator;
@@ -55,6 +56,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final RowType projectedType;
     private final LookupStreamingReader reader;
     private final boolean sequenceFieldEnabled;
+    @Nullable protected final SequenceGenerator sequenceGenerator;
 
     public FullCacheLookupTable(Context context) throws IOException {
         this.context = context;
@@ -65,14 +67,17 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         null);
         FileStoreTable table = context.table;
         this.reader = new LookupStreamingReader(table, context.projection, context.tablePredicate);
+        CoreOptions coreOptions = new CoreOptions(table.options());
         this.sequenceFieldEnabled =
-                table.primaryKeys().size() > 0
-                        && new CoreOptions(table.options()).sequenceField().isPresent();
+                table.primaryKeys().size() > 0 && coreOptions.sequenceField().isPresent();
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
+        SequenceGenerator sequenceGenerator = null;
         if (sequenceFieldEnabled) {
             projectedType = projectedType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT());
+            sequenceGenerator = SequenceGenerator.create(projectedType, coreOptions);
         }
         this.projectedType = projectedType;
+        this.sequenceGenerator = sequenceGenerator;
     }
 
     @Override
