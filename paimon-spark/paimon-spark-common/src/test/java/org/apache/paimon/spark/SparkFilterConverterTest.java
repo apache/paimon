@@ -27,6 +27,7 @@ import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 
+import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
 import org.apache.spark.sql.sources.GreaterThan;
 import org.apache.spark.sql.sources.GreaterThanOrEqual;
@@ -117,6 +118,16 @@ public class SparkFilterConverterTest {
         Predicate expectedEqNull = builder.equal(0, null);
         Predicate actualEqNull = converter.convert(eqNull);
         assertThat(actualEqNull).isEqualTo(expectedEqNull);
+
+        EqualNullSafe eqSafe = EqualNullSafe.apply(field, 1);
+        Predicate expectedEqSafe = builder.equal(0, 1);
+        Predicate actualEqSafe = converter.convert(eqSafe);
+        assertThat(actualEqSafe).isEqualTo(expectedEqSafe);
+
+        EqualNullSafe eqNullSafe = EqualNullSafe.apply(field, null);
+        Predicate expectEqNullSafe = builder.isNull(0);
+        Predicate actualEqNullSafe = converter.convert(eqNullSafe);
+        assertThat(actualEqNullSafe).isEqualTo(expectEqNullSafe);
 
         In in = In.apply(field, new Object[] {1, null, 2});
         Predicate expectedIn = builder.in(0, Arrays.asList(1, null, 2));
