@@ -18,8 +18,7 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
+import org.apache.paimon.branch.TableBranch;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -27,7 +26,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -47,51 +45,46 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.Iterator;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.SortedMap;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
-/** A {@link Table} for showing tags of table. */
-public class TagsTable implements ReadonlyTable {
+/** A {@link Table} for showing branches of table. */
+public class BranchesTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String TAGS = "tags";
+    public static final String BRANCHES = "branches";
 
     public static final RowType TABLE_TYPE =
             new RowType(
                     Arrays.asList(
-                            new DataField(0, "tag_name", SerializationUtils.newStringType(false)),
-                            new DataField(1, "snapshot_id", new BigIntType(false)),
-                            new DataField(2, "schema_id", new BigIntType(false)),
-                            new DataField(3, "commit_time", new TimestampType(false, 3)),
-                            new DataField(4, "record_count", new BigIntType(true)),
-                            new DataField(5, "branches", SerializationUtils.newStringType(true))));
+                            new DataField(
+                                    0, "branch_name", SerializationUtils.newStringType(false)),
+                            new DataField(
+                                    1, "created_from_tag", SerializationUtils.newStringType(false)),
+                            new DataField(2, "created_from_snapshot", new BigIntType(false)),
+                            new DataField(3, "create_time", new TimestampType(false, 3))));
 
     private final FileIO fileIO;
     private final Path location;
 
-    public TagsTable(FileIO fileIO, Path location) {
+    public BranchesTable(FileIO fileIO, Path location) {
         this.fileIO = fileIO;
         this.location = location;
     }
 
     @Override
     public String name() {
-        return location.getName() + SYSTEM_TABLE_SPLITTER + TAGS;
+        return location.getName() + SYSTEM_TABLE_SPLITTER + BRANCHES;
     }
 
     @Override
@@ -101,25 +94,25 @@ public class TagsTable implements ReadonlyTable {
 
     @Override
     public List<String> primaryKeys() {
-        return Collections.singletonList("tag_name");
+        return Arrays.asList("branch_name", "tag_name");
     }
 
     @Override
     public InnerTableScan newScan() {
-        return new TagsScan();
+        return new BranchesScan();
     }
 
     @Override
     public InnerTableRead newRead() {
-        return new TagsRead(fileIO);
+        return new BranchesRead(fileIO);
     }
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new TagsTable(fileIO, location);
+        return new BranchesTable(fileIO, location);
     }
 
-    private class TagsScan extends ReadOnceTableScan {
+    private class BranchesScan extends ReadOnceTableScan {
 
         @Override
         public InnerTableScan withFilter(Predicate predicate) {
@@ -129,24 +122,25 @@ public class TagsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new TagsSplit(fileIO, location));
+            return () -> Collections.singletonList(new BranchesSplit(fileIO, location));
         }
     }
 
-    private static class TagsSplit implements Split {
+    private static class BranchesSplit implements Split {
         private static final long serialVersionUID = 1L;
 
         private final FileIO fileIO;
         private final Path location;
 
-        private TagsSplit(FileIO fileIO, Path location) {
+        private BranchesSplit(FileIO fileIO, Path location) {
             this.fileIO = fileIO;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return new TagManager(fileIO, location).tagCount();
+            FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
+            return table.branchManager().branchCount();
         }
 
         @Override
@@ -157,7 +151,7 @@ public class TagsTable implements ReadonlyTable {
             if (o == null || getClass() != o.getClass()) {
                 return false;
             }
-            TagsSplit that = (TagsSplit) o;
+            BranchesSplit that = (BranchesSplit) o;
             return Objects.equals(location, that.location);
         }
 
@@ -167,12 +161,12 @@ public class TagsTable implements ReadonlyTable {
         }
     }
 
-    private static class TagsRead implements InnerTableRead {
+    private static class BranchesRead implements InnerTableRead {
 
         private final FileIO fileIO;
         private int[][] projection;
 
-        public TagsRead(FileIO fileIO) {
+        public BranchesRead(FileIO fileIO) {
             this.fileIO = fileIO;
         }
 
@@ -195,34 +189,13 @@ public class TagsTable implements ReadonlyTable {
 
         @Override
         public RecordReader<InternalRow> createReader(Split split) {
-            if (!(split instanceof TagsSplit)) {
+            if (!(split instanceof BranchesSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((TagsSplit) split).location;
-            Options options = new Options();
-            options.set(CoreOptions.PATH, location.toUri().toString());
-            FileStoreTable table = FileStoreTableFactory.create(fileIO, options);
-            SortedMap<Snapshot, List<String>> tags = table.tagManager().tags();
-            Map<String, Snapshot> nameToSnapshot = new LinkedHashMap<>();
-            for (Map.Entry<Snapshot, List<String>> tag : tags.entrySet()) {
-                for (String tagName : tag.getValue()) {
-                    nameToSnapshot.put(tagName, tag.getKey());
-                }
-            }
-            Map<String, List<String>> tagBranches = new HashMap<>();
-            table.branchManager()
-                    .branches()
-                    .forEach(
-                            branch ->
-                                    tagBranches
-                                            .computeIfAbsent(
-                                                    branch.getCreatedFromTag(),
-                                                    key -> new ArrayList<>())
-                                            .add(branch.getBranchName()));
-
-            Iterator<InternalRow> rows =
-                    Iterators.transform(
-                            nameToSnapshot.entrySet().iterator(), tag -> toRow(tag, tagBranches));
+            Path location = ((BranchesSplit) split).location;
+            FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
+            List<TableBranch> branches = table.branchManager().branches();
+            Iterator<InternalRow> rows = Iterators.transform(branches.iterator(), this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -231,18 +204,13 @@ public class TagsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(
-                Map.Entry<String, Snapshot> tag, Map<String, List<String>> tagBranches) {
-            Snapshot snapshot = tag.getValue();
-            List<String> branches = tagBranches.get(tag.getKey());
+        private InternalRow toRow(TableBranch branch) {
             return GenericRow.of(
-                    BinaryString.fromString(tag.getKey()),
-                    snapshot.id(),
-                    snapshot.schemaId(),
+                    BinaryString.fromString(branch.getBranchName()),
+                    BinaryString.fromString(branch.getCreatedFromTag()),
+                    branch.getCreatedFromSnapshot(),
                     Timestamp.fromLocalDateTime(
-                            DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                    snapshot.totalRecordCount(),
-                    BinaryString.fromString(branches == null ? "[]" : branches.toString()));
+                            DateTimeUtils.toLocalDateTime(branch.getCreateTime())));
         }
     }
 }
