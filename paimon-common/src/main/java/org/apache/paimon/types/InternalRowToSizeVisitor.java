@@ -208,9 +208,6 @@ public class InternalRowToSizeVisitor
             if (row.isNullAt(index)) {
                 return NULL_SIZE;
             } else {
-                long x =
-                        row.getTimestamp(index, localZonedTimestampType.getPrecision())
-                                .getMillisecond();
                 return 8;
             }
         };
