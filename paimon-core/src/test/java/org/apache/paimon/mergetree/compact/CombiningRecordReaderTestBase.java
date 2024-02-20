@@ -85,6 +85,7 @@ public abstract class CombiningRecordReaderTestBase {
                 getExpected(
                                 readersData.stream()
                                         .flatMap(Collection::stream)
+                                        .sorted()
                                         .collect(Collectors.toList()))
                         .iterator();
         List<TestReusingRecordReader> readers = new ArrayList<>();
