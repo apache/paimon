@@ -194,15 +194,22 @@ public class LookupTableTest extends TableTestBase {
         assertRow(result.get(0), 1, 22, 222);
 
         // refresh with old sequence
-        table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator(), true);
-        result = table.get(row(1));
+        table.refresh(singletonList((sequence(row(2, 11, 111), 0L))).iterator(), true);
+        result = table.get(row(2));
         assertThat(result).hasSize(1);
-        assertRow(result.get(0), 1, 22, 222);
+        assertRow(result.get(0), 2, 22, 222);
+
+        // test refresh with same sequence
+        table.refresh(singletonList((sequence(row(2, 22, 2222), 1L))).iterator(), true);
+        result = table.get(row(2));
+        assertThat(result).hasSize(1);
+        assertRow(result.get(0), 2, 22, 2222);
 
         // test refresh delete data with old sequence
         table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), true);
-        assertThat(table.get(row(1))).hasSize(1);
+                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), 2L)).iterator(), true);
+        result = table.get(row(1));
+        assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
     }
 
@@ -351,7 +358,7 @@ public class LookupTableTest extends TableTestBase {
 
         // refresh with old value
         table.refresh(
-                singletonList((InternalRow) joined.replace(row(1, 22, 333), GenericRow.of(0L)))
+                singletonList((InternalRow) joined.replace(row(1, 11, 333), GenericRow.of(2L)))
                         .iterator(),
                 true);
         result = table.get(row(22));
