@@ -43,10 +43,13 @@ public interface Lock extends AutoCloseable {
         Lock create();
     }
 
-    static Factory factory(@Nullable CatalogLock.Factory lockFactory, Identifier tablePath) {
+    static Factory factory(
+            @Nullable CatalogLock.LockFactory lockFactory,
+            @Nullable CatalogLock.LockContext lockContext,
+            Identifier tablePath) {
         return lockFactory == null
                 ? new EmptyFactory()
-                : new CatalogLockFactory(lockFactory, tablePath);
+                : new CatalogLockFactory(lockFactory, lockContext, tablePath);
     }
 
     static Factory emptyFactory() {
@@ -58,17 +61,22 @@ public interface Lock extends AutoCloseable {
 
         private static final long serialVersionUID = 1L;
 
-        private final CatalogLock.Factory lockFactory;
+        private final CatalogLock.LockFactory lockFactory;
+        private final CatalogLock.LockContext lockContext;
         private final Identifier tablePath;
 
-        public CatalogLockFactory(CatalogLock.Factory lockFactory, Identifier tablePath) {
+        public CatalogLockFactory(
+                CatalogLock.LockFactory lockFactory,
+                CatalogLock.LockContext lockContext,
+                Identifier tablePath) {
             this.lockFactory = lockFactory;
+            this.lockContext = lockContext;
             this.tablePath = tablePath;
         }
 
         @Override
         public Lock create() {
-            return fromCatalog(lockFactory.create(), tablePath);
+            return fromCatalog(lockFactory.create(lockContext), tablePath);
         }
     }
 
