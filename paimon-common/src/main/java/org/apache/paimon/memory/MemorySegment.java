@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.memory;
 
 import org.apache.paimon.annotation.Public;
@@ -37,6 +33,10 @@ import java.nio.ReadOnlyBufferException;
 import java.util.Objects;
 
 import static org.apache.paimon.memory.MemoryUtils.getByteBufferAddress;
+
+/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /**
  * This class represents a piece of memory.

@@ -17,10 +17,6 @@
  * under the License.
  */
 
-/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.utils;
 
 import org.junit.Assert;
@@ -30,6 +26,10 @@ import org.testcontainers.shaded.com.google.common.primitives.UnsignedBytes;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Random;
+
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /** Tests for {@link ZOrderByteUtils}. */
 public class TestZOrderByteUtil {
