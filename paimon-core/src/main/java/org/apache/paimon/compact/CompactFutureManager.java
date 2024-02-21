@@ -44,6 +44,11 @@ public abstract class CompactFutureManager implements CompactManager {
         }
     }
 
+    @Override
+    public boolean isCompacting() {
+        return taskFuture != null;
+    }
+
     protected final Optional<CompactResult> innerGetCompactionResult(boolean blocking)
             throws ExecutionException, InterruptedException {
         if (taskFuture != null) {

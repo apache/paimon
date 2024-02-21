@@ -21,11 +21,13 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.AbstractFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
@@ -33,6 +35,8 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.StreamTableScan;
+import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -105,7 +109,12 @@ public class TableWriteTest {
             eventList.add(random.nextInt(eventList.size() + 1), Event.EXTRACT_STATE);
         }
 
-        FileStoreTable table = createFileStoreTable();
+        Options conf = new Options();
+        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
+        conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        FileStoreTable table = createFileStoreTable(conf);
+
         TableWriteImpl<?> write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -168,12 +177,60 @@ public class TableWriteTest {
         EXTRACT_STATE
     }
 
-    private FileStoreTable createFileStoreTable() throws Exception {
+    @Test
+    public void testChangelogWhenNotWaitForCompaction() throws Exception {
         Options conf = new Options();
-        conf.set(CoreOptions.BUCKET, 2);
+        conf.set(CoreOptions.BUCKET, 1);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        conf.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.LOOKUP);
+        FileStoreTable table = createFileStoreTable(conf);
 
+        TableWriteImpl<?> write =
+                table.newWrite(commitUser).withIOManager(new IOManagerImpl(tempDir.toString()));
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        int numPartitions = 5;
+        int numRecordsPerPartition = 10000;
+
+        int commitIdentifier = 0;
+        for (int i = 0; i < numPartitions; i++) {
+            // Write a lot of records, then quickly call prepareCommit many times, without waiting
+            // for compaction.
+            // It is very likely that the compaction is not finished.
+            for (int j = 0; j < numRecordsPerPartition; j++) {
+                write.write(GenericRow.of(i, j, (long) j));
+            }
+            for (int j = 0; j < 3; j++) {
+                commitIdentifier++;
+                // Even if there is no new record, if there is an ongoing compaction, the
+                // corresponding writer should not be closed.
+                commit.commit(commitIdentifier, write.prepareCommit(false, commitIdentifier));
+            }
+        }
+        commit.commit(commitIdentifier, write.prepareCommit(true, commitIdentifier));
+
+        write.close();
+        commit.close();
+
+        Map<String, String> readOptions = new HashMap<>();
+        readOptions.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "1");
+        table = table.copy(readOptions);
+        long latestSnapshotId = table.snapshotManager().latestSnapshotId();
+
+        StreamTableScan scan = table.newStreamScan();
+        TableRead read = table.newRead();
+        List<InternalRow> actual = new ArrayList<>();
+        for (long i = 0; i <= latestSnapshotId; i++) {
+            RecordReader<InternalRow> reader = read.createReader(scan.plan().splits());
+            reader.forEachRemaining(actual::add);
+            reader.close();
+        }
+
+        assertThat(actual).hasSize(numPartitions * numRecordsPerPartition);
+    }
+
+    private FileStoreTable createFileStoreTable(Options conf) throws Exception {
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),

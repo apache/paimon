@@ -259,6 +259,11 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     @Override
+    public boolean isCompacting() {
+        return compactManager.isCompacting();
+    }
+
+    @Override
     public void sync() throws Exception {
         trySyncLatestCompaction(true);
     }

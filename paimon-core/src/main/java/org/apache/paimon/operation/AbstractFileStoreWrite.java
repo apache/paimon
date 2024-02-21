@@ -211,7 +211,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
+                    // Condition 1: There is no more record waiting to be committed.
+                    // Condition 2: No compaction is in progress. That is, no more changelog will be
+                    // produced.
+                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier
+                            && !writerContainer.writer.isCompacting()) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
