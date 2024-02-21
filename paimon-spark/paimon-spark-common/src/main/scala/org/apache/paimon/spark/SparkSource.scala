@@ -63,7 +63,7 @@ class SparkSource
       schema: StructType,
       partitioning: Array[Transform],
       properties: JMap[String, String]): Table = {
-    new SparkTable(loadTable(properties), null)
+    new SparkTable(loadTable(properties))
   }
 
   override def createRelation(
