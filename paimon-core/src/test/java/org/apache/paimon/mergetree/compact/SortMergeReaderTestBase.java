@@ -35,6 +35,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 /** Tests for {@link SortMergeReader}. */
@@ -103,6 +104,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            Collections.sort(input);
             return MergeFunctionTestUtils.getExpectedForDeduplicate(input);
         }
 
@@ -122,6 +124,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
 
         @Override
         protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            Collections.sort(input);
             return MergeFunctionTestUtils.getExpectedForFirstRow(input);
         }
 
