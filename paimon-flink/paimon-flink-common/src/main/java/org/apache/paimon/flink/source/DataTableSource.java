@@ -95,6 +95,7 @@ public class DataTableSource extends FlinkTableSource {
     private SplitStatistics splitStatistics;
 
     @Nullable private List<String> dynamicPartitionFilteringFields;
+    private List<Split> splits;
 
     public DataTableSource(
             ObjectIdentifier tableIdentifier,
@@ -257,13 +258,16 @@ public class DataTableSource extends FlinkTableSource {
                             options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
         }
 
-        return sourceBuilder.withParallelism(parallelism).withEnv(env).build();
+        return sourceBuilder
+                .withParallelism(parallelism)
+                .withEnv(env)
+                .withSplits(this.splits)
+                .build();
     }
 
     private void scanSplitsForInference() {
         if (splitStatistics == null) {
-            List<Split> splits =
-                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+            this.splits = table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
             splitStatistics = new SplitStatistics(splits);
         }
     }

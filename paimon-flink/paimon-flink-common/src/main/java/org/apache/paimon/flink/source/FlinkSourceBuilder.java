@@ -33,6 +33,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -80,6 +81,7 @@ public class FlinkSourceBuilder {
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
+    @Nullable private List<Split> splits;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
         this.tableIdentifier = tableIdentifier;
@@ -114,6 +116,11 @@ public class FlinkSourceBuilder {
 
     public FlinkSourceBuilder withLogSourceProvider(LogSourceProvider logSourceProvider) {
         this.logSourceProvider = logSourceProvider;
+        return this;
+    }
+
+    public FlinkSourceBuilder withSplits(List<Split> splits) {
+        this.splits = splits;
         return this;
     }
 
@@ -161,7 +168,8 @@ public class FlinkSourceBuilder {
                         limit,
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE),
                         options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE),
-                        dynamicPartitionFilteringInfo));
+                        dynamicPartitionFilteringInfo,
+                        splits));
     }
 
     private DataStream<RowData> buildContinuousFileSource() {

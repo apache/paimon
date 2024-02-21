@@ -24,6 +24,7 @@ import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableScan;
 
 import org.apache.flink.api.connector.source.Boundedness;
@@ -48,12 +49,14 @@ public class StaticFileStoreSource extends FlinkSource {
 
     @Nullable private final DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
 
+    private final List<Split> splits;
+
     public StaticFileStoreSource(
             ReadBuilder readBuilder,
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode) {
-        this(readBuilder, limit, splitBatchSize, splitAssignMode, null);
+        this(readBuilder, limit, splitBatchSize, splitAssignMode, null, null);
     }
 
     public StaticFileStoreSource(
@@ -61,11 +64,13 @@ public class StaticFileStoreSource extends FlinkSource {
             @Nullable Long limit,
             int splitBatchSize,
             SplitAssignMode splitAssignMode,
-            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo) {
+            @Nullable DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo,
+            @Nullable List<Split> splits) {
         super(readBuilder, limit);
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
         this.dynamicPartitionFilteringInfo = dynamicPartitionFilteringInfo;
+        this.splits = splits;
     }
 
     @Override
@@ -87,13 +92,17 @@ public class StaticFileStoreSource extends FlinkSource {
 
     private List<FileStoreSourceSplit> getSplits(SplitEnumeratorContext context) {
         FileStoreSourceSplitGenerator splitGenerator = new FileStoreSourceSplitGenerator();
-        TableScan scan = readBuilder.newScan();
-        // register scan metrics
-        if (context.metricGroup() != null) {
-            ((InnerTableScan) scan)
-                    .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+        if (this.splits == null) {
+            TableScan scan = readBuilder.newScan();
+            // register scan metrics
+            if (context.metricGroup() != null) {
+                ((InnerTableScan) scan)
+                        .withMetricsRegistry(new FlinkMetricRegistry(context.metricGroup()));
+            }
+            return splitGenerator.createSplits(scan.plan());
+        } else {
+            return splitGenerator.createSplits(splits);
         }
-        return splitGenerator.createSplits(scan.plan());
     }
 
     public static SplitAssigner createSplitAssigner(
