@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -50,15 +49,19 @@ public class NotIn extends LeafFunction {
 
     @Override
     public boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals) {
-        Long nullCount = fieldStats.nullCount();
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            List<Object> literals) {
         if (nullCount != null && rowCount == nullCount) {
             return false;
         }
         for (Object literal : literals) {
             if (literal == null
-                    || (compareLiteral(type, literal, fieldStats.minValue()) == 0
-                            && compareLiteral(type, literal, fieldStats.maxValue()) == 0)) {
+                    || (compareLiteral(type, literal, min) == 0
+                            && compareLiteral(type, literal, max) == 0)) {
                 return false;
             }
         }

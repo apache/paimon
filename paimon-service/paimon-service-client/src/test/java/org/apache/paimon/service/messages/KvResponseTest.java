@@ -20,8 +20,9 @@ package org.apache.paimon.service.messages;
 
 import org.apache.paimon.data.BinaryRow;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.buffer.UnpooledByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.UnpooledByteBufAllocator;
+
 import org.junit.jupiter.api.Test;
 
 import java.util.Random;

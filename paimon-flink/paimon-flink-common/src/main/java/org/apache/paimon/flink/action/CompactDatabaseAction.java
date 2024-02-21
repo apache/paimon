@@ -30,7 +30,6 @@ import org.apache.paimon.flink.source.CompactorSourceBuilder;
 import org.apache.paimon.flink.source.MultiTablesCompactorSourceBuilder;
 import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
@@ -47,7 +46,6 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -66,7 +64,7 @@ public class CompactDatabaseAction extends ActionBase {
 
     private MultiTablesSinkMode databaseCompactMode = MultiTablesSinkMode.DIVIDED;
 
-    private final Map<String, Table> tableMap = new HashMap<>();
+    private final Map<String, FileStoreTable> tableMap = new HashMap<>();
 
     private Options tableOptions = new Options();
 
@@ -143,11 +141,12 @@ public class CompactDatabaseAction extends ActionBase {
                                                 table.getClass().getName()));
                                 continue;
                             }
-                            table =
-                                    table.copy(
-                                            Collections.singletonMap(
-                                                    CoreOptions.WRITE_ONLY.key(), "false"));
-                            tableMap.put(fullTableName, table);
+                            Map<String, String> dynamicOptions =
+                                    new HashMap<>(tableOptions.toMap());
+                            dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
+                            FileStoreTable fileStoreTable =
+                                    (FileStoreTable) table.copy(dynamicOptions);
+                            tableMap.put(fullTableName, fileStoreTable);
                         } else {
                             LOG.debug("The table {} is excluded.", fullTableName);
                         }
@@ -165,16 +164,13 @@ public class CompactDatabaseAction extends ActionBase {
         ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
-        for (Map.Entry<String, Table> entry : tableMap.entrySet()) {
-            FileStoreTable fileStoreTable = (FileStoreTable) entry.getValue();
+        for (Map.Entry<String, FileStoreTable> entry : tableMap.entrySet()) {
+            FileStoreTable fileStoreTable = entry.getValue();
             switch (fileStoreTable.bucketMode()) {
                 case UNAWARE:
                     {
                         buildForUnawareBucketCompaction(
-                                env,
-                                entry.getKey(),
-                                (AppendOnlyFileStoreTable) entry.getValue(),
-                                isStreaming);
+                                env, entry.getKey(), fileStoreTable, isStreaming);
                         break;
                     }
                 case FIXED:
@@ -229,7 +225,7 @@ public class CompactDatabaseAction extends ActionBase {
     private void buildForUnawareBucketCompaction(
             StreamExecutionEnvironment env,
             String fullName,
-            AppendOnlyFileStoreTable table,
+            FileStoreTable table,
             boolean isStreaming) {
         UnawareBucketCompactionTopoBuilder unawareBucketCompactionTopoBuilder =
                 new UnawareBucketCompactionTopoBuilder(env, fullName, table);

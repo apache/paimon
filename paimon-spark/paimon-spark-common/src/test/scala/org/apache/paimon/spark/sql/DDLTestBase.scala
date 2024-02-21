@@ -25,7 +25,7 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
 
   import testImplicits._
 
-  test("Paimon: Create Table As Select") {
+  test("Paimon DDL: Create Table As Select") {
     withTable("source", "t1", "t2") {
       Seq((1L, "x1", "2023"), (2L, "x2", "2023"))
         .toDF("a", "b", "pt")
@@ -58,4 +58,16 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
     }
   }
 
+  test("Paimon DDL: create database with location with filesystem catalog") {
+    withTempDir {
+      dBLocation =>
+        withDatabase("paimon_db") {
+          val error = intercept[Exception] {
+            spark.sql(s"CREATE DATABASE paimon_db LOCATION '${dBLocation.getCanonicalPath}'")
+          }.getMessage
+          assert(
+            error.contains("Cannot specify location for a database when using fileSystem catalog."))
+        }
+    }
+  }
 }

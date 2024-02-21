@@ -27,6 +27,7 @@ import java.io.File;
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
+import java.util.TreeSet;
 
 /** Utils for lookup. */
 public class LookupUtils {
@@ -35,10 +36,11 @@ public class LookupUtils {
             Levels levels,
             InternalRow key,
             int startLevel,
-            BiFunctionWithIOE<InternalRow, SortedRun, T> lookup)
+            BiFunctionWithIOE<InternalRow, SortedRun, T> lookup,
+            BiFunctionWithIOE<InternalRow, TreeSet<DataFileMeta>, T> level0Lookup)
             throws IOException {
         if (startLevel == 0) {
-            throw new IllegalArgumentException("Start level can not be zero.");
+            return level0Lookup.apply(key, levels.level0());
         }
 
         T result = null;
@@ -53,13 +55,33 @@ public class LookupUtils {
         return result;
     }
 
+    public static <T> T lookupLevel0(
+            Comparator<InternalRow> keyComparator,
+            InternalRow target,
+            TreeSet<DataFileMeta> level0,
+            BiFunctionWithIOE<InternalRow, DataFileMeta, T> lookup)
+            throws IOException {
+        T result = null;
+        for (DataFileMeta file : level0) {
+            if (keyComparator.compare(file.maxKey(), target) >= 0
+                    && keyComparator.compare(file.minKey(), target) <= 0) {
+                result = lookup.apply(target, file);
+                if (result != null) {
+                    break;
+                }
+            }
+        }
+
+        return result;
+    }
+
     public static <T> T lookup(
             Comparator<InternalRow> keyComparator,
             InternalRow target,
             SortedRun level,
             BiFunctionWithIOE<InternalRow, DataFileMeta, T> lookup)
             throws IOException {
-        if (!level.nonEmpty()) {
+        if (level.isEmpty()) {
             return null;
         }
         List<DataFileMeta> files = level.files();

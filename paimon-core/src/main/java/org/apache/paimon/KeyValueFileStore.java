@@ -24,6 +24,7 @@ import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexMaintainer;
 import org.apache.paimon.index.IndexMaintainer;
+import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
@@ -51,6 +52,7 @@ import java.util.function.Supplier;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** {@link FileStore} for querying and updating {@link KeyValue}s. */
@@ -106,19 +108,32 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreScan newScan() {
-        return newScan(false);
+        return newScan(DEFAULT_MAIN_BRANCH);
+    }
+
+    public KeyValueFileStoreScan newScan(String branchName) {
+        return newScan(false, branchName);
     }
 
     @Override
     public KeyValueFileStoreRead newRead() {
         return new KeyValueFileStoreRead(
-                fileIO,
                 schemaManager,
                 schemaId,
                 keyType,
                 valueType,
                 newKeyComparator(),
                 mfFactory,
+                newReaderFactoryBuilder());
+    }
+
+    public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
+        return KeyValueFileReaderFactory.builder(
+                fileIO,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
                 FileFormatDiscover.of(options),
                 pathFactory(),
                 keyValueFieldsExtractor,
@@ -149,7 +164,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true).withManifestCacheFilter(manifestFilter),
+                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 options,
                 keyValueFieldsExtractor,
@@ -172,7 +187,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return pathFactoryMap;
     }
 
-    private KeyValueFileStoreScan newScan(boolean forWrite) {
+    private KeyValueFileStoreScan newScan(boolean forWrite, String branchName) {
         ScanBucketFilter bucketFilter =
                 new ScanBucketFilter(bucketKeyType) {
                     @Override
@@ -202,7 +217,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
-                options.scanManifestParallelism());
+                options.scanManifestParallelism(),
+                branchName);
     }
 
     @Override

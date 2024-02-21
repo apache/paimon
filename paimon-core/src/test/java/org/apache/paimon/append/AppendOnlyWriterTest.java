@@ -567,15 +567,20 @@ public class AppendOnlyWriterTest {
                 STATS_SERIALIZER.toBinary(
                         new FieldStats[] {
                             initStats(
-                                    toCompact.get(0).valueStats().min().getInt(0),
-                                    toCompact.get(size - 1).valueStats().max().getInt(0),
+                                    toCompact.get(0).valueStats().minValues().getInt(0),
+                                    toCompact.get(size - 1).valueStats().maxValues().getInt(0),
                                     0),
                             initStats(
-                                    toCompact.get(0).valueStats().min().getString(1).toString(),
+                                    toCompact
+                                            .get(0)
+                                            .valueStats()
+                                            .minValues()
+                                            .getString(1)
+                                            .toString(),
                                     toCompact
                                             .get(size - 1)
                                             .valueStats()
-                                            .max()
+                                            .maxValues()
                                             .getString(1)
                                             .toString(),
                                     0),

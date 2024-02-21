@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
+import org.apache.paimon.flink.sink.FlinkWriteSink;
 import org.apache.paimon.flink.utils.SingleOutputStreamOperatorUtils;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -43,8 +44,8 @@ import static org.apache.paimon.flink.action.MultiTablesSinkMode.COMBINED;
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 
 /**
- * Builder for {@link FlinkCdcSink} when syncing the whole database into one Paimon database. Each
- * database table will be written into a separate Paimon table.
+ * Builder for CDC {@link FlinkWriteSink} when syncing the whole database into one Paimon database.
+ * Each database table will be written into a separate Paimon table.
  *
  * <p>This builder will create a separate sink for each Paimon sink table. Thus this implementation
  * is not very efficient in resource saving.
@@ -64,7 +65,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     @Nullable private Integer parallelism;
     private double committerCpu;
     @Nullable private MemorySize committerMemory;
-    private Map<String, String> dynamicOptions;
 
     // Paimon catalog used to check and create tables. There will be two
     //     places where this catalog is used. 1) in processing function,
@@ -97,7 +97,6 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     }
 
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTableOptions(Options options) {
-        this.dynamicOptions = options.toMap();
         this.parallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
         this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
@@ -150,24 +149,29 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
         SingleOutputStreamOperatorUtils.getSideOutput(
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
+                .keyBy(t -> t.f0)
                 .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
                 .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> partitioned =
                 partition(
                         newlyAddedTableStream,
-                        new CdcMultiplexRecordChannelComputer(catalogLoader, dynamicOptions),
+                        new CdcMultiplexRecordChannelComputer(catalogLoader),
                         parallelism);
 
         FlinkCdcMultiTableSink sink =
                 new FlinkCdcMultiTableSink(catalogLoader, committerCpu, committerMemory);
-        sink.sinkFrom(partitioned, dynamicOptions);
+        sink.sinkFrom(partitioned);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
-        new FlinkCdcSink(table).sinkFrom(partitioned);
+        new CdcFixedBucketSink(table).sinkFrom(partitioned);
+    }
+
+    private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
+        new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed);
     }
 
     private void buildDividedCdcSink() {
@@ -206,8 +210,10 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                 case DYNAMIC:
                     new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
                     break;
-                case GLOBAL_DYNAMIC:
                 case UNAWARE:
+                    buildForUnawareBucket(table, parsedForTable);
+                    break;
+                case GLOBAL_DYNAMIC:
                 default:
                     throw new UnsupportedOperationException(
                             "Unsupported bucket mode: " + bucketMode);

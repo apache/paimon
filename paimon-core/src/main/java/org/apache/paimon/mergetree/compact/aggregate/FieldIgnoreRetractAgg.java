@@ -39,6 +39,11 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
+    public void reset() {
+        aggregator.reset();
+    }
+
+    @Override
     public Object retract(Object accumulator, Object retractField) {
         return accumulator;
     }

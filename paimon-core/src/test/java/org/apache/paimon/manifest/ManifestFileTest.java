@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -26,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -128,12 +130,14 @@ public class ManifestFileTest {
                 .isEqualTo(expected.numDeletedFiles());
 
         // check stats
-        for (int i = 0; i < expected.partitionStats().fields(null).length; i++) {
+        FieldStatsArraySerializer statsConverter = new FieldStatsArraySerializer(DEFAULT_PART_TYPE);
+        FieldStats[] fieldStats = statsConverter.fromBinary(expected.partitionStats());
+        for (int i = 0; i < fieldStats.length; i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    expected.partitionStats().fields(null)[i],
+                    fieldStats[i],
                     actual,
-                    meta -> meta.partitionStats().fields(null)[idx]);
+                    meta -> statsConverter.fromBinary(meta.partitionStats())[idx]);
         }
     }
 }

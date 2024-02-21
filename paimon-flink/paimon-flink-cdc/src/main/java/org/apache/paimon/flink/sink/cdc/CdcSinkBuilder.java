@@ -119,6 +119,7 @@ public class CdcSinkBuilder<T> {
             case DYNAMIC:
                 return new CdcDynamicBucketSink((FileStoreTable) table).build(parsed, parallelism);
             case UNAWARE:
+                return buildForUnawareBucket(parsed);
             default:
                 throw new UnsupportedOperationException("Unsupported bucket mode: " + bucketMode);
         }
@@ -128,6 +129,11 @@ public class CdcSinkBuilder<T> {
         FileStoreTable dataTable = (FileStoreTable) table;
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
-        return new FlinkCdcSink(dataTable).sinkFrom(partitioned);
+        return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
+    }
+
+    private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
+        FileStoreTable dataTable = (FileStoreTable) table;
+        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed);
     }
 }

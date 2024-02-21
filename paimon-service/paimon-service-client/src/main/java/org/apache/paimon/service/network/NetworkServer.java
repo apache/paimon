@@ -27,17 +27,17 @@ import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.netty4.io.netty.bootstrap.ServerBootstrap;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFuture;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelInitializer;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelOption;
+import org.apache.paimon.shade.netty4.io.netty.channel.EventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.nio.NioEventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.SocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import org.apache.paimon.shade.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 
-import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
-import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -149,7 +149,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
         ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
-                        .setNameFormat("Flink " + getServerName() + " Thread %d")
+                        .setNameFormat("Paimon " + getServerName() + " Thread %d")
                         .build();
         return Executors.newFixedThreadPool(numQueryThreads, threadFactory);
     }
@@ -233,7 +233,7 @@ public abstract class NetworkServer<REQ extends MessageBody, RESP extends Messag
         final ThreadFactory threadFactory =
                 new ThreadFactoryBuilder()
                         .setDaemon(true)
-                        .setNameFormat("Flink " + serverName + " EventLoop Thread %d")
+                        .setNameFormat("Paimon " + serverName + " EventLoop Thread %d")
                         .build();
 
         final NioEventLoopGroup nioGroup =

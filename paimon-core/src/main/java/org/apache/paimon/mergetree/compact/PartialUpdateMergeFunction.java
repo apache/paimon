@@ -56,7 +56,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     private final InternalRow.FieldGetter[] getters;
     private final boolean ignoreDelete;
     private final Map<Integer, SequenceGenerator> fieldSequences;
-
+    private final boolean fieldSequenceEnabled;
     private final Map<Integer, FieldAggregator> fieldAggregators;
 
     private InternalRow currentKey;
@@ -69,11 +69,13 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
             InternalRow.FieldGetter[] getters,
             boolean ignoreDelete,
             Map<Integer, SequenceGenerator> fieldSequences,
-            Map<Integer, FieldAggregator> fieldAggregators) {
+            Map<Integer, FieldAggregator> fieldAggregators,
+            boolean fieldSequenceEnabled) {
         this.getters = getters;
         this.ignoreDelete = ignoreDelete;
         this.fieldSequences = fieldSequences;
         this.fieldAggregators = fieldAggregators;
+        this.fieldSequenceEnabled = fieldSequenceEnabled;
     }
 
     @Override
@@ -95,7 +97,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 return;
             }
 
-            if (fieldSequences.size() > 1) {
+            if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
                 return;
             }
@@ -312,13 +314,15 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                         createFieldGetters(Projection.of(projection).project(tableTypes)),
                         ignoreDelete,
                         projectedSequences,
-                        projectedAggregators);
+                        projectedAggregators,
+                        !fieldSequences.isEmpty());
             } else {
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(tableTypes),
                         ignoreDelete,
                         fieldSequences,
-                        fieldAggregators);
+                        fieldAggregators,
+                        !fieldSequences.isEmpty());
             }
         }
 

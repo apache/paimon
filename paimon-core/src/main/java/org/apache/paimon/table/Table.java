@@ -20,6 +20,7 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -58,6 +59,10 @@ public interface Table extends Serializable {
     /** Optional comment of this table. */
     Optional<String> comment();
 
+    /** Optional statistics of this table. */
+    @Experimental
+    Optional<Statistics> statistics();
+
     // ================= Table Operations ====================
 
     /** Copy this table with adding dynamic options. */
@@ -82,6 +87,18 @@ public interface Table extends Serializable {
     /** Rollback table's state to a specific tag. */
     @Experimental
     void rollbackTo(String tagName);
+
+    /** Create a branch from given tag. */
+    @Experimental
+    void createBranch(String branchName, String tagName);
+
+    /** Delete a branch by branchName. */
+    @Experimental
+    void deleteBranch(String branchName);
+
+    /** Manually expire snapshots, parameters can be controlled independently of table options. */
+    @Experimental
+    ExpireSnapshots newExpireSnapshots();
 
     // =============== Read & Write Operations ==================
 

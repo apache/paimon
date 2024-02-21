@@ -51,6 +51,7 @@ import org.junit.jupiter.api.BeforeEach;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -109,9 +110,13 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
             throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         catalog.createDatabase(database, true);
+        Map<String, String> newOptions = new HashMap<>(options);
+        if (!newOptions.containsKey("bucket")) {
+            newOptions.put("bucket", "1");
+        }
         catalog.createTable(
                 identifier,
-                new Schema(rowType.getFields(), partitionKeys, primaryKeys, options, ""),
+                new Schema(rowType.getFields(), partitionKeys, primaryKeys, newOptions, ""),
                 false);
         return (FileStoreTable) catalog.getTable(identifier);
     }

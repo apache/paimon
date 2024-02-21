@@ -29,6 +29,7 @@ import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.IOFunction;
 
@@ -45,6 +46,8 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
 import java.util.Comparator;
+import java.util.TreeSet;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
@@ -61,8 +64,8 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
-
     private final Cache<String, ContainsFile> containsFiles;
+    private final Function<Long, BloomFilter.Builder> bfGenerator;
 
     public ContainsLevels(
             Levels levels,
@@ -72,7 +75,8 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
             Duration fileRetention,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            Function<Long, BloomFilter.Builder> bfGenerator) {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
@@ -88,6 +92,7 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
                         .executor(MoreExecutors.directExecutor())
                         .build();
         levels.addDropFileCallback(this);
+        this.bfGenerator = bfGenerator;
     }
 
     @VisibleForTesting
@@ -101,8 +106,15 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
     }
 
     public boolean contains(InternalRow key, int startLevel) throws IOException {
-        Boolean result = LookupUtils.lookup(levels, key, startLevel, this::contains);
+        Boolean result =
+                LookupUtils.lookup(levels, key, startLevel, this::contains, this::containsLevel0);
         return result != null && result;
+    }
+
+    @Nullable
+    private Boolean containsLevel0(InternalRow key, TreeSet<DataFileMeta> level0)
+            throws IOException {
+        return LookupUtils.lookupLevel0(keyComparator, key, level0, this::contains);
     }
 
     @Nullable
@@ -142,8 +154,10 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter = lookupStoreFactory.createWriter(localFile);
-                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
+        LookupStoreWriter kvWriter =
+                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
+        LookupStoreFactory.Context context;
+        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
             while ((batch = reader.readBatch()) != null) {
@@ -156,9 +170,11 @@ public class ContainsLevels implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
+        } finally {
+            context = kvWriter.close();
         }
 
-        return new ContainsFile(localFile, lookupStoreFactory.createReader(localFile));
+        return new ContainsFile(localFile, lookupStoreFactory.createReader(localFile, context));
     }
 
     @Override

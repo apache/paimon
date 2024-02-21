@@ -23,7 +23,7 @@ import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.flink.source.BucketUnawareCompactSource;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.utils.ExecutorThreadFactory;
@@ -53,15 +53,14 @@ public class AppendOnlyTableCompactionWorkerOperator
     private static final Logger LOG =
             LoggerFactory.getLogger(AppendOnlyTableCompactionWorkerOperator.class);
 
-    private final AppendOnlyFileStoreTable table;
+    private final FileStoreTable table;
     private final String commitUser;
 
     private transient AppendOnlyFileStoreWrite write;
     private transient ExecutorService lazyCompactExecutor;
     private transient Queue<Future<CommitMessage>> result;
 
-    public AppendOnlyTableCompactionWorkerOperator(
-            AppendOnlyFileStoreTable table, String commitUser) {
+    public AppendOnlyTableCompactionWorkerOperator(FileStoreTable table, String commitUser) {
         super(Options.fromMap(table.options()));
         this.table = table;
         this.commitUser = commitUser;
@@ -75,7 +74,7 @@ public class AppendOnlyTableCompactionWorkerOperator
     @Override
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
-        this.write = table.store().newWrite(commitUser);
+        this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser);
         this.result = new LinkedList<>();
     }
 

@@ -168,7 +168,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
 
     @Test
     public void testSystemTableTimeTravel() throws Exception {
-        spark.sql("CREATE TABLE t (k INT, v STRING)");
+        spark.sql("CREATE TABLE t (k INT, v STRING) TBLPROPERTIES ('bucket' = '1')");
 
         // snapshot 1
         writeTable(
@@ -235,7 +235,8 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                         () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
                 .satisfies(
                         AssertionUtils.anyCauseMatches(
-                                IllegalArgumentException.class, "Tag 'unknown' doesn't exist."));
+                                RuntimeException.class,
+                                "Cannot find a time travel version for unknown"));
     }
 
     @Test
@@ -267,11 +268,35 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
         Map<String, String> expireOptions = new HashMap<>();
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
-        table.copy(expireOptions).store().newExpire().expire();
+        table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
         // time travel to tag2
         assertThat(spark.sql("SELECT * FROM t VERSION AS OF 'tag2'").collectAsList().toString())
+                .isEqualTo("[[1,Hello], [2,Paimon], [3,Test], [4,Case]]");
+    }
+
+    @Test
+    public void testTravelToTagWithDigitalName() throws Exception {
+        spark.sql("CREATE TABLE t (k INT, v STRING)");
+
+        // snapshot 1
+        writeTable(
+                "t",
+                GenericRow.of(1, BinaryString.fromString("Hello")),
+                GenericRow.of(2, BinaryString.fromString("Paimon")));
+
+        // snapshot 2
+        writeTable(
+                "t",
+                GenericRow.of(3, BinaryString.fromString("Test")),
+                GenericRow.of(4, BinaryString.fromString("Case")));
+
+        FileStoreTable table = getTable("t");
+        table.createTag("1", 2);
+
+        // time travel to tag '1'
+        assertThat(spark.sql("SELECT * FROM t VERSION AS OF '1'").collectAsList().toString())
                 .isEqualTo("[[1,Hello], [2,Paimon], [3,Test], [4,Case]]");
     }
 }

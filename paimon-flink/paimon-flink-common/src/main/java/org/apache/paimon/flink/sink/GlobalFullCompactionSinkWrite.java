@@ -115,6 +115,13 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
     }
 
     @Override
+    public SinkRecord write(InternalRow rowData, int bucket) throws Exception {
+        SinkRecord sinkRecord = super.write(rowData, bucket);
+        touchBucket(sinkRecord.partition(), bucket);
+        return sinkRecord;
+    }
+
+    @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {
         super.compact(partition, bucket, fullCompaction);
         touchBucket(partition, bucket);

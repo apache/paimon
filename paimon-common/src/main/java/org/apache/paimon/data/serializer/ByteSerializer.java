@@ -45,4 +45,14 @@ public final class ByteSerializer extends SerializerSingleton<Byte> {
     public Byte deserialize(DataInputView source) throws IOException {
         return source.readByte();
     }
+
+    @Override
+    public String serializeToString(Byte record) {
+        return record.toString();
+    }
+
+    @Override
+    public Byte deserializeFromString(String s) {
+        return Byte.valueOf(s);
+    }
 }

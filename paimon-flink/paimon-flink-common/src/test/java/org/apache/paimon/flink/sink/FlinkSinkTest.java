@@ -48,8 +48,8 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.state.StateInitializationContextImpl;
+import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.datastream.SingleOutputStreamOperator;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
@@ -62,7 +62,6 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -231,8 +230,8 @@ public class FlinkSinkTest {
         DataStreamSource<InternalRow> source =
                 streamExecutionEnvironment.fromCollection(
                         Collections.singletonList(GenericRow.of(1, 1)));
-        FlinkSink<InternalRow> flinkSink = new FileStoreSink(fileStoreTable, null, null);
-        SingleOutputStreamOperator<Committable> written = flinkSink.doWrite(source, "123", 1);
+        FlinkSink<InternalRow> flinkSink = new FixedBucketSink(fileStoreTable, null, null);
+        DataStream<Committable> written = flinkSink.doWrite(source, "123", 1);
         RowDataStoreWriteOperator operator =
                 ((RowDataStoreWriteOperator)
                         ((SimpleOperatorFactory)
@@ -263,22 +262,23 @@ public class FlinkSinkTest {
 
     private FileStoreTable createFileStoreTable() throws Exception {
         org.apache.paimon.fs.Path tablePath = new org.apache.paimon.fs.Path(tempPath.toString());
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
-                                Arrays.asList("pk"),
-                                conf.toMap(),
+                                Collections.singletonList("pk"),
+                                options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
                 FileIOFinder.find(tablePath),
                 tablePath,
                 tableSchema,
-                conf,
+                options,
                 new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 

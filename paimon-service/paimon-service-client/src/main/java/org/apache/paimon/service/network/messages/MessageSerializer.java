@@ -22,10 +22,10 @@ import org.apache.paimon.service.network.NetworkClient;
 import org.apache.paimon.service.network.NetworkServer;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufAllocator;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufInputStream;
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBufOutputStream;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufAllocator;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufInputStream;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBufOutputStream;
 
 import java.io.IOException;
 import java.io.ObjectInputStream;

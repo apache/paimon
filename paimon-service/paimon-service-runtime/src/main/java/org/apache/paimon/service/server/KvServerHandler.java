@@ -19,18 +19,23 @@
 package org.apache.paimon.service.server;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.lookup.QueryLookup;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.service.exceptions.UnknownPartitionBucketException;
 import org.apache.paimon.service.messages.KvRequest;
 import org.apache.paimon.service.messages.KvResponse;
 import org.apache.paimon.service.network.AbstractServerHandler;
 import org.apache.paimon.service.network.messages.MessageSerializer;
 import org.apache.paimon.service.network.stats.ServiceRequestStats;
+import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandler;
 
 import java.util.concurrent.CompletableFuture;
+
+import static org.apache.paimon.table.sink.ChannelComputer.select;
 
 /**
  * This handler dispatches asynchronous tasks, which query values and write the result to the
@@ -43,7 +48,10 @@ import java.util.concurrent.CompletableFuture;
 @ChannelHandler.Sharable
 public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse> {
 
-    private final QueryLookup lookup;
+    private final int serverId;
+    private final int numServers;
+    private final TableQuery lookup;
+    private final InternalRowSerializer valueSerializer;
 
     /**
      * Create the handler used by the {@link KvQueryServer}.
@@ -56,11 +64,16 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
      */
     public KvServerHandler(
             final KvQueryServer server,
-            final QueryLookup lookup,
+            final int serverId,
+            final int numServers,
+            final TableQuery lookup,
             final MessageSerializer<KvRequest, KvResponse> serializer,
             final ServiceRequestStats stats) {
         super(server, serializer, stats);
+        this.serverId = serverId;
+        this.numServers = numServers;
         this.lookup = Preconditions.checkNotNull(lookup);
+        this.valueSerializer = lookup.createValueSerializer();
     }
 
     @Override
@@ -68,9 +81,23 @@ public class KvServerHandler extends AbstractServerHandler<KvRequest, KvResponse
             final long requestId, final KvRequest request) {
         final CompletableFuture<KvResponse> responseFuture = new CompletableFuture<>();
 
+        int selectServerId = select(request.partition(), request.bucket(), numServers);
+        if (selectServerId != serverId) {
+            responseFuture.completeExceptionally(
+                    new UnknownPartitionBucketException(getServerName()));
+            return responseFuture;
+        }
+
         try {
-            BinaryRow[] values =
-                    lookup.lookup(request.partition(), request.bucket(), request.keys());
+            BinaryRow[] keys = request.keys();
+            BinaryRow[] values = new BinaryRow[keys.length];
+            for (int i = 0; i < values.length; i++) {
+                InternalRow value =
+                        this.lookup.lookup(request.partition(), request.bucket(), keys[i]);
+                if (value != null) {
+                    values[i] = valueSerializer.toBinaryRow(value).copy();
+                }
+            }
             responseFuture.complete(new KvResponse(values));
             return responseFuture;
         } catch (Throwable t) {

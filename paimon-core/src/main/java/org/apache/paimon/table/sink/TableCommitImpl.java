@@ -28,7 +28,6 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.FileStoreExpire;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.metrics.CommitMetrics;
@@ -37,6 +36,7 @@ import org.apache.paimon.utils.ExecutorThreadFactory;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PathFactory;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
@@ -67,16 +67,13 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/**
- * An abstraction layer above {@link FileStoreCommit} and {@link FileStoreExpire} to provide
- * snapshot commit and expiration.
- */
+/** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
 public class TableCommitImpl implements InnerTableCommit {
     private static final Logger LOG = LoggerFactory.getLogger(TableCommitImpl.class);
 
     private final FileStoreCommit commit;
     private final List<CommitCallback> commitCallbacks;
-    @Nullable private final FileStoreExpire expire;
+    @Nullable private final Runnable expireSnapshots;
     @Nullable private final PartitionExpire partitionExpire;
     @Nullable private final TagAutoCreation tagAutoCreation;
     private final Lock lock;
@@ -95,7 +92,7 @@ public class TableCommitImpl implements InnerTableCommit {
     public TableCommitImpl(
             FileStoreCommit commit,
             List<CommitCallback> commitCallbacks,
-            @Nullable FileStoreExpire expire,
+            @Nullable Runnable expireSnapshots,
             @Nullable PartitionExpire partitionExpire,
             @Nullable TagAutoCreation tagAutoCreation,
             Lock lock,
@@ -104,16 +101,13 @@ public class TableCommitImpl implements InnerTableCommit {
             ExpireExecutionMode expireExecutionMode,
             String tableName) {
         commit.withLock(lock);
-        if (expire != null) {
-            expire.withLock(lock);
-        }
         if (partitionExpire != null) {
             partitionExpire.withLock(lock);
         }
 
         this.commit = commit;
         this.commitCallbacks = commitCallbacks;
-        this.expire = expire;
+        this.expireSnapshots = expireSnapshots;
         this.partitionExpire = partitionExpire;
         this.tagAutoCreation = tagAutoCreation;
         this.lock = lock;
@@ -252,6 +246,7 @@ public class TableCommitImpl implements InnerTableCommit {
     private void checkFilesExistence(List<ManifestCommittable> committables) {
         List<Path> files = new ArrayList<>();
         Map<Pair<BinaryRow, Integer>, DataFilePathFactory> factoryMap = new HashMap<>();
+        PathFactory indexFileFactory = commit.pathFactory().indexFileFactory();
         for (ManifestCommittable committable : committables) {
             for (CommitMessage message : committable.fileCommittables()) {
                 CommitMessageImpl msg = (CommitMessageImpl) message;
@@ -270,7 +265,7 @@ public class TableCommitImpl implements InnerTableCommit {
                 msg.compactIncrement().compactAfter().forEach(collector);
                 msg.indexIncrement().newIndexFiles().stream()
                         .map(IndexFileMeta::fileName)
-                        .map(pathFactory::toPath)
+                        .map(indexFileFactory::toPath)
                         .forEach(files::add);
             }
         }
@@ -338,9 +333,7 @@ public class TableCommitImpl implements InnerTableCommit {
             consumerManager.expire(LocalDateTime.now().minus(consumerExpireTime));
         }
 
-        if (expire != null) {
-            expire.expire();
-        }
+        expireSnapshots();
 
         if (partitionExpire != null) {
             partitionExpire.expire(partitionExpireIdentifier);
@@ -348,6 +341,12 @@ public class TableCommitImpl implements InnerTableCommit {
 
         if (tagAutoCreation != null) {
             tagAutoCreation.run();
+        }
+    }
+
+    public void expireSnapshots() {
+        if (expireSnapshots != null) {
+            expireSnapshots.run();
         }
     }
 

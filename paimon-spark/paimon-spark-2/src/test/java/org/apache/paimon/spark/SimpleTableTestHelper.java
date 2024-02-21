@@ -48,6 +48,7 @@ public class SimpleTableTestHelper {
         Map<String, String> options = new HashMap<>();
         // orc is shaded, can not find shaded classes in ide
         options.put(CoreOptions.FILE_FORMAT.key(), CoreOptions.FileFormatType.AVRO.toString());
+        options.put("bucket", "1");
         new SchemaManager(LocalFileIO.create(), path)
                 .createTable(
                         new Schema(

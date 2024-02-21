@@ -37,7 +37,7 @@ import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
-import org.apache.paimon.table.AbstractFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.PartitionKeyExtractor;
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor;
@@ -78,12 +78,11 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
     private static final String INDEX_NAME = "keyIndex";
 
-    private final AbstractFileStoreTable table;
+    private final FileStoreTable table;
 
     private transient IOManager ioManager;
 
     private transient int bucketIndex;
-    private transient ProjectToRowFunction setPartition;
     private transient boolean bootstrap;
     private transient BinaryExternalSortBuffer bootstrapKeys;
     private transient RowBuffer bootstrapRecords;
@@ -103,7 +102,7 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
     private transient ExistingProcessor existingProcessor;
 
     public GlobalIndexAssigner(Table table) {
-        this.table = (AbstractFileStoreTable) table;
+        this.table = (FileStoreTable) table;
     }
 
     // ================== Start Public API ===================
@@ -122,7 +121,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
 
         RowType bootstrapType = IndexBootstrap.bootstrapType(table.schema());
         this.bucketIndex = bootstrapType.getFieldCount() - 1;
-        this.setPartition = new ProjectToRowFunction(table.rowType(), table.partitionKeys());
+        ProjectToRowFunction setPartition =
+                new ProjectToRowFunction(table.rowType(), table.partitionKeys());
 
         CoreOptions coreOptions = table.coreOptions();
         this.targetBucketRowNumber = (int) coreOptions.dynamicBucketTargetRowNum();
@@ -289,7 +289,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         keyWithRowType,
                         coreOptions.writeBufferSize() / 2,
                         coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+                        coreOptions.localSortMaxNumFileHandles(),
+                        coreOptions.spillCompression());
 
         Function<SortOrder, RowIterator> iteratorFunction =
                 sortOrder -> {

@@ -28,18 +28,21 @@ import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Remo
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.MoreExecutors;
 
 import java.io.IOException;
-import java.io.RandomAccessFile;
-import java.util.Objects;
-import java.util.function.Consumer;
 
 /** Cache manager to cache bytes to paged {@link MemorySegment}s. */
 public class CacheManager {
 
-    private final int pageSize;
+    /**
+     * Refreshing the cache comes with some costs, so not every time we visit the CacheManager, but
+     * every 10 visits, refresh the LRU strategy.
+     */
+    public static final int REFRESH_COUNT = 10;
+
     private final Cache<CacheKey, CacheValue> cache;
 
-    public CacheManager(int pageSize, MemorySize maxMemorySize) {
-        this.pageSize = pageSize;
+    private int fileReadCount;
+
+    public CacheManager(MemorySize maxMemorySize) {
         this.cache =
                 Caffeine.newBuilder()
                         .weigher(this::weigh)
@@ -47,24 +50,20 @@ public class CacheManager {
                         .removalListener(this::onRemoval)
                         .executor(MoreExecutors.directExecutor())
                         .build();
+        this.fileReadCount = 0;
     }
 
     @VisibleForTesting
-    Cache<CacheKey, CacheValue> cache() {
+    public Cache<CacheKey, CacheValue> cache() {
         return cache;
     }
 
-    public int pageSize() {
-        return pageSize;
-    }
-
-    public MemorySegment getPage(
-            RandomAccessFile file, int pageNumber, Consumer<Integer> cleanCallback) {
-        CacheKey key = new CacheKey(file, pageNumber);
+    public MemorySegment getPage(CacheKey key, CacheReader reader, CacheCallback callback) {
         CacheValue value = cache.getIfPresent(key);
         while (value == null || value.isClosed) {
             try {
-                value = createValue(key, cleanCallback);
+                this.fileReadCount++;
+                value = new CacheValue(MemorySegment.wrap(reader.read(key)), callback);
             } catch (IOException e) {
                 throw new RuntimeException(e);
             }
@@ -73,8 +72,8 @@ public class CacheManager {
         return value.segment;
     }
 
-    public void invalidPage(RandomAccessFile file, int pageNumber) {
-        cache.invalidate(new CacheKey(file, pageNumber));
+    public void invalidPage(CacheKey key) {
+        cache.invalidate(key);
     }
 
     private int weigh(CacheKey cacheKey, CacheValue cacheValue) {
@@ -83,62 +82,23 @@ public class CacheManager {
 
     private void onRemoval(CacheKey key, CacheValue value, RemovalCause cause) {
         value.isClosed = true;
-        value.cleanCallback.accept(key.pageNumber);
+        value.callback.onRemoval(key);
     }
 
-    private CacheValue createValue(CacheKey key, Consumer<Integer> cleanCallback)
-            throws IOException {
-        return new CacheValue(key.read(pageSize), cleanCallback);
-    }
-
-    private static class CacheKey {
-
-        private final RandomAccessFile file;
-        private final int pageNumber;
-
-        private CacheKey(RandomAccessFile file, int pageNumber) {
-            this.file = file;
-            this.pageNumber = pageNumber;
-        }
-
-        private MemorySegment read(int pageSize) throws IOException {
-            long length = file.length();
-            long pageAddress = (long) pageNumber * pageSize;
-            int len = (int) Math.min(pageSize, length - pageAddress);
-            byte[] bytes = new byte[len];
-            file.seek(pageAddress);
-            file.readFully(bytes);
-            return MemorySegment.wrap(bytes);
-        }
-
-        @Override
-        public boolean equals(Object o) {
-            if (this == o) {
-                return true;
-            }
-            if (o == null || getClass() != o.getClass()) {
-                return false;
-            }
-            CacheKey cacheKey = (CacheKey) o;
-            return pageNumber == cacheKey.pageNumber && Objects.equals(file, cacheKey.file);
-        }
-
-        @Override
-        public int hashCode() {
-            return Objects.hash(file, pageNumber);
-        }
+    public int fileReadCount() {
+        return fileReadCount;
     }
 
     private static class CacheValue {
 
         private final MemorySegment segment;
-        private final Consumer<Integer> cleanCallback;
+        private final CacheCallback callback;
 
         private boolean isClosed = false;
 
-        private CacheValue(MemorySegment segment, Consumer<Integer> cleanCallback) {
+        private CacheValue(MemorySegment segment, CacheCallback callback) {
             this.segment = segment;
-            this.cleanCallback = cleanCallback;
+            this.callback = callback;
         }
     }
 }

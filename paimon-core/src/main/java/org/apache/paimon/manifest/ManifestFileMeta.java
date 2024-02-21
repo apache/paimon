@@ -281,14 +281,14 @@ public class ManifestFileMeta {
 
             if (predicateOpt.isPresent()) {
                 Predicate predicate = predicateOpt.get();
-                FieldStatsArraySerializer fieldStatsArraySerializer =
-                        new FieldStatsArraySerializer(partitionType);
                 for (; j < base.size(); j++) {
                     // TODO: optimize this to binary search.
                     ManifestFileMeta file = base.get(j);
                     if (predicate.test(
                             file.numAddedFiles + file.numDeletedFiles,
-                            file.partitionStats.fields(fieldStatsArraySerializer))) {
+                            file.partitionStats.minValues(),
+                            file.partitionStats.maxValues(),
+                            file.partitionStats.nullCounts())) {
                         break;
                     } else {
                         result.add(file);

@@ -25,14 +25,14 @@ under the License.
     <parent>
         <groupId>org.apache.paimon</groupId>
         <artifactId>paimon-spark</artifactId>
-        <version>0.7-SNAPSHOT</version>
+        <version>0.8-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-spark-3.3</artifactId>
     <name>Paimon : Spark : 3.3</name>
 
     <properties>
-        <spark.version>3.3.3</spark.version>
+        <spark.version>3.3.4</spark.version>
     </properties>
 
     <dependencies>

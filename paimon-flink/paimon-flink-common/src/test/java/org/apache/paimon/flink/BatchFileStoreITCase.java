@@ -233,7 +233,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
         expireOptions.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         FileStoreTable table = (FileStoreTable) paimonTable("T");
-        table.copy(expireOptions).store().newExpire().expire();
+        table.copy(expireOptions).newCommit("").expireSnapshots();
         assertThat(table.snapshotManager().snapshotCount()).isEqualTo(1);
 
         assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='tag1') */"))
@@ -375,7 +375,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDelete() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true')");
+                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
@@ -392,7 +392,7 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     public void testDeleteWithPkLookup() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('changelog-producer' = 'lookup')");
+                        + "WITH ('changelog-producer' = 'lookup', 'bucket' = '1')");
         BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");

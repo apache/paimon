@@ -20,18 +20,23 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
+import org.apache.paimon.stats.FieldStatsArraySerializer;
+import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.DataField;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.util.List;
+import java.util.Map;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -91,15 +96,15 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
 
     protected void validateStatsField(List<DataFileMeta> fileMetaList) {
         for (DataFileMeta fileMeta : fileMetaList) {
-            FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
-            assertThat(statsArray.length).isEqualTo(12);
+            BinaryTableStats stats = getTableValueStats(fileMeta);
+            assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
             for (int i = 0; i < 11; i++) {
-                assertThat(statsArray[i].minValue()).isNotNull();
-                assertThat(statsArray[i].maxValue()).isNotNull();
+                assertThat(stats.minValues().isNullAt(i)).isFalse();
+                assertThat(stats.maxValues().isNullAt(i)).isFalse();
             }
             // Min and max value of binary type is null
-            assertThat(statsArray[11].minValue()).isNull();
-            assertThat(statsArray[11].maxValue()).isNull();
+            assertThat(stats.minValues().isNullAt(11)).isTrue();
+            assertThat(stats.maxValues().isNullAt(11)).isTrue();
         }
     }
 
@@ -165,7 +170,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                                             .collect(Collectors.toList()))
                             .containsAll(filesName);
 
-                    validateValuesWithNewSchema(filesName, fileMetaList);
+                    validateValuesWithNewSchema(
+                            schemas, table.schema().id(), filesName, fileMetaList);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -216,7 +222,8 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
                             .containsAll(filesName);
 
                     // Compare all columns with table column type
-                    validateValuesWithNewSchema(filesName, fileMetaList);
+                    validateValuesWithNewSchema(
+                            schemas, table.schema().id(), filesName, fileMetaList);
                 },
                 getPrimaryKeyNames(),
                 tableConfig,
@@ -224,14 +231,22 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
     }
 
     protected void validateValuesWithNewSchema(
-            List<String> filesName, List<DataFileMeta> fileMetaList) {
+            Map<Long, TableSchema> tableSchemas,
+            long schemaId,
+            List<String> filesName,
+            List<DataFileMeta> fileMetaList) {
+        Function<Long, List<DataField>> schemaFields = id -> tableSchemas.get(id).fields();
+        FieldStatsConverters converters = new FieldStatsConverters(schemaFields, schemaId);
         for (DataFileMeta fileMeta : fileMetaList) {
-            FieldStats[] statsArray = getTableValueStats(fileMeta).fields(null);
-            assertThat(statsArray.length).isEqualTo(12);
+            BinaryTableStats stats = getTableValueStats(fileMeta);
+            FieldStatsArraySerializer serializer = converters.getOrCreate(fileMeta.schemaId());
+            InternalRow min = serializer.evolution(stats.minValues());
+            InternalRow max = serializer.evolution(stats.maxValues());
+            assertThat(stats.minValues().getFieldCount()).isEqualTo(12);
             if (filesName.contains(fileMeta.fileName())) {
-                checkTwoValues(statsArray);
+                checkTwoValues(min, max);
             } else {
-                checkOneValue(statsArray);
+                checkOneValue(min, max);
             }
         }
     }
@@ -245,41 +260,28 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
      *   <li>types: a->int, b->varchar[10], c->varchar[10], d->double, e->int, f->decimal,g->float,
      *       h->double, i->decimal, j->date, k->date, l->varbinary
      * </ul>
-     *
-     * @param statsArray the field stats
      */
-    private void checkOneValue(FieldStats[] statsArray) {
-        assertThat(statsArray[0].minValue()).isEqualTo((statsArray[0].maxValue())).isEqualTo(2);
-        assertThat(statsArray[1].minValue())
-                .isEqualTo(statsArray[1].maxValue())
+    private void checkOneValue(InternalRow min, InternalRow max) {
+        assertThat(min.getInt(0)).isEqualTo(max.getInt(0)).isEqualTo(2);
+        assertThat(min.getString(1))
+                .isEqualTo(max.getString(1))
                 .isEqualTo(BinaryString.fromString("400"));
-        assertThat(statsArray[2].minValue())
-                .isEqualTo(statsArray[2].maxValue())
+        assertThat(min.getString(2))
+                .isEqualTo(max.getString(2))
                 .isEqualTo(BinaryString.fromString("401"));
-        assertThat((Double) statsArray[3].minValue())
-                .isEqualTo((Double) statsArray[3].maxValue())
-                .isEqualTo(402D);
-        assertThat((Integer) statsArray[4].minValue())
-                .isEqualTo(statsArray[4].maxValue())
-                .isEqualTo(403);
-        assertThat(((Decimal) statsArray[5].minValue()).toBigDecimal().intValue())
-                .isEqualTo(((Decimal) statsArray[5].maxValue()).toBigDecimal().intValue())
+        assertThat(min.getDouble(3)).isEqualTo(max.getDouble(3)).isEqualTo(402D);
+        assertThat(min.getInt(4)).isEqualTo(max.getInt(4)).isEqualTo(403);
+        assertThat(min.getDecimal(5, 10, 2).toBigDecimal().intValue())
+                .isEqualTo(max.getDecimal(5, 10, 2).toBigDecimal().intValue())
                 .isEqualTo(404);
-        assertThat((Float) statsArray[6].minValue())
-                .isEqualTo(statsArray[6].maxValue())
-                .isEqualTo(405F);
-        assertThat((Double) statsArray[7].minValue())
-                .isEqualTo(statsArray[7].maxValue())
-                .isEqualTo(406D);
-        assertThat(((Decimal) statsArray[8].minValue()).toBigDecimal().doubleValue())
-                .isEqualTo(((Decimal) statsArray[8].maxValue()).toBigDecimal().doubleValue())
+        assertThat(min.getFloat(6)).isEqualTo(max.getFloat(6)).isEqualTo(405F);
+        assertThat(min.getDouble(7)).isEqualTo(max.getDouble(7)).isEqualTo(406D);
+        assertThat(min.getDecimal(8, 10, 2).toBigDecimal().doubleValue())
+                .isEqualTo(max.getDecimal(8, 10, 2).toBigDecimal().doubleValue())
                 .isEqualTo(407D);
-        assertThat(statsArray[9].minValue()).isEqualTo(statsArray[9].maxValue()).isEqualTo(408);
-        assertThat(statsArray[10].minValue()).isEqualTo(statsArray[10].maxValue()).isEqualTo(409);
-
-        // Min and max value of binary type is null
-        assertThat(statsArray[11].minValue()).isNull();
-        assertThat(statsArray[11].maxValue()).isNull();
+        assertThat(min.getInt(9)).isEqualTo(max.getInt(9)).isEqualTo(408);
+        assertThat(min.getInt(10)).isEqualTo(max.getInt(10)).isEqualTo(409);
+        assertThat(min.isNullAt(11)).isEqualTo(max.isNullAt(11)).isTrue();
     }
 
     /**
@@ -296,44 +298,43 @@ public abstract class ColumnTypeFileMetaTestBase extends SchemaEvolutionTableTes
      *       f->decimal,g->float, h->double, i->decimal, j->date, k->date, l->varbinary
      * </ul>
      */
-    private void checkTwoValues(FieldStats[] statsArray) {
-        assertThat(statsArray[0].minValue()).isEqualTo(2);
-        assertThat(statsArray[0].maxValue()).isEqualTo(2);
+    private void checkTwoValues(InternalRow min, InternalRow max) {
+        assertThat(min.getInt(0)).isEqualTo(2);
+        assertThat(max.getInt(0)).isEqualTo(2);
 
-        assertThat(statsArray[1].minValue()).isEqualTo(BinaryString.fromString("200       "));
-        assertThat(statsArray[1].maxValue()).isEqualTo(BinaryString.fromString("300       "));
+        assertThat(min.getString(1)).isEqualTo(BinaryString.fromString("200       "));
+        assertThat(max.getString(1)).isEqualTo(BinaryString.fromString("300       "));
 
-        assertThat(statsArray[2].minValue()).isEqualTo(BinaryString.fromString("201"));
-        assertThat(statsArray[2].maxValue()).isEqualTo(BinaryString.fromString("301"));
+        assertThat(min.getString(2)).isEqualTo(BinaryString.fromString("201"));
+        assertThat(max.getString(2)).isEqualTo(BinaryString.fromString("301"));
 
-        assertThat((Double) statsArray[3].minValue()).isEqualTo(202D);
-        assertThat((Double) statsArray[3].maxValue()).isEqualTo(302D);
+        assertThat(min.getDouble(3)).isEqualTo(202D);
+        assertThat(max.getDouble(3)).isEqualTo(302D);
 
-        assertThat((Integer) statsArray[4].minValue()).isEqualTo(203);
-        assertThat((Integer) statsArray[4].maxValue()).isEqualTo(303);
+        assertThat(min.getInt(4)).isEqualTo(203);
+        assertThat(max.getInt(4)).isEqualTo(303);
 
-        assertThat(((Decimal) statsArray[5].minValue()).toBigDecimal().intValue()).isEqualTo(204);
-        assertThat(((Decimal) statsArray[5].maxValue()).toBigDecimal().intValue()).isEqualTo(304);
+        assertThat(min.getDecimal(5, 10, 2).toBigDecimal().intValue()).isEqualTo(204);
+        assertThat(max.getDecimal(5, 10, 2).toBigDecimal().intValue()).isEqualTo(304);
 
-        assertThat((Float) statsArray[6].minValue()).isEqualTo(205F);
-        assertThat((Float) statsArray[6].maxValue()).isEqualTo(305F);
+        assertThat(min.getFloat(6)).isEqualTo(205F);
+        assertThat(max.getFloat(6)).isEqualTo(305F);
 
-        assertThat((Double) statsArray[7].minValue()).isEqualTo(206D);
-        assertThat((Double) statsArray[7].maxValue()).isEqualTo(306D);
+        assertThat(min.getDouble(7)).isEqualTo(206D);
+        assertThat(max.getDouble(7)).isEqualTo(306D);
 
-        assertThat(((Decimal) statsArray[8].minValue()).toBigDecimal().doubleValue())
-                .isEqualTo(207D);
-        assertThat(((Decimal) statsArray[8].maxValue()).toBigDecimal().doubleValue())
-                .isEqualTo(307D);
+        assertThat(min.getDecimal(8, 10, 2).toBigDecimal().doubleValue()).isEqualTo(207D);
+        assertThat(max.getDecimal(8, 10, 2).toBigDecimal().doubleValue()).isEqualTo(307D);
 
-        assertThat(statsArray[9].minValue()).isEqualTo(208);
-        assertThat(statsArray[9].maxValue()).isEqualTo(308);
-        assertThat(statsArray[10].minValue()).isEqualTo(209);
-        assertThat(statsArray[10].maxValue()).isEqualTo(309);
+        assertThat(min.getInt(9)).isEqualTo(208);
+        assertThat(max.getInt(9)).isEqualTo(308);
+
+        assertThat(min.getInt(10)).isEqualTo(209);
+        assertThat(max.getInt(10)).isEqualTo(309);
 
         // Min and max value of binary type is null
-        assertThat(statsArray[11].minValue()).isNull();
-        assertThat(statsArray[11].maxValue()).isNull();
+        assertThat(min.isNullAt(11)).isTrue();
+        assertThat(max.isNullAt(11)).isTrue();
     }
 
     @Override

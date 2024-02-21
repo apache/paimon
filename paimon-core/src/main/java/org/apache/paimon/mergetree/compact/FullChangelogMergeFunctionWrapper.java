@@ -100,11 +100,11 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         if (isInitialized) {
             KeyValue merged = mergeFunction.getResult();
             if (topLevelKv == null) {
-                if (merged != null && isAdd(merged)) {
+                if (merged != null && merged.isAdd()) {
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
                 }
             } else {
-                if (merged == null || !isAdd(merged)) {
+                if (merged == null || !merged.isAdd()) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
                 } else if (!changelogRowDeduplicate
                         || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
@@ -115,7 +115,7 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
             }
             return reusedResult.setResultIfNotRetract(merged);
         } else {
-            if (topLevelKv == null && isAdd(initialKv)) {
+            if (topLevelKv == null && initialKv.isAdd()) {
                 reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, initialKv));
             }
             // either topLevelKv is not null, but there is only one kv,
@@ -128,9 +128,5 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
 
     private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
         return reused.replace(from.key(), from.sequenceNumber(), valueKind, from.value());
-    }
-
-    private boolean isAdd(KeyValue kv) {
-        return kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER;
     }
 }

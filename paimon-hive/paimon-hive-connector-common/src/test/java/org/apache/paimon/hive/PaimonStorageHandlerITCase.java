@@ -740,18 +740,20 @@ public class PaimonStorageHandlerITCase {
     public void testDateAndTimestamp() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         Options conf = getBasicConf();
-        conf.set(
-                CoreOptions.FILE_FORMAT,
+
+        CoreOptions.FileFormatType fileFormatType =
                 random.nextBoolean()
                         ? CoreOptions.FileFormatType.ORC
-                        : CoreOptions.FileFormatType.PARQUET);
+                        : CoreOptions.FileFormatType.PARQUET;
+        conf.set(CoreOptions.FILE_FORMAT, fileFormatType);
+
+        int precision = random.nextInt(10);
+
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,
                         RowType.of(
-                                new DataType[] {
-                                    DataTypes.DATE(), DataTypes.TIMESTAMP(random.nextInt(10))
-                                },
+                                new DataType[] {DataTypes.DATE(), DataTypes.TIMESTAMP(precision)},
                                 new String[] {"dt", "ts"}),
                         Collections.emptyList(),
                         Collections.emptyList());
@@ -772,32 +774,53 @@ public class PaimonStorageHandlerITCase {
                 GenericRow.of(
                         null,
                         Timestamp.fromLocalDateTime(
-                                LocalDateTime.of(2022, 6, 18, 8, 30, 0, 100_000_000))));
+                                // to test different precisions
+                                LocalDateTime.of(2022, 6, 18, 8, 30, 0, 123_456_789))));
         commit.commit(2, write.prepareCommit(true, 2));
         write.close();
         commit.close();
 
         createExternalTable();
+
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-11'"))
                 .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
         assertThat(
                         hiveShell.executeQuery(
-                                "SELECT * FROM `"
-                                        + externalTable
-                                        + "` WHERE ts = '2022-05-17 17:29:20.1'"))
+                                String.format(
+                                        // do not test '.123456789' because the filter pushdown will
+                                        // cause wrong result
+                                        "SELECT * FROM `%s` WHERE ts = '2022-05-17 17:29:20.1'",
+                                        externalTable)))
                 .containsExactly("1971-01-11\t2022-05-17 17:29:20.1");
+
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `" + externalTable + "` WHERE dt = '1971-01-12'"))
                 .containsExactly("1971-01-12\tNULL");
+
+        // validate '2022-06-18 08:30:00.123456789'
+        // the original precision is maintained, but the file format will affect the result
+        // parquet stores timestamp with three forms
+        String fraction;
+        if (fileFormatType == CoreOptions.FileFormatType.ORC) {
+            fraction = ".123456789";
+        } else {
+            if (precision <= 3) {
+                fraction = ".123";
+            } else if (precision <= 6) {
+                fraction = ".123456";
+            } else {
+                fraction = ".123456789";
+            }
+        }
         assertThat(
                         hiveShell.executeQuery(
                                 "SELECT * FROM `"
                                         + externalTable
-                                        + "` WHERE ts = '2022-06-18 08:30:00.1'"))
-                .containsExactly("NULL\t2022-06-18 08:30:00.1");
+                                        + "` WHERE dt IS NULL and ts IS NOT NULL"))
+                .containsExactly("NULL\t2022-06-18 08:30:00" + fraction);
     }
 
     @Test

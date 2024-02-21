@@ -100,7 +100,6 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
         // 2. With level 0, with the latest high level, return changelog
         if (highLevel != null) {
-            // For first row, we should just return old value. And produce no changelog.
             setChangelog(highLevel, result);
             return reusedResult.setResult(result);
         }
@@ -121,12 +120,12 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     }
 
     private void setChangelog(KeyValue before, KeyValue after) {
-        if (before == null || !isAdd(before)) {
-            if (isAdd(after)) {
+        if (before == null || !before.isAdd()) {
+            if (after.isAdd()) {
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));
             }
         } else {
-            if (!isAdd(after)) {
+            if (!after.isAdd()) {
                 reusedResult.addChangelog(replaceBefore(RowKind.DELETE, before));
             } else if (!changelogRowDeduplicate
                     || !valueEqualiser.equals(before.value(), after.value())) {
@@ -147,9 +146,5 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
     private KeyValue replace(KeyValue reused, RowKind valueKind, KeyValue from) {
         return reused.replace(from.key(), from.sequenceNumber(), valueKind, from.value());
-    }
-
-    private boolean isAdd(KeyValue kv) {
-        return kv.valueKind() == RowKind.INSERT || kv.valueKind() == RowKind.UPDATE_AFTER;
     }
 }

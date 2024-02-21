@@ -28,12 +28,14 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.metastore.AddPartitionTagCallback;
 import org.apache.paimon.metastore.MetastoreClient;
 import org.apache.paimon.operation.FileStoreCommitImpl;
-import org.apache.paimon.operation.FileStoreExpireImpl;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.service.ServiceManager;
+import org.apache.paimon.stats.StatsFile;
+import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.TagCallback;
@@ -50,6 +52,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /**
  * Base {@link FileStore} implementation.
@@ -143,6 +147,14 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
+    public StatsFileHandler newStatsFileHandler() {
+        return new StatsFileHandler(
+                snapshotManager(),
+                schemaManager,
+                new StatsFile(fileIO, pathFactory().statsFileFactory()));
+    }
+
+    @Override
     public RowType partitionType() {
         return partitionType;
     }
@@ -159,6 +171,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
+    }
+
+    public FileStoreCommitImpl newCommit(String commitUser, String branchName) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -175,20 +191,9 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestFullCompactionThresholdSize(),
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
-                newKeyComparator());
-    }
-
-    @Override
-    public FileStoreExpireImpl newExpire() {
-        return new FileStoreExpireImpl(
-                options.snapshotNumRetainMin(),
-                options.snapshotNumRetainMax(),
-                options.snapshotTimeRetain().toMillis(),
-                snapshotManager(),
-                newSnapshotDeletion(),
-                newTagManager(),
-                options.snapshotExpireLimit(),
-                options.snapshotExpireCleanEmptyDirectories());
+                newKeyComparator(),
+                branchName,
+                newStatsFileHandler());
     }
 
     @Override
@@ -198,7 +203,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                newStatsFileHandler());
     }
 
     @Override
@@ -213,7 +219,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 pathFactory(),
                 manifestFileFactory().create(),
                 manifestListFactory().create(),
-                newIndexFileHandler());
+                newIndexFileHandler(),
+                newStatsFileHandler());
     }
 
     public abstract Comparator<InternalRow> newKeyComparator();
@@ -258,5 +265,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                     new AddPartitionTagCallback(metastoreClientFactory.create(), partitionField));
         }
         return callbacks;
+    }
+
+    @Override
+    public ServiceManager newServiceManager() {
+        return new ServiceManager(fileIO, options.path());
     }
 }

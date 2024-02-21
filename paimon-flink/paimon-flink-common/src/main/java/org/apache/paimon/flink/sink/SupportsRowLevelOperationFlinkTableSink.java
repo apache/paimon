@@ -28,9 +28,7 @@ import org.apache.paimon.predicate.AllPrimaryKeyEqualVisitor;
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.table.AbstractFileStoreTable;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
-import org.apache.paimon.table.PrimaryKeyFileStoreTable;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableUtils;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
@@ -93,7 +91,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         // unsupported. Similarly, it is not allowed to update the primary key column when updating
         // the column of PrimaryKeyFileStoreTable, because the old data cannot be handled
         // correctly.
-        if (table instanceof PrimaryKeyFileStoreTable) {
+        if (table.primaryKeys().size() > 0) {
             Options options = Options.fromMap(table.options());
             Set<String> primaryKeys = new HashSet<>(table.primaryKeys());
             updatedColumns.forEach(
@@ -126,15 +124,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                             MERGE_ENGINE.key(),
                             MergeEngine.DEDUPLICATE,
                             MergeEngine.PARTIAL_UPDATE));
-        } else if (table instanceof AppendOnlyFileStoreTable) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "%s can not support update, because there is no primary key.",
-                            table.getClass().getName()));
         } else {
             throw new UnsupportedOperationException(
                     String.format(
-                            "%s can not support update, because it is an unknown subclass of FileStoreTable.",
+                            "%s can not support update, because there is no primary key.",
                             table.getClass().getName()));
         }
     }
@@ -169,7 +162,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     @Override
     public Optional<Long> executeDeletion() {
         FileStoreCommit commit =
-                ((AbstractFileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
+                ((FileStoreTable) table).store().newCommit(UUID.randomUUID().toString());
         long identifier = BatchWriteBuilder.COMMIT_IDENTIFIER;
         if (deletePredicate == null) {
             commit.purgeTable(identifier);
@@ -184,7 +177,7 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
     }
 
     private void validateDeletable() {
-        if (table instanceof PrimaryKeyFileStoreTable) {
+        if (table.primaryKeys().size() > 0) {
             Options options = Options.fromMap(table.options());
             if (options.get(MERGE_ENGINE) == MergeEngine.DEDUPLICATE) {
                 return;
@@ -193,15 +186,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                     String.format(
                             "merge engine '%s' can not support delete, currently only %s can support delete.",
                             options.get(MERGE_ENGINE), MergeEngine.DEDUPLICATE));
-        } else if (table instanceof AppendOnlyFileStoreTable) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "table '%s' can not support delete, because there is no primary key.",
-                            table.getClass().getName()));
         } else {
             throw new UnsupportedOperationException(
                     String.format(
-                            "%s can not support delete, because it is an unknown subclass of FileStoreTable.",
+                            "table '%s' can not support delete, because there is no primary key.",
                             table.getClass().getName()));
         }
     }

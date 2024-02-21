@@ -33,8 +33,10 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
+import static org.apache.paimon.table.system.AggregationFieldsTable.AGGREGATION;
 import static org.apache.paimon.table.system.AllTableOptionsTable.ALL_TABLE_OPTIONS;
 import static org.apache.paimon.table.system.AuditLogTable.AUDIT_LOG;
+import static org.apache.paimon.table.system.BranchesTable.BRANCHES;
 import static org.apache.paimon.table.system.CatalogOptionsTable.CATALOG_OPTIONS;
 import static org.apache.paimon.table.system.ConsumersTable.CONSUMERS;
 import static org.apache.paimon.table.system.FilesTable.FILES;
@@ -72,10 +74,14 @@ public class SystemTableLoader {
                 return new FilesTable(dataTable);
             case TAGS:
                 return new TagsTable(fileIO, location);
+            case BRANCHES:
+                return new BranchesTable(fileIO, location);
             case CONSUMERS:
                 return new ConsumersTable(fileIO, location);
             case READ_OPTIMIZED:
                 return new ReadOptimizedTable(dataTable);
+            case AGGREGATION:
+                return new AggregationFieldsTable(fileIO, location);
             default:
                 return null;
         }

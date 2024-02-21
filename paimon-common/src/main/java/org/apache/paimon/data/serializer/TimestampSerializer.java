@@ -21,6 +21,7 @@ package org.apache.paimon.data.serializer;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
+import org.apache.paimon.utils.DateTimeUtils;
 
 import java.io.IOException;
 
@@ -71,6 +72,16 @@ public class TimestampSerializer implements Serializer<Timestamp> {
             int intVal = source.readInt();
             return Timestamp.fromEpochMillis(longVal, intVal);
         }
+    }
+
+    @Override
+    public String serializeToString(Timestamp record) {
+        return DateTimeUtils.formatTimestamp(record, precision);
+    }
+
+    @Override
+    public Timestamp deserializeFromString(String s) {
+        return DateTimeUtils.parseTimestampData(s, precision);
     }
 
     @Override

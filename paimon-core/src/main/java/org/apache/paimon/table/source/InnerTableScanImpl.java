@@ -30,7 +30,6 @@ import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** {@link TableScan} implementation for batch planning. */
 public class InnerTableScanImpl extends AbstractInnerTableScan {
@@ -57,12 +56,6 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
-        return this;
-    }
-
-    @Override
-    public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-        snapshotReader.withPartitionFilter(partitionSpec);
         return this;
     }
 

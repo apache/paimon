@@ -19,13 +19,17 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
@@ -54,12 +58,15 @@ import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -142,19 +149,47 @@ public class FilesTable implements ReadonlyTable {
 
         private final FileStoreTable storeTable;
 
+        @Nullable private LeafPredicate partitionPredicate;
+        @Nullable private LeafPredicate bucketPredicate;
+        @Nullable private LeafPredicate levelPredicate;
+
         private FilesScan(FileStoreTable storeTable) {
             this.storeTable = storeTable;
         }
 
         @Override
-        public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
+        public InnerTableScan withFilter(Predicate pushdown) {
+            List<Predicate> predicates = PredicateBuilder.splitAnd(pushdown);
+            for (Predicate predicate : predicates) {
+                if (predicate instanceof LeafPredicate) {
+                    LeafPredicate leaf = (LeafPredicate) predicate;
+                    switch (leaf.fieldName()) {
+                        case "partition":
+                            this.partitionPredicate = leaf;
+                            break;
+                        case "bucket":
+                            this.bucketPredicate = leaf;
+                            break;
+                        case "level":
+                            this.levelPredicate = leaf;
+                            break;
+                        default:
+                            break;
+                    }
+                }
+            }
             return this;
         }
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new FilesSplit(storeTable));
+            return () ->
+                    Collections.singletonList(
+                            new FilesSplit(
+                                    storeTable,
+                                    partitionPredicate,
+                                    bucketPredicate,
+                                    levelPredicate));
         }
     }
 
@@ -164,8 +199,19 @@ public class FilesTable implements ReadonlyTable {
 
         private final FileStoreTable storeTable;
 
-        private FilesSplit(FileStoreTable storeTable) {
+        @Nullable private final LeafPredicate partitionPredicate;
+        @Nullable private final LeafPredicate bucketPredicate;
+        @Nullable private final LeafPredicate levelPredicate;
+
+        private FilesSplit(
+                FileStoreTable storeTable,
+                @Nullable LeafPredicate partitionPredicate,
+                @Nullable LeafPredicate bucketPredicate,
+                @Nullable LeafPredicate levelPredicate) {
             this.storeTable = storeTable;
+            this.partitionPredicate = partitionPredicate;
+            this.bucketPredicate = bucketPredicate;
+            this.levelPredicate = levelPredicate;
         }
 
         @Override
@@ -178,7 +224,42 @@ public class FilesTable implements ReadonlyTable {
         }
 
         private TableScan.Plan plan() {
-            return storeTable.newScan().plan();
+            InnerTableScan scan = storeTable.newScan();
+            if (partitionPredicate != null) {
+                if (partitionPredicate.function() instanceof Equal) {
+                    String partitionStr = partitionPredicate.literals().get(0).toString();
+                    if (partitionStr.startsWith("[")) {
+                        partitionStr = partitionStr.substring(1);
+                    }
+                    if (partitionStr.endsWith("]")) {
+                        partitionStr = partitionStr.substring(0, partitionStr.length() - 1);
+                    }
+                    String[] partFields = partitionStr.split(", ");
+                    LinkedHashMap<String, String> partSpec = new LinkedHashMap<>();
+                    List<String> partitionKeys = storeTable.partitionKeys();
+                    for (int i = 0; i < partitionKeys.size(); i++) {
+                        partSpec.put(partitionKeys.get(i), partFields[i]);
+                    }
+                    scan.withPartitionFilter(partSpec);
+                }
+                // TODO support range?
+            }
+            if (bucketPredicate != null) {
+                scan.withBucketFilter(
+                        bucket -> {
+                            // bucket index: 1
+                            return bucketPredicate.test(GenericRow.of(null, bucket));
+                        });
+            }
+            if (levelPredicate != null) {
+                scan.withLevelFilter(
+                        level -> {
+                            // level index: 5
+                            return levelPredicate.test(
+                                    GenericRow.of(null, null, null, null, null, level));
+                        });
+            }
+            return scan.plan();
         }
 
         @Override
@@ -372,7 +453,7 @@ public class FilesTable implements ReadonlyTable {
                     fieldStatsConverters.getOrCreate(file.schemaId());
             // Create value stats
             FieldStats[] fieldStatsArray =
-                    tableStats.fields(fieldStatsArraySerializer, file.rowCount());
+                    fieldStatsArraySerializer.fromBinary(tableStats, file.rowCount());
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();

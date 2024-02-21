@@ -110,7 +110,7 @@ public class IndexBootstrap implements Serializable {
 
         return parallelExecute(
                 TypeUtils.project(rowType, keyProjection),
-                readBuilder,
+                s -> readBuilder.newRead().createReader(s),
                 splits,
                 options.pageSize(),
                 options.crossPartitionUpsertBootstrapParallelism(),

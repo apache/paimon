@@ -50,6 +50,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SnapshotManager;
@@ -131,6 +132,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
+        return new AuditLogDataReader(dataTable.newSnapshotReader(branchName));
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new AuditLogBatchScan(dataTable.newScan());
     }
@@ -158,6 +164,11 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
     @Override
     public TagManager tagManager() {
         return dataTable.tagManager();
+    }
+
+    @Override
+    public BranchManager branchManager() {
+        return dataTable.branchManager();
     }
 
     @Override
@@ -306,6 +317,30 @@ public class AuditLogTable implements DataTable, ReadonlyTable {
         @Override
         public InnerTableScan withMetricsRegistry(MetricRegistry metricsRegistry) {
             batchScan.withMetricsRegistry(metricsRegistry);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLimit(int limit) {
+            batchScan.withLimit(limit);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
+            batchScan.withPartitionFilter(partitionSpec);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withBucketFilter(Filter<Integer> bucketFilter) {
+            batchScan.withBucketFilter(bucketFilter);
+            return this;
+        }
+
+        @Override
+        public InnerTableScan withLevelFilter(Filter<Integer> levelFilter) {
+            batchScan.withLevelFilter(levelFilter);
             return this;
         }
 

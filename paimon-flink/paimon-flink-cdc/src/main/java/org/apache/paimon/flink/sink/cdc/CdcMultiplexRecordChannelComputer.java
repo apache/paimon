@@ -20,8 +20,8 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.flink.sink.ChannelComputer;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.ChannelComputer;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -43,12 +43,9 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
 
     private Map<Identifier, CdcRecordChannelComputer> channelComputers;
     private Catalog catalog;
-    private final Map<String, String> dynamicOptions;
 
-    public CdcMultiplexRecordChannelComputer(
-            Catalog.Loader catalogLoader, Map<String, String> dynamicOptions) {
+    public CdcMultiplexRecordChannelComputer(Catalog.Loader catalogLoader) {
         this.catalogLoader = catalogLoader;
-        this.dynamicOptions = dynamicOptions;
     }
 
     @Override
@@ -76,7 +73,6 @@ public class CdcMultiplexRecordChannelComputer implements ChannelComputer<CdcMul
                     FileStoreTable table;
                     try {
                         table = (FileStoreTable) catalog.getTable(id);
-                        table.copy(dynamicOptions);
                     } catch (Catalog.TableNotExistException e) {
                         LOG.error("Failed to get table " + id.getFullName());
                         return null;

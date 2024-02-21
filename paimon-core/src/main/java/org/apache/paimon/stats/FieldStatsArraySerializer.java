@@ -19,8 +19,17 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.casting.CastExecutor;
+import org.apache.paimon.casting.CastFieldGetter;
+import org.apache.paimon.casting.CastedRow;
+import org.apache.paimon.data.BinaryArray;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.ArrayType;
@@ -29,6 +38,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.InternalRowUtils;
+import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -47,13 +57,17 @@ public class FieldStatsArraySerializer {
 
     @Nullable private final int[] indexMapping;
     @Nullable private final CastExecutor<Object, Object>[] converterMapping;
+    @Nullable private final CastFieldGetter[] castFieldGetters;
 
     public FieldStatsArraySerializer(RowType type) {
-        this(type, null, null);
+        this(type, null, null, null);
     }
 
     public FieldStatsArraySerializer(
-            RowType type, int[] indexMapping, CastExecutor<Object, Object>[] converterMapping) {
+            RowType type,
+            @Nullable int[] indexMapping,
+            @Nullable CastExecutor<Object, Object>[] converterMapping,
+            @Nullable CastFieldGetter[] castFieldGetters) {
         RowType safeType = toAllFieldsNullableRowType(type);
         this.serializer = new InternalRowSerializer(safeType);
         this.fieldGetters =
@@ -65,6 +79,7 @@ public class FieldStatsArraySerializer {
                         .toArray(InternalRow.FieldGetter[]::new);
         this.indexMapping = indexMapping;
         this.converterMapping = converterMapping;
+        this.castFieldGetters = castFieldGetters;
     }
 
     public BinaryTableStats toBinary(FieldStats[] stats) {
@@ -80,8 +95,7 @@ public class FieldStatsArraySerializer {
         return new BinaryTableStats(
                 serializer.toBinaryRow(minValues).copy(),
                 serializer.toBinaryRow(maxValues).copy(),
-                nullCounts,
-                stats);
+                BinaryArray.fromLongArray(nullCounts));
     }
 
     public FieldStats[] fromBinary(BinaryTableStats array) {
@@ -91,10 +105,10 @@ public class FieldStatsArraySerializer {
     public FieldStats[] fromBinary(BinaryTableStats array, @Nullable Long rowCount) {
         int fieldCount = indexMapping == null ? fieldGetters.length : indexMapping.length;
         FieldStats[] stats = new FieldStats[fieldCount];
-        Long[] nullCounts = array.nullCounts();
+        BinaryArray nullCounts = array.nullCounts();
         for (int i = 0; i < fieldCount; i++) {
             int fieldIndex = indexMapping == null ? i : indexMapping[i];
-            if (fieldIndex < 0 || fieldIndex >= array.min().getFieldCount()) {
+            if (fieldIndex < 0 || fieldIndex >= array.minValues().getFieldCount()) {
                 // simple evolution for add column
                 if (rowCount == null) {
                     throw new RuntimeException("Schema Evolution for stats needs row count.");
@@ -103,16 +117,47 @@ public class FieldStatsArraySerializer {
             } else {
                 CastExecutor<Object, Object> converter =
                         converterMapping == null ? null : converterMapping[i];
-                Object min = fieldGetters[fieldIndex].getFieldOrNull(array.min());
+                Object min = fieldGetters[fieldIndex].getFieldOrNull(array.minValues());
                 min = converter == null || min == null ? min : converter.cast(min);
 
-                Object max = fieldGetters[fieldIndex].getFieldOrNull(array.max());
+                Object max = fieldGetters[fieldIndex].getFieldOrNull(array.maxValues());
                 max = converter == null || max == null ? max : converter.cast(max);
 
-                stats[i] = new FieldStats(min, max, nullCounts[fieldIndex]);
+                stats[i] =
+                        new FieldStats(
+                                min,
+                                max,
+                                nullCounts.isNullAt(fieldIndex)
+                                        ? null
+                                        : nullCounts.getLong(fieldIndex));
             }
         }
         return stats;
+    }
+
+    public InternalRow evolution(BinaryRow values) {
+        InternalRow row = values;
+        if (indexMapping != null) {
+            row = ProjectedRow.from(indexMapping).replaceRow(row);
+        }
+
+        if (castFieldGetters != null) {
+            row = CastedRow.from(castFieldGetters).replaceRow(values);
+        }
+
+        return row;
+    }
+
+    public InternalArray evolution(BinaryArray nullCounts, @Nullable Long rowCount) {
+        if (indexMapping == null) {
+            return nullCounts;
+        }
+
+        if (rowCount == null) {
+            throw new RuntimeException("Schema Evolution for stats needs row count.");
+        }
+
+        return new NullCountsEvoArray(indexMapping, nullCounts, rowCount);
     }
 
     public static RowType schema() {
@@ -133,5 +178,156 @@ public class FieldStatsArraySerializer {
                                 .toArray(DataType[]::new),
                         rowType.getFieldNames().toArray(new String[0]))
                 .build();
+    }
+
+    private static class NullCountsEvoArray implements InternalArray {
+
+        private final int[] indexMapping;
+        private final InternalArray array;
+        private final long notFoundValue;
+
+        protected NullCountsEvoArray(int[] indexMapping, InternalArray array, long notFoundValue) {
+            this.indexMapping = indexMapping;
+            this.array = array;
+            this.notFoundValue = notFoundValue;
+        }
+
+        @Override
+        public int size() {
+            return indexMapping.length;
+        }
+
+        @Override
+        public boolean isNullAt(int pos) {
+            if (indexMapping[pos] < 0) {
+                return false;
+            }
+            return array.isNullAt(indexMapping[pos]);
+        }
+
+        @Override
+        public long getLong(int pos) {
+            if (indexMapping[pos] < 0) {
+                return notFoundValue;
+            }
+            return array.getLong(indexMapping[pos]);
+        }
+
+        // ============================= Unsupported Methods ================================
+
+        @Override
+        public boolean getBoolean(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public byte getByte(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public short getShort(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int getInt(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public float getFloat(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public double getDouble(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public BinaryString getString(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Decimal getDecimal(int pos, int precision, int scale) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public Timestamp getTimestamp(int pos, int precision) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public byte[] getBinary(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InternalArray getArray(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InternalMap getMap(int pos) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public InternalRow getRow(int pos, int numFields) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int hashCode() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public String toString() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public boolean[] toBooleanArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public byte[] toByteArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public short[] toShortArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public int[] toIntArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public long[] toLongArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public float[] toFloatArray() {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public double[] toDoubleArray() {
+            throw new UnsupportedOperationException();
+        }
     }
 }

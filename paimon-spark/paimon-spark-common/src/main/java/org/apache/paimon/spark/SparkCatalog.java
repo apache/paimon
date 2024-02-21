@@ -105,7 +105,7 @@ public class SparkCatalog extends SparkBaseCatalog {
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
         try {
-            catalog.createDatabase(namespace[0], false);
+            catalog.createDatabase(namespace[0], false, metadata);
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new NamespaceAlreadyExistsException(namespace);
         }
@@ -142,10 +142,12 @@ public class SparkCatalog extends SparkBaseCatalog {
                 isValidateNamespace(namespace),
                 "Namespace %s is not valid",
                 Arrays.toString(namespace));
-        if (catalog.databaseExists(namespace[0])) {
-            return Collections.emptyMap();
+        String dataBaseName = namespace[0];
+        try {
+            return catalog.loadDatabaseProperties(dataBaseName);
+        } catch (Catalog.DatabaseNotExistException e) {
+            throw new NoSuchNamespaceException(namespace);
         }
-        throw new NoSuchNamespaceException(namespace);
     }
 
     /**
@@ -210,7 +212,7 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public SparkTable loadTable(Identifier ident) throws NoSuchTableException {
         try {
-            return new SparkTable(load(ident), ident);
+            return new SparkTable(load(ident));
         } catch (Catalog.TableNotExistException e) {
             throw new NoSuchTableException(ident);
         }
@@ -221,18 +223,9 @@ public class SparkCatalog extends SparkBaseCatalog {
      */
     public SparkTable loadTable(Identifier ident, String version) throws NoSuchTableException {
         Table table = loadPaimonTable(ident);
-        Options dynamicOptions = new Options();
-
-        if (version.chars().allMatch(Character::isDigit)) {
-            long snapshotId = Long.parseUnsignedLong(version);
-            LOG.info("Time travel to snapshot '{}'.", snapshotId);
-            dynamicOptions.set(CoreOptions.SCAN_SNAPSHOT_ID, snapshotId);
-        } else {
-            LOG.info("Time travel to tag '{}'.", version);
-            dynamicOptions.set(CoreOptions.SCAN_TAG_NAME, version);
-        }
-
-        return new SparkTable(table.copy(dynamicOptions.toMap()), ident);
+        LOG.info("Time travel to version '{}'.", version);
+        return new SparkTable(
+                table.copy(Collections.singletonMap(CoreOptions.SCAN_VERSION.key(), version)));
     }
 
     /**
@@ -249,7 +242,7 @@ public class SparkCatalog extends SparkBaseCatalog {
         LOG.info("Time travel target timestamp is {} milliseconds.", timestamp);
 
         Options option = new Options().set(CoreOptions.SCAN_TIMESTAMP_MILLIS, timestamp);
-        return new SparkTable(table.copy(option.toMap()), ident);
+        return new SparkTable(table.copy(option.toMap()));
     }
 
     private Table loadPaimonTable(Identifier ident) throws NoSuchTableException {
