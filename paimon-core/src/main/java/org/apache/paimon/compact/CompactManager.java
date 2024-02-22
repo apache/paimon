@@ -51,4 +51,7 @@ public interface CompactManager extends Closeable {
 
     /** Cancel currently running compaction task. */
     void cancelCompaction();
+
+    /** Check if a compaction is in progress, or if a compaction result remains to be fetched. */
+    boolean isCompacting();
 }
