@@ -439,7 +439,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
                         + String.format(
-                                "'changelog-producer.lookup-wait' = '%s'", random.nextBoolean())
+                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check
