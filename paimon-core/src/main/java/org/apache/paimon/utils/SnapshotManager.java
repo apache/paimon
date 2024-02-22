@@ -181,23 +181,30 @@ public class SnapshotManager implements Serializable {
     }
 
     /**
-     * Returns a snapshot earlier than the timestamp mills. A non-existent snapshot may be returned
-     * if all snapshots are later than the timestamp mills.
+     * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot may be
+     * returned if all snapshots are equal to or later than the timestamp mills.
      */
     public @Nullable Long earlierThanTimeMills(long timestampMills) {
         Long earliest = earliestSnapshotId();
         Long latest = latestSnapshotId();
+
         if (earliest == null || latest == null) {
             return null;
         }
 
-        for (long i = latest; i >= earliest; i--) {
-            long commitTime = snapshot(i).timeMillis();
-            if (commitTime < timestampMills) {
-                return i;
+        if (snapshot(earliest).timeMillis() >= timestampMills) {
+            return earliest - 1;
+        }
+
+        while (earliest < latest) {
+            long mid = (earliest + latest + 1) / 2;
+            if (snapshot(mid).timeMillis() < timestampMills) {
+                earliest = mid;
+            } else {
+                latest = mid - 1;
             }
         }
-        return earliest - 1;
+        return earliest;
     }
 
     /**
@@ -214,7 +221,7 @@ public class SnapshotManager implements Serializable {
         if (snapshot(earliest).timeMillis() > timestampMills) {
             return null;
         }
-        Snapshot finnalSnapshot = null;
+        Snapshot finalSnapshot = null;
         while (earliest <= latest) {
             long mid = earliest + (latest - earliest) / 2; // Avoid overflow
             Snapshot snapshot = snapshot(mid);
@@ -223,13 +230,13 @@ public class SnapshotManager implements Serializable {
                 latest = mid - 1; // Search in the left half
             } else if (commitTime < timestampMills) {
                 earliest = mid + 1; // Search in the right half
-                finnalSnapshot = snapshot;
+                finalSnapshot = snapshot;
             } else {
-                finnalSnapshot = snapshot; // Found the exact match
+                finalSnapshot = snapshot; // Found the exact match
                 break;
             }
         }
-        return finnalSnapshot;
+        return finalSnapshot;
     }
 
     public long snapshotCount() throws IOException {
