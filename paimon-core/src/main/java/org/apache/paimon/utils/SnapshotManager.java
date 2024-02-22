@@ -429,7 +429,7 @@ public class SnapshotManager implements Serializable {
         int retryNumber = 0;
         while (retryNumber++ < READ_HINT_RETRY_NUM) {
             try {
-                return Long.parseLong(fileIO.readFileUtf8(path));
+                return fileIO.readOverwrittenFileUtf8(path).map(Long::parseLong).orElse(null);
             } catch (Exception ignored) {
             }
             try {
@@ -470,7 +470,6 @@ public class SnapshotManager implements Serializable {
             throws IOException {
         Path snapshotDir = snapshotDirByBranch(branchName);
         Path hintFile = new Path(snapshotDir, fileName);
-        fileIO.delete(hintFile, false);
-        fileIO.writeFileUtf8(hintFile, String.valueOf(snapshotId));
+        fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
     }
 }
