@@ -309,24 +309,6 @@ under the License.
                 </executions>
             </plugin>
             <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
-                <version>${spotless.version}</version>
-                <configuration>
-                    <scala>
-                        <scalafmt>
-                            <version>3.4.3</version>
-                            <!-- This file is in the root of the project to make sure IntelliJ picks it up automatically -->
-                            <file>${project.basedir}/../../.scalafmt.conf</file>
-                        </scalafmt>
-                        <licenseHeader>
-                            <content>${spotless.license.header}</content>
-                            <delimiter>${spotless.delimiter}</delimiter>
-                        </licenseHeader>
-                    </scala>
-                </configuration>
-            </plugin>
-            <plugin>
                 <groupId>org.antlr</groupId>
                 <artifactId>antlr4-maven-plugin</artifactId>
                 <version>${antlr4.version}</version>
