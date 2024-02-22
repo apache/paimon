@@ -40,7 +40,7 @@ See [Expire Snapshots]({{< ref "/maintenance/manage-snapshots#expire-snapshots" 
 
 An example for single partition field:
 ```sql
-CREATE TABLE T (...) PARTITIONED BY (dt) WITH (
+CREATE TABLE t (...) PARTITIONED BY (dt) WITH (
     'partition.expiration-time' = '7 d',
     'partition.expiration-check-interval' = '1 d',
     'partition.timestamp-formatter' = 'yyyyMMdd'
@@ -49,7 +49,7 @@ CREATE TABLE T (...) PARTITIONED BY (dt) WITH (
 
 An example for multiple partition fields:
 ```sql
-CREATE TABLE T (...) PARTITIONED BY (other_key, dt) WITH (
+CREATE TABLE t (...) PARTITIONED BY (other_key, dt) WITH (
     'partition.expiration-time' = '7 d',
     'partition.expiration-check-interval' = '1 d',
     'partition.timestamp-formatter' = 'yyyyMMdd',

@@ -96,7 +96,7 @@ For streaming reads, records are produced in the following order:
 You can define watermark for reading Paimon tables:
 
 ```sql
-CREATE TABLE T (
+CREATE TABLE t (
     `user` BIGINT,
     product STRING,
     order_time TIMESTAMP(3),
@@ -105,7 +105,7 @@ CREATE TABLE T (
 
 -- launch a bounded streaming job to read paimon_table
 SELECT window_start, window_end, COUNT(`user`) FROM TABLE(
- TUMBLE(TABLE T, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
+ TUMBLE(TABLE t, DESCRIPTOR(order_time), INTERVAL '10' MINUTES)) GROUP BY window_start, window_end;
 ```
 
 You can also enable [Flink Watermark alignment](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/datastream/event-time/generating_watermarks/#watermark-alignment-_beta_),
@@ -168,7 +168,7 @@ The following is an example of creating the Append table and specifying the buck
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
                          product_id BIGINT,
                          price DOUBLE,
                          sales BIGINT
