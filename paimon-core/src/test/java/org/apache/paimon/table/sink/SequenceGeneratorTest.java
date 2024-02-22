@@ -34,14 +34,10 @@ import org.apache.paimon.types.RowType;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
-import static org.apache.paimon.CoreOptions.SequenceAutoPadding.MILLIS_TO_MICRO;
 import static org.apache.paimon.CoreOptions.SequenceAutoPadding.ROW_KIND_FLAG;
-import static org.apache.paimon.CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -169,58 +165,6 @@ public class SequenceGeneratorTest {
     }
 
     @Test
-    public void testGenerateWithPadding() {
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_id")))
-                .isEqualTo(1);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("pt")))
-                .isEqualTo(1);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_intsecond")))
-                .isEqualTo(1685548953);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_tinyint")))
-                .isEqualTo(2);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_smallint")))
-                .isEqualTo(3);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigint")))
-                .isEqualTo(4000000000000L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_bigintmillis")))
-                .isEqualTo(1685548953000L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_float")))
-                .isEqualTo(2);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_double")))
-                .isEqualTo(3);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_string")))
-                .isEqualTo(1);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_date")))
-                .isEqualTo(375);
-        assertThat(getSecondFromGeneratedWithPadding(generateWithPaddingOnSecond("_timestamp0")))
-                .isEqualTo(1685548953L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp3")))
-                .isEqualTo(1685548953123L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_timestamp6")))
-                .isEqualTo(1685548953123L);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_char")))
-                .isEqualTo(3);
-        assertThat(getMillisFromGeneratedWithPadding(generateWithPaddingOnMillis("_varchar")))
-                .isEqualTo(4);
-        assertThat(
-                        getSecondFromGeneratedWithPadding(
-                                generateWithPaddingOnSecond("_localtimestamp")))
-                .isEqualTo(1685548953L);
-        assertThat(
-                        getMillisFromGeneratedWithPadding(
-                                generateWithPaddingOnMillis("_localtimestamp")))
-                .isEqualTo(1685548953123L);
-        assertUnsupportedDatatype("_boolean");
-        assertUnsupportedDatatype("_binary");
-        assertUnsupportedDatatype("_varbinary");
-        assertUnsupportedDatatype("_bytes");
-        assertUnsupportedDatatype("_time");
-        assertUnsupportedDatatype("_map");
-        assertUnsupportedDatatype("_array");
-        assertUnsupportedDatatype("_multiset");
-    }
-
-    @Test
     public void testGenerateWithPaddingRowKind() {
         assertThat(generateWithPaddingOnRowKind(1L, RowKind.INSERT)).isEqualTo(3);
         assertThat(generateWithPaddingOnRowKind(1L, RowKind.UPDATE_AFTER)).isEqualTo(3);
@@ -231,11 +175,6 @@ public class SequenceGeneratorTest {
                 Timestamp.fromLocalDateTime(LocalDateTime.parse("5000-01-01T00:00:00")).toMicros();
         assertThat(generateWithPaddingOnRowKind(maxMicros, RowKind.INSERT))
                 .isEqualTo(191235168000000001L);
-
-        assertThat(generateWithPaddingOnMicrosAndRowKind(1L, RowKind.INSERT))
-                .isBetween(2001L, 3999L);
-        assertThat(generateWithPaddingOnMicrosAndRowKind(1L, RowKind.UPDATE_BEFORE))
-                .isBetween(2000L, 3998L);
     }
 
     private SequenceGenerator getGenerator(String field) {
@@ -252,29 +191,8 @@ public class SequenceGeneratorTest {
                 .isInstanceOf(UnsupportedOperationException.class);
     }
 
-    private long generateWithPaddingOnSecond(String field) {
-        return getGenerator(field, Collections.singletonList(SECOND_TO_MICRO)).generate(row);
-    }
-
-    private long getSecondFromGeneratedWithPadding(long generated) {
-        return TimeUnit.SECONDS.convert(generated, TimeUnit.MICROSECONDS);
-    }
-
-    private long generateWithPaddingOnMillis(String field) {
-        return getGenerator(field, Collections.singletonList(MILLIS_TO_MICRO)).generate(row);
-    }
-
     private long generateWithPaddingOnRowKind(long sequence, RowKind rowKind) {
         return getGenerator("_bigint", Collections.singletonList(ROW_KIND_FLAG))
                 .generate(GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence));
-    }
-
-    private long generateWithPaddingOnMicrosAndRowKind(long sequence, RowKind rowKind) {
-        return getGenerator("_bigint", Arrays.asList(MILLIS_TO_MICRO, ROW_KIND_FLAG))
-                .generate(GenericRow.ofKind(rowKind, 0, 0, 0, 0, 0, 0, sequence));
-    }
-
-    private long getMillisFromGeneratedWithPadding(long generated) {
-        return TimeUnit.MILLISECONDS.convert(generated, TimeUnit.MICROSECONDS);
     }
 }

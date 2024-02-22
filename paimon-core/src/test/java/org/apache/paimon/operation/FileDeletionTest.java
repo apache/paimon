@@ -680,7 +680,8 @@ public class FileDeletionTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         rowType,
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory())
+                        DeduplicateMergeFunction.factory(),
+                        p -> null)
                 .changelogProducer(changelogProducer)
                 .build();
     }

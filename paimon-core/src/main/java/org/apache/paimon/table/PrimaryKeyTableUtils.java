@@ -24,6 +24,8 @@ import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.FirstRowMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
+import org.apache.paimon.mergetree.compact.SequenceFieldReorderFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -79,6 +81,11 @@ public class PrimaryKeyTableUtils {
             default:
                 throw new UnsupportedOperationException("Unsupported merge engine: " + mergeEngine);
         }
+    }
+
+    public static ReorderFunctionFactory<KeyValue> createReorderFunctionFactory(
+            RowType keyType, RowType valueType, CoreOptions options) {
+        return SequenceFieldReorderFunction.factory(keyType, valueType, options);
     }
 
     /** Primary key fields extractor. */

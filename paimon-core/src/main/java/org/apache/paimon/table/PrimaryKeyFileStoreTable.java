@@ -28,6 +28,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.LookupMergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.Lock;
@@ -38,7 +39,6 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -95,6 +95,9 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                         LookupMergeFunction.wrap(
                                 mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);
             }
+            ReorderFunctionFactory<KeyValue> rfFactory =
+                    PrimaryKeyTableUtils.createReorderFunctionFactory(
+                            new RowType(extractor.keyFields(tableSchema)), rowType, options);
 
             lazyStore =
                     new KeyValueFileStore(
@@ -111,7 +114,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                             extractor,
                             mfFactory,
                             name(),
-                            catalogEnvironment);
+                            catalogEnvironment,
+                            rfFactory);
         }
         return lazyStore;
     }
@@ -185,25 +189,19 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<KeyValue> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
-        TableSchema schema = schema();
-        CoreOptions options = store().options();
-        final SequenceGenerator sequenceGenerator = SequenceGenerator.create(schema, options);
-        final RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
+        final RowKindGenerator rowKindGenerator =
+                RowKindGenerator.create(schema().logicalRowType(), store().options());
         final KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
                 createRowKeyExtractor(),
                 record -> {
                     InternalRow row = record.row();
-                    long sequenceNumber =
-                            sequenceGenerator == null
-                                    ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceGenerator.generate(row);
                     RowKind rowKind =
                             rowKindGenerator == null
                                     ? row.getRowKind()
                                     : rowKindGenerator.generate(row);
-                    return kv.replace(record.primaryKey(), sequenceNumber, rowKind, row);
+                    return kv.replace(record.primaryKey(), rowKind, row);
                 });
     }
 

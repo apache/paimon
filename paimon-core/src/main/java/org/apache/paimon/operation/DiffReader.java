@@ -22,6 +22,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 
@@ -44,14 +45,16 @@ public class DiffReader {
             RecordReader<KeyValue> afterReader,
             Comparator<InternalRow> keyComparator,
             MergeSorter sorter,
-            boolean keepDelete)
+            boolean keepDelete,
+            ReorderFunctionFactory<KeyValue> rfFactory)
             throws IOException {
         return sorter.mergeSort(
                 Arrays.asList(
                         () -> wrapLevelToReader(beforeReader, BEFORE_LEVEL),
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
                 keyComparator,
-                new DiffMerger(keepDelete));
+                new DiffMerger(keepDelete),
+                rfFactory.create());
     }
 
     private static RecordReader<KeyValue> wrapLevelToReader(

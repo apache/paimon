@@ -49,7 +49,8 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
                 new ArrayList<>(readers),
                 KEY_COMPARATOR,
                 new ReducerMergeFunctionWrapper(createMergeFunction()),
-                sortEngine);
+                sortEngine,
+                null);
     }
 
     @ParameterizedTest

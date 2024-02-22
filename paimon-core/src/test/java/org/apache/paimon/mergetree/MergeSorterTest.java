@@ -139,7 +139,7 @@ public class MergeSorterTest {
                     }
                 };
         List<KeyValue> all = new ArrayList<>();
-        sorter.mergeSort(readers, Comparator.comparingInt(o -> o.getInt(0)), collectFunc)
+        sorter.mergeSort(readers, Comparator.comparingInt(o -> o.getInt(0)), collectFunc, null)
                 .forEachRemaining(all::addAll);
 
         assertThat(toString(all)).containsExactlyElementsOf(toString(expectedKvs));

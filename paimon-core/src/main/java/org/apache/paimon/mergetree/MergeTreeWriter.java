@@ -33,6 +33,7 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -66,6 +67,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final KeyValueFileWriterFactory writerFactory;
     private final boolean commitForceCompact;
     private final ChangelogProducer changelogProducer;
+    private final ReorderFunction<KeyValue> reorderFunction;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
     private final LinkedHashSet<DataFileMeta> newFilesChangelog;
@@ -91,7 +93,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
-            WriterMetrics writerMetrics) {
+            WriterMetrics writerMetrics,
+            @Nullable ReorderFunction<KeyValue> reorderFunction) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.sortCompression = sortCompression;
@@ -122,6 +125,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             compactChangelog.addAll(increment.compactIncrement().changelogFiles());
         }
         this.writerMetrics = writerMetrics;
+        this.reorderFunction = reorderFunction;
     }
 
     private long newSequenceNumber() {
@@ -148,10 +152,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long sequenceNumber =
-                kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
-                        ? newSequenceNumber()
-                        : kv.sequenceNumber();
+        long sequenceNumber = newSequenceNumber();
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushWriteBuffer(false, false);
@@ -214,7 +215,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         keyComparator,
                         mergeFunction,
                         changelogWriter == null ? null : changelogWriter::write,
-                        dataWriter::write);
+                        dataWriter::write,
+                        reorderFunction);
             } finally {
                 if (changelogWriter != null) {
                     changelogWriter.close();

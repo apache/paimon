@@ -20,7 +20,6 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -57,9 +56,9 @@ public class RowKindGenerator {
     }
 
     @Nullable
-    public static RowKindGenerator create(TableSchema schema, CoreOptions options) {
+    public static RowKindGenerator create(RowType logicalRowType, CoreOptions options) {
         return options.rowkindField()
-                .map(field -> new RowKindGenerator(field, schema.logicalRowType()))
+                .map(field -> new RowKindGenerator(field, logicalRowType))
                 .orElse(null);
     }
 }

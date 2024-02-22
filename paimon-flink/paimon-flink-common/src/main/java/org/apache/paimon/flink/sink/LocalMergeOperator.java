@@ -27,11 +27,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -62,9 +62,9 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     private transient RecordComparator keyComparator;
 
     private transient long recordCount;
-    private transient SequenceGenerator sequenceGenerator;
     private transient RowKindGenerator rowKindGenerator;
     private transient MergeFunction<KeyValue> mergeFunction;
+    private transient ReorderFunction<KeyValue> reorderFunction;
 
     private transient SortBufferWriteBuffer buffer;
     private transient long currentWatermark;
@@ -93,8 +93,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         keyComparator = new KeyComparatorSupplier(keyType).get();
 
         recordCount = 0;
-        sequenceGenerator = SequenceGenerator.create(schema, options);
-        rowKindGenerator = RowKindGenerator.create(schema, options);
+        rowKindGenerator = RowKindGenerator.create(valueType, options);
         mergeFunction =
                 PrimaryKeyTableUtils.createMergeFunctionFactory(
                                 schema,
@@ -113,6 +112,9 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                                         return schema.fields();
                                     }
                                 })
+                        .create();
+        reorderFunction =
+                PrimaryKeyTableUtils.createReorderFunctionFactory(keyType, valueType, options)
                         .create();
 
         buffer =
@@ -141,11 +143,9 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         row.setRowKind(RowKind.INSERT);
 
         InternalRow key = keyProjection.apply(row);
-        long sequenceNumber =
-                sequenceGenerator == null ? recordCount : sequenceGenerator.generate(row);
-        if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+        if (!buffer.put(recordCount, rowKind, key, row)) {
             flushBuffer();
-            if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+            if (!buffer.put(recordCount, rowKind, key, row)) {
                 // change row kind back
                 row.setRowKind(rowKind);
                 output.collect(record);
@@ -195,7 +195,8 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                     InternalRow row = kv.value();
                     row.setRowKind(kv.valueKind());
                     output.collect(new StreamRecord<>(row));
-                });
+                },
+                reorderFunction);
         buffer.clear();
 
         if (currentWatermark != Long.MIN_VALUE) {

@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.types.RowKind;
 
 import javax.annotation.Nullable;
@@ -57,12 +58,14 @@ public interface WriteBuffer {
      *
      * @param rawConsumer consumer to consume records without merging.
      * @param mergedConsumer consumer to consume records after merging.
+     * @param reorderFunction reorder records before merging and consumption.
      */
     void forEach(
             Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
             @Nullable KvConsumer rawConsumer,
-            KvConsumer mergedConsumer)
+            KvConsumer mergedConsumer,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException;
 
     /** Removes all records from this table. The table will be empty after this call returns. */

@@ -59,7 +59,8 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
+            boolean changelogRowDeduplicate,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -69,7 +70,8 @@ public class FirstRowMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter
                 mfFactory,
                 mergeSorter,
                 valueEqualiser,
-                changelogRowDeduplicate);
+                changelogRowDeduplicate,
+                rfFactory);
         this.containsLevels = containsLevels;
     }
 

@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -46,7 +45,6 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -74,7 +72,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -186,26 +183,50 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testSequenceNumber() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.INT(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"pt", "a", "b", "sec", "non_time"});
         FileStoreTable table =
-                createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
+                createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "sec"), rowType);
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
-        write.write(rowData(1, 10, 200L));
-        write.write(rowData(1, 10, 100L));
-        write.write(rowData(1, 11, 101L));
+
+        write.write(GenericRow.of(1, 10, 102, 1685530987, BinaryString.fromString("a1")));
+        write.write(GenericRow.of(1, 10, 101, 1685530986, BinaryString.fromString("a2")));
+        write.write(GenericRow.of(1, 10, 101, 1685530986, BinaryString.fromString("a3")));
+        write.write(GenericRow.of(1, 11, 100, 1685530986, BinaryString.fromString("a4")));
         commit.commit(0, write.prepareCommit(true, 0));
-        write.write(rowData(1, 11, 55L));
+        write.write(GenericRow.of(1, 11, 100, 1685530986, BinaryString.fromString("a5")));
         commit.commit(1, write.prepareCommit(true, 1));
         write.close();
         commit.close();
 
         List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
         TableRead read = table.newRead();
-        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
-                .isEqualTo(
-                        Arrays.asList(
-                                "1|10|200|binary|varbinary|mapKey:mapVal|multiset",
-                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset"));
+        assertThat(
+                        getResult(
+                                read,
+                                splits,
+                                binaryRow(1),
+                                0,
+                                rowData ->
+                                        rowData.getInt(0)
+                                                + "|"
+                                                + rowData.getInt(1)
+                                                + "|"
+                                                + rowData.getInt(2)
+                                                + "|"
+                                                + rowData.getInt(3)
+                                                + "|"
+                                                + rowData.getString(4)))
+                .isEqualTo(Arrays.asList("1|10|102|1685530987|a1", "1|11|100|1685530986|a5"));
     }
 
     @Test
@@ -220,29 +241,74 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             DataTypes.STRING()
                         },
                         new String[] {"pt", "a", "b", "sec", "non_time"});
-        GenericRow row1 = GenericRow.of(1, 10, 100, 1685530987, BinaryString.fromString("a1"));
-        GenericRow row2 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a2"));
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
                             conf.set(CoreOptions.SEQUENCE_FIELD, "sec");
                             conf.set(
                                     CoreOptions.SEQUENCE_AUTO_PADDING,
-                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO.toString());
+                                    CoreOptions.SequenceAutoPadding.ROW_KIND_FLAG.toString());
                         },
                         rowType);
         StreamTableWrite write = table.newWrite(commitUser);
-        long sequenceNumber1 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row1).sequenceNumber();
-        long sequenceNumber2 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row2).sequenceNumber();
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS))
-                .isEqualTo(1685530987);
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS))
-                .isEqualTo(1685530987);
-        write.close();
+        StreamTableCommit commit = table.newCommit(commitUser);
 
-        // Do not check results, they are unstable
+        write.write(
+                GenericRow.ofKind(
+                        RowKind.INSERT, 1, 10, 102, 1685530987, BinaryString.fromString("a1")));
+        write.write(
+                GenericRow.ofKind(
+                        RowKind.DELETE, 1, 10, 101, 1685530986, BinaryString.fromString("a2")));
+        write.write(
+                GenericRow.ofKind(
+                        RowKind.INSERT, 1, 10, 101, 1685530986, BinaryString.fromString("a2")));
+        write.write(
+                GenericRow.ofKind(RowKind.INSERT, 1, 10, 102, null, BinaryString.fromString("a3")));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.write(
+                GenericRow.ofKind(
+                        RowKind.UPDATE_AFTER,
+                        1,
+                        11,
+                        100,
+                        1685530986,
+                        BinaryString.fromString("a4")));
+        write.write(
+                GenericRow.ofKind(
+                        RowKind.UPDATE_BEFORE,
+                        1,
+                        11,
+                        100,
+                        1685530986,
+                        BinaryString.fromString("a4")));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.close();
+        commit.close();
+
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(
+                        getResult(
+                                read,
+                                splits,
+                                binaryRow(1),
+                                0,
+                                rowData ->
+                                        (rowData.getRowKind() == RowKind.INSERT
+                                                                || rowData.getRowKind()
+                                                                        == RowKind.UPDATE_AFTER
+                                                        ? "+"
+                                                        : "-")
+                                                + rowData.getInt(0)
+                                                + "|"
+                                                + rowData.getInt(1)
+                                                + "|"
+                                                + rowData.getInt(2)
+                                                + "|"
+                                                + (!rowData.isNullAt(3) ? rowData.getInt(3) : null)
+                                                + "|"
+                                                + rowData.getString(4)))
+                .isEqualTo(Arrays.asList("+1|10|102|null|a3", "+1|11|100|1685530986|a4"));
     }
 
     @Test

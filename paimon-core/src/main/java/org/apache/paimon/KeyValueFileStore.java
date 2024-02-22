@@ -27,6 +27,7 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
 import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
@@ -69,6 +70,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final String tableName;
+    private final ReorderFunctionFactory<KeyValue> rfFactory;
 
     public KeyValueFileStore(
             FileIO fileIO,
@@ -83,7 +85,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
-            CatalogEnvironment catalogEnvironment) {
+            CatalogEnvironment catalogEnvironment,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
@@ -94,6 +97,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         this.keyComparatorSupplier = new KeyComparatorSupplier(keyType);
         this.valueEqualiserSupplier = new ValueEqualiserSupplier(valueType);
         this.tableName = tableName;
+        this.rfFactory = rfFactory;
     }
 
     @Override
@@ -124,7 +128,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 valueType,
                 newKeyComparator(),
                 mfFactory,
-                newReaderFactoryBuilder());
+                newReaderFactoryBuilder(),
+                rfFactory);
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
@@ -168,7 +173,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 indexFactory,
                 options,
                 keyValueFieldsExtractor,
-                tableName);
+                tableName,
+                rfFactory);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

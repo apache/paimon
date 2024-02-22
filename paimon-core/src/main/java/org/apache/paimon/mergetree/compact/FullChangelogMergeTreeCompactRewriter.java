@@ -48,7 +48,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueComparator,
-            boolean changelogRowDeduplicate) {
+            boolean changelogRowDeduplicate,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -58,7 +59,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 mfFactory,
                 mergeSorter,
                 valueComparator,
-                changelogRowDeduplicate);
+                changelogRowDeduplicate,
+                rfFactory);
     }
 
     @Override

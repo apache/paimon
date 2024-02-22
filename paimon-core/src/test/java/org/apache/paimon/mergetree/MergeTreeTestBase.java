@@ -154,19 +154,13 @@ public abstract class MergeTreeTestBase {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
                                 return Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "k",
-                                                new org.apache.paimon.types.IntType(false)));
+                                        new DataField(0, "k", new IntType(false)));
                             }
 
                             @Override
                             public List<DataField> valueFields(TableSchema schema) {
                                 return Collections.singletonList(
-                                        new DataField(
-                                                0,
-                                                "v",
-                                                new org.apache.paimon.types.IntType(false)));
+                                        new DataField(0, "v", new IntType(false)));
                             }
                         },
                         new CoreOptions(new HashMap<>()));
@@ -426,6 +420,7 @@ public abstract class MergeTreeTestBase {
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,
                         null,
+                        null,
                         null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
@@ -555,7 +550,8 @@ public abstract class MergeTreeTestBase {
                         readerFactory,
                         comparator,
                         DeduplicateMergeFunction.factory().create(),
-                        new MergeSorter(options, null, null, null));
+                        new MergeSorter(options, null, null, null),
+                        null);
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -601,7 +597,8 @@ public abstract class MergeTreeTestBase {
                             compactReaderFactory,
                             comparator,
                             DeduplicateMergeFunction.factory().create(),
-                            new MergeSorter(options, null, null, null));
+                            new MergeSorter(options, null, null, null),
+                            null);
             writer.write(new RecordReaderIterator<>(sectionsReader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());

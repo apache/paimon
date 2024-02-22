@@ -49,6 +49,7 @@ import org.apache.paimon.mergetree.compact.LookupMergeTreeCompactRewriter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactRewriter;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -86,6 +87,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final FileIO fileIO;
     private final RowType keyType;
     private final RowType valueType;
+    private final ReorderFunctionFactory<KeyValue> rfFactory;
 
     public KeyValueFileStoreWrite(
             FileIO fileIO,
@@ -104,7 +106,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             @Nullable IndexMaintainer.Factory<KeyValue> indexFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
-            String tableName) {
+            String tableName,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
         this.fileIO = fileIO;
         this.keyType = keyType;
@@ -133,6 +136,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
         this.options = options;
+        this.rfFactory = rfFactory;
     }
 
     @Override
@@ -180,7 +184,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                getWriterMetrics(partition, bucket));
+                getWriterMetrics(partition, bucket),
+                rfFactory.create());
     }
 
     @VisibleForTesting
@@ -230,7 +235,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         mergeSorter,
                         valueEqualiserSupplier.get(),
-                        options.changelogRowDeduplicate());
+                        options.changelogRowDeduplicate(),
+                        rfFactory);
             case LOOKUP:
                 if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
                     KeyValueFileReaderFactory keyOnlyReader =
@@ -249,7 +255,8 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             mfFactory,
                             mergeSorter,
                             valueEqualiserSupplier.get(),
-                            options.changelogRowDeduplicate());
+                            options.changelogRowDeduplicate(),
+                            rfFactory);
                 }
                 LookupLevels lookupLevels = createLookupLevels(levels, readerFactory);
                 return new LookupMergeTreeCompactRewriter(
@@ -262,10 +269,16 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         mfFactory,
                         mergeSorter,
                         valueEqualiserSupplier.get(),
-                        options.changelogRowDeduplicate());
+                        options.changelogRowDeduplicate(),
+                        rfFactory);
             default:
                 return new MergeTreeCompactRewriter(
-                        readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        mfFactory,
+                        mergeSorter,
+                        rfFactory);
         }
     }
 

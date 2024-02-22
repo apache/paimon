@@ -42,18 +42,21 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final Comparator<InternalRow> keyComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
+    protected final ReorderFunctionFactory<KeyValue> rfFactory;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            MergeSorter mergeSorter) {
+            MergeSorter mergeSorter,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
+        this.rfFactory = rfFactory;
     }
 
     @Override
@@ -73,7 +76,8 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                         readerFactory,
                         keyComparator,
                         mfFactory.create(),
-                        mergeSorter);
+                        mergeSorter,
+                        rfFactory.create());
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         return new CompactResult(extractFilesFromSections(sections), writer.result());

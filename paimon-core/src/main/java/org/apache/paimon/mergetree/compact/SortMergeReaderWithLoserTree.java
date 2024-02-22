@@ -34,17 +34,20 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
 
     private final MergeFunctionWrapper<T> mergeFunctionWrapper;
     private final LoserTree<KeyValue> loserTree;
+    private final ReorderFunction<KeyValue> reorderFunction;
 
     public SortMergeReaderWithLoserTree(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper) {
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            @Nullable ReorderFunction<KeyValue> reorderFunction) {
         this.mergeFunctionWrapper = mergeFunctionWrapper;
         this.loserTree =
                 new LoserTree<>(
                         readers,
                         (e1, e2) -> userKeyComparator.compare(e2.key(), e1.key()),
                         (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber()));
+        this.reorderFunction = reorderFunction;
     }
 
     /** Compared with heapsort, {@link LoserTree} will only produce one batch. */
@@ -74,8 +77,13 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
                 if (winner == null) {
                     return null;
                 }
-                mergeFunctionWrapper.reset();
-                mergeFunctionWrapper.add(winner);
+                if (reorderFunction == null) {
+                    mergeFunctionWrapper.reset();
+                    mergeFunctionWrapper.add(winner);
+                } else {
+                    reorderFunction.reset();
+                    reorderFunction.add(winner);
+                }
 
                 T result = merge();
                 if (result != null) {
@@ -89,7 +97,18 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
                     !released, "SortMergeIterator#nextImpl is called after release");
 
             while (loserTree.peekWinner() != null) {
-                mergeFunctionWrapper.add(loserTree.popWinner());
+                if (reorderFunction == null) {
+                    mergeFunctionWrapper.add(loserTree.popWinner());
+                } else {
+                    reorderFunction.add(loserTree.popWinner());
+                }
+            }
+
+            if (reorderFunction != null) {
+                mergeFunctionWrapper.reset();
+                for (KeyValue kv : reorderFunction.getResult()) {
+                    mergeFunctionWrapper.add(kv);
+                }
             }
             return mergeFunctionWrapper.getResult();
         }

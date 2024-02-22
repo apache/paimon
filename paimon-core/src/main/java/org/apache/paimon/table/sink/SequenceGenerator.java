@@ -21,12 +21,10 @@ package org.apache.paimon.table.sink;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.SequenceAutoPadding;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeDefaultVisitor;
-import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
 import org.apache.paimon.types.DoubleType;
@@ -45,7 +43,6 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /** Generate sequence number. */
@@ -86,16 +83,13 @@ public class SequenceGenerator {
     }
 
     @Nullable
-    public static SequenceGenerator create(TableSchema schema, CoreOptions options) {
+    public static SequenceGenerator create(RowType logicalRowType, CoreOptions options) {
         List<SequenceAutoPadding> sequenceAutoPadding =
                 options.sequenceAutoPadding().stream()
                         .map(SequenceAutoPadding::fromString)
                         .collect(Collectors.toList());
         return options.sequenceField()
-                .map(
-                        field ->
-                                new SequenceGenerator(
-                                        field, schema.logicalRowType(), sequenceAutoPadding))
+                .map(field -> new SequenceGenerator(field, logicalRowType, sequenceAutoPadding))
                 .orElse(null);
     }
 
@@ -109,25 +103,20 @@ public class SequenceGenerator {
 
     @Nullable
     public Long generateNullable(InternalRow row) {
-        return generator.generateNullable(row, index);
+        Long sequence = generator.generateNullable(row, index);
+        return sequence != null ? withPaddings(row, sequence) : null;
     }
 
     public long generate(InternalRow row) {
-        long sequence = generator.generate(row, index);
+        return withPaddings(row, generator.generate(row, index));
+    }
+
+    private long withPaddings(InternalRow row, long sequence) {
         for (SequenceAutoPadding padding : paddings) {
-            switch (padding) {
-                case ROW_KIND_FLAG:
-                    sequence = addRowKindFlag(sequence, row.getRowKind());
-                    break;
-                case SECOND_TO_MICRO:
-                    sequence = secondToMicro(sequence);
-                    break;
-                case MILLIS_TO_MICRO:
-                    sequence = millisToMicro(sequence);
-                    break;
-                default:
-                    throw new UnsupportedOperationException(
-                            "Unknown sequence padding mode " + padding);
+            if (padding == SequenceAutoPadding.ROW_KIND_FLAG) {
+                sequence = addRowKindFlag(sequence, row.getRowKind());
+            } else {
+                throw new UnsupportedOperationException("Unknown sequence padding mode " + padding);
             }
         }
         return sequence;
@@ -135,29 +124,6 @@ public class SequenceGenerator {
 
     private long addRowKindFlag(long sequence, RowKind rowKind) {
         return (sequence << 1) | (rowKind.isAdd() ? 1 : 0);
-    }
-
-    private long millisToMicro(long sequence) {
-        // Generated value is millis
-        return sequence * 1_000 + getCurrentMicroOfMillis();
-    }
-
-    private long secondToMicro(long sequence) {
-        // timestamp returns millis
-        long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? sequence / 1000 : sequence;
-        return second * 1_000_000 + getCurrentMicroOfSeconds();
-    }
-
-    private static long getCurrentMicroOfMillis() {
-        long currentNanoTime = System.nanoTime();
-        long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        return (currentNanoTime - mills * 1_000_000) / 1000;
-    }
-
-    private static long getCurrentMicroOfSeconds() {
-        long currentNanoTime = System.nanoTime();
-        long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        return (currentNanoTime - seconds * 1_000_000_000) / 1000;
     }
 
     private interface Generator {

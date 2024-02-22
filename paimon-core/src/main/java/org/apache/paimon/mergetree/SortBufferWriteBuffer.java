@@ -33,6 +33,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.sort.SortBuffer;
@@ -127,12 +128,17 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             Comparator<InternalRow> keyComparator,
             MergeFunction<KeyValue> mergeFunction,
             @Nullable KvConsumer rawConsumer,
-            KvConsumer mergedConsumer)
+            KvConsumer mergedConsumer,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException {
         // TODO do not use iterator
         MergeIterator mergeIterator =
                 new MergeIterator(
-                        rawConsumer, buffer.sortedIterator(), keyComparator, mergeFunction);
+                        rawConsumer,
+                        buffer.sortedIterator(),
+                        keyComparator,
+                        mergeFunction,
+                        reorderFunction);
         while (mergeIterator.hasNext()) {
             mergedConsumer.accept(mergeIterator.next());
         }
@@ -153,6 +159,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         private final MutableObjectIterator<BinaryRow> kvIter;
         private final Comparator<InternalRow> keyComparator;
         private final ReducerMergeFunctionWrapper mergeFunctionWrapper;
+        @Nullable private final ReorderFunction<KeyValue> reorderFunction;
 
         // previously read kv
         private KeyValueSerializer previous;
@@ -168,12 +175,14 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                 @Nullable KvConsumer rawConsumer,
                 MutableObjectIterator<BinaryRow> kvIter,
                 Comparator<InternalRow> keyComparator,
-                MergeFunction<KeyValue> mergeFunction)
+                MergeFunction<KeyValue> mergeFunction,
+                @Nullable ReorderFunction<KeyValue> reorderFunction)
                 throws IOException {
             this.rawConsumer = rawConsumer;
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
+            this.reorderFunction = reorderFunction;
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
             this.previous = new KeyValueSerializer(keyType, valueType);
@@ -209,8 +218,13 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                 if (previousRow == null) {
                     return;
                 }
-                mergeFunctionWrapper.reset();
-                mergeFunctionWrapper.add(previous.getReusedKv());
+                if (reorderFunction == null) {
+                    mergeFunctionWrapper.reset();
+                    mergeFunctionWrapper.add(previous.getReusedKv());
+                } else {
+                    reorderFunction.reset();
+                    reorderFunction.add(previous.getReusedKv());
+                }
 
                 while (readOnce()) {
                     if (keyComparator.compare(
@@ -218,8 +232,22 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                             != 0) {
                         break;
                     }
-                    mergeFunctionWrapper.add(current.getReusedKv());
+                    if (reorderFunction == null) {
+                        mergeFunctionWrapper.add(current.getReusedKv());
+                    } else {
+                        reorderFunction.add(current.getReusedKv());
+                    }
                     swapSerializers();
+                }
+
+                if (reorderFunction != null) {
+                    mergeFunctionWrapper.reset();
+                    for (KeyValue kv : reorderFunction.getResult()) {
+                        if (rawConsumer != null) {
+                            rawConsumer.accept(kv);
+                        }
+                        mergeFunctionWrapper.add(kv);
+                    }
                 }
                 result = mergeFunctionWrapper.getResult();
             } while (result == null);
@@ -233,7 +261,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             }
             if (currentRow != null) {
                 current.fromRow(currentRow);
-                if (rawConsumer != null) {
+                if (reorderFunction == null && rawConsumer != null) {
                     rawConsumer.accept(current.getReusedKv());
                 }
             }

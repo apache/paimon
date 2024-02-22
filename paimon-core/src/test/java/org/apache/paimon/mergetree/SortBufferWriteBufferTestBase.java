@@ -29,6 +29,8 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
+import org.apache.paimon.mergetree.compact.SequenceFieldReorderFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
@@ -61,11 +63,15 @@ public abstract class SortBufferWriteBufferTestBase {
     private static final RecordComparator KEY_COMPARATOR =
             (a, b) -> Integer.compare(a.getInt(0), b.getInt(0));
 
+    protected final RowType keyType =
+            new RowType(Collections.singletonList(new DataField(0, "key", new IntType())));
+    protected final RowType valueType =
+            new RowType(Collections.singletonList(new DataField(1, "value", new BigIntType())));
+
     protected final SortBufferWriteBuffer table =
             new SortBufferWriteBuffer(
-                    new RowType(Collections.singletonList(new DataField(0, "key", new IntType()))),
-                    new RowType(
-                            Collections.singletonList(new DataField(1, "value", new BigIntType()))),
+                    keyType,
+                    valueType,
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
                     128,
@@ -77,6 +83,10 @@ public abstract class SortBufferWriteBufferTestBase {
     protected abstract List<ReusingTestData> getExpected(List<ReusingTestData> input);
 
     protected abstract MergeFunction<KeyValue> createMergeFunction();
+
+    protected ReorderFunction<KeyValue> createReorderFunction() {
+        return null;
+    }
 
     @Test
     public void testAndClear() throws IOException {
@@ -107,12 +117,17 @@ public abstract class SortBufferWriteBufferTestBase {
 
     private void testRandom(int numRecords) throws IOException {
         List<ReusingTestData> input = ReusingTestData.generateData(numRecords, addOnly());
+        preSort(input);
         runTest(input);
     }
 
+    protected void preSort(List<ReusingTestData> input) {
+        Collections.sort(input);
+    }
+
     protected void runTest(List<ReusingTestData> input) throws IOException {
-        Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
         prepareTable(input);
+        Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
         table.forEach(
                 KEY_COMPARATOR,
                 createMergeFunction(),
@@ -120,11 +135,12 @@ public abstract class SortBufferWriteBufferTestBase {
                 kv -> {
                     assertThat(expected.isEmpty()).isFalse();
                     expected.poll().assertEquals(kv);
-                });
+                },
+                createReorderFunction());
         assertThat(expected).isEmpty();
     }
 
-    private void prepareTable(List<ReusingTestData> input) throws IOException {
+    protected void prepareTable(List<ReusingTestData> input) throws IOException {
         ReusingKeyValue reuse = new ReusingKeyValue();
         for (ReusingTestData data : input) {
             KeyValue keyValue = reuse.update(data);
@@ -210,7 +226,7 @@ public abstract class SortBufferWriteBufferTestBase {
     }
 
     /** Test for {@link SortBufferWriteBuffer} with {@link LookupMergeFunction}. */
-    public static class WithLookupFunctionTest extends SortBufferWriteBufferTestBase {
+    public static class WithLookupMergeFunctionTest extends SortBufferWriteBufferTestBase {
 
         @Override
         protected boolean addOnly() {
@@ -260,6 +276,129 @@ public abstract class SortBufferWriteBufferTestBase {
                             new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))),
                             new Options())
                     .create();
+        }
+    }
+
+    /**
+     * Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction} and {@link
+     * DeduplicateMergeFunction}.
+     */
+    public static class WithSequenceFieldReorderFunctionAndDeduplicateMergeFunctionTest
+            extends WithSequenceFieldReorderFunctionTestBase {
+
+        public WithSequenceFieldReorderFunctionAndDeduplicateMergeFunctionTest() {
+            this.withMergeFunctionTest = new WithDeduplicateMergeFunctionTest();
+        }
+    }
+
+    /**
+     * Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction} and {@link
+     * PartialUpdateMergeFunction}.
+     */
+    public static class WithSequenceFieldReorderFunctionAndPartialUpdateMergeFunctionTest
+            extends WithSequenceFieldReorderFunctionTestBase {
+
+        public WithSequenceFieldReorderFunctionAndPartialUpdateMergeFunctionTest() {
+            this.withMergeFunctionTest = new WithPartialUpdateMergeFunctionTest();
+        }
+    }
+
+    /**
+     * Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction} and {@link
+     * AggregateMergeFunction}.
+     */
+    public static class WithSequenceFieldReorderFunctionAndAggregateMergeFunctionTest
+            extends WithSequenceFieldReorderFunctionTestBase {
+
+        public WithSequenceFieldReorderFunctionAndAggregateMergeFunctionTest() {
+            this.withMergeFunctionTest = new WithAggMergeFunctionTest();
+        }
+    }
+
+    /**
+     * Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction} and {@link
+     * LookupMergeFunction}.
+     */
+    public static class WithSequenceFieldReorderFunctionAndLookupMergeFunctionTest
+            extends WithSequenceFieldReorderFunctionTestBase {
+
+        public WithSequenceFieldReorderFunctionAndLookupMergeFunctionTest() {
+            this.withMergeFunctionTest = new WithLookupMergeFunctionTest();
+        }
+    }
+
+    /**
+     * Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction} and {@link
+     * FirstRowMergeFunction}.
+     */
+    public static class WithSequenceFieldReorderFunctionAndFirstRowMergeFunctionTest
+            extends WithSequenceFieldReorderFunctionTestBase {
+
+        public WithSequenceFieldReorderFunctionAndFirstRowMergeFunctionTest() {
+            this.withMergeFunctionTest = new WithFirstRowMergeFunctionTest();
+        }
+    }
+
+    /** Test for {@link SortBufferWriteBuffer} with {@link SequenceFieldReorderFunction}. */
+    public abstract static class WithSequenceFieldReorderFunctionTestBase
+            extends SortBufferWriteBufferTestBase {
+
+        protected SortBufferWriteBufferTestBase withMergeFunctionTest;
+
+        @Override
+        protected boolean addOnly() {
+            return withMergeFunctionTest.addOnly();
+        }
+
+        @Override
+        protected List<ReusingTestData> getExpected(List<ReusingTestData> input) {
+            List<ReusingTestData> reInput = new LinkedList<>();
+            for (ReusingTestData reusingTestData : input) {
+                reInput.add(
+                        new ReusingTestData(
+                                reusingTestData.key,
+                                reusingTestData.sequenceNumber,
+                                reusingTestData.valueKind,
+                                reusingTestData.value));
+            }
+
+            input.sort(ReusingTestData::compareByFieldAndSequence);
+            for (int i = 0; i < input.size(); i++) {
+                reInput.get(i).valueKind = input.get(i).valueKind;
+                reInput.get(i).value = input.get(i).value;
+            }
+
+            return withMergeFunctionTest.getExpected(reInput);
+        }
+
+        @Override
+        protected MergeFunction<KeyValue> createMergeFunction() {
+            return withMergeFunctionTest.createMergeFunction();
+        }
+
+        @Override
+        protected ReorderFunction<KeyValue> createReorderFunction() {
+            return SequenceFieldReorderFunction.factory(
+                            keyType,
+                            valueType,
+                            new CoreOptions(new Options().set(CoreOptions.SEQUENCE_FIELD, "value")))
+                    .create();
+        }
+
+        @Override
+        protected void runTest(List<ReusingTestData> input) throws IOException {
+            prepareTable(input);
+            Queue<ReusingTestData> expected = new LinkedList<>(getExpected(input));
+            table.forEach(
+                    KEY_COMPARATOR,
+                    createMergeFunction(),
+                    null,
+                    kv -> {
+                        assertThat(expected.isEmpty()).isFalse();
+                        expected.poll().assertEquals(kv);
+                    },
+                    createReorderFunction());
+            assertThat(expected).isEmpty();
         }
     }
 }

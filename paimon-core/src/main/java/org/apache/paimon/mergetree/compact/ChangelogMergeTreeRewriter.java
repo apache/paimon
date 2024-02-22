@@ -57,8 +57,9 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+            boolean changelogRowDeduplicate,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
+        super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter, rfFactory);
         this.maxLevel = maxLevel;
         this.mergeEngine = mergeEngine;
         this.valueEqualiser = valueEqualiser;
@@ -120,7 +121,8 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                                     readerFactory,
                                     keyComparator,
                                     createMergeWrapper(outputLevel),
-                                    mergeSorter));
+                                    mergeSorter,
+                                    rfFactory.create()));
         }
 
         RecordReaderIterator<ChangelogResult> iterator = null;

@@ -37,6 +37,7 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
     private final List<RecordReader<KeyValue>> nextBatchReaders;
     private final Comparator<InternalRow> userKeyComparator;
     private final MergeFunctionWrapper<T> mergeFunctionWrapper;
+    private final ReorderFunction<KeyValue> reorderFunction;
 
     private final PriorityQueue<Element> minHeap;
     private final List<Element> polled;
@@ -44,10 +45,12 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
     public SortMergeReaderWithMinHeap(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunctionWrapper<T> mergeFunctionWrapper) {
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
+            @Nullable ReorderFunction<KeyValue> reorderFunction) {
         this.nextBatchReaders = new ArrayList<>(readers);
         this.userKeyComparator = userKeyComparator;
         this.mergeFunctionWrapper = mergeFunctionWrapper;
+        this.reorderFunction = reorderFunction;
 
         this.minHeap =
                 new PriorityQueue<>(
@@ -115,6 +118,12 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                 if (!hasMore) {
                     return null;
                 }
+                if (reorderFunction != null) {
+                    mergeFunctionWrapper.reset();
+                    for (KeyValue kv : reorderFunction.getResult()) {
+                        mergeFunctionWrapper.add(kv);
+                    }
+                }
                 T result = mergeFunctionWrapper.getResult();
                 if (result != null) {
                     return result;
@@ -148,7 +157,11 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                 return false;
             }
 
-            mergeFunctionWrapper.reset();
+            if (reorderFunction == null) {
+                mergeFunctionWrapper.reset();
+            } else {
+                reorderFunction.reset();
+            }
             InternalRow key =
                     Preconditions.checkNotNull(minHeap.peek(), "Min heap is empty. This is a bug.")
                             .kv
@@ -162,7 +175,11 @@ public class SortMergeReaderWithMinHeap<T> implements SortMergeReader<T> {
                     break;
                 }
                 minHeap.poll();
-                mergeFunctionWrapper.add(element.kv);
+                if (reorderFunction == null) {
+                    mergeFunctionWrapper.add(element.kv);
+                } else {
+                    reorderFunction.add(element.kv);
+                }
                 polled.add(element);
             }
             return true;

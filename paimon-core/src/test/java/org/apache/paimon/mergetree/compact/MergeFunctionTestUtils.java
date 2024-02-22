@@ -23,7 +23,6 @@ import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.ReusingTestData;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 
@@ -33,9 +32,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class MergeFunctionTestUtils {
 
     public static List<ReusingTestData> getExpectedForDeduplicate(List<ReusingTestData> input) {
-        input = new ArrayList<>(input);
-        Collections.sort(input);
-
         List<ReusingTestData> expected = new ArrayList<>();
         for (int i = 0; i < input.size(); i++) {
             ReusingTestData data = input.get(i);
@@ -47,9 +43,6 @@ public class MergeFunctionTestUtils {
     }
 
     public static List<ReusingTestData> getExpectedForPartialUpdate(List<ReusingTestData> input) {
-        input = new ArrayList<>(input);
-        Collections.sort(input);
-
         LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
         for (ReusingTestData d : input) {
             groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
@@ -71,9 +64,6 @@ public class MergeFunctionTestUtils {
     }
 
     public static List<ReusingTestData> getExpectedForAggSum(List<ReusingTestData> input) {
-        input = new ArrayList<>(input);
-        Collections.sort(input);
-
         LinkedHashMap<Integer, List<ReusingTestData>> groups = new LinkedHashMap<>();
         for (ReusingTestData d : input) {
             groups.computeIfAbsent(d.key, k -> new ArrayList<>()).add(d);
@@ -98,9 +88,6 @@ public class MergeFunctionTestUtils {
     }
 
     public static List<ReusingTestData> getExpectedForFirstRow(List<ReusingTestData> input) {
-        input = new ArrayList<>(input);
-        Collections.sort(input);
-
         List<ReusingTestData> expected = new ArrayList<>();
         for (int i = 0; i < input.size(); i++) {
             if (i == 0 || input.get(i).key != input.get(i - 1).key) {

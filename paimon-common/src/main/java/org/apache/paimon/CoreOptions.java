@@ -2099,13 +2099,7 @@ public class CoreOptions implements Serializable {
     public enum SequenceAutoPadding implements DescribedEnum {
         ROW_KIND_FLAG(
                 "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
+                "Pads a bit flag to indicate whether it is retract (0) or add (1) message.");
 
         private final String value;
         private final String description;

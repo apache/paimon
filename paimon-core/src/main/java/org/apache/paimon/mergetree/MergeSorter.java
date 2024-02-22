@@ -31,6 +31,7 @@ import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.mergetree.compact.SortMergeReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
@@ -103,10 +104,11 @@ public class MergeSorter {
     public <T> RecordReader<T> mergeSort(
             List<ReaderSupplier<KeyValue>> lazyReaders,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionWrapper<T> mergeFunction)
+            MergeFunctionWrapper<T> mergeFunction,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException {
         if (ioManager != null && lazyReaders.size() > spillThreshold) {
-            return spillMergeSort(lazyReaders, keyComparator, mergeFunction);
+            return spillMergeSort(lazyReaders, keyComparator, mergeFunction, reorderFunction);
         }
 
         List<RecordReader<KeyValue>> readers = new ArrayList<>(lazyReaders.size());
@@ -121,19 +123,21 @@ public class MergeSorter {
         }
 
         return SortMergeReader.createSortMergeReader(
-                readers, keyComparator, mergeFunction, sortEngine);
+                readers, keyComparator, mergeFunction, sortEngine, reorderFunction);
     }
 
     private <T> RecordReader<T> spillMergeSort(
             List<ReaderSupplier<KeyValue>> readers,
             Comparator<InternalRow> keyComparator,
-            MergeFunctionWrapper<T> mergeFunction)
+            MergeFunctionWrapper<T> mergeFunction,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException {
         ExternalSorterWithLevel sorter = new ExternalSorterWithLevel();
         ConcatRecordReader.create(readers).forIOEachRemaining(sorter::put);
         sorter.flushMemory();
 
-        NoReusingMergeIterator<T> iterator = sorter.newIterator(keyComparator, mergeFunction);
+        NoReusingMergeIterator<T> iterator =
+                sorter.newIterator(keyComparator, mergeFunction, reorderFunction);
         return new RecordReader<T>() {
 
             private boolean read = false;
@@ -225,10 +229,12 @@ public class MergeSorter {
         }
 
         public <T> NoReusingMergeIterator<T> newIterator(
-                Comparator<InternalRow> keyComparator, MergeFunctionWrapper<T> mergeFunction)
+                Comparator<InternalRow> keyComparator,
+                MergeFunctionWrapper<T> mergeFunction,
+                @Nullable ReorderFunction<KeyValue> reorderFunction)
                 throws IOException {
             return new NoReusingMergeIterator<>(
-                    buffer.sortedIterator(), keyComparator, mergeFunction);
+                    buffer.sortedIterator(), keyComparator, mergeFunction, reorderFunction);
         }
     }
 
@@ -237,6 +243,7 @@ public class MergeSorter {
         private final MutableObjectIterator<BinaryRow> kvIter;
         private final Comparator<InternalRow> keyComparator;
         private final MergeFunctionWrapper<T> mergeFunc;
+        @Nullable private final ReorderFunction<KeyValue> reorderFunc;
 
         private KeyValue left;
 
@@ -245,11 +252,13 @@ public class MergeSorter {
         private NoReusingMergeIterator(
                 MutableObjectIterator<BinaryRow> kvIter,
                 Comparator<InternalRow> keyComparator,
-                MergeFunctionWrapper<T> mergeFunction) {
+                MergeFunctionWrapper<T> mergeFunction,
+                @Nullable ReorderFunction<KeyValue> reorderFunction) {
             this.kvIter = kvIter;
             this.keyComparator = keyComparator;
             this.mergeFunc = mergeFunction;
             this.isEnd = false;
+            this.reorderFunc = reorderFunction;
         }
 
         public T next() throws IOException {
@@ -259,7 +268,11 @@ public class MergeSorter {
 
             T result;
             do {
-                mergeFunc.reset();
+                if (reorderFunc == null) {
+                    mergeFunc.reset();
+                } else {
+                    reorderFunc.reset();
+                }
                 InternalRow key = null;
                 KeyValue keyValue;
                 while ((keyValue = readOnce()) != null) {
@@ -267,11 +280,22 @@ public class MergeSorter {
                         break;
                     }
                     key = keyValue.key();
-                    mergeFunc.add(keyValue);
+                    if (reorderFunc == null) {
+                        mergeFunc.add(keyValue);
+                    } else {
+                        reorderFunc.add(keyValue);
+                    }
                 }
                 left = keyValue;
                 if (key == null) {
                     return null;
+                }
+
+                if (reorderFunc != null) {
+                    mergeFunc.reset();
+                    for (KeyValue kv : reorderFunc.getResult()) {
+                        mergeFunc.add(kv);
+                    }
                 }
                 result = mergeFunc.getResult();
             } while (result == null);
@@ -292,12 +316,14 @@ public class MergeSorter {
 
             int keyArity = keyType.getFieldCount();
             int valueArity = valueType.getFieldCount();
+
+            RowKind rowKind = RowKind.fromByteValue(row.getByte(keyArity + 1));
             return new KeyValue()
                     .replace(
                             new OffsetRow(keyArity, 0).replace(row),
                             row.getLong(keyArity),
-                            RowKind.fromByteValue(row.getByte(keyArity + 1)),
-                            new OffsetRow(valueArity, keyArity + 3).replace(row))
+                            rowKind,
+                            new OffsetRow(valueArity, keyArity + 3).replace(row).replace(rowKind))
                     .setLevel(row.getInt(keyArity + 2));
         }
     }

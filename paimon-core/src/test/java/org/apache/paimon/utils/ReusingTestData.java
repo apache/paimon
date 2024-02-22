@@ -36,10 +36,10 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 public class ReusingTestData implements Comparable<ReusingTestData> {
 
-    public final int key;
-    public final long sequenceNumber;
-    public final RowKind valueKind;
-    public final long value;
+    public int key;
+    public long sequenceNumber;
+    public RowKind valueKind;
+    public long value;
 
     public ReusingTestData(int key, long sequenceNumber, RowKind valueKind, long value) {
         this.key = key;
@@ -57,6 +57,20 @@ public class ReusingTestData implements Comparable<ReusingTestData> {
         Preconditions.checkArgument(
                 result != 0 || this == that,
                 "Found two CompactTestData with the same sequenceNumber. This is invalid.");
+        return result;
+    }
+
+    public int compareByFieldAndSequence(ReusingTestData that) {
+        if (key != that.key) {
+            return Integer.compare(key, that.key);
+        }
+        int result = Long.compare(value, that.value);
+        if (result == 0) {
+            result = Long.compare(sequenceNumber, that.sequenceNumber);
+        }
+        Preconditions.checkArgument(
+                result != 0 || this == that,
+                "Found two CompactTestData with the same value and sequenceNumber. This is invalid.");
         return result;
     }
 

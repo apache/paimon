@@ -39,6 +39,8 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory.AdjustedProjection;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
+import org.apache.paimon.mergetree.compact.ReorderFunctionFactory;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -72,6 +74,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final MergeSorter mergeSorter;
+    private final ReorderFunctionFactory<KeyValue> rfFactory;
 
     @Nullable private int[][] keyProjectedFields;
 
@@ -95,7 +98,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor,
-            CoreOptions options) {
+            CoreOptions options,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         this(
                 schemaManager,
                 schemaId,
@@ -112,7 +116,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                         formatDiscover,
                         pathFactory,
                         extractor,
-                        options));
+                        options),
+                rfFactory);
     }
 
     public KeyValueFileStoreRead(
@@ -122,7 +127,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             RowType valueType,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
+            KeyValueFileReaderFactory.Builder readerFactoryBuilder,
+            ReorderFunctionFactory<KeyValue> rfFactory) {
         this.tableSchema = schemaManager.schema(schemaId);
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.keyComparator = keyComparator;
@@ -130,6 +136,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.mergeSorter =
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
+        this.rfFactory = rfFactory;
     }
 
     public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
@@ -139,9 +146,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     }
 
     public KeyValueFileStoreRead withValueProjection(int[][] projectedFields) {
-        AdjustedProjection projection = mfFactory.adjustProjection(projectedFields);
+        AdjustedProjection mfProjection = mfFactory.adjustProjection(projectedFields);
+        AdjustedProjection projection = rfFactory.adjustProjection(mfProjection.pushdownProjection);
         this.pushdownProjection = projection.pushdownProjection;
-        this.outerProjection = projection.outerProjection;
+        // keep the first outer projection.
+        this.outerProjection = mfProjection.outerProjection;
         if (pushdownProjection != null) {
             readerFactoryBuilder.withValueProjection(pushdownProjection);
             mergeSorter.setProjectedValueType(readerFactoryBuilder.projectedValueType());
@@ -228,7 +237,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                     split.partition(), split.bucket(), split.dataFiles(), false),
                             keyComparator,
                             mergeSorter,
-                            forceKeepDelete);
+                            forceKeepDelete,
+                            p -> null);
         }
     }
 
@@ -246,6 +256,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
                 new ReducerMergeFunctionWrapper(mfFactory.create(pushdownProjection));
+        ReorderFunction<KeyValue> reorderFunction = rfFactory.create(pushdownProjection);
         for (List<SortedRun> section : new IntervalPartition(files, keyComparator).partition()) {
             sectionReaders.add(
                     () ->
@@ -256,7 +267,8 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                             : nonOverlappedSectionFactory,
                                     keyComparator,
                                     mergeFuncWrapper,
-                                    mergeSorter));
+                                    mergeSorter,
+                                    reorderFunction));
         }
 
         RecordReader<KeyValue> reader = ConcatRecordReader.create(sectionReaders);

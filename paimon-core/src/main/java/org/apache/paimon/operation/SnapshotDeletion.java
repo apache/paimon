@@ -69,7 +69,7 @@ public class SnapshotDeletion extends FileDeletionBase {
         // try read manifests
         List<String> manifestFileNames =
                 readManifestFileNames(tryReadManifestList(snapshot.deltaManifestList()));
-        List<ManifestEntry> manifestEntries = new ArrayList<>();
+        List<ManifestEntry> manifestEntries;
         // data file path -> (original manifest entry, extra file paths)
         Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         for (String manifest : manifestFileNames) {

@@ -27,7 +27,10 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
+import org.apache.paimon.mergetree.compact.ReorderFunction;
 import org.apache.paimon.reader.RecordReader;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -45,7 +48,8 @@ public class MergeTreeReaders {
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
             MergeFunction<KeyValue> mergeFunction,
-            MergeSorter mergeSorter)
+            MergeSorter mergeSorter,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
@@ -56,7 +60,8 @@ public class MergeTreeReaders {
                                     readerFactory,
                                     userKeyComparator,
                                     new ReducerMergeFunctionWrapper(mergeFunction),
-                                    mergeSorter));
+                                    mergeSorter,
+                                    reorderFunction));
         }
         RecordReader<KeyValue> reader = ConcatRecordReader.create(readers);
         if (dropDelete) {
@@ -70,13 +75,15 @@ public class MergeTreeReaders {
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
-            MergeSorter mergeSorter)
+            MergeSorter mergeSorter,
+            @Nullable ReorderFunction<KeyValue> reorderFunction)
             throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (SortedRun run : section) {
             readers.add(() -> readerForRun(run, readerFactory));
         }
-        return mergeSorter.mergeSort(readers, userKeyComparator, mergeFunctionWrapper);
+        return mergeSorter.mergeSort(
+                readers, userKeyComparator, mergeFunctionWrapper, reorderFunction);
     }
 
     public static RecordReader<KeyValue> readerForRun(
