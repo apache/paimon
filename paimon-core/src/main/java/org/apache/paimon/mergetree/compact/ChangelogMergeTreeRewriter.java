@@ -93,7 +93,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     public CompactResult rewrite(
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         if (rewriteChangelog(outputLevel, dropDelete, sections)) {
-            return rewriteChangelogCompaction(outputLevel, sections, true);
+            return rewriteChangelogCompaction(outputLevel, sections, dropDelete, true);
         } else {
             return rewriteCompaction(outputLevel, dropDelete, sections);
         }
@@ -102,10 +102,14 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
     /**
      * Rewrite and produce changelog at the same time.
      *
+     * @param dropDelete whether to drop delete when rewrite compact file
      * @param rewriteCompactFile whether to rewrite compact file
      */
     private CompactResult rewriteChangelogCompaction(
-            int outputLevel, List<List<SortedRun>> sections, boolean rewriteCompactFile)
+            int outputLevel,
+            List<List<SortedRun>> sections,
+            boolean dropDelete,
+            boolean rewriteCompactFile)
             throws Exception {
         List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
         for (List<SortedRun> section : sections) {
@@ -132,8 +136,9 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
             while (iterator.hasNext()) {
                 ChangelogResult result = iterator.next();
-                if (rewriteCompactFile && result.result() != null) {
-                    compactFileWriter.write(result.result());
+                KeyValue keyValue = result.result();
+                if (rewriteCompactFile && keyValue != null && (!dropDelete || keyValue.isAdd())) {
+                    compactFileWriter.write(keyValue);
                 }
                 for (KeyValue kv : result.changelogs()) {
                     changelogFileWriter.write(kv);
@@ -170,6 +175,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                     outputLevel,
                     Collections.singletonList(
                             Collections.singletonList(SortedRun.fromSingle(file))),
+                    false,
                     strategy.rewrite);
         } else {
             return super.upgrade(outputLevel, file);
