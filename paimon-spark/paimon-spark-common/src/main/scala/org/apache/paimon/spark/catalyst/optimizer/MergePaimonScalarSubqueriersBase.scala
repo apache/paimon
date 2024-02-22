@@ -18,7 +18,7 @@
 package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.spark.PaimonScan
-import org.apache.paimon.spark.util.CTERelationRefHelper
+import org.apache.paimon.spark.util.CTERelationRefUtils
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeMap, CreateNamedStruct, Expression, ExprId, GetStructField, LeafExpression, Literal, NamedExpression, PredicateHelper, ScalarSubquery, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
@@ -361,7 +361,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
               val subqueryCTE = header.plan.asInstanceOf[CTERelationDef]
               GetStructField(
                 createScalarSubquery(
-                  CTERelationRefHelper.createCTERelationRef(
+                  CTERelationRefUtils.createCTERelationRef(
                     subqueryCTE.id,
                     _resolved = true,
                     subqueryCTE.output),

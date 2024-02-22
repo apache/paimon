@@ -20,7 +20,7 @@ package org.apache.paimon.spark.util
 import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
-object CTERelationRefHelper {
+object CTERelationRefUtils {
 
   private val (ctorm, hasStreamingField) = init()
 
