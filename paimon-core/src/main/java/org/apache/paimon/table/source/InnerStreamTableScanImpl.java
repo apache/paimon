@@ -27,7 +27,6 @@ import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousAppendAndCompactFollowUpScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
@@ -190,7 +189,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
             case COMPACT_BUCKET_TABLE:
-                return new ContinuousCompactorFollowUpScanner();
+                return new DeltaFollowUpScanner();
             case COMPACT_APPEND_NO_BUCKET:
                 return new ContinuousAppendAndCompactFollowUpScanner();
             case FILE_MONITOR:
