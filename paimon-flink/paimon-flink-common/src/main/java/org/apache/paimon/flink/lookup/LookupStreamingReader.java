@@ -27,6 +27,7 @@ import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -52,8 +53,8 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_BOOTSTRAP_PAR
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
-/** A streaming reader to read table. */
-public class TableStreamingReader {
+/** A streaming reader to load data into {@link LookupTable}. */
+public class LookupStreamingReader {
 
     private final Table table;
     private final int[] projection;
@@ -61,19 +62,20 @@ public class TableStreamingReader {
     @Nullable private final Predicate projectedPredicate;
     private final StreamTableScan scan;
 
-    public TableStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
-        this.table = table;
-        this.projection = projection;
-        if (CoreOptions.fromMap(table.options()).startupMode()
-                != CoreOptions.StartupMode.COMPACTED_FULL) {
-            table =
-                    table.copy(
-                            Collections.singletonMap(
-                                    CoreOptions.SCAN_MODE.key(),
-                                    CoreOptions.StartupMode.LATEST_FULL.toString()));
+    public LookupStreamingReader(Table table, int[] projection, @Nullable Predicate predicate) {
+        CoreOptions.StartupMode startupMode = CoreOptions.fromMap(table.options()).startupMode();
+        if (startupMode != CoreOptions.StartupMode.COMPACTED_FULL) {
+            startupMode = CoreOptions.StartupMode.LATEST_FULL;
         }
-
-        this.readBuilder = table.newReadBuilder().withProjection(projection).withFilter(predicate);
+        this.table =
+                ((FileStoreTable) table)
+                        .unsetOptions()
+                        .copy(
+                                Collections.singletonMap(
+                                        CoreOptions.SCAN_MODE.key(), startupMode.toString()));
+        this.projection = projection;
+        this.readBuilder =
+                this.table.newReadBuilder().withProjection(projection).withFilter(predicate);
         scan = readBuilder.newStreamScan();
 
         if (predicate != null) {

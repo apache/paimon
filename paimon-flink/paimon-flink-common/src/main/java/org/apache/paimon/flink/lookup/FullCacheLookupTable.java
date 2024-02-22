@@ -53,7 +53,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final Context context;
     protected final RocksDBStateFactory stateFactory;
     protected final RowType projectedType;
-    private final TableStreamingReader reader;
+    private final LookupStreamingReader reader;
     private final boolean sequenceFieldEnabled;
 
     public FullCacheLookupTable(Context context) throws IOException {
@@ -64,7 +64,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table.coreOptions().toConfiguration(),
                         null);
         FileStoreTable table = context.table;
-        this.reader = new TableStreamingReader(table, context.projection, context.tablePredicate);
+        this.reader = new LookupStreamingReader(table, context.projection, context.tablePredicate);
         this.sequenceFieldEnabled =
                 table.primaryKeys().size() > 0
                         && new CoreOptions(table.options()).sequenceField().isPresent();
