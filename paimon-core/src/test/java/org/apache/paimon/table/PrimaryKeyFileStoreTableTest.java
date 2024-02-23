@@ -72,6 +72,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -1065,6 +1066,46 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         "Aggregate function 'max' does not support retraction,"
                                 + " If you allow this function to ignore retraction messages,"
                                 + " you can configure 'fields.${field_name}.ignore-retract'='true'");
+    }
+
+    @Test
+    public void testAggMergeFuncRetract() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT()
+                        },
+                        new String[] {"pt", "a", "b", "c"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> options.set("merge-engine", "aggregation"), rowType);
+        StreamTableWrite write = table.newWrite("");
+        StreamTableCommit commit = table.newCommit("");
+        write.write(GenericRow.of(1, 1, 3, 3));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 3, 3));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.close();
+        commit.close();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        BiFunction<InternalRow, Integer, Integer> getField =
+                (row, i) -> row.isNullAt(i) ? null : row.getInt(i);
+        Function<InternalRow, String> toString =
+                row ->
+                        getField.apply(row, 0)
+                                + "|"
+                                + getField.apply(row, 1)
+                                + "|"
+                                + getField.apply(row, 2)
+                                + "|"
+                                + getField.apply(row, 3);
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                toString))
+                .containsExactly("1|1|null|null");
     }
 
     @Test

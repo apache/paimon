@@ -302,11 +302,13 @@ For streaming queries, `aggregation` merge engine must be used together with `lo
 
 ### Retract
 
-Only `sum`, `product`, `count`, `collect` and `merge_map` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
+Only `sum`, `product`, `count`, `collect`, `merge_map`, `last_value` and `last_non_null_value` supports retraction (`UPDATE_BEFORE` and `DELETE`), others aggregate functions do not support retraction.
 If you allow some functions to ignore retraction messages, you can configure:
 `'fields.${field_name}.ignore-retract'='true'`.
 
-NOTE: The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not 
+The `last_value` and `last_non_null_value` just set field to null when accept retract messages.
+
+The `collect` and `merge_map` make a best-effort attempt to handle retraction messages, but the results are not 
 guaranteed to be accurate. The following behaviors may occur when processing retraction messages:
 
 1. It might fail to handle retraction messages if records are disordered. For example, the table uses `collect`, and the 
