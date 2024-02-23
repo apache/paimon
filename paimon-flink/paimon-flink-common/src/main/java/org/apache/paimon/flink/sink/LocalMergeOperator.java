@@ -142,7 +142,9 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
 
         InternalRow key = keyProjection.apply(row);
         long sequenceNumber =
-                sequenceGenerator == null ? recordCount : sequenceGenerator.generate(row);
+                sequenceGenerator == null
+                        ? recordCount
+                        : sequenceGenerator.generateWithPadding(row, recordCount);
         if (!buffer.put(sequenceNumber, rowKind, key, row)) {
             flushBuffer();
             if (!buffer.put(sequenceNumber, rowKind, key, row)) {

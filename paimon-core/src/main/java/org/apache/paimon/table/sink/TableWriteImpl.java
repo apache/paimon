@@ -133,14 +133,6 @@ public class TableWriteImpl<T> implements InnerTableWrite, Restorable<List<State
         return record;
     }
 
-    @VisibleForTesting
-    public T writeAndReturnData(InternalRow row) throws Exception {
-        SinkRecord record = toSinkRecord(row);
-        T data = recordExtractor.extract(record);
-        write.write(record.partition(), record.bucket(), data);
-        return data;
-    }
-
     private SinkRecord toSinkRecord(InternalRow row) {
         keyAndBucketExtractor.setRecord(row);
         return new SinkRecord(
