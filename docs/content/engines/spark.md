@@ -86,6 +86,12 @@ Append path to paimon jar file to the `--jars` argument when starting `spark-sql
 spark-sql ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
+OR use the `--packages` option.
+
+```bash
+spark-sql ... --packages org.apache.paimon:paimon-spark-3.3:{{< version >}}
+```
+
 Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
 **Step 2: Specify Paimon Catalog**
