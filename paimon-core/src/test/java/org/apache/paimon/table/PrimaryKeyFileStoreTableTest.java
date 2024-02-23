@@ -1082,7 +1082,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         StreamTableWrite write = table.newWrite("");
         StreamTableCommit commit = table.newCommit("");
         write.write(GenericRow.of(1, 1, 3, 3));
-        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, 3, 3));
+        write.write(GenericRow.ofKind(RowKind.DELETE, 1, 1, null, 3));
         commit.commit(0, write.prepareCommit(true, 0));
 
         write.close();
@@ -1105,7 +1105,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 readBuilder.newRead(),
                                 readBuilder.newScan().plan().splits(),
                                 toString))
-                .containsExactly("1|1|null|null");
+                .containsExactly("1|1|3|null");
     }
 
     @Test

@@ -317,6 +317,11 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 0, "A"), row(0, 1, "b")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 0, "A")));
     }
 
     @Test
@@ -342,6 +347,11 @@ public class FieldAggregatorTest {
         accumulator = (InternalArray) agg.agg(accumulator, singletonArray(current));
         assertThat(unnest(accumulator, elementGetter))
                 .containsExactlyInAnyOrderElementsOf(Arrays.asList(row(0, 1, "B"), row(0, 1, "b")));
+
+        current = row(0, 1, "b");
+        accumulator = (InternalArray) agg.retract(accumulator, singletonArray(current));
+        assertThat(unnest(accumulator, elementGetter))
+                .containsExactlyInAnyOrderElementsOf(Collections.singletonList(row(0, 1, "B")));
     }
 
     private List<Object> unnest(InternalArray array, InternalArray.ElementGetter elementGetter) {

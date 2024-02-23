@@ -41,6 +41,6 @@ public class FieldLastNonNullValueAgg extends FieldAggregator {
 
     @Override
     public Object retract(Object accumulator, Object retractField) {
-        return null;
+        return retractField != null ? null : accumulator;
     }
 }
