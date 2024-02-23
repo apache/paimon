@@ -175,8 +175,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
-    protected abstract FileStoreTable copy(TableSchema newTableSchema);
-
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         checkImmutability(dynamicOptions);
