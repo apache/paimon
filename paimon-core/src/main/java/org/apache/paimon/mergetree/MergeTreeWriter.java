@@ -34,6 +34,7 @@ import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.operation.metrics.WriterMetrics;
+import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.RecordWriter;
@@ -66,6 +67,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private final KeyValueFileWriterFactory writerFactory;
     private final boolean commitForceCompact;
     private final ChangelogProducer changelogProducer;
+    @Nullable private final SequenceGenerator sequenceGenerator;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
     private final LinkedHashSet<DataFileMeta> newFilesChangelog;
@@ -91,6 +93,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
+            @Nullable SequenceGenerator sequenceGenerator,
             WriterMetrics writerMetrics) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
@@ -105,6 +108,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.writerFactory = writerFactory;
         this.commitForceCompact = commitForceCompact;
         this.changelogProducer = changelogProducer;
+        this.sequenceGenerator = sequenceGenerator;
 
         this.newFiles = new LinkedHashSet<>();
         this.newFilesChangelog = new LinkedHashSet<>();
@@ -148,10 +152,10 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void write(KeyValue kv) throws Exception {
-        long sequenceNumber =
-                kv.sequenceNumber() == KeyValue.UNKNOWN_SEQUENCE
-                        ? newSequenceNumber()
-                        : kv.sequenceNumber();
+        long sequenceNumber = newSequenceNumber();
+        if (sequenceGenerator != null) {
+            sequenceNumber = sequenceGenerator.generateWithPadding(kv.value(), sequenceNumber);
+        }
         boolean success = writeBuffer.put(sequenceNumber, kv.valueKind(), kv.key(), kv.value());
         if (!success) {
             flushWriteBuffer(false, false);

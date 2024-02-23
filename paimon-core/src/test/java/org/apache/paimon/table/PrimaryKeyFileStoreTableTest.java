@@ -20,7 +20,6 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
-import org.apache.paimon.KeyValue;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -46,7 +45,6 @@ import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
-import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
@@ -74,7 +72,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -222,6 +219,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         new String[] {"pt", "a", "b", "sec", "non_time"});
         GenericRow row1 = GenericRow.of(1, 10, 100, 1685530987, BinaryString.fromString("a1"));
         GenericRow row2 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a2"));
+        GenericRow row3 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a3"));
         FileStoreTable table =
                 createFileStoreTable(
                         conf -> {
@@ -232,17 +230,33 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         },
                         rowType);
         StreamTableWrite write = table.newWrite(commitUser);
-        long sequenceNumber1 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row1).sequenceNumber();
-        long sequenceNumber2 =
-                ((TableWriteImpl<KeyValue>) write).writeAndReturnData(row2).sequenceNumber();
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber1, TimeUnit.MICROSECONDS))
-                .isEqualTo(1685530987);
-        assertThat(TimeUnit.SECONDS.convert(sequenceNumber2, TimeUnit.MICROSECONDS))
-                .isEqualTo(1685530987);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        write.write(row1);
+        write.write(row2);
+        commit.commit(0, write.prepareCommit(false, 0));
+        write.write(row3);
+        commit.commit(1, write.prepareCommit(false, 1));
         write.close();
+        commit.close();
 
-        // Do not check results, they are unstable
+        ReadBuilder readBuilder = table.newReadBuilder();
+        Function<InternalRow, String> toString =
+                row ->
+                        row.getInt(0)
+                                + "|"
+                                + row.getInt(1)
+                                + "|"
+                                + row.getInt(2)
+                                + "|"
+                                + row.getInt(3)
+                                + "|"
+                                + row.getString(4);
+        assertThat(
+                        getResult(
+                                readBuilder.newRead(),
+                                readBuilder.newScan().plan().splits(),
+                                toString))
+                .isEqualTo(Collections.singletonList("1|10|101|1685530987|a3"));
     }
 
     @Test

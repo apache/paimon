@@ -63,7 +63,7 @@ option to automatically pad the sequence field for you.
 
 2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
    millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
-   of sequence number will be made up to microsecond by system.
+   of sequence number will be made up to microsecond by incremental id (Calculate within a single bucket).
 
 3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
    pad the row kind flag.
