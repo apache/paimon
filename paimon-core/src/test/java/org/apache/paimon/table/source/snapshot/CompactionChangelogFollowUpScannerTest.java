@@ -79,7 +79,7 @@ public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
         snapshot = snapshotManager.snapshot(3);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        TableScan.Plan plan = scanner.scan(3, snapshotReader);
+        TableScan.Plan plan = scanner.scan(snapshot, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(Arrays.asList("+I 1|10|102", "+I 1|20|200", "+I 1|30|300"));
 
@@ -90,7 +90,7 @@ public class CompactionChangelogFollowUpScannerTest extends ScannerTestBase {
         snapshot = snapshotManager.snapshot(5);
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
         assertThat(scanner.shouldScanSnapshot(snapshot)).isTrue();
-        plan = scanner.scan(5, snapshotReader);
+        plan = scanner.scan(snapshot, snapshotReader);
         assertThat(getResult(read, plan.splits()))
                 .hasSameElementsAs(
                         Arrays.asList("-U 1|10|102", "+U 1|10|103", "-D 1|30|300", "+I 1|40|401"));
