@@ -80,8 +80,7 @@ public interface FileStoreTable extends DataTable {
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
-    /** The dim table in lookup join should ignore scan options. */
-    FileStoreTable unsetOptions();
+    FileStoreTable copy(TableSchema newTableSchema);
 
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);

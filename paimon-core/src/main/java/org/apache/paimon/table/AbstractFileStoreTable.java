@@ -60,7 +60,6 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -176,17 +175,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
 
-    protected abstract FileStoreTable copy(TableSchema newTableSchema);
-
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
         checkImmutability(dynamicOptions);
         return copyInternal(dynamicOptions, true);
-    }
-
-    @Override
-    public FileStoreTable unsetOptions() {
-        return copy(this.tableSchema.copy(Collections.emptyMap()));
     }
 
     @Override

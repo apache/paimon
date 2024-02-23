@@ -75,7 +75,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected FileStoreTable copy(TableSchema newTableSchema) {
+    public FileStoreTable copy(TableSchema newTableSchema) {
         return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
