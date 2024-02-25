@@ -15,13 +15,15 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.catalyst.optimizer
 
 import org.apache.paimon.spark.PaimonScan
+import org.apache.paimon.spark.util.CTERelationRefUtils
 
 import org.apache.spark.sql.catalyst.expressions.{Alias, Attribute, AttributeMap, CreateNamedStruct, Expression, ExprId, GetStructField, LeafExpression, Literal, NamedExpression, PredicateHelper, ScalarSubquery, Unevaluable}
 import org.apache.spark.sql.catalyst.expressions.aggregate.AggregateExpression
-import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationDef, CTERelationRef, Filter, Join, LogicalPlan, Project, Subquery, WithCTE}
+import org.apache.spark.sql.catalyst.plans.logical.{Aggregate, CTERelationDef, Filter, Join, LogicalPlan, Project, Subquery, WithCTE}
 import org.apache.spark.sql.catalyst.rules.Rule
 import org.apache.spark.sql.catalyst.trees.TreePattern.{SCALAR_SUBQUERY, SCALAR_SUBQUERY_REFERENCE, TreePattern}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
@@ -360,7 +362,10 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
               val subqueryCTE = header.plan.asInstanceOf[CTERelationDef]
               GetStructField(
                 createScalarSubquery(
-                  CTERelationRef(subqueryCTE.id, _resolved = true, subqueryCTE.output),
+                  CTERelationRefUtils.createCTERelationRef(
+                    subqueryCTE.id,
+                    _resolved = true,
+                    subqueryCTE.output),
                   ssr.exprId),
                 ssr.headerIndex)
             } else {

@@ -18,39 +18,47 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.sink.ChannelComputer;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
-import org.apache.flink.api.java.tuple.Tuple2;
+/**
+ * {@link ChannelComputer} for distributing CDC records into writers for fixed-bucket mode tables.
+ */
+public abstract class CdcFixedBucketChannelComputerBase<T> implements ChannelComputer<T> {
 
-/** Hash key of a {@link CdcRecord} with bucket. */
-public class CdcWithBucketChannelComputer implements ChannelComputer<Tuple2<CdcRecord, Integer>> {
-
-    private static final long serialVersionUID = 1L;
-
-    private final TableSchema schema;
+    protected final TableSchema schema;
 
     private transient int numChannels;
-    private transient CdcRecordKeyAndBucketExtractor extractor;
+    private transient KeyAndBucketExtractor<T> extractor;
 
-    public CdcWithBucketChannelComputer(TableSchema schema) {
+    public CdcFixedBucketChannelComputerBase(TableSchema schema) {
         this.schema = schema;
     }
 
     @Override
     public void setup(int numChannels) {
         this.numChannels = numChannels;
-        this.extractor = new CdcRecordKeyAndBucketExtractor(schema);
+        this.extractor = createExtractor();
     }
 
+    protected abstract KeyAndBucketExtractor<T> createExtractor();
+
     @Override
-    public int channel(Tuple2<CdcRecord, Integer> record) {
-        extractor.setRecord(record.f0);
-        return ChannelComputer.select(extractor.partition(), record.f1, numChannels);
+    public int channel(T record) {
+        extractor.setRecord(record);
+        return channel(extractor.partition(), extractor.bucket());
+    }
+
+    @VisibleForTesting
+    int channel(BinaryRow partition, int bucket) {
+        return ChannelComputer.select(partition, bucket, numChannels);
     }
 
     @Override
     public String toString() {
-        return "shuffle by partition & bucket";
+        return "shuffle by bucket";
     }
 }

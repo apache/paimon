@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -190,6 +191,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The minimum number of completed snapshots to retain. Should be greater than or equal to 1.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
             key("snapshot.num-retained.max")
                     .intType()
@@ -723,6 +725,7 @@ public class CoreOptions implements Serializable {
                                     + " if there is a need for access, it will be re-read from the DFS to build"
                                     + " an index on the local disk.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_DISK_SIZE =
             key("lookup.cache-max-disk-size")
                     .memoryType()

@@ -28,6 +28,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -135,11 +136,20 @@ public class LookupJoinITCase extends CatalogITCaseBase {
 
     @ParameterizedTest
     @EnumSource(LookupCacheMode.class)
-    public void testLookupWithLatest(LookupCacheMode cacheMode) throws Exception {
+    public void testLookupIgnoreScanOptions(LookupCacheMode cacheMode) throws Exception {
         initTable(cacheMode);
         sql("INSERT INTO DIM VALUES (1, 11, 111, 1111), (2, 22, 222, 2222)");
+
+        String scanOption;
+        if (ThreadLocalRandom.current().nextBoolean()) {
+            scanOption = "'scan.mode'='latest'";
+        } else {
+            scanOption = "'scan.snapshot-id'='2'";
+        }
         String query =
-                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS('scan.mode'='latest') */"
+                "SELECT T.i, D.j, D.k1, D.k2 FROM T LEFT JOIN DIM /*+ OPTIONS("
+                        + scanOption
+                        + ") */"
                         + " for system_time as of T.proctime AS D ON T.i = D.i";
         BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
 
