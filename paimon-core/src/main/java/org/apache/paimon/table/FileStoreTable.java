@@ -80,6 +80,8 @@ public interface FileStoreTable extends DataTable {
     @Override
     FileStoreTable copy(Map<String, String> dynamicOptions);
 
+    FileStoreTable copy(TableSchema newTableSchema);
+
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
 
@@ -96,6 +98,8 @@ public interface FileStoreTable extends DataTable {
 
     @Override
     TableCommitImpl newCommit(String commitUser);
+
+    TableCommitImpl newCommit(String commitUser, String branchName);
 
     LocalTableQuery newLocalTableQuery();
 

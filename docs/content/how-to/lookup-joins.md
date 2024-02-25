@@ -55,7 +55,7 @@ CREATE TABLE customers (
 INSERT INTO customers ...
 
 -- Create a temporary left table, like from kafka
-CREATE TEMPORARY TABLE Orders (
+CREATE TEMPORARY TABLE orders (
     order_id INT,
     total INT,
     customer_id INT,
@@ -76,7 +76,7 @@ You can now use `customers` in a lookup join query.
 ```sql
 -- enrich each order with customer information
 SELECT o.order_id, o.total, c.country, c.zip
-FROM Orders AS o
+FROM orders AS o
 JOIN customers
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
@@ -84,7 +84,7 @@ ON o.customer_id = c.id;
 
 ## Retry Lookup
 
-If the records of `Orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
+If the records of `orders` (main table) join missing because the corresponding data of `customers` (lookup table) is not ready.
 You can consider using Flink's [Delayed Retry Strategy For Lookup](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/hints/#3-enable-delayed-retry-strategy-for-lookup).
 Only for Flink 1.16+.
 
@@ -92,7 +92,7 @@ Only for Flink 1.16+.
 -- enrich each order with customer information
 SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
 o.order_id, o.total, c.country, c.zip
-FROM Orders AS o
+FROM orders AS o
 JOIN customers
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
@@ -108,14 +108,14 @@ other records.
 -- enrich each order with customer information
 SELECT /*+ LOOKUP('table'='c', 'retry-predicate'='lookup_miss', 'output-mode'='allow_unordered', 'retry-strategy'='fixed_delay', 'fixed-delay'='1s', 'max-attempts'='600') */
 o.order_id, o.total, c.country, c.zip
-FROM Orders AS o
+FROM orders AS o
 JOIN customers /*+ OPTIONS('lookup.async'='true', 'lookup.async-thread-number'='16') */
 FOR SYSTEM_TIME AS OF o.proc_time AS c
 ON o.customer_id = c.id;
 ```
 
 {{< hint info >}}
-If the main table (`Orders`) is CDC stream, `allow_unordered` will be ignored by Flink SQL (only supports append stream),
+If the main table (`orders`) is CDC stream, `allow_unordered` will be ignored by Flink SQL (only supports append stream),
 your streaming job may be blocked. You can try to use `audit_log` system table feature of Paimon to walk around
 (convert CDC stream to append stream).
 {{< /hint >}}

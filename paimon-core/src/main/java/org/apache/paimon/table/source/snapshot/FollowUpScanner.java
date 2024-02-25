@@ -27,9 +27,9 @@ public interface FollowUpScanner {
 
     boolean shouldScanSnapshot(Snapshot snapshot);
 
-    Plan scan(long snapshotId, SnapshotReader snapshotReader);
+    Plan scan(Snapshot snapshot, SnapshotReader snapshotReader);
 
-    default Plan getOverwriteChangesPlan(long snapshotId, SnapshotReader snapshotReader) {
-        return snapshotReader.withSnapshot(snapshotId).readChanges();
+    default Plan getOverwriteChangesPlan(Snapshot snapshot, SnapshotReader snapshotReader) {
+        return snapshotReader.withSnapshot(snapshot).readChanges();
     }
 }

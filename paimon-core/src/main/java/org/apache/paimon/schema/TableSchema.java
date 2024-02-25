@@ -285,6 +285,10 @@ public class TableSchema implements Serializable {
                 timeMillis);
     }
 
+    public static TableSchema fromJson(String json) {
+        return JsonSerdeUtil.fromJson(json, TableSchema.class);
+    }
+
     @Override
     public String toString() {
         return JsonSerdeUtil.toJson(this);

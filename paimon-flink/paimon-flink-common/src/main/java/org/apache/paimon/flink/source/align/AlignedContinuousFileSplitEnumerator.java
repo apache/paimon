@@ -228,6 +228,7 @@ public class AlignedContinuousFileSplitEnumerator extends ContinuousFileSplitEnu
                 finished = true;
             } else {
                 LOG.error("Failed to enumerate files", error);
+                throw new RuntimeException(error);
             }
         }
 

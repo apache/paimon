@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.spark.sort;
 
 import org.apache.paimon.utils.ZOrderByteUtils;
@@ -48,6 +44,10 @@ import java.nio.ByteBuffer;
 
 import scala.collection.JavaConverters;
 import scala.collection.Seq;
+
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /** Spark udf to calculate zorder bytes. Copied from iceberg. */
 public class SparkZOrderUDF implements Serializable {

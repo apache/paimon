@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -45,7 +45,6 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /** Generate sequence number. */
@@ -108,11 +107,11 @@ public class SequenceGenerator {
     }
 
     @Nullable
-    public Long generateNullable(InternalRow row) {
+    public Long generateWithoutPadding(InternalRow row) {
         return generator.generateNullable(row, index);
     }
 
-    public long generate(InternalRow row) {
+    public long generateWithPadding(InternalRow row, long incrSeq) {
         long sequence = generator.generate(row, index);
         for (SequenceAutoPadding padding : paddings) {
             switch (padding) {
@@ -120,10 +119,10 @@ public class SequenceGenerator {
                     sequence = addRowKindFlag(sequence, row.getRowKind());
                     break;
                 case SECOND_TO_MICRO:
-                    sequence = secondToMicro(sequence);
+                    sequence = secondToMicro(sequence, incrSeq);
                     break;
                 case MILLIS_TO_MICRO:
-                    sequence = millisToMicro(sequence);
+                    sequence = millisToMicro(sequence, incrSeq);
                     break;
                 default:
                     throw new UnsupportedOperationException(
@@ -137,27 +136,15 @@ public class SequenceGenerator {
         return (sequence << 1) | (rowKind.isAdd() ? 1 : 0);
     }
 
-    private long millisToMicro(long sequence) {
+    private long millisToMicro(long sequence, long incrSeq) {
         // Generated value is millis
-        return sequence * 1_000 + getCurrentMicroOfMillis();
+        return sequence * 1_000 + (incrSeq % 1_000);
     }
 
-    private long secondToMicro(long sequence) {
+    private long secondToMicro(long sequence, long incrSeq) {
         // timestamp returns millis
         long second = fieldType.is(DataTypeFamily.TIMESTAMP) ? sequence / 1000 : sequence;
-        return second * 1_000_000 + getCurrentMicroOfSeconds();
-    }
-
-    private static long getCurrentMicroOfMillis() {
-        long currentNanoTime = System.nanoTime();
-        long mills = TimeUnit.MILLISECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        return (currentNanoTime - mills * 1_000_000) / 1000;
-    }
-
-    private static long getCurrentMicroOfSeconds() {
-        long currentNanoTime = System.nanoTime();
-        long seconds = TimeUnit.SECONDS.convert(currentNanoTime, TimeUnit.NANOSECONDS);
-        return (currentNanoTime - seconds * 1_000_000_000) / 1000;
+        return second * 1_000_000 + (incrSeq % 1_000_000);
     }
 
     private interface Generator {

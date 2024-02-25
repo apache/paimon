@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -689,11 +689,9 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     public void testHiveLock() throws InterruptedException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
-        CatalogLock.Factory lockFactory =
-                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get())
-                        .catalog()
-                        .lockFactory()
-                        .get();
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        CatalogLock.LockFactory lockFactory = catalog.lockFactory().get();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -708,7 +706,7 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock = lockFactory.create();
+                                CatalogLock lock = lockFactory.create(catalog.lockContext().get());
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock("test_db", "t", unsafeIncrement);

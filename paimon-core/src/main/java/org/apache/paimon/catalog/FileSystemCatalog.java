@@ -57,7 +57,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.Factory> lockFactory() {
+    public Optional<CatalogLock.LockFactory> lockFactory() {
         return Optional.empty();
     }
 

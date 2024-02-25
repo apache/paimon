@@ -27,8 +27,8 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /**
- * A {@link RecordReader} which drops {@link KeyValue} of {@link RowKind#DELETE} kind from the
- * wrapped reader.
+ * A {@link RecordReader} which drops {@link KeyValue} that does not meet {@link RowKind#isAdd} from
+ * the wrapped reader.
  */
 public class DropDeleteReader implements RecordReader<KeyValue> {
 
@@ -55,9 +55,7 @@ public class DropDeleteReader implements RecordReader<KeyValue> {
                     if (kv == null) {
                         return null;
                     }
-
-                    if (kv.valueKind() == RowKind.INSERT
-                            || kv.valueKind() == RowKind.UPDATE_AFTER) {
+                    if (kv.isAdd()) {
                         return kv;
                     }
                 }

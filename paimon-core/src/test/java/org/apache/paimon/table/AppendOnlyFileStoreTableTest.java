@@ -86,6 +86,30 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBranchBatchReadWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        generateBranch(table);
+        writeBranchData(table);
+        List<Split> splits = toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits());
+        TableRead read = table.newRead();
+        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "1|10|100|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, BATCH_ROW_TO_STRING))
+                .hasSameElementsAs(
+                        Arrays.asList(
+                                "2|20|200|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|22|202|binary|varbinary|mapKey:mapVal|multiset",
+                                "2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
     public void testBatchProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
@@ -239,6 +263,31 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         .mapToInt(Integer::intValue)
                         .toArray();
         assertThat(partitions).containsExactly(1, 2, 3);
+    }
+
+    @Test
+    public void testBranchStreamingReadWrite() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        generateBranch(table);
+        writeBranchData(table);
+
+        List<Split> splits =
+                toSplits(
+                        table.newSnapshotReader(BRANCH_NAME)
+                                .withMode(ScanMode.DELTA)
+                                .read()
+                                .dataSplits());
+        TableRead read = table.newRead();
+
+        assertThat(getResult(read, splits, binaryRow(1), 0, STREAMING_ROW_TO_STRING))
+                .isEqualTo(
+                        Arrays.asList(
+                                "+1|11|101|binary|varbinary|mapKey:mapVal|multiset",
+                                "+1|12|102|binary|varbinary|mapKey:mapVal|multiset"));
+        assertThat(getResult(read, splits, binaryRow(2), 0, STREAMING_ROW_TO_STRING))
+                .isEqualTo(
+                        Collections.singletonList(
+                                "+2|21|201|binary|varbinary|mapKey:mapVal|multiset"));
     }
 
     @Test
@@ -431,6 +480,29 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(2, 20, 200L));
+        write.write(rowData(1, 11, 101L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        write.write(rowData(1, 12, 102L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(2, 22, 202L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        write.write(rowData(1, 11, 101L));
+        write.write(rowData(2, 21, 201L));
+        write.write(rowData(1, 12, 102L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        write.close();
+        commit.close();
+    }
+
+    private void writeBranchData(FileStoreTable table) throws Exception {
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME);
 
         write.write(rowData(1, 10, 100L));
         write.write(rowData(2, 20, 200L));

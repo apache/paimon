@@ -154,6 +154,29 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testConsumerIdInBatch() throws Exception {
+        String table = "T2";
+
+        batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table));
+
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+
+        Thread.sleep(1000);
+        iterator.close();
+
+        batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
+        // ignore the consumer id in batch mode
+        assertThat(sql("SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
+    }
+
+    @Test
     @Timeout(120)
     public void testSnapshotWatermark() throws Exception {
         streamSqlIter(
