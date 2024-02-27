@@ -32,7 +32,7 @@ public class KeyValueSerializerTest extends ObjectSerializerTestBase<KeyValue> {
     @Override
     protected ObjectSerializer<KeyValue> serializer() {
         return new KeyValueSerializer(
-                TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.DEFAULT_ROW_TYPE);
+                TestKeyValueGenerator.KEY_TYPE, TestKeyValueGenerator.DEFAULT_ROW_TYPE, false);
     }
 
     @Override

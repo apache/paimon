@@ -47,6 +47,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -235,6 +237,45 @@ public class KeyValueFileReadWriteTest {
                                                 kv.value().getInt(1))));
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"orc", "parquet"})
+    public void testReadWithRowPosition(String format) throws Exception {
+        readWithRowPosition(format);
+    }
+
+    private void readWithRowPosition(String format) throws Exception {
+        DataFileTestDataGenerator gen =
+                DataFileTestDataGenerator.builder().memTableCapacity(200).build();
+        DataFileTestDataGenerator.Data data = gen.next();
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
+                writerFactory.createRollingMergeTreeFileWriter(0);
+        writer.write(CloseableIterator.fromList(data.content, kv -> {}));
+        writer.close();
+
+        HashMap<String, String> options = new HashMap<>();
+        options.put(CoreOptions.DELETION_VECTORS_ENABLED.key(), "true");
+        options.put(CoreOptions.FILE_FORMAT.key(), format);
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), format, null, null, options);
+
+        for (DataFileMeta meta : writer.result()) {
+            int rowPosition = 0;
+            CloseableIterator<KeyValue> actualKvsIterator =
+                    new RecordReaderIterator<>(
+                            readerFactory.createRecordReader(
+                                    meta.schemaId(),
+                                    meta.fileName(),
+                                    meta.fileSize(),
+                                    meta.level()));
+            while (actualKvsIterator.hasNext()) {
+                KeyValue next = actualKvsIterator.next();
+                assertThat(next.rowPosition()).isEqualTo(rowPosition++);
+            }
+            actualKvsIterator.close();
+        }
+    }
+
     protected KeyValueFileWriterFactory createWriterFactory(String pathStr, String format) {
         Path path = new Path(pathStr);
         FileStorePathFactory pathFactory =
@@ -274,6 +315,16 @@ public class KeyValueFileReadWriteTest {
 
     private KeyValueFileReaderFactory createReaderFactory(
             String pathStr, String format, int[][] keyProjection, int[][] valueProjection) {
+        return createReaderFactory(
+                pathStr, format, keyProjection, valueProjection, new HashMap<>());
+    }
+
+    private KeyValueFileReaderFactory createReaderFactory(
+            String pathStr,
+            String format,
+            int[][] keyProjection,
+            int[][] valueProjection,
+            Map<String, String> options) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
         FileStorePathFactory pathFactory = new FileStorePathFactory(path);
@@ -287,7 +338,7 @@ public class KeyValueFileReadWriteTest {
                         ignore -> new FlushingFileFormat(format),
                         pathFactory,
                         new TestKeyValueGenerator.TestKeyValueFieldsExtractor(),
-                        new CoreOptions(new HashMap<>()));
+                        new CoreOptions(options));
         if (keyProjection != null) {
             builder.withKeyProjection(keyProjection);
         }

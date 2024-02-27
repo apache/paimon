@@ -96,7 +96,7 @@ public class KeyValueFileWriterFactory {
     }
 
     private KeyValueDataFileWriter createDataFileWriter(Path path, int level) {
-        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType);
+        KeyValueSerializer kvSerializer = new KeyValueSerializer(keyType, valueType, false);
         return new KeyValueDataFileWriter(
                 fileIO,
                 formatContext.writerFactory(level),

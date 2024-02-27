@@ -207,6 +207,7 @@ public class SchemaEvolutionUtil {
      * @param dataProjection the data projection
      * @param dataKeyFields the data key fields
      * @param dataValueFields the data value fields
+     * @param withRowPosition whether to add row position field
      * @return the result index and cast mapping
      */
     public static IndexCastMapping createIndexCastMapping(
@@ -215,15 +216,18 @@ public class SchemaEvolutionUtil {
             List<DataField> tableValueFields,
             int[] dataProjection,
             List<DataField> dataKeyFields,
-            List<DataField> dataValueFields) {
+            List<DataField> dataValueFields,
+            boolean withRowPosition) {
         int maxKeyId =
                 Math.max(
                         tableKeyFields.stream().mapToInt(DataField::id).max().orElse(0),
                         dataKeyFields.stream().mapToInt(DataField::id).max().orElse(0));
         List<DataField> tableFields =
-                KeyValue.createKeyValueFields(tableKeyFields, tableValueFields, maxKeyId);
+                KeyValue.createKeyValueFields(
+                        tableKeyFields, tableValueFields, maxKeyId, withRowPosition);
         List<DataField> dataFields =
-                KeyValue.createKeyValueFields(dataKeyFields, dataValueFields, maxKeyId);
+                KeyValue.createKeyValueFields(
+                        dataKeyFields, dataValueFields, maxKeyId, withRowPosition);
         return createIndexCastMapping(tableProjection, tableFields, dataProjection, dataFields);
     }
 

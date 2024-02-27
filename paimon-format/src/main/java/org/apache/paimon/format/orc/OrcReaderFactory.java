@@ -26,6 +26,7 @@ import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
+import org.apache.paimon.format.orc.reader.OrcRowPositionColumnVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
@@ -123,7 +124,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
-            vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
+            if ("_ROW_POSITION".equals(name)) {
+                vectors[i] =
+                        new OrcRowPositionColumnVector(
+                                orcBatch.cols[tableFieldNames.indexOf(name)]);
+            } else {
+                vectors[i] = createPaimonVector(orcBatch.cols[tableFieldNames.indexOf(name)], type);
+            }
         }
         return new OrcReaderBatch(orcBatch, new VectorizedColumnBatch(vectors), recycler);
     }
@@ -176,11 +183,18 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<InternalRow> convertAndGetIterator(VectorizedRowBatch orcBatch) {
+        private RecordIterator<InternalRow> convertAndGetIterator(
+                VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
             paimonColumnBatch.setNumRows(batchSize);
+            for (ColumnVector column : paimonColumnBatch.columns) {
+                if (column instanceof OrcRowPositionColumnVector) {
+                    ((OrcRowPositionColumnVector) column).replaceStartPosition(rowNumber);
+                    break;
+                }
+            }
             result.set(batchSize);
             return result;
         }
@@ -217,13 +231,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
         public RecordIterator<InternalRow> readBatch() throws IOException {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
-
+            long rowNumber = orcReader.getRowNumber();
             if (!nextBatch(orcReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator(orcVectorBatch);
+            return batch.convertAndGetIterator(orcVectorBatch, rowNumber);
         }
 
         @Override

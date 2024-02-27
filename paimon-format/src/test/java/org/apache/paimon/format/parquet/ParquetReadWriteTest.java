@@ -281,6 +281,38 @@ public class ParquetReadWriteTest {
                 });
     }
 
+    @ParameterizedTest
+    @MethodSource("parameters")
+    void testReadRowPosition(int rowGroupSize) throws IOException {
+        int number = 1000;
+        List<InternalRow> records = new ArrayList<>(number);
+        for (int i = 0; i < number; i++) {
+            Integer v = i;
+            records.add(newRow(v));
+        }
+
+        Path testPath = createTempParquetFile(folder, records, rowGroupSize);
+        // test reader with row position
+        DataType[] fieldTypes = new DataType[] {new DoubleType(), new BigIntType()};
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder()
+                                .fields(fieldTypes, new String[] {"f7", "_ROW_POSITION"})
+                                .build(),
+                        500);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
+        reader.forEachRemaining(
+                row -> {
+                    int i = cnt.get();
+                    assertThat(row.getDouble(0)).isEqualTo(i);
+                    assertThat(row.getLong(1)).isEqualTo(i);
+                    cnt.incrementAndGet();
+                });
+    }
+
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)
             throws IOException {
         List<InternalRow> rows = records.stream().map(this::newRow).collect(Collectors.toList());

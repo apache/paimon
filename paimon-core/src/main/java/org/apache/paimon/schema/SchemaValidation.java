@@ -49,6 +49,8 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
+import static org.apache.paimon.CoreOptions.FileFormatType.ORC;
+import static org.apache.paimon.CoreOptions.FileFormatType.PARQUET;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
@@ -216,6 +218,10 @@ public class SchemaValidation {
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
+        }
+
+        if (options.deletionVectorsEnabled()) {
+            validateForDeletionVectors(schema, options);
         }
     }
 
@@ -467,6 +473,18 @@ public class SchemaValidation {
                             e);
                 }
             }
+        }
+    }
+
+    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
+        if (schema.primaryKeys().isEmpty()) {
+            throw new IllegalArgumentException(
+                    "Deletion vectors mode is only supported for tables with primary keys.");
+        }
+
+        if (!options.formatType().equals(ORC) && !options.formatType().equals(PARQUET)) {
+            throw new IllegalArgumentException(
+                    "Deletion vectors mode is only supported for orc or parquet file format now.");
         }
     }
 }

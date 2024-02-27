@@ -67,7 +67,7 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             IOManager ioManager) {
         this.keyType = keyType;
         this.valueType = valueType;
-        this.serializer = new KeyValueSerializer(keyType, valueType);
+        this.serializer = new KeyValueSerializer(keyType, valueType, false);
 
         // user key + sequenceNumber
         List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
@@ -176,9 +176,9 @@ public class SortBufferWriteBuffer implements WriteBuffer {
             this.mergeFunctionWrapper = new ReducerMergeFunctionWrapper(mergeFunction);
 
             int totalFieldCount = keyType.getFieldCount() + 2 + valueType.getFieldCount();
-            this.previous = new KeyValueSerializer(keyType, valueType);
+            this.previous = new KeyValueSerializer(keyType, valueType, false);
             this.previousRow = new BinaryRow(totalFieldCount);
-            this.current = new KeyValueSerializer(keyType, valueType);
+            this.current = new KeyValueSerializer(keyType, valueType, false);
             this.currentRow = new BinaryRow(totalFieldCount);
             readOnce();
             this.advanced = false;

@@ -33,6 +33,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import static org.apache.paimon.schema.SystemColumns.ROW_POSITION;
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
 import static org.apache.paimon.utils.Preconditions.checkState;
@@ -45,6 +46,7 @@ public class KeyValue {
 
     public static final long UNKNOWN_SEQUENCE = -1;
     public static final int UNKNOWN_LEVEL = -1;
+    public static final int UNKNOWN_ROW_POSITION = -1;
 
     private InternalRow key;
     // determined after written into memory table or read from file
@@ -53,6 +55,7 @@ public class KeyValue {
     private InternalRow value;
     // determined after read from file
     private int level;
+    private long rowPosition;
 
     public KeyValue replace(InternalRow key, RowKind valueKind, InternalRow value) {
         return replace(key, UNKNOWN_SEQUENCE, valueKind, value);
@@ -65,6 +68,7 @@ public class KeyValue {
         this.valueKind = valueKind;
         this.value = value;
         this.level = UNKNOWN_LEVEL;
+        this.rowPosition = UNKNOWN_ROW_POSITION;
         return this;
     }
 
@@ -112,10 +116,26 @@ public class KeyValue {
         return this;
     }
 
+    public long rowPosition() {
+        return rowPosition;
+    }
+
+    public KeyValue setRowPosition(long rowPosition) {
+        this.rowPosition = rowPosition;
+        return this;
+    }
+
     public static RowType schema(RowType keyType, RowType valueType) {
+        return schema(keyType, valueType, false);
+    }
+
+    public static RowType schema(RowType keyType, RowType valueType, boolean withRowPosition) {
         List<DataField> fields = new ArrayList<>(keyType.getFields());
         fields.add(new DataField(0, SEQUENCE_NUMBER, new BigIntType(false)));
         fields.add(new DataField(1, VALUE_KIND, new TinyIntType(false)));
+        if (withRowPosition) {
+            fields.add(new DataField(2, ROW_POSITION, new BigIntType(false)));
+        }
         fields.addAll(valueType.getFields());
         return new RowType(fields);
     }
@@ -142,10 +162,14 @@ public class KeyValue {
      * @param keyFields the key fields
      * @param valueFields the value fields
      * @param maxKeyId the max key id
+     * @param withRowPosition whether to add row position field
      * @return the table fields
      */
     public static List<DataField> createKeyValueFields(
-            List<DataField> keyFields, List<DataField> valueFields, final int maxKeyId) {
+            List<DataField> keyFields,
+            List<DataField> valueFields,
+            final int maxKeyId,
+            boolean withRowPosition) {
         checkState(maxKeyId >= keyFields.stream().mapToInt(DataField::id).max().orElse(0));
 
         List<DataField> fields = new ArrayList<>(keyFields.size() + valueFields.size() + 2);
@@ -158,10 +182,19 @@ public class KeyValue {
         fields.add(
                 new DataField(
                         maxKeyId + 2, VALUE_KIND, new org.apache.paimon.types.TinyIntType(false)));
+
+        if (withRowPosition) {
+            fields.add(
+                    new DataField(
+                            maxKeyId + 3,
+                            ROW_POSITION,
+                            new org.apache.paimon.types.BigIntType(false)));
+        }
+
         for (DataField valueField : valueFields) {
             DataField newValueField =
                     new DataField(
-                            valueField.id() + maxKeyId + 3,
+                            valueField.id() + maxKeyId + (withRowPosition ? 4 : 3),
                             valueField.name(),
                             valueField.type(),
                             valueField.description());
@@ -172,8 +205,13 @@ public class KeyValue {
     }
 
     public static int[][] project(
-            int[][] keyProjection, int[][] valueProjection, int numKeyFields) {
-        int[][] projection = new int[keyProjection.length + 2 + valueProjection.length][];
+            int[][] keyProjection,
+            int[][] valueProjection,
+            int numKeyFields,
+            boolean withRowPosition) {
+        int valueStart = withRowPosition ? 3 : 2;
+
+        int[][] projection = new int[keyProjection.length + valueStart + valueProjection.length][];
 
         // key
         for (int i = 0; i < keyProjection.length; i++) {
@@ -187,12 +225,17 @@ public class KeyValue {
         // value kind
         projection[keyProjection.length + 1] = new int[] {numKeyFields + 1};
 
+        // row position
+        if (withRowPosition) {
+            projection[keyProjection.length + 2] = new int[] {numKeyFields + 2};
+        }
+
         // value
         for (int i = 0; i < valueProjection.length; i++) {
-            int idx = keyProjection.length + 2 + i;
+            int idx = keyProjection.length + valueStart + i;
             projection[idx] = new int[valueProjection[i].length];
             System.arraycopy(valueProjection[i], 0, projection[idx], 0, valueProjection[i].length);
-            projection[idx][0] += numKeyFields + 2;
+            projection[idx][0] += numKeyFields + valueStart;
         }
 
         return projection;

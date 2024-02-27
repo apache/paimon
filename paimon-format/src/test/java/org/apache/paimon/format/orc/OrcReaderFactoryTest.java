@@ -31,7 +31,9 @@ import org.apache.paimon.utils.DecimalUtils;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.hadoop.conf.Configuration;
+import org.apache.hadoop.hive.ql.io.sarg.PredicateLeaf;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -40,6 +42,8 @@ import java.io.InputStream;
 import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Random;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
@@ -69,6 +73,35 @@ class OrcReaderFactoryTest {
                             new String[] {
                                 "_col0", "_col1", "_col2", "_col3", "_col4", "_col5", "_col6",
                                 "_col7", "_col8"
+                            })
+                    .build();
+
+    private static final RowType FLAT_FILE_TYPE_WITH_ROW_POSITION =
+            RowType.builder()
+                    .fields(
+                            new DataType[] {
+                                DataTypes.INT(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.STRING(),
+                                DataTypes.INT(),
+                                DataTypes.STRING(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.INT(),
+                                DataTypes.BIGINT()
+                            },
+                            new String[] {
+                                "_col0",
+                                "_col1",
+                                "_col2",
+                                "_col3",
+                                "_col4",
+                                "_col5",
+                                "_col6",
+                                "_col7",
+                                "_col8",
+                                "_ROW_POSITION"
                             })
                     .build();
 
@@ -134,6 +167,64 @@ class OrcReaderFactoryTest {
         // check that all rows have been read
         assertThat(cnt.get()).isEqualTo(1920800);
         assertThat(totalF0.get()).isEqualTo(1844737280400L);
+    }
+
+    @Test
+    void testReadFileWithRowPosition() throws IOException {
+        OrcReaderFactory format =
+                createFormat(FLAT_FILE_TYPE_WITH_ROW_POSITION, new int[] {2, 0, 1, 9});
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        AtomicLong totalF0 = new AtomicLong(0);
+
+        forEach(
+                format,
+                flatFile,
+                row -> {
+                    assertThat(row.isNullAt(0)).isFalse();
+                    assertThat(row.isNullAt(1)).isFalse();
+                    assertThat(row.isNullAt(2)).isFalse();
+                    assertThat(row.getString(0).toString()).isNotNull();
+                    totalF0.addAndGet(row.getInt(1));
+                    assertThat(row.getString(2).toString()).isNotNull();
+                    // check row position
+                    assertThat(row.getLong(3)).isEqualTo(cnt.get());
+                    cnt.incrementAndGet();
+                });
+
+        // check that all rows have been read
+        assertThat(cnt.get()).isEqualTo(1920800);
+        assertThat(totalF0.get()).isEqualTo(1844737280400L);
+    }
+
+    @RepeatedTest(10)
+    void testReadFileWithRowPositionAndFilter() throws IOException {
+        ArrayList<OrcFilters.Predicate> predicates = new ArrayList<>();
+        int randomStart = new Random().nextInt(1920800);
+        predicates.add(
+                new OrcFilters.Not(
+                        new OrcFilters.LessThanEquals(
+                                "_col0", PredicateLeaf.Type.LONG, randomStart)));
+        OrcReaderFactory format =
+                createFormat(FLAT_FILE_TYPE_WITH_ROW_POSITION, new int[] {2, 0, 1, 9}, predicates);
+
+        AtomicBoolean isFirst = new AtomicBoolean(true);
+        forEach(
+                format,
+                flatFile,
+                row -> {
+                    // check filter
+                    // Note: the accuracy of filter is within flatFile's strip size (5000, read in
+                    // meta)
+                    if (isFirst.get()) {
+                        assertThat(randomStart - row.getLong(3)).isLessThan(5000);
+                        isFirst.set(false);
+                    }
+                    // check row position
+                    // Note: in flatFile, field _col0's value is row position + 1, we can use it to
+                    // check row position
+                    assertThat(row.getLong(3) + 1).isEqualTo(row.getInt(1));
+                });
     }
 
     @Test

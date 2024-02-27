@@ -169,7 +169,8 @@ public class SchemaEvolutionUtilTest {
                         tableFields1,
                         dataProjection,
                         keyFields,
-                        dataFields);
+                        dataFields,
+                        false);
         assertThat(table1DataIndexMapping.getIndexMapping()).containsExactly(0, 1, 2, 3, -1, 4);
 
         // Get (1, 2, 3, (byte) 4, null, 5L) from data value
@@ -204,7 +205,8 @@ public class SchemaEvolutionUtilTest {
                         tableFields2,
                         table1Projection,
                         keyFields,
-                        tableFields1);
+                        tableFields1,
+                        false);
         assertThat(table2Table1IndexMapping.getIndexMapping())
                 .containsExactly(0, 1, 2, 3, -1, 4, 5);
 

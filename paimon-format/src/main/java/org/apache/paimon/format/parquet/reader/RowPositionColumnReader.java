@@ -16,22 +16,22 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.schema;
+package org.apache.paimon.format.parquet.reader;
 
-import java.util.Arrays;
-import java.util.List;
+import org.apache.paimon.data.columnar.writable.WritableLongVector;
 
-/** System columns for key value store. */
-public class SystemColumns {
+/** This column reader is used to obtain row position. */
+public class RowPositionColumnReader implements ColumnReader<WritableLongVector> {
+    private long curPosition;
 
-    /** System field names. */
-    public static final String KEY_FIELD_PREFIX = "_KEY_";
+    public RowPositionColumnReader(long startPosition) {
+        this.curPosition = startPosition;
+    }
 
-    public static final String VALUE_COUNT = "_VALUE_COUNT";
-    public static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
-    public static final String VALUE_KIND = "_VALUE_KIND";
-    public static final String ROW_POSITION = "_ROW_POSITION";
-
-    public static final List<String> SYSTEM_FIELD_NAMES =
-            Arrays.asList(VALUE_COUNT, SEQUENCE_NUMBER, VALUE_KIND, ROW_POSITION);
+    @Override
+    public void readToVector(int readNumber, WritableLongVector column) {
+        for (int rowId = 0; rowId < readNumber; rowId++) {
+            column.setLong(rowId, curPosition++);
+        }
+    }
 }

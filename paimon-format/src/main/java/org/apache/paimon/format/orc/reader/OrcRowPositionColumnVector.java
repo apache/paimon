@@ -16,22 +16,25 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.schema;
+package org.apache.paimon.format.orc.reader;
 
-import java.util.Arrays;
-import java.util.List;
+import org.apache.hadoop.hive.ql.exec.vector.ColumnVector;
 
-/** System columns for key value store. */
-public class SystemColumns {
+/** This column vector is used to obtain row position. */
+public class OrcRowPositionColumnVector extends AbstractOrcColumnVector
+        implements org.apache.paimon.data.columnar.LongColumnVector {
+    private long startPosition;
 
-    /** System field names. */
-    public static final String KEY_FIELD_PREFIX = "_KEY_";
+    public OrcRowPositionColumnVector(ColumnVector ignore) {
+        super(ignore);
+    }
 
-    public static final String VALUE_COUNT = "_VALUE_COUNT";
-    public static final String SEQUENCE_NUMBER = "_SEQUENCE_NUMBER";
-    public static final String VALUE_KIND = "_VALUE_KIND";
-    public static final String ROW_POSITION = "_ROW_POSITION";
+    @Override
+    public long getLong(int i) {
+        return startPosition + i;
+    }
 
-    public static final List<String> SYSTEM_FIELD_NAMES =
-            Arrays.asList(VALUE_COUNT, SEQUENCE_NUMBER, VALUE_KIND, ROW_POSITION);
+    public void replaceStartPosition(long startPosition) {
+        this.startPosition = startPosition;
+    }
 }
