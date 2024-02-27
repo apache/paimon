@@ -30,6 +30,7 @@ import org.apache.paimon.format.orc.reader.OrcRowPositionColumnVector;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.schema.SystemColumns;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -124,7 +125,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
         for (int i = 0; i < vectors.length; i++) {
             String name = tableFieldNames.get(i);
             DataType type = tableFieldTypes.get(i);
-            if ("_ROW_POSITION".equals(name)) {
+            if (name.equals(SystemColumns.ROW_POSITION)) {
                 vectors[i] =
                         new OrcRowPositionColumnVector(
                                 orcBatch.cols[tableFieldNames.indexOf(name)]);

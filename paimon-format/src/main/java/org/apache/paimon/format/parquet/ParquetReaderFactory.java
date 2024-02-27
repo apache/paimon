@@ -34,6 +34,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
+import org.apache.paimon.schema.SystemColumns;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pool;
@@ -139,7 +140,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Type[] types = new Type[projectedFields.length];
         for (int i = 0; i < projectedFields.length; ++i) {
             String fieldName = projectedFields[i];
-            if (fieldName.equals("_ROW_POSITION")) {
+            if (fieldName.equals(SystemColumns.ROW_POSITION)) {
                 types[i] =
                         ParquetSchemaConverter.convertToParquetType(fieldName, projectedTypes[i]);
             } else if (!parquetSchema.containsField(fieldName)) {
