@@ -26,6 +26,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.operation.metrics.ScanMetrics;
+import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.utils.Filter;
@@ -44,6 +45,8 @@ public interface FileStoreScan {
     FileStoreScan withPartitionFilter(Predicate predicate);
 
     FileStoreScan withPartitionFilter(List<BinaryRow> partitions);
+
+    FileStoreScan withPartitionFilter(PartitionPredicate predicate);
 
     FileStoreScan withBucket(int bucket);
 
