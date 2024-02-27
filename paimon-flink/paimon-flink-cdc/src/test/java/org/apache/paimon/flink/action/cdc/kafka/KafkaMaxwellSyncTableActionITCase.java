@@ -85,4 +85,10 @@ public class KafkaMaxwellSyncTableActionITCase extends KafkaSyncTableActionITCas
     public void testWaterMarkSyncTable() throws Exception {
         testWaterMarkSyncTable(MAXWELL);
     }
+
+    @Test
+    @Timeout(60)
+    public void testFieldValNullSyncTable() throws Exception {
+        testTableFiledValNull(MAXWELL);
+    }
 }
