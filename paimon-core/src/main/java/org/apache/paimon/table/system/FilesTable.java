@@ -20,10 +20,10 @@ package org.apache.paimon.table.system;
 
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.predicate.Equal;
@@ -48,9 +48,11 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
@@ -449,20 +451,24 @@ public class FilesTable implements ReadonlyTable {
         }
 
         private void initialize() {
-            FieldStatsArraySerializer fieldStatsArraySerializer =
+            FieldStatsArraySerializer serializer =
                     fieldStatsConverters.getOrCreate(file.schemaId());
             // Create value stats
-            FieldStats[] fieldStatsArray =
-                    fieldStatsArraySerializer.fromBinary(tableStats, file.rowCount());
+            InternalRow min = serializer.evolution(tableStats.minValues());
+            InternalRow max = serializer.evolution(tableStats.maxValues());
+            InternalArray nullCounts =
+                    serializer.evolution(tableStats.nullCounts(), file.rowCount());
             lazyNullValueCounts = new TreeMap<>();
             lazyLowerValueBounds = new TreeMap<>();
             lazyUpperValueBounds = new TreeMap<>();
-            for (int i = 0; i < fieldStatsArray.length; i++) {
-                String fieldName = fieldStatsConverters.tableDataFields().get(i).name();
-                FieldStats fieldStats = fieldStatsArray[i];
-                lazyNullValueCounts.put(fieldName, fieldStats.nullCount());
-                lazyLowerValueBounds.put(fieldName, fieldStats.minValue());
-                lazyUpperValueBounds.put(fieldName, fieldStats.maxValue());
+            for (int i = 0; i < min.getFieldCount(); i++) {
+                DataField field = fieldStatsConverters.tableDataFields().get(i);
+                String name = field.name();
+                DataType type = field.type();
+                lazyNullValueCounts.put(
+                        name, nullCounts.isNullAt(i) ? null : nullCounts.getLong(i));
+                lazyLowerValueBounds.put(name, InternalRowUtils.get(min, i, type));
+                lazyUpperValueBounds.put(name, InternalRowUtils.get(max, i, type));
             }
         }
 

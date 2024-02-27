@@ -154,7 +154,7 @@ public class ManifestEntry {
                 case ADD:
                     Preconditions.checkState(
                             !map.containsKey(identifier),
-                            "Trying to add file %s which is already added. Manifest might be corrupted.",
+                            "Trying to add file %s which is already added.",
                             identifier);
                     map.put(identifier, entry);
                     break;
@@ -181,7 +181,7 @@ public class ManifestEntry {
         for (ManifestEntry entry : entries) {
             Preconditions.checkState(
                     entry.kind() != FileKind.DELETE,
-                    "Trying to delete file %s which is not previously added. Manifest might be corrupted.",
+                    "Trying to delete file %s which is not previously added.",
                     entry.file().fileName());
         }
     }

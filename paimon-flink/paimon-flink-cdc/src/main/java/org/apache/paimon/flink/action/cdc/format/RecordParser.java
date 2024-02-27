@@ -143,6 +143,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                 JsonSerdeUtil.convertValue(record, new TypeReference<Map<String, Object>>() {});
         Map<String, String> rowData =
                 recordMap.entrySet().stream()
+                        .filter(entry -> Objects.nonNull(entry.getKey()))
                         .collect(
                                 Collectors.toMap(
                                         Map.Entry::getKey,
@@ -157,7 +158,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                                                     return Objects.toString(entry.getValue());
                                                 }
                                             }
-                                            return Objects.toString(entry.getValue(), null);
+                                            return Objects.toString(entry.getValue());
                                         }));
         evalComputedColumns(rowData, paimonFieldTypes);
         return rowData;

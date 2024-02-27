@@ -131,6 +131,12 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     @Override
+    public FileStoreScan withPartitionFilter(PartitionPredicate predicate) {
+        this.partitionFilter = predicate;
+        return this;
+    }
+
+    @Override
     public FileStoreScan withBucket(int bucket) {
         this.bucketFilter = i -> i == bucket;
         return this;
