@@ -215,6 +215,41 @@ public class LookupLevelsTest {
         assertThat(kv).isNotNull();
     }
 
+    @Test
+    public void testLookupLevel0() throws Exception {
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(0, kv(1, 0)),
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        KeyValue kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(0);
+        assertThat(kv.value().getInt(1)).isEqualTo(0);
+
+        levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        // not in level 0
+        kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(1);
+        assertThat(kv.value().getInt(1)).isEqualTo(11);
+    }
+
     private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
         return new LookupLevels(
                 levels,
