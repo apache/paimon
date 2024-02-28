@@ -89,7 +89,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(1, 11, 1), kv(3, 33, 2), kv(5, 5, 3)),
                                 newFile(2, kv(2, 22, 4), kv(5, 55, 5))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
         KeyValue kv = lookupLevels.lookup(row(1), 1);
@@ -131,7 +132,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(7, 77), kv(8, 88)),
                                 newFile(1, kv(10, 1010), kv(11, 1111))),
                         1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         Map<Integer, Integer> contains =
                 new HashMap<Integer, Integer>() {
@@ -178,7 +180,8 @@ public class LookupLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofKibiBytes(20));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
@@ -209,7 +212,8 @@ public class LookupLevelsTest {
                                 // empty level 2
                                 newFile(3, kv(2, 22), kv(5, 55))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         KeyValue kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
@@ -225,7 +229,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
                                 newFile(2, kv(2, 22), kv(5, 55))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         KeyValue kv = lookupLevels.lookup(row(1), 0);
         assertThat(kv).isNotNull();
@@ -250,12 +255,12 @@ public class LookupLevelsTest {
         assertThat(kv.value().getInt(1)).isEqualTo(11);
     }
 
-    private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
-        return new LookupLevels(
+    private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
+        return new LookupLevels<>(
                 levels,
                 comparator,
                 keyType,
-                rowType,
+                new LookupLevels.KeyValueProcessor(rowType),
                 file ->
                         createReaderFactory()
                                 .createRecordReader(
