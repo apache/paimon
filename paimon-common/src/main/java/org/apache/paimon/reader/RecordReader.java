@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ConsumerWithIOException;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
@@ -134,6 +135,33 @@ public interface RecordReader<T> extends Closeable {
             while ((batch = readBatch()) != null) {
                 while ((record = batch.next()) != null) {
                     action.accept(record);
+                }
+                batch.releaseBatch();
+            }
+        } finally {
+            close();
+        }
+    }
+
+    /**
+     * Performs the given action for each remaining element with row position in {@link
+     * RecordReader} until all elements have been processed or the action throws an exception.
+     */
+    default void forEachRemainingWithPosition(Consumer<? super Pair<Long, T>> action)
+            throws IOException {
+        RecordWithPositionIterator<T> batch;
+        long rowPosition;
+        T record;
+
+        try {
+            while ((batch = (RecordWithPositionIterator<T>) readBatch()) != null) {
+                while (true) {
+                    rowPosition = batch.rowPosition();
+                    record = batch.next();
+                    if (record == null) {
+                        break;
+                    }
+                    action.accept(Pair.of(rowPosition, record));
                 }
                 batch.releaseBatch();
             }

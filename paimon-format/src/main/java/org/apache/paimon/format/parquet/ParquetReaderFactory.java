@@ -393,7 +393,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         public RecordIterator<InternalRow> convertAndGetIterator() {
-            result.set(columnarBatch.getNumRows());
+            result.reset(columnarBatch.getNumRows());
+            // Since we currently don't implement parquet's filter push down, row position is always
+            // increased from 0 by 1, so we do not need to reset row position.
             return result;
         }
     }
