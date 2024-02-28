@@ -28,6 +28,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -79,6 +80,7 @@ import java.util.function.Function;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
@@ -1232,7 +1234,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testReadOptimizedTable() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        // let max level has many files
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -1251,16 +1255,14 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 DataTypes.ROW(
                                         DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
 
-        SnapshotReader snapshotReader = roTable.newSnapshotReader();
         TableRead read = roTable.newRead();
-        List<String> result =
-                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        List<String> result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result).isEmpty();
 
         write.compact(binaryRow(1), 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
 
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 10, 100]", "+I[1, 11, 110]");
 
         write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 101L));
@@ -1268,10 +1270,15 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.compact(binaryRow(2), 0, true);
         commit.commit(3, write.prepareCommit(true, 3));
 
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[1, 10, 100]", "+I[1, 11, 110]", "+I[2, 20, 201]", "+I[2, 21, 210]");
+
+        // test value filter on ro table
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        List<Split> splits = roTable.newScan().withFilter(builder.equal(2, 210L)).plan().splits();
+        assertThat(splits).hasSize(1);
 
         write.close();
         commit.close();

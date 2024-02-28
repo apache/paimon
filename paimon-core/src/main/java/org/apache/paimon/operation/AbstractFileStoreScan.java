@@ -330,7 +330,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                         Collectors.toList()))
                         .values()
                         .stream()
-                        .filter(this::filterWholeBucketByStats)
+                        .map(this::filterWholeBucketByStats)
                         .flatMap(Collection::stream)
                         .collect(Collectors.toList());
 
@@ -420,7 +420,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     }
 
     /** Note: Keep this thread-safe. */
-    protected abstract boolean filterWholeBucketByStats(List<ManifestEntry> entries);
+    protected abstract List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries);
 
     /** Note: Keep this thread-safe. */
     private List<ManifestEntry> readManifestFileMeta(ManifestFileMeta manifest) {
