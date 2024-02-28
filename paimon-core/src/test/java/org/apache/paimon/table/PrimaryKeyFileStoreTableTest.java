@@ -48,6 +48,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
+import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -73,6 +74,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -1279,6 +1281,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
         List<Split> splits = roTable.newScan().withFilter(builder.equal(2, 210L)).plan().splits();
         assertThat(splits).hasSize(1);
+        Optional<List<RawFile>> rawFiles = splits.get(0).convertToRawFiles();
+        assertThat(rawFiles).isPresent();
+        assertThat(rawFiles.get()).hasSize(1);
 
         write.close();
         commit.close();
