@@ -22,13 +22,13 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.ConsumerWithIOException;
 import org.apache.paimon.utils.Filter;
-import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
 import java.io.Closeable;
 import java.io.IOException;
 import java.util.Iterator;
+import java.util.function.BiConsumer;
 import java.util.function.Consumer;
 import java.util.function.Function;
 
@@ -147,7 +147,7 @@ public interface RecordReader<T> extends Closeable {
      * Performs the given action for each remaining element with row position in {@link
      * RecordReader} until all elements have been processed or the action throws an exception.
      */
-    default void forEachRemainingWithPosition(Consumer<? super Pair<Long, T>> action)
+    default void forEachRemainingWithPosition(BiConsumer<Long, ? super T> action)
             throws IOException {
         RecordWithPositionIterator<T> batch;
         long rowPosition;
@@ -161,7 +161,7 @@ public interface RecordReader<T> extends Closeable {
                     if (record == null) {
                         break;
                     }
-                    action.accept(Pair.of(rowPosition, record));
+                    action.accept(rowPosition, record);
                 }
                 batch.releaseBatch();
             }

@@ -149,10 +149,7 @@ class OrcReaderFactoryTest {
 
         try (RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), flatFile)) {
             reader.forEachRemainingWithPosition(
-                    pair -> {
-                        long rowPosition = pair.getLeft();
-                        InternalRow row = pair.getRight();
-
+                    (rowPosition, row) -> {
                         assertThat(row.isNullAt(0)).isFalse();
                         assertThat(row.isNullAt(1)).isFalse();
                         assertThat(row.isNullAt(2)).isFalse();
@@ -185,10 +182,7 @@ class OrcReaderFactoryTest {
         try (RecordReader<InternalRow> reader =
                 format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
             reader.forEachRemainingWithPosition(
-                    pair -> {
-                        Long rowPosition = pair.getLeft();
-                        InternalRow row = pair.getRight();
-
+                    (rowPosition, row) -> {
                         // check filter: _col0 > randomStart
                         // Note: the accuracy of filter is within flatFile's strip size
                         if (isFirst.get()) {

@@ -305,9 +305,7 @@ public class ParquetReadWriteTest {
         AtomicInteger cnt = new AtomicInteger(0);
         try (RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath)) {
             reader.forEachRemainingWithPosition(
-                    pair -> {
-                        long rowPosition = pair.getLeft();
-                        InternalRow row = pair.getRight();
+                    (rowPosition, row) -> {
                         assertThat(row.getDouble(0)).isEqualTo(cnt.get());
                         // check row position
                         assertThat(rowPosition).isEqualTo(cnt.get());
