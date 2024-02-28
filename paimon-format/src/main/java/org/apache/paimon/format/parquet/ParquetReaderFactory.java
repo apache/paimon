@@ -320,6 +320,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
+            currentRowPosition += num;
             batch.columnarBatch.setNumRows(num);
             return true;
         }
@@ -348,7 +349,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             totalCountLoadedSoFar += pages.getRowCount();
-            currentRowPosition += pages.getRowCount();
         }
 
         private ParquetReaderBatch getCachedEntry() throws IOException {
