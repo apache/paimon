@@ -20,7 +20,6 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.KeyValue;
-import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,8 +44,6 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
 
     protected final int maxLevel;
     protected final MergeEngine mergeEngine;
-    protected final RecordEqualiser valueEqualiser;
-    protected final boolean changelogRowDeduplicate;
 
     public ChangelogMergeTreeRewriter(
             int maxLevel,
@@ -55,14 +52,10 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            MergeSorter mergeSorter,
-            RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
+            MergeSorter mergeSorter) {
         super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
         this.maxLevel = maxLevel;
         this.mergeEngine = mergeEngine;
-        this.valueEqualiser = valueEqualiser;
-        this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
 
     protected abstract boolean rewriteChangelog(

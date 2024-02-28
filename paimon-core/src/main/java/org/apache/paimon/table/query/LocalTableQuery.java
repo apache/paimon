@@ -53,7 +53,7 @@ import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
 /** Implementation for {@link TableQuery} for caching data and file in local. */
 public class LocalTableQuery implements TableQuery {
 
-    private final Map<BinaryRow, Map<Integer, LookupLevels>> tableView;
+    private final Map<BinaryRow, Map<Integer, LookupLevels<KeyValue>>> tableView;
 
     private final CoreOptions options;
 
@@ -125,12 +125,13 @@ public class LocalTableQuery implements TableQuery {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
         KeyValueFileReaderFactory factory = readerFactoryBuilder.build(partition, bucket);
         Options options = this.options.toConfiguration();
-        LookupLevels lookupLevels =
-                new LookupLevels(
+        LookupLevels<KeyValue> lookupLevels =
+                new LookupLevels<>(
                         levels,
                         keyComparatorSupplier.get(),
                         readerFactoryBuilder.keyType(),
-                        readerFactoryBuilder.projectedValueType(),
+                        new LookupLevels.KeyValueProcessor(
+                                readerFactoryBuilder.projectedValueType()),
                         file ->
                                 factory.createRecordReader(
                                         file.schemaId(),
@@ -154,11 +155,11 @@ public class LocalTableQuery implements TableQuery {
     @Override
     public synchronized InternalRow lookup(BinaryRow partition, int bucket, InternalRow key)
             throws IOException {
-        Map<Integer, LookupLevels> buckets = tableView.get(partition);
+        Map<Integer, LookupLevels<KeyValue>> buckets = tableView.get(partition);
         if (buckets == null || buckets.isEmpty()) {
             return null;
         }
-        LookupLevels lookupLevels = buckets.get(bucket);
+        LookupLevels<KeyValue> lookupLevels = buckets.get(bucket);
         if (lookupLevels == null) {
             return null;
         }
@@ -189,8 +190,10 @@ public class LocalTableQuery implements TableQuery {
 
     @Override
     public void close() throws IOException {
-        for (Map.Entry<BinaryRow, Map<Integer, LookupLevels>> buckets : tableView.entrySet()) {
-            for (Map.Entry<Integer, LookupLevels> bucket : buckets.getValue().entrySet()) {
+        for (Map.Entry<BinaryRow, Map<Integer, LookupLevels<KeyValue>>> buckets :
+                tableView.entrySet()) {
+            for (Map.Entry<Integer, LookupLevels<KeyValue>> bucket :
+                    buckets.getValue().entrySet()) {
                 bucket.getValue().close();
             }
         }
