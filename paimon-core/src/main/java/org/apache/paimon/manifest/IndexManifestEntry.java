@@ -80,6 +80,7 @@ public class IndexManifestEntry {
         fields.add(new DataField(4, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(5, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(6, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(7, "_DELETIONS_VECTORS_RANGES", newBytesType(true)));
         return new RowType(fields);
     }
 

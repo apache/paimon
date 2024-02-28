@@ -18,13 +18,12 @@
 
 package org.apache.paimon.manifest;
 
-import org.apache.paimon.index.HashIndexFile;
-import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.ObjectSerializerTestBase;
 
 import java.util.Random;
 
+import static org.apache.paimon.index.IndexFileMetaSerializerTest.randomIndexFile;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 
 /** Test for {@link IndexManifestEntrySerializer}. */
@@ -46,10 +45,6 @@ public class IndexManifestEntrySerializerTest extends ObjectSerializerTestBase<I
                 rnd.nextBoolean() ? FileKind.ADD : FileKind.DELETE,
                 row(rnd.nextInt()),
                 rnd.nextInt(),
-                new IndexFileMeta(
-                        HashIndexFile.HASH_INDEX,
-                        "my_file_name" + rnd.nextLong(),
-                        rnd.nextInt(),
-                        rnd.nextInt()));
+                randomIndexFile());
     }
 }

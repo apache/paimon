@@ -22,7 +22,11 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.ObjectSerializer;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.VersionedObjectSerializer;
+
+import java.util.Map;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
 public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
@@ -37,7 +41,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 BinaryString.fromString(record.indexType()),
                 BinaryString.fromString(record.fileName()),
                 record.fileSize(),
-                record.rowCount());
+                record.rowCount(),
+                SerializationUtils.serializeObject(record.deletionVectorsRanges()));
     }
 
     @Override
@@ -46,6 +51,8 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getString(0).toString(),
                 row.getString(1).toString(),
                 row.getLong(2),
-                row.getLong(3));
+                row.getLong(3),
+                (Map<String, Pair<Integer, Integer>>)
+                        SerializationUtils.deserializeObject(row.getBinary(4)));
     }
 }

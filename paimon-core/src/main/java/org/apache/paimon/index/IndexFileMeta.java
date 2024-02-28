@@ -18,14 +18,20 @@
 
 package org.apache.paimon.index;
 
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of index file. */
@@ -36,11 +42,24 @@ public class IndexFileMeta {
     private final long fileSize;
     private final long rowCount;
 
+    /** Metadata only used by {@link DeletionVectorsIndexFile}. */
+    private final @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges;
+
     public IndexFileMeta(String indexType, String fileName, long fileSize, long rowCount) {
+        this(indexType, fileName, fileSize, rowCount, null);
+    }
+
+    public IndexFileMeta(
+            String indexType,
+            String fileName,
+            long fileSize,
+            long rowCount,
+            @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges) {
         this.indexType = indexType;
         this.fileName = fileName;
         this.fileSize = fileSize;
         this.rowCount = rowCount;
+        this.deletionVectorsRanges = deletionVectorsRanges;
     }
 
     public String indexType() {
@@ -59,6 +78,10 @@ public class IndexFileMeta {
         return rowCount;
     }
 
+    public @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges() {
+        return deletionVectorsRanges;
+    }
+
     @Override
     public boolean equals(Object o) {
         if (this == o) {
@@ -71,12 +94,13 @@ public class IndexFileMeta {
         return Objects.equals(indexType, that.indexType)
                 && Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
-                && rowCount == that.rowCount;
+                && rowCount == that.rowCount
+                && Objects.equals(deletionVectorsRanges, that.deletionVectorsRanges);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(indexType, fileName, fileSize, rowCount);
+        return Objects.hash(indexType, fileName, fileSize, rowCount, deletionVectorsRanges);
     }
 
     @Override
@@ -91,6 +115,8 @@ public class IndexFileMeta {
                 + fileSize
                 + ", rowCount="
                 + rowCount
+                + ", deletionVectorsRanges="
+                + deletionVectorsRanges
                 + '}';
     }
 
@@ -100,6 +126,7 @@ public class IndexFileMeta {
         fields.add(new DataField(1, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(2, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(3, "_ROW_COUNT", new BigIntType(false)));
+        fields.add(new DataField(4, "_DELETION_VECTORS_RANGES", newBytesType(true)));
         return new RowType(fields);
     }
 }

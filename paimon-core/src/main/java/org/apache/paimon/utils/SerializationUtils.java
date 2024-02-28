@@ -25,8 +25,12 @@ import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.io.EOFException;
 import java.io.IOException;
+import java.io.ObjectInputStream;
+import java.io.ObjectOutputStream;
 import java.nio.ByteBuffer;
 
 import static org.apache.paimon.memory.MemorySegmentUtils.copyToBytes;
@@ -102,5 +106,26 @@ public class SerializationUtils {
     /** Schemaless deserialization for {@link BinaryRow} from a {@link DataInputView}. */
     public static BinaryRow deserializeBinaryRow(DataInputView input) throws IOException {
         return deserializeBinaryRow(deserializedBytes(input));
+    }
+
+    /** Serialize an object to a {@code byte[]} by using java serialization. */
+    public static byte[] serializeObject(Object obj) {
+        try (ByteArrayOutputStream byteOut = new ByteArrayOutputStream();
+                ObjectOutputStream out = new ObjectOutputStream(byteOut)) {
+            out.writeObject(obj);
+            return byteOut.toByteArray();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    /** Deserialize an object from a {@code byte[]} by using java serialization. */
+    public static Object deserializeObject(byte[] bytes) {
+        try (ByteArrayInputStream byteIn = new ByteArrayInputStream(bytes);
+                ObjectInputStream in = new ObjectInputStream(byteIn)) {
+            return in.readObject();
+        } catch (IOException | ClassNotFoundException e) {
+            throw new RuntimeException(e);
+        }
     }
 }
