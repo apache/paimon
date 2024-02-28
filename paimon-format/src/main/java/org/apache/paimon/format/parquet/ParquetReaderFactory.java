@@ -280,6 +280,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.pool = pool;
             this.rowsReturned = 0;
             this.totalCountLoadedSoFar = 0;
+            this.currentRowPosition = 0;
         }
 
         @Nullable
