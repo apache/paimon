@@ -41,8 +41,6 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     protected final long lruCacheSize;
 
-    protected final int[] primaryKeyMapping;
-
     protected final KeyProjectedRow primaryKeyRow;
 
     @Nullable private final ProjectedRow keyRearrange;
@@ -55,7 +53,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
         FileStoreTable table = context.table;
-        this.primaryKeyMapping =
+        int[] primaryKeyMapping =
                 table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
 
@@ -77,7 +75,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                 stateFactory.valueState(
                         "table",
                         InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
         super.open();

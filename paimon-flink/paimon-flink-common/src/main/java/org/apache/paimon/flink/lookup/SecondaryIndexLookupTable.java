@@ -53,8 +53,8 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                         InternalSerializers.create(
                                 TypeUtils.project(projectedType, secKeyRow.indexMapping())),
                         InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        lruCacheSize / 2);
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
+                        lruCacheSize);
         super.open();
     }
 
