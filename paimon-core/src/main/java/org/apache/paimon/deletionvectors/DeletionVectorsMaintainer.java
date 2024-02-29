@@ -26,21 +26,16 @@ import javax.annotation.Nullable;
 
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
 
 /** Maintainer of deletionVectors index. */
 public class DeletionVectorsMaintainer {
 
     private final IndexFileHandler indexFileHandler;
-    private final IndexFileMeta indexFile;
     private final Map<String, DeletionVector> deletionVectors;
     private boolean modified;
-    private boolean restored;
-    private final Set<String> restoredFileNames;
 
     private DeletionVectorsMaintainer(
             IndexFileHandler fileHandler,
@@ -48,7 +43,7 @@ public class DeletionVectorsMaintainer {
             BinaryRow partition,
             int bucket) {
         this.indexFileHandler = fileHandler;
-        this.indexFile =
+        IndexFileMeta indexFile =
                 snapshotId == null
                         ? null
                         : fileHandler
@@ -58,15 +53,12 @@ public class DeletionVectorsMaintainer {
                                         partition,
                                         bucket)
                                 .orElse(null);
-        this.deletionVectors = new HashMap<>();
+        this.deletionVectors =
+                indexFile == null
+                        ? new HashMap<>()
+                        : indexFileHandler.readAllDeletionVectors(indexFile);
         this.modified = false;
-        this.restored = false;
-        this.restoredFileNames = new HashSet<>();
     }
-
-    // -------------------------------------------------------------------------
-    //  For writer
-    // -------------------------------------------------------------------------
 
     /**
      * Notifies a new deletion which marks the specified row position as deleted with the given file
@@ -76,7 +68,6 @@ public class DeletionVectorsMaintainer {
      * @param position The row position within the file that has been deleted.
      */
     public void notifyNewDeletion(String fileName, long position) {
-        restoreAllDeletionVector();
         DeletionVector deletionVector =
                 deletionVectors.computeIfAbsent(fileName, k -> new BitmapDeletionVector());
         if (!deletionVector.isDeleted(position)) {
@@ -92,7 +83,6 @@ public class DeletionVectorsMaintainer {
      * @param fileName The name of the file whose deletion vector should be removed.
      */
     public void removeDeletionVectorOf(String fileName) {
-        restoreAllDeletionVector();
         if (deletionVectors.containsKey(fileName)) {
             deletionVectors.remove(fileName);
             modified = true;
@@ -115,10 +105,6 @@ public class DeletionVectorsMaintainer {
         return Collections.emptyList();
     }
 
-    // -------------------------------------------------------------------------
-    //  For reader
-    // -------------------------------------------------------------------------
-
     /**
      * Retrieves the deletion vector associated with the specified file name.
      *
@@ -127,33 +113,7 @@ public class DeletionVectorsMaintainer {
      *     Optional} if not.
      */
     public Optional<DeletionVector> deletionVectorOf(String fileName) {
-        restoreDeletionVector(fileName);
         return Optional.ofNullable(deletionVectors.get(fileName));
-    }
-
-    // -------------------------------------------------------------------------
-    //  Internal methods
-    // -------------------------------------------------------------------------
-
-    // Restore all deletionVectors
-    private void restoreAllDeletionVector() {
-        if (indexFile != null && !restored) {
-            deletionVectors.putAll(indexFileHandler.readAllDeletionVectors(indexFile));
-            restored = true;
-        }
-    }
-
-    // Restore the specified deletionVector
-    private void restoreDeletionVector(String fileName) {
-        if (indexFile != null
-                && !restored
-                && !deletionVectors.containsKey(fileName)
-                && !restoredFileNames.contains(fileName)) {
-            restoredFileNames.add(fileName);
-            indexFileHandler
-                    .readDeletionVector(indexFile, fileName)
-                    .ifPresent(deletionVector -> deletionVectors.put(fileName, deletionVector));
-        }
     }
 
     /** Factory to restore {@link DeletionVectorsMaintainer}. */

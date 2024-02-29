@@ -19,13 +19,15 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericArray;
 import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 
 /** A {@link VersionedObjectSerializer} for {@link IndexFileMeta}. */
@@ -42,7 +44,9 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 BinaryString.fromString(record.fileName()),
                 record.fileSize(),
                 record.rowCount(),
-                SerializationUtils.serializeObject(record.deletionVectorsRanges()));
+                record.deletionVectorsRanges() == null
+                        ? null
+                        : dvRangesToRowArrayData(record.deletionVectorsRanges()));
     }
 
     @Override
@@ -52,7 +56,29 @@ public class IndexFileMetaSerializer extends ObjectSerializer<IndexFileMeta> {
                 row.getString(1).toString(),
                 row.getLong(2),
                 row.getLong(3),
-                (Map<String, Pair<Integer, Integer>>)
-                        SerializationUtils.deserializeObject(row.getBinary(4)));
+                row.isNullAt(4) ? null : rowArrayDataToDvRanges(row.getArray(4)));
+    }
+
+    public static InternalArray dvRangesToRowArrayData(
+            Map<String, Pair<Integer, Integer>> dvRanges) {
+        return new GenericArray(
+                dvRanges.entrySet().stream()
+                        .map(
+                                entry ->
+                                        GenericRow.of(
+                                                BinaryString.fromString(entry.getKey()),
+                                                entry.getValue().getLeft(),
+                                                entry.getValue().getRight()))
+                        .toArray(GenericRow[]::new));
+    }
+
+    public static Map<String, Pair<Integer, Integer>> rowArrayDataToDvRanges(
+            InternalArray arrayData) {
+        Map<String, Pair<Integer, Integer>> dvRanges = new LinkedHashMap<>(arrayData.size());
+        for (int i = 0; i < arrayData.size(); i++) {
+            InternalRow row = arrayData.getRow(i, 3);
+            dvRanges.put(row.getString(0).toString(), Pair.of(row.getInt(1), row.getInt(2)));
+        }
+        return dvRanges;
     }
 }

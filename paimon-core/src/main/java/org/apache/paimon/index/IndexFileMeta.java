@@ -19,8 +19,10 @@
 package org.apache.paimon.index;
 
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
@@ -31,7 +33,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
-import static org.apache.paimon.utils.SerializationUtils.newBytesType;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of index file. */
@@ -126,7 +127,16 @@ public class IndexFileMeta {
         fields.add(new DataField(1, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(2, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(3, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(4, "_DELETION_VECTORS_RANGES", newBytesType(true)));
+        fields.add(
+                new DataField(
+                        4,
+                        "_DELETION_VECTORS_RANGES",
+                        new ArrayType(
+                                true,
+                                RowType.of(
+                                        newStringType(false),
+                                        new IntType(false),
+                                        new IntType(false)))));
         return new RowType(fields);
     }
 }
