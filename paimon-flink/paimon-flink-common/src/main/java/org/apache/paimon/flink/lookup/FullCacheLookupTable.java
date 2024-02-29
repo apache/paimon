@@ -86,7 +86,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
     @Override
     public void open() throws Exception {
-        Predicate scanPredicate = context.projectedPredicate;
+        Predicate scanPredicate = context.tablePredicate;
         if (specificPartition != null) {
             scanPredicate = createSpecificPartFilter(scanPredicate);
         }
