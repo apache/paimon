@@ -39,30 +39,25 @@ import java.util.List;
 /** A {@link LookupTable} for primary key table. */
 public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
-    protected final RocksDBValueState<InternalRow, InternalRow> tableState;
+    protected final long lruCacheSize;
 
-    protected int[] primaryKeyMapping;
+    protected final int[] primaryKeyMapping;
 
     protected final KeyProjectedRow primaryKeyRow;
 
     @Nullable private final ProjectedRow keyRearrange;
 
+    protected RocksDBValueState<InternalRow, InternalRow> tableState;
+
     public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
             throws IOException {
         super(context);
+        this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
         FileStoreTable table = context.table;
         this.primaryKeyMapping =
                 table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
-
-        this.tableState =
-                stateFactory.valueState(
-                        "table",
-                        InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        InternalSerializers.create(projectedType),
-                        lruCacheSize);
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -74,6 +69,18 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                                     .toArray());
         }
         this.keyRearrange = keyRearrange;
+    }
+
+    @Override
+    public void open() throws Exception {
+        this.tableState =
+                stateFactory.valueState(
+                        "table",
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyMapping)),
+                        InternalSerializers.create(projectedType),
+                        lruCacheSize);
+        super.open();
     }
 
     @Override

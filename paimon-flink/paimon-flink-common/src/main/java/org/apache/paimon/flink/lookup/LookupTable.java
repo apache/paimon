@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.lookup;
 
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 
 import java.io.Closeable;
@@ -26,6 +27,8 @@ import java.util.List;
 
 /** A lookup table which provides get and refresh. */
 public interface LookupTable extends Closeable {
+
+    default void specificPartition(BinaryRow partition) {}
 
     void open() throws Exception;
 

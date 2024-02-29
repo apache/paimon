@@ -57,6 +57,18 @@ under the License.
             <td>The cache mode of lookup join.<br /><br />Possible values:<ul><li>"AUTO"</li><li>"FULL"</li></ul></td>
         </tr>
         <tr>
+            <td><h5>lookup.dynamic-partition</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>String</td>
+            <td>Specific dynamic partition for lookup, only support 'max_pt()' currently.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.dynamic-partition.refresh-interval</h5></td>
+            <td style="word-wrap: break-word;">1 h</td>
+            <td>Duration</td>
+            <td>Specific dynamic partition refresh interval for lookup, scan all partitions and obtain corresponding partition.</td>
+        </tr>
+        <tr>
             <td><h5>scan.infer-parallelism</h5></td>
             <td style="word-wrap: break-word;">true</td>
             <td>Boolean</td>

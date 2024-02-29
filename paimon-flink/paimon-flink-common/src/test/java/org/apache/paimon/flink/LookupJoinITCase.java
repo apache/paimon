@@ -642,6 +642,44 @@ public class LookupJoinITCase extends CatalogITCaseBase {
     }
 
     @Test
+    public void testLookupMaxPtPartitionedTablePartialCache() throws Exception {
+        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.AUTO);
+    }
+
+    @Test
+    public void testLookupMaxPtPartitionedTableFullCache() throws Exception {
+        innerTestLookupMaxPtPartitionedTable(LookupCacheMode.FULL);
+    }
+
+    private void innerTestLookupMaxPtPartitionedTable(LookupCacheMode mode) throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE PARTITIONED_DIM (pt STRING, k INT, v INT, PRIMARY KEY (pt, k) NOT ENFORCED)"
+                        + "PARTITIONED BY (`pt`) WITH ("
+                        + "'bucket' = '1', "
+                        + "'lookup.dynamic-partition' = 'max_pt()', "
+                        + "'lookup.dynamic-partition.refresh-interval' = '1 ms', "
+                        + String.format("'lookup.cache' = '%s', ", mode)
+                        + "'continuous.discovery-interval'='1 ms')");
+        String query =
+                "SELECT T.i, D.v FROM T LEFT JOIN PARTITIONED_DIM for system_time as of T.proctime AS D ON T.i = D.k";
+        BlockingIterator<Row, Row> iterator = BlockingIterator.of(sEnv.executeSql(query).collect());
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('1', 1, 2)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        List<Row> result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 2));
+
+        sql("INSERT INTO PARTITIONED_DIM VALUES ('2', 1, 3)");
+        Thread.sleep(2000); // wait refresh
+        sql("INSERT INTO T VALUES (1)");
+        result = iterator.collect(1);
+        assertThat(result).containsExactlyInAnyOrder(Row.of(1, 3));
+
+        iterator.close();
+    }
+
+    @Test
     public void testLookupNonPkAppendTable() throws Exception {
         sql(
                 "CREATE TABLE DIM_NO_PK (i INT, j INT, k1 INT, k2 INT) "

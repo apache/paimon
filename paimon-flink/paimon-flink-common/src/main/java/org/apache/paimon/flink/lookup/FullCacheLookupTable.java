@@ -27,11 +27,14 @@ import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -53,8 +56,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final Context context;
     protected final RocksDBStateFactory stateFactory;
     protected final RowType projectedType;
-    private final LookupStreamingReader reader;
     private final boolean sequenceFieldEnabled;
+
+    private LookupStreamingReader reader;
+    private BinaryRow specificPartition;
 
     public FullCacheLookupTable(Context context) throws IOException {
         this.context = context;
@@ -64,7 +69,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table.coreOptions().toConfiguration(),
                         null);
         FileStoreTable table = context.table;
-        this.reader = new LookupStreamingReader(table, context.projection, context.tablePredicate);
         this.sequenceFieldEnabled =
                 table.primaryKeys().size() > 0
                         && new CoreOptions(table.options()).sequenceField().isPresent();
@@ -76,7 +80,17 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     @Override
+    public void specificPartition(BinaryRow partition) {
+        this.specificPartition = partition;
+    }
+
+    @Override
     public void open() throws Exception {
+        Predicate scanPredicate = context.projectedPredicate;
+        if (specificPartition != null) {
+            scanPredicate = createSpecificPartFilter(scanPredicate);
+        }
+        this.reader = new LookupStreamingReader(context.table, context.projection, scanPredicate);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -107,6 +121,26 @@ public abstract class FullCacheLookupTable implements LookupTable {
 
         bulkLoader.finish();
         bulkLoadSorter.clear();
+    }
+
+    private Predicate createSpecificPartFilter(Predicate scanPredicate) {
+        RowType rowType = context.table.rowType();
+        List<String> fieldNames = rowType.getFieldNames();
+        List<String> partitionKeys = context.table.partitionKeys();
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> predicates = new ArrayList<>();
+        if (scanPredicate != null) {
+            predicates.add(scanPredicate);
+        }
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            int index = fieldNames.indexOf(partitionKeys.get(i));
+            predicates.add(
+                    builder.equal(
+                            index,
+                            InternalRowUtils.get(specificPartition, i, rowType.getTypeAt(index))));
+        }
+        scanPredicate = PredicateBuilder.and(predicates);
+        return scanPredicate;
     }
 
     @Override
@@ -155,6 +189,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Override
     public void close() throws IOException {
         stateFactory.close();
+        FileIOUtils.deleteDirectory(context.tempPath);
     }
 
     /** Bulk loader for the table. */
