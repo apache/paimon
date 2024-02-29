@@ -29,5 +29,11 @@ public final class JdbcCatalogOptions {
                     .defaultValue(false)
                     .withDescription("Enable automatic table creation.");
 
+    public static final ConfigOption<String> CATALOG_NAME =
+            ConfigOptions.key("catalog-name")
+                    .stringType()
+                    .defaultValue(null)
+                    .withDescription("Custom jdbc catalog name.");
+
     private JdbcCatalogOptions() {}
 }

@@ -18,7 +18,7 @@
 
 package org.apache.paimon;
 
-/** Define client connection pool. */
+/** Source: [core/src/main/java/org/apache/iceberg/ClientPool.java]. */
 public interface ClientPool<C, E extends Exception> {
     /** Action interface for client. */
     interface Action<R, C, E extends Exception> {

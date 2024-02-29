@@ -27,6 +27,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.sql.SQLException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -53,10 +54,31 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "username", "user");
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
+        properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
+
         properties.put(JdbcCatalogOptions.INITIALIZE_CATALOG_TABLES.key(), "true");
         properties.putAll(props);
         JdbcCatalog jdbcCatalog = new JdbcCatalog(fileIO, catalogName, properties, warehouse);
         return jdbcCatalog;
+    }
+
+    @Test
+    public void testAcquireLockFail() throws SQLException, InterruptedException {
+        String lockId = "jdbc.testDb.testTable";
+        assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 3000))
+                .isTrue();
+        assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 3000))
+                .isFalse();
+    }
+
+    @Test
+    public void testCleanTimeoutLockAndAcquireLock() throws SQLException, InterruptedException {
+        String lockId = "jdbc.testDb.testTable";
+        assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 1000))
+                .isTrue();
+        Thread.sleep(2000);
+        assertThat(JdbcUtils.acquire(((JdbcCatalog) catalog).getConnections(), lockId, 1000))
+                .isTrue();
     }
 
     @Test

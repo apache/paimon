@@ -18,25 +18,18 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import java.sql.SQLException;
 
-/** Factory to create {@link JdbcCatalog}. */
-public class JdbcCatalogFactory implements CatalogFactory {
+/** Jdbc distributed lock interface. */
+public interface JdbcDistributedLockDialect {
+    void createTable(JdbcClientPool connections) throws SQLException, InterruptedException;
 
-    public static final String IDENTIFIER = "jdbc";
+    boolean lockAcquire(JdbcClientPool connections, String lockId, long timeoutMillSeconds)
+            throws SQLException, InterruptedException;
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
-    }
+    boolean releaseLock(JdbcClientPool connections, String lockId)
+            throws SQLException, InterruptedException;
 
-    @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        String catalogName = context.options().get(JdbcCatalogOptions.CATALOG_NAME);
-        return new JdbcCatalog(fileIO, catalogName, context.options().toMap(), warehouse.getName());
-    }
+    int tryReleaseTimedOutLock(JdbcClientPool connections, String lockId)
+            throws SQLException, InterruptedException;
 }

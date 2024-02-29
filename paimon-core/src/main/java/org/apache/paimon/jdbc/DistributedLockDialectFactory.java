@@ -18,25 +18,25 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-
-/** Factory to create {@link JdbcCatalog}. */
-public class JdbcCatalogFactory implements CatalogFactory {
-
-    public static final String IDENTIFIER = "jdbc";
-
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+class DistributedLockDialectFactory {
+    static JdbcDistributedLockDialect create(String protocol) {
+        JdbcProtocol type = JdbcProtocol.valueOf(protocol.toUpperCase());
+        switch (type) {
+            case SQLITE:
+                return new SqlLiteDistributedLockDialect();
+            case MYSQL:
+                return new MysqlDistributedLockDialect();
+            default:
+                throw new UnsupportedOperationException(
+                        String.format("Distributed locks based on %s are not supported", protocol));
+        }
     }
 
-    @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        String catalogName = context.options().get(JdbcCatalogOptions.CATALOG_NAME);
-        return new JdbcCatalog(fileIO, catalogName, context.options().toMap(), warehouse.getName());
+    /** Supported jdbc protocol. */
+    enum JdbcProtocol {
+        SQLITE,
+        // for mysql.
+        MARIADB,
+        MYSQL;
     }
 }

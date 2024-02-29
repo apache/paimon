@@ -18,6 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.Identifier;
@@ -56,7 +57,6 @@ import static org.apache.paimon.jdbc.JdbcCatalogOptions.INITIALIZE_CATALOG_TABLE
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
-import static org.apache.paimon.jdbc.JdbcUtils.updateTableMetadataLocation;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 
 /** Support jdbc catalog. */
@@ -96,6 +96,11 @@ public class JdbcCatalog extends AbstractCatalog {
         }
     }
 
+    @VisibleForTesting
+    public JdbcClientPool getConnections() {
+        return connections;
+    }
+
     /** Initialize catalog tables. */
     private void initializeCatalogTablesIfNeed() throws SQLException, InterruptedException {
         boolean initializeCatalogTables =
@@ -130,19 +135,10 @@ public class JdbcCatalog extends AbstractCatalog {
                                 .execute();
                     });
 
-            // Check and create distributed lock table.
-            connections.run(
-                    conn -> {
-                        DatabaseMetaData dbMeta = conn.getMetaData();
-                        ResultSet tableExists =
-                                dbMeta.getTables(
-                                        null, null, JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME, null);
-                        if (tableExists.next()) {
-                            return true;
-                        }
-                        return conn.prepareStatement(JdbcUtils.CREATE_DISTRIBUTED_LOCK_TABLE_SQL)
-                                .execute();
-                    });
+            // if lock enabled, Check and create distributed lock table.
+            if (lockEnabled()) {
+                JdbcUtils.createDistributedLockTable(connections);
+            }
         }
     }
 
@@ -270,7 +266,6 @@ public class JdbcCatalog extends AbstractCatalog {
                                     sql.setString(1, catalogName);
                                     sql.setString(2, identifier.getDatabaseName());
                                     sql.setString(3, identifier.getObjectName());
-                                    sql.setString(4, path.toString());
                                     return sql.executeUpdate();
                                 }
                             });
@@ -312,9 +307,6 @@ public class JdbcCatalog extends AbstractCatalog {
                                     + " to underlying files.",
                             e);
                 }
-                // Update table metadata
-                updateTableMetadataLocation(
-                        connections, catalogName, toTable, toPath.toString(), fromPath.toString());
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to rename table " + fromTable.getFullName(), e);
@@ -328,30 +320,8 @@ public class JdbcCatalog extends AbstractCatalog {
             throw new RuntimeException(
                     String.format("Table is not exists {}", identifier.getFullName()));
         }
-        final SchemaManager schemaManager = getSchemaManager(identifier);
-        // first commit changes to underlying files
-        TableSchema schema = schemaManager.commitChanges(changes);
-        try {
-            String newMetadataLocation = getDataTableLocation(identifier).toString();
-            Map<String, String> tableMetadata =
-                    JdbcUtils.getTable(
-                            connections,
-                            catalogName,
-                            identifier.getDatabaseName(),
-                            identifier.getObjectName());
-            String oldMetadataLocation = tableMetadata.get(JdbcUtils.METADATA_LOCATION_PROP);
-            if (!newMetadataLocation.equals(oldMetadataLocation)) {
-                updateTableMetadataLocation(
-                        connections,
-                        catalogName,
-                        identifier,
-                        newMetadataLocation,
-                        oldMetadataLocation);
-            }
-        } catch (Exception te) {
-            schemaManager.deleteSchema(schema.id());
-            throw new RuntimeException(te);
-        }
+        SchemaManager schemaManager = getSchemaManager(identifier);
+        schemaManager.commitChanges(changes);
     }
 
     @Override

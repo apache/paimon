@@ -19,7 +19,6 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.ClientPoolImpl;
-import org.apache.paimon.options.CatalogOptions;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -27,27 +26,27 @@ import java.sql.SQLException;
 import java.sql.SQLNonTransientConnectionException;
 import java.util.Map;
 import java.util.Properties;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /** Client pool for jdbc. */
 public class JdbcClientPool extends ClientPoolImpl<Connection, SQLException> {
 
+    private static final Pattern PROTOCOL_PATTERN = Pattern.compile("jdbc:([^:]+):(.*)");
     private final String dbUrl;
     private final Map<String, String> properties;
-
-    public JdbcClientPool(String dbUrl, Map<String, String> props) {
-        this(
-                Integer.parseInt(
-                        props.getOrDefault(
-                                CatalogOptions.CLIENT_POOL_SIZE.key(),
-                                String.valueOf(CatalogOptions.CLIENT_POOL_SIZE.defaultValue()))),
-                dbUrl,
-                props);
-    }
+    private final String protocol;
 
     public JdbcClientPool(int poolSize, String dbUrl, Map<String, String> props) {
         super(poolSize, SQLNonTransientConnectionException.class, true);
         properties = props;
         this.dbUrl = dbUrl;
+        Matcher matcher = PROTOCOL_PATTERN.matcher(dbUrl);
+        if (matcher.matches()) {
+            this.protocol = matcher.group(1);
+        } else {
+            throw new RuntimeException("Valid Jdbc url failure: " + dbUrl);
+        }
     }
 
     @Override
@@ -65,6 +64,10 @@ public class JdbcClientPool extends ClientPoolImpl<Connection, SQLException> {
     protected Connection reconnect(Connection client) {
         close(client);
         return newClient();
+    }
+
+    public String getProtocol() {
+        return protocol;
     }
 
     @Override

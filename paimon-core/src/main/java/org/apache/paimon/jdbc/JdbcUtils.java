@@ -29,41 +29,19 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
-import java.sql.Timestamp;
-import java.util.Collections;
 import java.util.Map;
 import java.util.Properties;
-import java.util.Set;
 import java.util.function.Consumer;
 import java.util.stream.Stream;
 
 /** Util for jdbc catalog. */
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
-    public static final String METADATA_LOCATION_PROP = "metadata_location";
-    public static final String PREVIOUS_METADATA_LOCATION_PROP = "previous_metadata_location";
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
     public static final String CATALOG_NAME = "catalog_name";
     public static final String TABLE_DATABASE = "database_name";
     public static final String TABLE_NAME = "table_name";
 
-    static final String DO_COMMIT_SQL =
-            "UPDATE "
-                    + CATALOG_TABLE_NAME
-                    + " SET "
-                    + METADATA_LOCATION_PROP
-                    + " = ? , "
-                    + PREVIOUS_METADATA_LOCATION_PROP
-                    + " = ? "
-                    + " WHERE "
-                    + CATALOG_NAME
-                    + " = ? AND "
-                    + TABLE_DATABASE
-                    + " = ? AND "
-                    + TABLE_NAME
-                    + " = ? AND "
-                    + METADATA_LOCATION_PROP
-                    + " = ?";
     static final String CREATE_CATALOG_TABLE =
             "CREATE TABLE "
                     + CATALOG_TABLE_NAME
@@ -74,10 +52,6 @@ public class JdbcUtils {
                     + " VARCHAR(255) NOT NULL,"
                     + TABLE_NAME
                     + " VARCHAR(255) NOT NULL,"
-                    + METADATA_LOCATION_PROP
-                    + " VARCHAR(1000),"
-                    + PREVIOUS_METADATA_LOCATION_PROP
-                    + " VARCHAR(1000),"
                     + " PRIMARY KEY ("
                     + CATALOG_NAME
                     + ", "
@@ -166,12 +140,8 @@ public class JdbcUtils {
                     + TABLE_DATABASE
                     + ", "
                     + TABLE_NAME
-                    + ", "
-                    + METADATA_LOCATION_PROP
-                    + ", "
-                    + PREVIOUS_METADATA_LOCATION_PROP
                     + ") "
-                    + " VALUES (?,?,?,?,null)";
+                    + " VALUES (?,?,?)";
 
     // Catalog database Properties
     static final String DATABASE_PROPERTIES_TABLE_NAME = "paimon_database_properties";
@@ -231,16 +201,6 @@ public class JdbcUtils {
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
-    static final String DELETE_DATABASE_PROPERTIES_SQL =
-            "DELETE FROM "
-                    + DATABASE_PROPERTIES_TABLE_NAME
-                    + " WHERE "
-                    + CATALOG_NAME
-                    + " = ? AND "
-                    + DATABASE_NAME
-                    + " = ? AND "
-                    + DATABASE_PROPERTY_KEY
-                    + " IN ";
     static final String DELETE_ALL_DATABASE_PROPERTIES_SQL =
             "DELETE FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
@@ -249,16 +209,6 @@ public class JdbcUtils {
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ?";
-    static final String LIST_PROPERTY_DATABASES_SQL =
-            "SELECT DISTINCT "
-                    + DATABASE_NAME
-                    + " FROM "
-                    + DATABASE_PROPERTIES_TABLE_NAME
-                    + " WHERE "
-                    + CATALOG_NAME
-                    + " = ? AND "
-                    + DATABASE_NAME
-                    + " LIKE ?";
     static final String LIST_ALL_PROPERTY_DATABASES_SQL =
             "SELECT DISTINCT "
                     + DATABASE_NAME
@@ -270,42 +220,9 @@ public class JdbcUtils {
 
     // Distributed locks table
     static final String DISTRIBUTED_LOCKS_TABLE_NAME = "paimon_distributed_locks";
-    static final String LOCK_NAME = "lock_name";
+    static final String LOCK_ID = "lock_id";
     static final String ACQUIRED_AT = "acquired_at";
-
-    static final String CREATE_DISTRIBUTED_LOCK_TABLE_SQL =
-            "CREATE TABLE "
-                    + DISTRIBUTED_LOCKS_TABLE_NAME
-                    + "("
-                    + LOCK_NAME
-                    + " VARCHAR(1000) NOT NULL,"
-                    + ACQUIRED_AT
-                    + " TIMESTAMP NULL DEFAULT NULL,"
-                    + "PRIMARY KEY ("
-                    + LOCK_NAME
-                    + ")"
-                    + ")";
-
-    static final String DISTRIBUTED_LOCK_ACQUIRE_SQL =
-            "INSERT INTO "
-                    + DISTRIBUTED_LOCKS_TABLE_NAME
-                    + " ("
-                    + LOCK_NAME
-                    + ", "
-                    + ACQUIRED_AT
-                    + ") VALUES (?, ?)";
-
-    static final String DISTRIBUTED_LOCK_RELEASE_SQL =
-            "DELETE FROM " + DISTRIBUTED_LOCKS_TABLE_NAME + " WHERE " + LOCK_NAME + " = ?";
-
-    static final String DISTRIBUTED_LOCK_EXPIRE_CLEAR_SQL =
-            "DELETE FROM "
-                    + DISTRIBUTED_LOCKS_TABLE_NAME
-                    + " WHERE "
-                    + LOCK_NAME
-                    + " = ? AND "
-                    + ACQUIRED_AT
-                    + " < ?";
+    static final String EXPIRE_TIME = "expire_time_seconds";
 
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {
@@ -336,10 +253,6 @@ public class JdbcUtils {
                             table.put(CATALOG_NAME, rs.getString(CATALOG_NAME));
                             table.put(TABLE_DATABASE, rs.getString(TABLE_DATABASE));
                             table.put(TABLE_NAME, rs.getString(TABLE_NAME));
-                            table.put(METADATA_LOCATION_PROP, rs.getString(METADATA_LOCATION_PROP));
-                            table.put(
-                                    PREVIOUS_METADATA_LOCATION_PROP,
-                                    rs.getString(PREVIOUS_METADATA_LOCATION_PROP));
                         }
                         rs.close();
                     }
@@ -355,8 +268,6 @@ public class JdbcUtils {
         int updatedRecords =
                 execute(
                         err -> {
-                            // SQLite doesn't set SQLState or throw
-                            // SQLIntegrityConstraintViolationException
                             if (err instanceof SQLIntegrityConstraintViolationException
                                     || (err.getMessage() != null
                                             && err.getMessage().contains("constraint failed"))) {
@@ -380,40 +291,6 @@ public class JdbcUtils {
             LOG.warn(
                     "Rename operation affected {} rows: the catalog table's primary key assumption has been violated",
                     updatedRecords);
-        }
-    }
-
-    /** Update table metadata location. */
-    public static void updateTableMetadataLocation(
-            JdbcClientPool connections,
-            String catalogName,
-            Identifier identifier,
-            String newMetadataLocation,
-            String oldMetadataLocation)
-            throws SQLException, InterruptedException {
-        int updatedRecords =
-                connections.run(
-                        conn -> {
-                            try (PreparedStatement sql =
-                                    conn.prepareStatement(JdbcUtils.DO_COMMIT_SQL)) {
-                                // UPDATE
-                                sql.setString(1, newMetadataLocation);
-                                sql.setString(2, oldMetadataLocation);
-                                // WHERE
-                                sql.setString(3, catalogName);
-                                sql.setString(4, identifier.getDatabaseName());
-                                sql.setString(5, identifier.getObjectName());
-                                sql.setString(6, oldMetadataLocation);
-                                return sql.executeUpdate();
-                            }
-                        });
-        if (updatedRecords == 1) {
-            LOG.debug("Successfully committed to existing table: {}", identifier.getFullName());
-        } else {
-            throw new RuntimeException(
-                    String.format(
-                            "Failed to update table %s from catalog %s",
-                            identifier.getFullName(), catalogName));
         }
     }
 
@@ -517,39 +394,6 @@ public class JdbcUtils {
                         insertedRecords, properties.size()));
     }
 
-    public static boolean updateProperties(
-            JdbcClientPool connections,
-            String catalogName,
-            String databaseName,
-            Map<String, String> properties) {
-        Stream<String> caseArgs =
-                properties.entrySet().stream()
-                        .flatMap(entry -> Stream.of(entry.getKey(), entry.getValue()));
-        Stream<String> whereArgs =
-                Stream.concat(Stream.of(catalogName, databaseName), properties.keySet().stream());
-        String[] args = Stream.concat(caseArgs, whereArgs).toArray(String[]::new);
-        int updatedRecords =
-                execute(connections, JdbcUtils.updatePropertiesStatement(properties.size()), args);
-        if (updatedRecords == properties.size()) {
-            return true;
-        }
-        throw new IllegalStateException(
-                String.format(
-                        "Failed to update: %d of %d succeeded", updatedRecords, properties.size()));
-    }
-
-    public static boolean deleteProperties(
-            JdbcClientPool connections,
-            String catalogName,
-            String databaseName,
-            Set<String> properties) {
-        String[] args =
-                Stream.concat(Stream.of(catalogName, databaseName), properties.stream())
-                        .toArray(String[]::new);
-
-        return execute(connections, JdbcUtils.deletePropertiesStatement(properties), args) > 0;
-    }
-
     private static String insertPropertiesStatement(int size) {
         StringBuilder sqlStatement = new StringBuilder(JdbcUtils.INSERT_DATABASE_PROPERTIES_SQL);
         for (int i = 0; i < size; i++) {
@@ -561,86 +405,27 @@ public class JdbcUtils {
         return sqlStatement.toString();
     }
 
-    private static String deletePropertiesStatement(Set<String> properties) {
-        StringBuilder sqlStatement = new StringBuilder(JdbcUtils.DELETE_DATABASE_PROPERTIES_SQL);
-        String values =
-                String.join(",", Collections.nCopies(properties.size(), String.valueOf('?')));
-        sqlStatement.append("(").append(values).append(")");
-
-        return sqlStatement.toString();
-    }
-
-    private static String updatePropertiesStatement(int size) {
-        StringBuilder sqlStatement =
-                new StringBuilder(
-                        "UPDATE "
-                                + DATABASE_PROPERTIES_TABLE_NAME
-                                + " SET "
-                                + DATABASE_PROPERTY_VALUE
-                                + " = CASE");
-        for (int i = 0; i < size; i += 1) {
-            sqlStatement.append(" WHEN " + DATABASE_PROPERTY_KEY + " = ? THEN ?");
-        }
-        sqlStatement.append(
-                " END WHERE "
-                        + CATALOG_NAME
-                        + " = ? AND "
-                        + DATABASE_NAME
-                        + " = ? AND "
-                        + DATABASE_PROPERTY_KEY
-                        + " IN ");
-
-        String values = String.join(",", Collections.nCopies(size, String.valueOf('?')));
-        sqlStatement.append("(").append(values).append(")");
-        return sqlStatement.toString();
-    }
-
-    public static boolean acquire(JdbcClientPool connections, String lockName, long timeout)
+    public static void createDistributedLockTable(JdbcClientPool connections)
             throws SQLException, InterruptedException {
-        // Check and clear expire lock
-        int affectedRows = tryClearExpireLock(connections, lockName, timeout);
+        DistributedLockDialectFactory.create(connections.getProtocol()).createTable(connections);
+    }
+
+    public static boolean acquire(
+            JdbcClientPool connections, String lockId, long timeoutMillSeconds)
+            throws SQLException, InterruptedException {
+        JdbcDistributedLockDialect distributedLockDialect =
+                DistributedLockDialectFactory.create(connections.getProtocol());
+        // Check and clear expire lock.
+        int affectedRows = distributedLockDialect.tryReleaseTimedOutLock(connections, lockId);
         if (affectedRows > 0) {
             LOG.debug("Successfully cleared " + affectedRows + " lock records");
         }
-        return connections.run(
-                connection -> {
-                    try (PreparedStatement preparedStatement =
-                            connection.prepareStatement(DISTRIBUTED_LOCK_ACQUIRE_SQL)) {
-                        preparedStatement.setString(1, lockName);
-                        preparedStatement.setTimestamp(
-                                2, new Timestamp(System.currentTimeMillis()));
-                        return preparedStatement.executeUpdate() > 0;
-                    } catch (SQLException e) {
-                        LOG.error("Try acquire lock failed.", e);
-                        return false;
-                    }
-                });
+        return distributedLockDialect.lockAcquire(connections, lockId, timeoutMillSeconds);
     }
 
-    public static void release(JdbcClientPool connections, String lockName)
+    public static void release(JdbcClientPool connections, String lockId)
             throws SQLException, InterruptedException {
-        connections.run(
-                connection -> {
-                    try (PreparedStatement preparedStatement =
-                            connection.prepareStatement(DISTRIBUTED_LOCK_RELEASE_SQL)) {
-                        preparedStatement.setString(1, lockName);
-                        return preparedStatement.executeUpdate() > 0;
-                    }
-                });
-    }
-
-    private static int tryClearExpireLock(JdbcClientPool connections, String lockName, long timeout)
-            throws SQLException, InterruptedException {
-        long expirationTimeMillis = System.currentTimeMillis() - timeout * 1000;
-        Timestamp expirationTimestamp = new Timestamp(expirationTimeMillis);
-        return connections.run(
-                connection -> {
-                    try (PreparedStatement preparedStatement =
-                            connection.prepareStatement(DISTRIBUTED_LOCK_EXPIRE_CLEAR_SQL)) {
-                        preparedStatement.setString(1, lockName);
-                        preparedStatement.setTimestamp(2, expirationTimestamp);
-                        return preparedStatement.executeUpdate();
-                    }
-                });
+        DistributedLockDialectFactory.create(connections.getProtocol())
+                .releaseLock(connections, lockId);
     }
 }

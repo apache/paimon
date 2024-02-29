@@ -27,7 +27,7 @@ import java.util.Deque;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
-/** A universal implementation for defining client connection pools. */
+/** Source: [core/src/main/java/org/apache/iceberg/ClientPoolImpl.java]. */
 public abstract class ClientPoolImpl<C, E extends Exception>
         implements Closeable, ClientPool<C, E> {
     private static final Logger LOG = LoggerFactory.getLogger(ClientPoolImpl.class);
@@ -59,7 +59,6 @@ public abstract class ClientPoolImpl<C, E extends Exception>
         C client = get();
         try {
             return action.run(client);
-
         } catch (Exception exc) {
             if (retry && isConnectionException(exc)) {
                 try {
@@ -104,13 +103,12 @@ public abstract class ClientPoolImpl<C, E extends Exception>
                     }
                 }
                 if (clients.isEmpty() && currentSize > 0) {
-                    // wake every second in case this missed the signal
                     synchronized (signal) {
+                        // wake every second in case this missed the signal
                         signal.wait(1000);
                     }
                 }
             }
-
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             LOG.warn("Interrupted while shutting down pool. Some clients may not be closed.", e);
