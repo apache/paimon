@@ -48,7 +48,6 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableRead;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
@@ -74,7 +73,6 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -86,6 +84,7 @@ import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -319,7 +318,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
+        Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
                 toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
         TableRead read = table.newRead();
@@ -399,7 +398,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
+        Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
                 toSplits(
                         table.newSnapshotReader()
@@ -914,7 +913,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 auditLogTable
                         .newSnapshotReader()
                         .withFilter(
-                                PredicateBuilder.and(
+                                and(
                                         predicateBuilder.equal(predicateBuilder.indexOf("b"), 300),
                                         predicateBuilder.equal(predicateBuilder.indexOf("pt"), 2)));
         InnerTableRead read = auditLogTable.newRead();
@@ -1278,12 +1277,20 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         "+I[1, 10, 100]", "+I[1, 11, 110]", "+I[2, 20, 201]", "+I[2, 21, 210]");
 
         // test value filter on ro table
+
         PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
-        List<Split> splits = roTable.newScan().withFilter(builder.equal(2, 210L)).plan().splits();
+        Predicate filter = builder.equal(0, 2);
+
+        // no value filter, return two files
+        List<Split> splits = roTable.newScan().withFilter(filter).plan().splits();
         assertThat(splits).hasSize(1);
-        Optional<List<RawFile>> rawFiles = splits.get(0).convertToRawFiles();
-        assertThat(rawFiles).isPresent();
-        assertThat(rawFiles.get()).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(2);
+
+        // with value filter, return one files
+        filter = and(filter, builder.equal(2, 210L));
+        splits = roTable.newScan().withFilter(filter).plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(1);
 
         write.close();
         commit.close();
