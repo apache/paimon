@@ -473,11 +473,6 @@ under the License.
                 </configuration>
             </plugin>
 
-            <plugin>
-                <groupId>com.diffplug.spotless</groupId>
-                <artifactId>spotless-maven-plugin</artifactId>
-            </plugin>
-
             <!--surefire for unit tests and integration tests-->
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
@@ -837,7 +832,7 @@ under the License.
                         <scala>
                             <scalafmt>
                                 <version>3.4.3</version>
-                                <file>.scalafmt.conf</file>
+                                <file>${project.basedir}/.scalafmt.conf</file>
                             </scalafmt>
 
                             <licenseHeader>
