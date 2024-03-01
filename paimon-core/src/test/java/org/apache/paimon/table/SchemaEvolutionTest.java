@@ -37,7 +37,6 @@ import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -60,6 +59,7 @@ import java.util.function.Consumer;
 
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
 import static org.apache.paimon.schema.SystemColumns.SYSTEM_FIELD_NAMES;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -473,7 +473,7 @@ public class SchemaEvolutionTest {
                                         Collections.singletonList(
                                                 SchemaChange.renameColumn("f0", "_VALUE_KIND"))))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 RuntimeException.class,
                                 String.format(
                                         "Field name[%s] in schema cannot be exist in %s",

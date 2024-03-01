@@ -38,7 +38,6 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -72,6 +71,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -683,7 +683,7 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false);
         assertThatThrownBy(() -> store.dropPartitions(Collections.emptyList()))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Partitions list cannot be empty."));
     }

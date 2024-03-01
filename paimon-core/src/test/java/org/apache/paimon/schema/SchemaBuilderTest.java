@@ -18,11 +18,11 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataTypes;
 
 import org.junit.jupiter.api.Test;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -36,7 +36,7 @@ public class SchemaBuilderTest {
 
         assertThatThrownBy(builder::build)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalStateException.class,
                                 "Table column [id, id] must not contain duplicate fields. Found: [id]"));
     }
@@ -48,7 +48,7 @@ public class SchemaBuilderTest {
 
         assertThatThrownBy(builder::build)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalStateException.class,
                                 "Primary key constraint [id, id] must not contain duplicate columns. Found: [id]"));
     }
@@ -60,10 +60,9 @@ public class SchemaBuilderTest {
 
         assertThatThrownBy(builder::build)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalStateException.class,
-                                "Partition key constraint [id, id] must not contain duplicate columns. Found: [id]"
-                                        + ""));
+                                "Partition key constraint [id, id] must not contain duplicate columns. Found: [id]"));
     }
 
     @Test
