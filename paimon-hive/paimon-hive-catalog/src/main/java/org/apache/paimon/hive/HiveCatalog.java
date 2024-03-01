@@ -84,6 +84,7 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
+import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
@@ -142,18 +143,6 @@ public class HiveCatalog extends AbstractCatalog {
             // set the warehouse location to the hiveConf
             hiveConf.set(HiveConf.ConfVars.METASTOREWAREHOUSE.varname, warehouse);
             locationHelper = new StorageLocationHelper();
-        }
-
-        /** Hive catalog only support hive lock. */
-        if (lockEnabled()) {
-            Optional<String> lockType = catalogOptions.getOptional(LOCK_TYPE);
-            if (lockType.isPresent()) {
-                checkArgument(
-                        LOCK_IDENTIFIER.equals(lockType.get()),
-                        "Hive catalog only support hive lock type");
-            } else {
-                catalogOptions.set(LOCK_TYPE, LOCK_IDENTIFIER);
-            }
         }
 
         this.client = createClient(hiveConf, clientClassName);
@@ -695,6 +684,18 @@ public class HiveCatalog extends AbstractCatalog {
             fileIO.checkOrMkdirs(warehouse);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+
+        /** Hive catalog only support hive lock. */
+        if (options.getOptional(LOCK_ENABLED).orElse(false)) {
+            Optional<String> lockType = options.getOptional(LOCK_TYPE);
+            if (lockType.isPresent()) {
+                checkArgument(
+                        LOCK_IDENTIFIER.equals(lockType.get()),
+                        "Hive catalog only support hive lock type");
+            } else {
+                options.set(LOCK_TYPE, LOCK_IDENTIFIER);
+            }
         }
         return new HiveCatalog(
                 fileIO,
