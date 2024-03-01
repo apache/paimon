@@ -86,7 +86,6 @@ under the License.
         <lz4.version>1.8.0</lz4.version>
         <slf4j.version>1.7.32</slf4j.version>
         <log4j.version>2.17.1</log4j.version>
-        <junit4.version>4.13.2</junit4.version>
         <junit5.version>5.8.1</junit5.version>
         <spotless.version>2.13.0</spotless.version>
         <spotless.delimiter>package</spotless.delimiter>
@@ -221,12 +220,6 @@ under the License.
                 <version>${junit5.version}</version>
                 <type>pom</type>
                 <scope>import</scope>
-            </dependency>
-
-            <dependency>
-                <groupId>junit</groupId>
-                <artifactId>junit</artifactId>
-                <version>${junit4.version}</version>
             </dependency>
 
             <dependency>
