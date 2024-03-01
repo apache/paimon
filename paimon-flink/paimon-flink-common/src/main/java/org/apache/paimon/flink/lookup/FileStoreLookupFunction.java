@@ -28,10 +28,13 @@ import org.apache.paimon.flink.FlinkRowWrapper;
 import org.apache.paimon.flink.utils.TableScanUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.OutOfRangeException;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
+import org.apache.paimon.utils.InternalRowUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.primitives.Ints;
 
@@ -232,14 +235,30 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
         }
 
         boolean partitionChanged = partitionLoader.checkRefresh();
-        lookupTable.specificPartition(partitionLoader.partition());
+        BinaryRow partition = partitionLoader.partition();
+        lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
 
         if (partitionChanged && reopen) {
             lookupTable.close();
             lookupTable.open();
         }
 
-        return partitionLoader.partition();
+        return partition;
+    }
+
+    private Predicate createSpecificPartFilter(BinaryRow partition) {
+        RowType rowType = table.rowType();
+        List<String> fieldNames = rowType.getFieldNames();
+        List<String> partitionKeys = table.partitionKeys();
+        PredicateBuilder builder = new PredicateBuilder(rowType);
+        List<Predicate> predicates = new ArrayList<>();
+        for (int i = 0; i < partitionKeys.size(); i++) {
+            int index = fieldNames.indexOf(partitionKeys.get(i));
+            predicates.add(
+                    builder.equal(
+                            index, InternalRowUtils.get(partition, i, rowType.getTypeAt(index))));
+        }
+        return PredicateBuilder.and(predicates);
     }
 
     private void reopen() {
