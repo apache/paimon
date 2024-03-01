@@ -45,7 +45,8 @@ public class DeletionVectorTest {
         assertThat(deletionVector.isEmpty()).isTrue();
 
         for (Integer i : toDelete) {
-            deletionVector.delete(i);
+            assertThat(deletionVector.checkedDelete(i)).isTrue();
+            assertThat(deletionVector.checkedDelete(i)).isFalse();
         }
         DeletionVector deserializedDeletionVector =
                 DeletionVector.deserializeFromBytes(deletionVector.serializeToBytes());

@@ -50,6 +50,12 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     @Override
+    public boolean checkedDelete(long position) {
+        checkPosition(position);
+        return roaringBitmap.checkedAdd((int) position);
+    }
+
+    @Override
     public boolean isDeleted(long position) {
         checkPosition(position);
         return roaringBitmap.contains((int) position);

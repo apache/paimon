@@ -36,6 +36,21 @@ public interface DeletionVector {
     void delete(long position);
 
     /**
+     * Marks the row at the specified position as deleted.
+     *
+     * @param position The position of the row to be marked as deleted.
+     * @return true if the added position wasn't already deleted. False otherwise.
+     */
+    default boolean checkedDelete(long position) {
+        if (isDeleted(position)) {
+            return false;
+        } else {
+            delete(position);
+            return true;
+        }
+    }
+
+    /**
      * Checks if the row at the specified position is marked as deleted.
      *
      * @param position The position of the row to check.

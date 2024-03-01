@@ -70,8 +70,7 @@ public class DeletionVectorsMaintainer {
     public void notifyNewDeletion(String fileName, long position) {
         DeletionVector deletionVector =
                 deletionVectors.computeIfAbsent(fileName, k -> new BitmapDeletionVector());
-        if (!deletionVector.isDeleted(position)) {
-            deletionVector.delete(position);
+        if (deletionVector.checkedDelete(position)) {
             modified = true;
         }
     }
