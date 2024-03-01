@@ -26,7 +26,6 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
@@ -102,6 +101,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.warehouse;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -799,7 +799,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                                         Collections.singletonList("dt"),
                                         streamingReadOverwrite))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 RuntimeException.class,
                                 "Doesn't support streaming read the changes from overwrite when the primary keys are not defined."));
     }
@@ -1388,7 +1388,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(updateStatement).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
     }
 
@@ -1496,7 +1496,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
 
         // Step4: execute update statement
         assertThatThrownBy(() -> bEnv.executeSql(updateStatement).await())
-                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                .satisfies(anyCauseMatches(UnsupportedOperationException.class));
     }
 
     // ----------------------------------------------------------------------------------------------------------------
@@ -1547,7 +1547,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
     }
 
@@ -1583,7 +1583,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                         changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
 
         assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                .satisfies(anyCauseMatches(UnsupportedOperationException.class));
     }
 
     @ParameterizedTest
@@ -1640,7 +1640,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
 
         // Test2 delete statement no where
@@ -1651,7 +1651,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, Collections.emptyList());
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement2).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
 
         // Test3 delete statement where pt
@@ -1662,7 +1662,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, Collections.emptyList());
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement3).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
     }
 
@@ -1723,7 +1723,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
 
         // Step5: partition key not push down
@@ -1742,7 +1742,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords1);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement1).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
 
         // Step6: partition key delete push down
@@ -1762,7 +1762,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords2);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement2).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
 
         // Step8: partition key delete push down
@@ -1779,7 +1779,7 @@ public class ReadWriteTableITCase extends AbstractTestBase {
             testBatchRead(querySql, expectedRecords3);
         } else {
             assertThatThrownBy(() -> bEnv.executeSql(deleteStatement3).await())
-                    .satisfies(AssertionUtils.anyCauseMatches(UnsupportedOperationException.class));
+                    .satisfies(anyCauseMatches(UnsupportedOperationException.class));
         }
     }
 
