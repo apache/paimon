@@ -51,6 +51,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link MySqlSyncTableAction}. */
@@ -1095,10 +1096,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .withTableConfig(Collections.singletonMap(BUCKET.key(), "2"))
                         .build();
 
-        assertThatThrownBy(action::run)
-                .satisfies(
-                        anyCauseMatches(
-                                UnsupportedOperationException.class,
-                                "Cannot change bucket number through dynamic options. You might need to rescale bucket."));
+        assertThatCode(action::build).doesNotThrowAnyException();
+        assertThat(action.fileStoreTable().options().get(BUCKET.key())).isEqualTo("1");
     }
 }
