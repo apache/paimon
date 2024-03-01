@@ -107,8 +107,8 @@ public abstract class RocksDBState<K, V, CacheV> {
             IOManager ioManager, CoreOptions options) {
         return BinaryExternalSortBuffer.create(
                 ioManager,
-                RowType.of(DataTypes.BYTES()),
                 RowType.of(DataTypes.BYTES(), DataTypes.BYTES()),
+                new int[] {0},
                 options.writeBufferSize() / 2,
                 options.pageSize(),
                 options.localSortMaxNumFileHandles(),

@@ -112,6 +112,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                                     section,
                                     readerFactory,
                                     keyComparator,
+                                    null,
                                     createMergeWrapper(outputLevel),
                                     mergeSorter));
         }

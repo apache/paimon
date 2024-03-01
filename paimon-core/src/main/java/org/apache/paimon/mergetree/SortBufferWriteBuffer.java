@@ -48,6 +48,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /** A {@link WriteBuffer} which stores records in {@link BinaryInMemorySortBuffer}. */
 public class SortBufferWriteBuffer implements WriteBuffer {
@@ -74,10 +75,12 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         sortKeyTypes.add(new BigIntType(false));
 
         // for sort binary buffer
+        int[] sortFields = IntStream.range(0, sortKeyTypes.size()).toArray();
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(sortKeyTypes, "MemTableKeyComputer");
+                CodeGenUtils.newNormalizedKeyComputer(
+                        sortKeyTypes, sortFields, "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(sortKeyTypes, "MemTableComparator");
+                CodeGenUtils.newRecordComparator(sortKeyTypes, sortFields, "MemTableComparator");
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(

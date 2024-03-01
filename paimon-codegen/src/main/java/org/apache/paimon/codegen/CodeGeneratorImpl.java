@@ -37,20 +37,20 @@ public class CodeGeneratorImpl implements CodeGenerator {
 
     @Override
     public GeneratedClass<NormalizedKeyComputer> generateNormalizedKeyComputer(
-            List<DataType> fieldTypes, String name) {
+            List<DataType> inputTypes, int[] sortFields, String name) {
         return new SortCodeGenerator(
-                        RowType.builder().fields(fieldTypes).build(),
-                        getAscendingSortSpec(fieldTypes.size()))
+                        RowType.builder().fields(inputTypes).build(),
+                        getAscendingSortSpec(sortFields))
                 .generateNormalizedKeyComputer(name);
     }
 
     @Override
     public GeneratedClass<RecordComparator> generateRecordComparator(
-            List<DataType> fieldTypes, String name) {
+            List<DataType> inputTypes, int[] sortFields, String name) {
         return ComparatorCodeGenerator.gen(
                 name,
-                RowType.builder().fields(fieldTypes).build(),
-                getAscendingSortSpec(fieldTypes.size()));
+                RowType.builder().fields(inputTypes).build(),
+                getAscendingSortSpec(sortFields));
     }
 
     /** Generate a {@link RecordEqualiser}. */
@@ -61,10 +61,10 @@ public class CodeGeneratorImpl implements CodeGenerator {
                 .generateRecordEqualiser(name);
     }
 
-    private SortSpec getAscendingSortSpec(int numFields) {
+    private SortSpec getAscendingSortSpec(int[] sortFields) {
         SortSpec.SortSpecBuilder builder = SortSpec.builder();
-        for (int i = 0; i < numFields; i++) {
-            builder.addField(i, true, false);
+        for (int sortField : sortFields) {
+            builder.addField(sortField, true, false);
         }
         return builder.build();
     }

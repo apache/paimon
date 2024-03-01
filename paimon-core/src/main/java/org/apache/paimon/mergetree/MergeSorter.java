@@ -37,12 +37,11 @@ import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.sort.SortBuffer;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.OffsetRow;
@@ -53,6 +52,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 import static org.apache.paimon.schema.SystemColumns.VALUE_KIND;
@@ -103,10 +103,12 @@ public class MergeSorter {
     public <T> RecordReader<T> mergeSort(
             List<ReaderSupplier<KeyValue>> lazyReaders,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefineSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
         if (ioManager != null && lazyReaders.size() > spillThreshold) {
-            return spillMergeSort(lazyReaders, keyComparator, mergeFunction);
+            return spillMergeSort(
+                    lazyReaders, keyComparator, userDefineSeqComparator, mergeFunction);
         }
 
         List<RecordReader<KeyValue>> readers = new ArrayList<>(lazyReaders.size());
@@ -121,15 +123,16 @@ public class MergeSorter {
         }
 
         return SortMergeReader.createSortMergeReader(
-                readers, keyComparator, mergeFunction, sortEngine);
+                readers, keyComparator, userDefineSeqComparator, mergeFunction, sortEngine);
     }
 
     private <T> RecordReader<T> spillMergeSort(
             List<ReaderSupplier<KeyValue>> readers,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefineSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
-        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel();
+        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel(userDefineSeqComparator);
         ConcatRecordReader.create(readers).forIOEachRemaining(sorter::put);
         sorter.flushMemory();
 
@@ -176,15 +179,25 @@ public class MergeSorter {
 
         private final SortBuffer buffer;
 
-        public ExternalSorterWithLevel() {
+        public ExternalSorterWithLevel(@Nullable FieldsComparator userDefineSeqComparator) {
             if (memoryPool.freePages() < 3) {
                 throw new IllegalArgumentException(
                         "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
             }
 
-            // user key + sequenceNumber
-            List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-            sortKeyTypes.add(new BigIntType(false));
+            // key fields
+            IntStream sortFields = IntStream.range(0, keyType.getFieldCount());
+
+            // user define sequence fields
+            if (userDefineSeqComparator != null) {
+                IntStream udsFields =
+                        IntStream.of(userDefineSeqComparator.compareFields())
+                                .map(operand -> operand + keyType.getFieldCount() + 3);
+                sortFields = IntStream.concat(sortFields, udsFields);
+            }
+
+            // sequence field
+            sortFields = IntStream.concat(sortFields, IntStream.of(keyType.getFieldCount()));
 
             // row type
             List<DataField> fields = new ArrayList<>(keyType.getFields());
@@ -196,8 +209,8 @@ public class MergeSorter {
             this.buffer =
                     BinaryExternalSortBuffer.create(
                             ioManager,
-                            DataTypes.ROW(sortKeyTypes.toArray(new DataType[0])),
                             new RowType(fields),
+                            sortFields.toArray(),
                             memoryPool,
                             spillSortMaxNumFiles,
                             compression);
