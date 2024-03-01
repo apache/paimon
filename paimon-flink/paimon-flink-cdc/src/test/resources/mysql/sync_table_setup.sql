@@ -375,3 +375,14 @@ CREATE TABLE t (
     PART INT,
     PRIMARY KEY (ID0)
 );
+
+-- ################################################################################
+--  testInvalidAlterBucket
+-- ################################################################################
+
+CREATE DATABASE invalid_alter_bucket;
+USE invalid_alter_bucket;
+
+CREATE TABLE t (
+    k INT PRIMARY KEY
+);
