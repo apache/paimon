@@ -60,6 +60,12 @@ public class CatalogOptions {
                     .defaultValue(false)
                     .withDescription("Enable Catalog Lock.");
 
+    public static final ConfigOption<String> LOCK_TYPE =
+            ConfigOptions.key("lock.type")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The Lock Type for Catalog, such as 'hive', 'zookeeper'.");
+
     public static final ConfigOption<Duration> LOCK_CHECK_MAX_SLEEP =
             key("lock-check-max-sleep")
                     .durationType()
