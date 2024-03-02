@@ -25,6 +25,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.utils.FieldsComparator;
@@ -64,7 +65,9 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 keyComparator,
                 userDefinedSeqComparator,
                 mfFactory,
-                mergeSorter);
+                mergeSorter,
+                LookupStrategy.CHANGELOG_ONLY,
+                null);
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }

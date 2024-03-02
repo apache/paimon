@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
@@ -89,7 +88,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
             MergeFunctionFactory<KeyValue> mfFactory =
                     PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
-            if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
+            if (options.needLookup()) {
                 mfFactory =
                         LookupMergeFunction.wrap(
                                 mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);

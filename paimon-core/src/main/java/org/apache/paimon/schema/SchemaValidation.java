@@ -20,6 +20,7 @@ package org.apache.paimon.schema;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.casting.CastExecutors;
 import org.apache.paimon.data.BinaryString;
@@ -49,6 +50,8 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
+import static org.apache.paimon.CoreOptions.FileFormatType.ORC;
+import static org.apache.paimon.CoreOptions.FileFormatType.PARQUET;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
@@ -218,6 +221,10 @@ public class SchemaValidation {
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
+        }
+
+        if (options.deletionVectorsEnabled()) {
+            validateForDeletionVectors(schema, options);
         }
     }
 
@@ -470,5 +477,25 @@ public class SchemaValidation {
                 }
             }
         }
+    }
+
+    private static void validateForDeletionVectors(TableSchema schema, CoreOptions options) {
+        checkArgument(
+                !schema.primaryKeys().isEmpty(),
+                "Deletion vectors mode is only supported for tables with primary keys.");
+
+        checkArgument(
+                options.formatType().equals(ORC) || options.formatType().equals(PARQUET),
+                "Deletion vectors mode is only supported for orc or parquet file format now.");
+
+        checkArgument(
+                options.changelogProducer() == ChangelogProducer.NONE
+                        || options.changelogProducer() == ChangelogProducer.LOOKUP,
+                "Deletion vectors mode is only supported for none or lookup changelog producer now.");
+
+        // todo: implement it
+        checkArgument(
+                !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
+                "Deletion vectors mode is not supported for first row merge engine now.");
     }
 }

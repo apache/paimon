@@ -138,7 +138,9 @@ public class TestChangelogDataReadWrite {
                                 ignore -> avro,
                                 pathFactory,
                                 EXTRACTOR,
-                                new CoreOptions(new HashMap<>())));
+                                new CoreOptions(new HashMap<>())),
+                        new CoreOptions(new HashMap<>()),
+                        null);
         return new KeyValueTableRead(read, null) {
 
             @Override
@@ -192,6 +194,7 @@ public class TestChangelogDataReadWrite {
                                 pathFactoryMap,
                                 snapshotManager,
                                 null, // not used, we only create an empty writer
+                                null,
                                 null,
                                 options,
                                 EXTRACTOR,
