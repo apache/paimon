@@ -26,6 +26,20 @@ public class TableBranch {
 
     private final long createTime;
 
+    public TableBranch(String branchName, Long createdFromSnapshot, long createTime) {
+        this.branchName = branchName;
+        this.createdFromTag = null;
+        this.createdFromSnapshot = createdFromSnapshot;
+        this.createTime = createTime;
+    }
+
+    public TableBranch(String branchName, long createTime) {
+        this.branchName = branchName;
+        this.createdFromTag = null;
+        this.createdFromSnapshot = null;
+        this.createTime = createTime;
+    }
+
     public TableBranch(
             String branchName, String createdFromTag, Long createdFromSnapshot, long createTime) {
         this.branchName = branchName;
