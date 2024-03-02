@@ -36,22 +36,30 @@ import java.util.List;
 /** A {@link LookupTable} for table without primary key. */
 public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
-    private final RocksDBListState<InternalRow, InternalRow> state;
+    private final long lruCacheSize;
 
     private final KeyProjectedRow joinKeyRow;
 
+    private RocksDBListState<InternalRow, InternalRow> state;
+
     public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
         super(context);
+        this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
         int[] joinKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.joinKeyRow = new KeyProjectedRow(joinKeyMapping);
+    }
+
+    @Override
+    public void open() throws Exception {
         this.state =
                 stateFactory.listState(
                         "join-key-index",
                         InternalSerializers.create(
-                                TypeUtils.project(projectedType, joinKeyMapping)),
+                                TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
+        super.open();
     }
 
     @Override

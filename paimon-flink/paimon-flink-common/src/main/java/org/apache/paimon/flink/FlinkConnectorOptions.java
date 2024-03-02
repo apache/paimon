@@ -293,6 +293,21 @@ public class FlinkConnectorOptions {
                     .defaultValue(LookupCacheMode.AUTO)
                     .withDescription("The cache mode of lookup join.");
 
+    public static final ConfigOption<String> LOOKUP_DYNAMIC_PARTITION =
+            ConfigOptions.key("lookup.dynamic-partition")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specific dynamic partition for lookup, only support 'max_pt()' currently.");
+
+    public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
+            ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "Specific dynamic partition refresh interval for lookup, "
+                                    + "scan all partitions and obtain corresponding partition.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()

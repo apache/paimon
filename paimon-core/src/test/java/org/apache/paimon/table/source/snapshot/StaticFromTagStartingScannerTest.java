@@ -20,13 +20,13 @@ package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -74,7 +74,7 @@ public class StaticFromTagStartingScannerTest extends ScannerTestBase {
                                 new StaticFromTagStartingScanner(snapshotManager, "non-existing")
                                         .scan(snapshotReader))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Tag 'non-existing' doesn't exist"));
     }

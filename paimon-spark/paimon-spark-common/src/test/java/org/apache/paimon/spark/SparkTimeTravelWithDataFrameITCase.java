@@ -21,7 +21,6 @@ package org.apache.paimon.spark;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import org.apache.spark.sql.Dataset;
 import org.apache.spark.sql.Row;
@@ -29,6 +28,7 @@ import org.junit.jupiter.api.Test;
 
 import java.util.List;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -119,7 +119,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
                                         .load()
                                         .collectAsList())
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 RuntimeException.class, "Fails to read snapshot from path file"));
     }
 
@@ -170,7 +170,7 @@ public class SparkTimeTravelWithDataFrameITCase extends SparkReadTestBase {
                                         .load()
                                         .collectAsList())
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Could not parse value '1.5' for key 'scan.snapshot-id'"));
     }

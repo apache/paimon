@@ -24,6 +24,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.utils.VersionedObjectSerializer;
 
+import static org.apache.paimon.index.IndexFileMetaSerializer.dvRangesToRowArrayData;
+import static org.apache.paimon.index.IndexFileMetaSerializer.rowArrayDataToDvRanges;
 import static org.apache.paimon.utils.SerializationUtils.deserializeBinaryRow;
 import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 
@@ -49,7 +51,10 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                 BinaryString.fromString(indexFile.indexType()),
                 BinaryString.fromString(indexFile.fileName()),
                 indexFile.fileSize(),
-                indexFile.rowCount());
+                indexFile.rowCount(),
+                record.indexFile().deletionVectorsRanges() == null
+                        ? null
+                        : dvRangesToRowArrayData(record.indexFile().deletionVectorsRanges()));
     }
 
     @Override
@@ -66,6 +71,7 @@ public class IndexManifestEntrySerializer extends VersionedObjectSerializer<Inde
                         row.getString(3).toString(),
                         row.getString(4).toString(),
                         row.getLong(5),
-                        row.getLong(6)));
+                        row.getLong(6),
+                        row.isNullAt(7) ? null : rowArrayDataToDvRanges(row.getArray(7))));
     }
 }

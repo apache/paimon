@@ -96,7 +96,10 @@ public class HiveSplitGenerator {
             scan.plan()
                     .splits()
                     .forEach(
-                            split -> splits.add(new PaimonInputSplit(location, (DataSplit) split)));
+                            split ->
+                                    splits.add(
+                                            new PaimonInputSplit(
+                                                    location, (DataSplit) split, table)));
         }
         return splits.toArray(new InputSplit[0]);
     }

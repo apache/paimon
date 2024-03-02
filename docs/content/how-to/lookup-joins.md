@@ -120,6 +120,36 @@ your streaming job may be blocked. You can try to use `audit_log` system table f
 (convert CDC stream to append stream).
 {{< /hint >}}
 
+## Dynamic Partition
+
+In traditional data warehouses, each partition often maintains the latest full data, so this partition table only 
+needs to join the latest partition. Paimon has specifically developed the `max_pt` feature for this scenario.
+
+**Create Paimon Partitioned Table**
+
+```sql
+CREATE TABLE customers (
+  id INT,
+  name STRING,
+  country STRING,
+  zip STRING,
+  dt STRING,
+  PRIMARY KEY (id, dt) NOT ENFORCED
+) PARTITIONED BY (dt);
+```
+
+**Lookup Join**
+
+```sql
+SELECT o.order_id, o.total, c.country, c.zip
+FROM orders AS o
+JOIN customers /*+ OPTIONS('lookup.dynamic-partition'='max_pt()', 'lookup.dynamic-partition.refresh-interval'='1 h') */
+FOR SYSTEM_TIME AS OF o.proc_time AS c
+ON o.customer_id = c.id;
+```
+
+The Lookup node will automatically refresh the latest partition and query the data of the latest partition.
+
 ## Query Service
 
 You can run a Flink Streaming Job to start query service for the table. When QueryService exists, Flink Lookup Join

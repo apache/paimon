@@ -112,6 +112,7 @@ public class TableReadBenchmark extends TableBenchmark {
     }
 
     private Table prepareData(Options options, String tableName) throws Exception {
+        options.set(CoreOptions.BUCKET, 1);
         Table table = createTable(options, tableName);
         StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();

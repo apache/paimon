@@ -34,22 +34,28 @@ import java.util.List;
 /** A {@link LookupTable} for primary key table which provides lookup by secondary key. */
 public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
-    private final RocksDBSetState<InternalRow, InternalRow> indexState;
-
     private final KeyProjectedRow secKeyRow;
+
+    private RocksDBSetState<InternalRow, InternalRow> indexState;
 
     public SecondaryIndexLookupTable(Context context, long lruCacheSize) throws IOException {
         super(context, lruCacheSize / 2, context.table.primaryKeys());
         List<String> fieldNames = projectedType.getFieldNames();
         int[] secKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
         this.secKeyRow = new KeyProjectedRow(secKeyMapping);
+    }
+
+    @Override
+    public void open() throws Exception {
         this.indexState =
                 stateFactory.setState(
                         "sec-index",
-                        InternalSerializers.create(TypeUtils.project(projectedType, secKeyMapping)),
                         InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        lruCacheSize / 2);
+                                TypeUtils.project(projectedType, secKeyRow.indexMapping())),
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
+                        lruCacheSize);
+        super.open();
     }
 
     @Override
