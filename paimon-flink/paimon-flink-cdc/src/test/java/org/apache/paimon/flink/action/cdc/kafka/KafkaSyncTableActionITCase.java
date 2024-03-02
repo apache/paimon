@@ -48,7 +48,7 @@ import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOp
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getDataFormat;
 import static org.apache.paimon.flink.action.cdc.kafka.KafkaActionUtils.getKafkaEarliestConsumer;
-import static org.apache.paimon.testutils.assertj.AssertionUtils.anyCauseMatches;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -946,6 +946,51 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
 
         List<String> primaryKeys = Arrays.asList("pt", "_id");
 
+        waitForResult(expected, table, rowType, primaryKeys);
+    }
+
+    protected void testTableFiledValNull(String format) throws Exception {
+        final String topic = "table_filed_val_null";
+        createTestTopic(topic, 1, 1);
+        // ---------- Write the data into Kafka -------------------
+        List<String> lines =
+                readLines(
+                        String.format(
+                                "kafka/%s/table/schemaevolution/%s-data-4.txt", format, format));
+        try {
+            writeRecordsToKafka(topic, lines);
+        } catch (Exception e) {
+            throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
+        }
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        kafkaConfig.put(SCAN_STARTUP_MODE.key(), EARLIEST_OFFSET.toString());
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        Thread.sleep(5000);
+        FileStoreTable table = getFileStoreTable(tableName);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.STRING().notNull(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {"id", "name", "description", "weight"});
+        List<String> primaryKeys = Collections.singletonList("id");
+        // topic has four records we read two
+        List<String> expected =
+                Arrays.asList(
+                        "+I[103, 12-pack drill bits, 12-pack of drill bits with sizes ranging from #40 to #3, null]",
+                        "+I[104, hammer, 12oz carpenter's hammer, 0.75]");
         waitForResult(expected, table, rowType, primaryKeys);
     }
 }

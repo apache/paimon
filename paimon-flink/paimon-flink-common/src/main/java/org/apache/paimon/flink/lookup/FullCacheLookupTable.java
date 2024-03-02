@@ -27,11 +27,13 @@ import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBState;
 import org.apache.paimon.lookup.RocksDBStateFactory;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.sort.BinaryExternalSortBuffer;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FileIOUtils;
 import org.apache.paimon.utils.MutableObjectIterator;
 import org.apache.paimon.utils.PartialRow;
 import org.apache.paimon.utils.TypeUtils;
@@ -53,8 +55,10 @@ public abstract class FullCacheLookupTable implements LookupTable {
     protected final Context context;
     protected final RocksDBStateFactory stateFactory;
     protected final RowType projectedType;
-    private final LookupStreamingReader reader;
     private final boolean sequenceFieldEnabled;
+
+    private LookupStreamingReader reader;
+    private Predicate specificPartition;
 
     public FullCacheLookupTable(Context context) throws IOException {
         this.context = context;
@@ -64,7 +68,6 @@ public abstract class FullCacheLookupTable implements LookupTable {
                         context.table.coreOptions().toConfiguration(),
                         null);
         FileStoreTable table = context.table;
-        this.reader = new LookupStreamingReader(table, context.projection, context.tablePredicate);
         this.sequenceFieldEnabled =
                 table.primaryKeys().size() > 0
                         && new CoreOptions(table.options()).sequenceField().isPresent();
@@ -76,7 +79,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
     }
 
     @Override
+    public void specificPartitionFilter(Predicate filter) {
+        this.specificPartition = filter;
+    }
+
+    @Override
     public void open() throws Exception {
+        Predicate scanPredicate =
+                PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
+        this.reader = new LookupStreamingReader(context.table, context.projection, scanPredicate);
         BinaryExternalSortBuffer bulkLoadSorter =
                 RocksDBState.createBulkLoadSorter(
                         IOManager.create(context.tempPath.toString()), context.table.coreOptions());
@@ -155,6 +166,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
     @Override
     public void close() throws IOException {
         stateFactory.close();
+        FileIOUtils.deleteDirectory(context.tempPath);
     }
 
     /** Bulk loader for the table. */

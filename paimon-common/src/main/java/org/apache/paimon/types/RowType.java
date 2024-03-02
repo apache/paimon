@@ -27,6 +27,7 @@ import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.JsonGenerator
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
@@ -182,6 +183,21 @@ public final class RowType extends DataType {
         int newId = currentHighestFieldId(fields) + 1;
         newFields.add(new DataField(newId, name, type));
         return new RowType(newFields);
+    }
+
+    public RowType project(int[] mapping) {
+        List<DataField> fields = getFields();
+        return new RowType(
+                Arrays.stream(mapping).mapToObj(fields::get).collect(Collectors.toList()));
+    }
+
+    public RowType project(List<String> names) {
+        List<DataField> fields = getFields();
+        List<String> fieldNames = fields.stream().map(DataField::name).collect(Collectors.toList());
+        return new RowType(
+                names.stream()
+                        .map(k -> fields.get(fieldNames.indexOf(k)))
+                        .collect(Collectors.toList()));
     }
 
     public static RowType of(DataType... types) {

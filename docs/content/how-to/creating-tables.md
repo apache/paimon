@@ -335,7 +335,7 @@ CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT
 );
-CREATE TABLE my_table As AS SELECT * FROM my_table;
+CREATE TABLE my_table_as AS SELECT * FROM my_table;
 
 /* partitioned table */
 CREATE TABLE my_table_partition (
@@ -345,14 +345,14 @@ CREATE TABLE my_table_partition (
      dt STRING,
      hh STRING
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_partition As WITH ('partition' = 'dt') AS SELECT * FROM my_table_partition;
+CREATE TABLE my_table_partition_as WITH ('partition' = 'dt') AS SELECT * FROM my_table_partition;
     
 /* change options */
 CREATE TABLE my_table_options (
        user_id BIGINT,
        item_id BIGINT
 ) WITH ('file.format' = 'orc');
-CREATE TABLE my_table_options As WITH ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
+CREATE TABLE my_table_options_as WITH ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
 
 /* primary key */
 CREATE TABLE my_table_pk (
@@ -363,7 +363,7 @@ CREATE TABLE my_table_pk (
       hh STRING,
       PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
-CREATE TABLE my_table_pk As WITH ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_pk;
+CREATE TABLE my_table_pk_as WITH ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_pk;
 
 
 /* primary key + partition */
@@ -375,7 +375,7 @@ CREATE TABLE my_table_all (
       hh STRING,
       PRIMARY KEY (dt, hh, user_id) NOT ENFORCED 
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_all As WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM my_table_all;
+CREATE TABLE my_table_all_as WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM my_table_all;
 ```
 
 {{< /tab >}}
@@ -387,7 +387,7 @@ CREATE TABLE my_table (
      user_id BIGINT,
      item_id BIGINT
 );
-CREATE TABLE my_table As AS SELECT * FROM my_table;
+CREATE TABLE my_table_as AS SELECT * FROM my_table;
 
 /* partitioned table*/
 CREATE TABLE my_table_partition (
@@ -397,14 +397,14 @@ CREATE TABLE my_table_partition (
       dt STRING,
       hh STRING
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE my_table_partition As PARTITIONED BY (dt) AS SELECT * FROM my_table_partition;
+CREATE TABLE my_table_partition_as PARTITIONED BY (dt) AS SELECT * FROM my_table_partition;
 
 /* change TBLPROPERTIES */
 CREATE TABLE my_table_options (
        user_id BIGINT,
        item_id BIGINT
 ) TBLPROPERTIES ('file.format' = 'orc');
-CREATE TABLE my_table_options As TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
+CREATE TABLE my_table_options_as TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
 
 
 /* primary key */
@@ -417,7 +417,7 @@ CREATE TABLE my_table_pk (
 ) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id'
 );
-CREATE TABLE my_table_pk As TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM my_table_pk;
+CREATE TABLE my_table_pk_as TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM my_table_pk;
 
 /* primary key + partition */
 CREATE TABLE my_table_all (
@@ -429,7 +429,7 @@ CREATE TABLE my_table_all (
 ) PARTITIONED BY (dt, hh) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id'
 );
-CREATE TABLE my_table_all As PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
+CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
 {{< /tab >}}

@@ -59,7 +59,6 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
@@ -110,6 +109,7 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.WRITE_ONLY;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
@@ -693,7 +693,7 @@ public abstract class FileStoreTableTestBase {
         StreamTableScan finalScan = scan;
         assertThatThrownBy(finalScan::plan)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 OutOfRangeException.class, "The snapshot with id 5 has expired."));
 
         write.close();
@@ -984,30 +984,30 @@ public abstract class FileStoreTableTestBase {
 
         assertThatThrownBy(() -> table.createBranch("main", "tag1"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'main' is the default branch and cannot be used."));
 
         assertThatThrownBy(() -> table.createBranch("branch-1", "tag1"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class, "Tag name 'tag1' not exists."));
 
         assertThatThrownBy(() -> table.createBranch("branch0", "test-tag"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'branch0' already exists."));
 
         assertThatThrownBy(() -> table.createBranch("", "test-tag"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 String.format("Branch name '%s' is blank", "")));
 
         assertThatThrownBy(() -> table.createBranch("10", "test-tag"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name cannot be pure numeric string but is '10'."));
     }
@@ -1032,7 +1032,7 @@ public abstract class FileStoreTableTestBase {
 
         assertThatThrownBy(() -> table.deleteBranch("branch1"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'branch1' doesn't exist."));
     }
@@ -1177,7 +1177,7 @@ public abstract class FileStoreTableTestBase {
 
         assertThatThrownBy(() -> table.createTag("", 1))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 String.format("Tag name '%s' is blank", "")));
     }
@@ -1197,7 +1197,7 @@ public abstract class FileStoreTableTestBase {
 
         assertThatThrownBy(() -> table.deleteTag("tag1"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class, "Tag 'tag1' doesn't exist."));
     }
 

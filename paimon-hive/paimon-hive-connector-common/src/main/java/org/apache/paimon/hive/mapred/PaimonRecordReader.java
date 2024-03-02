@@ -174,7 +174,8 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
     }
 
     public static RecordReader<Void, RowDataContainer> createRecordReader(
-            FileStoreTable table, PaimonInputSplit split, JobConf jobConf) throws IOException {
+            PaimonInputSplit split, JobConf jobConf) throws IOException {
+        FileStoreTable table = split.getTable();
         ReadBuilder readBuilder = table.newReadBuilder();
         createPredicate(table.schema(), jobConf, true).ifPresent(readBuilder::withFilter);
         List<String> paimonColumns = table.schema().fieldNames();

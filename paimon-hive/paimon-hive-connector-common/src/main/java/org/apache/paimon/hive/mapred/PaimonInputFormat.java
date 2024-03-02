@@ -48,8 +48,7 @@ public class PaimonInputFormat implements InputFormat<Void, RowDataContainer> {
     @Override
     public RecordReader<Void, RowDataContainer> getRecordReader(
             InputSplit inputSplit, JobConf jobConf, Reporter reporter) throws IOException {
-        FileStoreTable table = createFileStoreTable(jobConf);
         PaimonInputSplit split = (PaimonInputSplit) inputSplit;
-        return createRecordReader(table, split, jobConf);
+        return createRecordReader(split, jobConf);
     }
 }

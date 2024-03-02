@@ -155,7 +155,7 @@ public class PaimonRecordReaderTest {
                 List<String> originalColumns = ((FileStoreTable) table).schema().fieldNames();
                 return new PaimonRecordReader(
                         table.newReadBuilder(),
-                        new PaimonInputSplit(tempDir.toString(), dataSplit),
+                        new PaimonInputSplit(tempDir.toString(), dataSplit, (FileStoreTable) table),
                         originalColumns,
                         originalColumns,
                         selectedColumns,
