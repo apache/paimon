@@ -195,16 +195,21 @@ Paimon JDBC Catalog in Flink needs to correctly add the corresponding jar packag
 CREATE CATALOG my_jdbc WITH (
     'type' = 'paimon',
     'metastore' = 'jdbc',
-    -- 'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
-    -- 'jdbc.user' = '...', 
-    -- 'jdbc.password' = '...', 
-    -- 'initialize-catalog-tables'='true'
-    -- 'warehouse' = 'hdfs:///path/to/warehouse',
+    'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
+    'jdbc.user' = '...', 
+    'jdbc.password' = '...', 
+    'catalog-name'='jdbc'
+    'initialize-catalog-tables'='true'
+    'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
 USE CATALOG my_jdbc;
 ```
 You can define any connection parameters for a database with the prefix "jdbc.".
+
+You can define the "initialize-catalog-tables" configuration to automatically create tables required for the initial JdbcCatalog. If it is true, tables will be automatically created when initializing JdbcCatalog. If it is false, tables will not be automatically created and you must manually create them.
+
+You can also customize the name of the created jdbc catalog through 'catalog-name'.
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
