@@ -30,6 +30,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FailingFileIO;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -92,6 +93,38 @@ public class SchemaManagerTest {
                 assertThat(version.startsWith(".")).isFalse();
             }
         }
+    }
+
+    @Test
+    public void testCache() throws Exception {
+
+        // schema-0
+        manager.createTable(schema);
+
+        // schema-1
+        manager.commitChanges(SchemaChange.setOption("aaa", "bbb"));
+
+        // schema-2
+        manager.commitChanges(SchemaChange.setOption("ccc", "ddd"));
+
+        Optional<TableSchema> latest = manager.latest();
+        assertThat(latest).isPresent();
+        assertThat(latest.get().options()).containsKey("ccc");
+        assertThat(latest.get().options()).containsKey("aaa");
+
+        assertThat(manager.getCachedSchema().asMap()).hasSize(3);
+
+        manager.deleteSchema(1L);
+        Map<Long, TableSchema> cachedSchema = manager.getCachedSchema().asMap();
+        assertThat(cachedSchema).hasSize(2);
+        TableSchema tableSchema = cachedSchema.get(2L);
+        assertThat(tableSchema.options()).containsKey("ccc");
+
+        byte[] bytes = InstantiationUtil.serializeObject(manager);
+        SchemaManager schemaManager =
+                InstantiationUtil.deserializeObject(
+                        bytes, Thread.currentThread().getContextClassLoader());
+        assertThat(schemaManager.getCachedSchema().asMap()).isEqualTo(cachedSchema);
     }
 
     @Test

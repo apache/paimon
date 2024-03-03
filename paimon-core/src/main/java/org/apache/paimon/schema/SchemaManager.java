@@ -45,6 +45,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
+
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -80,9 +83,17 @@ public class SchemaManager implements Serializable {
 
     @Nullable private transient Lock lock;
 
+    private transient Cache<Long, TableSchema> cache;
+
     public SchemaManager(FileIO fileIO, Path tableRoot) {
+        this(fileIO, tableRoot, new HashMap<>());
+    }
+
+    public SchemaManager(FileIO fileIO, Path tableRoot, Map<Long, TableSchema> cache) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
+        this.cache = Caffeine.newBuilder().maximumSize(10).build();
+        this.cache.putAll(cache);
     }
 
     public SchemaManager withLock(@Nullable Lock lock) {
@@ -122,6 +133,11 @@ public class SchemaManager implements Serializable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+    }
+
+    @VisibleForTesting
+    Cache<Long, TableSchema> getCachedSchema() {
+        return cache;
     }
 
     /** Create a new schema from {@link Schema}. */
@@ -467,8 +483,14 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
+        return this.cache.get(id, this::loadSchemaFromFile);
+    }
+
+    private TableSchema loadSchemaFromFile(Long id) {
         try {
-            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
+            Path schemaPath = toSchemaPath(id);
+            String schemaJson = fileIO.readFileUtf8(schemaPath);
+            return JsonSerdeUtil.fromJson(schemaJson, TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
@@ -507,6 +529,7 @@ public class SchemaManager implements Serializable {
      */
     public void deleteSchema(long schemaId) {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
+        this.cache.invalidate(schemaId);
     }
 
     public static void checkAlterTableOption(String key) {

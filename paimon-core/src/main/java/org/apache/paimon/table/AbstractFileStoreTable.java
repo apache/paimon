@@ -55,12 +55,15 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import org.jetbrains.annotations.NotNull;
+
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -82,6 +85,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected final TableSchema tableSchema;
     protected final CatalogEnvironment catalogEnvironment;
 
+    protected final Map<Long, TableSchema> schemaCache;
+
     protected AbstractFileStoreTable(
             FileIO fileIO,
             Path path,
@@ -97,6 +102,18 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
+        schemaCache = loadSchemaCache(fileIO, path);
+    }
+
+    @NotNull
+    private Map<Long, TableSchema> loadSchemaCache(FileIO fileIO, Path path) {
+        final Map<Long, TableSchema> schemaCache;
+        schemaCache = new LinkedHashMap<>();
+        SchemaManager schemaManager = new SchemaManager(fileIO, path);
+        for (TableSchema schema : schemaManager.listAll()) {
+            schemaCache.put(schema.id(), schema);
+        }
+        return schemaCache;
     }
 
     @Override
@@ -259,7 +276,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     protected SchemaManager schemaManager() {
-        return new SchemaManager(fileIO(), path);
+        return new SchemaManager(fileIO(), path, schemaCache);
     }
 
     @Override
