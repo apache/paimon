@@ -279,7 +279,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void flushMemory() throws Exception {
-        flush(false, false);
+        if (sinkWriter.bufferSpillableWriter()) {
+            sinkWriter.spill();
+        } else {
+            flush(false, false);
+        }
     }
 
     @VisibleForTesting
@@ -310,6 +314,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         void setMemoryPool(MemorySegmentPool memoryPool);
 
         boolean bufferSpillableWriter();
+
+        void spill() throws IOException;
     }
 
     /**
@@ -362,6 +368,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         public boolean bufferSpillableWriter() {
             return false;
         }
+
+        @Override
+        public void spill() throws IOException {}
     }
 
     /**
@@ -429,6 +438,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         @Override
         public boolean bufferSpillableWriter() {
             return spillable;
+        }
+
+        @Override
+        public void spill() throws IOException {
+            writeBuffer.spill();
         }
     }
 }

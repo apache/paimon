@@ -126,7 +126,7 @@ public class ExternalBuffer implements RowBuffer {
                         + memorySize());
     }
 
-    private void spill() throws IOException {
+    public void spill() throws IOException {
         FileIOChannel.ID channel = ioManager.createChannel();
 
         BufferFileWriter writer = ioManager.createBufferFileWriter(channel);

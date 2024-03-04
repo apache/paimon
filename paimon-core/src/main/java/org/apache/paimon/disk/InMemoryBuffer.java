@@ -80,6 +80,11 @@ public class InMemoryBuffer implements RowBuffer {
         }
     }
 
+    @Override
+    public void spill() {
+        throw new UnsupportedOperationException();
+    }
+
     private void returnToSegmentPool() {
         pool.returnAll(this.recordBufferSegments);
         this.recordBufferSegments.clear();
