@@ -64,6 +64,7 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.InstantiationUtil;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -969,6 +970,8 @@ public abstract class FileStoreTableTestBase {
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
 
+
+
     @Test
     public void testUnsupportedBranchName() throws Exception {
         FileStoreTable table = createFileStoreTable();
@@ -1505,5 +1508,17 @@ public abstract class FileStoreTableTestBase {
                                 toSplits(table.newSnapshotReader(BRANCH_NAME).read().dataSplits()),
                                 BATCH_ROW_TO_STRING))
                 .containsExactlyInAnyOrder("0|0|0|binary|varbinary|mapKey:mapVal|multiset");
+    }
+
+    @Test
+    public void testSerAndDer() throws Exception {
+        FileStoreTable originFileStoreTable = createFileStoreTable();
+
+        byte[] bytes = InstantiationUtil.serializeObject(originFileStoreTable);
+        AbstractFileStoreTable serializedFileStoreTable =
+                InstantiationUtil.deserializeObject(
+                        bytes, Thread.currentThread().getContextClassLoader());
+        assertThat(serializedFileStoreTable.schemaCache.size()).isEqualTo(1);
+        assertThat(serializedFileStoreTable.schemaCache).containsOnlyKeys(0L);
     }
 }

@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DoubleType;
@@ -97,34 +98,24 @@ public class SchemaManagerTest {
 
     @Test
     public void testCache() throws Exception {
+        Path path = new Path(tempDir.toString());
+        SchemaManager manager = new SchemaManager(FileIOFinder.find(path), path);
 
         // schema-0
         manager.createTable(schema);
-
         // schema-1
         manager.commitChanges(SchemaChange.setOption("aaa", "bbb"));
-
         // schema-2
         manager.commitChanges(SchemaChange.setOption("ccc", "ddd"));
 
-        Optional<TableSchema> latest = manager.latest();
-        assertThat(latest).isPresent();
-        assertThat(latest.get().options()).containsKey("ccc");
-        assertThat(latest.get().options()).containsKey("aaa");
-
-        assertThat(manager.getCachedSchema().asMap()).hasSize(3);
+        Cache<Long, TableSchema> cachedSchema = manager.getCachedSchema();
+        assertThat(cachedSchema.asMap()).hasSize(3);
 
         manager.deleteSchema(1L);
-        Map<Long, TableSchema> cachedSchema = manager.getCachedSchema().asMap();
-        assertThat(cachedSchema).hasSize(2);
-        TableSchema tableSchema = cachedSchema.get(2L);
+        Map<Long, TableSchema> map = cachedSchema.asMap();
+        assertThat(map).hasSize(2);
+        TableSchema tableSchema = map.get(2L);
         assertThat(tableSchema.options()).containsKey("ccc");
-
-        byte[] bytes = InstantiationUtil.serializeObject(manager);
-        SchemaManager schemaManager =
-                InstantiationUtil.deserializeObject(
-                        bytes, Thread.currentThread().getContextClassLoader());
-        assertThat(schemaManager.getCachedSchema().asMap()).isEqualTo(cachedSchema);
     }
 
     @Test

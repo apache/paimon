@@ -54,11 +54,9 @@ import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
-
 import org.jetbrains.annotations.NotNull;
 
 import javax.annotation.Nullable;
-
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
