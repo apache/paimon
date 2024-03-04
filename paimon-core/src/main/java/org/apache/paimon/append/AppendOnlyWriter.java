@@ -176,8 +176,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         return compactManager.isCompacting();
     }
 
-    private void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction)
-            throws Exception {
+    @VisibleForTesting
+    void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction) throws Exception {
         long start = System.currentTimeMillis();
         List<DataFileMeta> flushedFiles = sinkWriter.flush();
 
@@ -279,7 +279,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void flushMemory() throws Exception {
-        flush(false, false);
+        boolean success = sinkWriter.flushMemory();
+        if (!success) {
+            flush(false, false);
+        }
     }
 
     @VisibleForTesting
@@ -302,6 +305,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         boolean write(InternalRow data) throws IOException;
 
         List<DataFileMeta> flush() throws IOException;
+
+        boolean flushMemory() throws IOException;
 
         long memoryOccupancy();
 
@@ -338,6 +343,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 writer = null;
             }
             return flushedFiles;
+        }
+
+        @Override
+        public boolean flushMemory() throws IOException {
+            return false;
         }
 
         @Override
@@ -429,6 +439,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         @Override
         public boolean bufferSpillableWriter() {
             return spillable;
+        }
+
+        @Override
+        public boolean flushMemory() throws IOException {
+            return writeBuffer.flushMemory();
         }
     }
 }

@@ -88,6 +88,12 @@ public class ExternalBuffer implements RowBuffer {
     }
 
     @Override
+    public boolean flushMemory() throws IOException {
+        spill();
+        return true;
+    }
+
+    @Override
     public boolean put(InternalRow row) throws IOException {
         checkState(!addCompleted, "This buffer has add completed.");
         if (!inMemoryBuffer.put(row)) {
