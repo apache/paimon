@@ -3,12 +3,14 @@
 [![License](https://img.shields.io/badge/license-Apache%202-4EB1BA.svg)](https://www.apache.org/licenses/LICENSE-2.0.html)
 [![Get on Slack](https://img.shields.io/badge/slack-join-orange.svg)](https://the-asf.slack.com/archives/C053Q2NCW8G)
 
-Paimon is a streaming data lake platform that supports high-speed data ingestion, change data tracking and efficient real-time analytics.
+Apache Paimon(incubating) is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
+for both streaming and batch operations. Paimon innovatively combines lake format and LSM structure, bringing realtime 
+streaming updates into the lake architecture.
 
 Background and documentation are available at https://paimon.apache.org
 
-`Paimon`'s former name was `Flink Table Store`, developed from the Flink community. The architecture refers to some design concepts of Iceberg.
-Thanks to Apache Flink and Apache Iceberg.
+`Paimon`'s former name was `Flink Table Store`, developed from the Flink community. The architecture refers to some 
+design concepts of Iceberg. Thanks to Apache Flink and Apache Iceberg.
 
 ## Collaboration
 
@@ -63,8 +65,6 @@ You can join the Paimon community on Slack. Paimon channel is in ASF Slack works
   Search [Paimon channel](https://the-asf.slack.com/archives/C053Q2NCW8G) and join it.
 - If you don't have an @apache.org email address, you can email to `user@paimon.apache.org` to apply for an
   [ASF Slack invitation](https://infra.apache.org/slack.html). Then join [Paimon channel](https://the-asf.slack.com/archives/C053Q2NCW8G).
-
-Don’t forget to introduce yourself in channel.
 
 ## Building
 

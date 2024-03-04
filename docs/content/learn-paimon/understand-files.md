@@ -40,7 +40,7 @@ Before delving further into this page, please ensure that you have read through 
 following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}),
-2. [File Layouts]({{< ref "concepts/file-layouts" >}}) and
+2. [Primary Key Table]({{< ref "concepts/primary-key-table/overview" >}}) and
 3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
 ## Understand File Operations
@@ -406,8 +406,6 @@ spilled files in writer to generate bigger files in DFS.
 
 ### Understand Snapshots
 
-Before delving further into this section, please ensure that you have read [File Layouts]({{< ref "concepts/file-layouts" >}}).
-
 {{< img src="/img/file-operations-3.png">}}
 
 Paimon maintains multiple versions of files, compaction and deletion of files are logical and do not actually
@@ -444,8 +442,8 @@ of buckets, otherwise there will be quite a few small files as well.
 
 ### Understand LSM for Primary Table
 
-LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple
-[data files]({{< ref "concepts/file-layouts#data-files" >}}) and each data file belongs to exactly one sorted run.
+LSM tree organizes files into several sorted runs. A sorted run consists of one or multiple data files and each data
+file belongs to exactly one sorted run.
 
 {{< img src="/img/sorted-runs.png">}}
 
