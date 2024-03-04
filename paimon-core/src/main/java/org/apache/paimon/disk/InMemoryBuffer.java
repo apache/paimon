@@ -81,8 +81,8 @@ public class InMemoryBuffer implements RowBuffer {
     }
 
     @Override
-    public void spill() {
-        throw new UnsupportedOperationException();
+    public boolean flushMemory() throws IOException {
+        return false;
     }
 
     private void returnToSegmentPool() {

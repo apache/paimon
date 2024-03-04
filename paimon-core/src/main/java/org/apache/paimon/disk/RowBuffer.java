@@ -39,7 +39,7 @@ public interface RowBuffer {
 
     void reset();
 
-    void spill() throws IOException;
+    boolean flushMemory() throws IOException;
 
     RowBufferIterator newIterator();
 
