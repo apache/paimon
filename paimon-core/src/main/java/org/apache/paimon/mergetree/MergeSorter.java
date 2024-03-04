@@ -103,12 +103,12 @@ public class MergeSorter {
     public <T> RecordReader<T> mergeSort(
             List<ReaderSupplier<KeyValue>> lazyReaders,
             Comparator<InternalRow> keyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
         if (ioManager != null && lazyReaders.size() > spillThreshold) {
             return spillMergeSort(
-                    lazyReaders, keyComparator, userDefineSeqComparator, mergeFunction);
+                    lazyReaders, keyComparator, userDefinedSeqComparator, mergeFunction);
         }
 
         List<RecordReader<KeyValue>> readers = new ArrayList<>(lazyReaders.size());
@@ -123,16 +123,16 @@ public class MergeSorter {
         }
 
         return SortMergeReader.createSortMergeReader(
-                readers, keyComparator, userDefineSeqComparator, mergeFunction, sortEngine);
+                readers, keyComparator, userDefinedSeqComparator, mergeFunction, sortEngine);
     }
 
     private <T> RecordReader<T> spillMergeSort(
             List<ReaderSupplier<KeyValue>> readers,
             Comparator<InternalRow> keyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunction)
             throws IOException {
-        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel(userDefineSeqComparator);
+        ExternalSorterWithLevel sorter = new ExternalSorterWithLevel(userDefinedSeqComparator);
         ConcatRecordReader.create(readers).forIOEachRemaining(sorter::put);
         sorter.flushMemory();
 
@@ -179,7 +179,7 @@ public class MergeSorter {
 
         private final SortBuffer buffer;
 
-        public ExternalSorterWithLevel(@Nullable FieldsComparator userDefineSeqComparator) {
+        public ExternalSorterWithLevel(@Nullable FieldsComparator userDefinedSeqComparator) {
             if (memoryPool.freePages() < 3) {
                 throw new IllegalArgumentException(
                         "Write buffer requires a minimum of 3 page memory, please increase write buffer memory size.");
@@ -189,9 +189,9 @@ public class MergeSorter {
             IntStream sortFields = IntStream.range(0, keyType.getFieldCount());
 
             // user define sequence fields
-            if (userDefineSeqComparator != null) {
+            if (userDefinedSeqComparator != null) {
                 IntStream udsFields =
-                        IntStream.of(userDefineSeqComparator.compareFields())
+                        IntStream.of(userDefinedSeqComparator.compareFields())
                                 .map(operand -> operand + keyType.getFieldCount() + 3);
                 sortFields = IntStream.concat(sortFields, udsFields);
             }

@@ -41,16 +41,16 @@ public interface SortMergeReader<T> extends RecordReader<T> {
     static <T> SortMergeReader<T> createSortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             SortEngine sortEngine) {
         switch (sortEngine) {
             case MIN_HEAP:
                 return new SortMergeReaderWithMinHeap<>(
-                        readers, userKeyComparator, userDefineSeqComparator, mergeFunctionWrapper);
+                        readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
             case LOSER_TREE:
                 return new SortMergeReaderWithLoserTree<>(
-                        readers, userKeyComparator, userDefineSeqComparator, mergeFunctionWrapper);
+                        readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
             default:
                 throw new UnsupportedOperationException("Unsupported sort engine: " + sortEngine);
         }

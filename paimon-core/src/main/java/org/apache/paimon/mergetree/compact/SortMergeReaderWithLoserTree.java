@@ -39,24 +39,24 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
     public SortMergeReaderWithLoserTree(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
         this.mergeFunctionWrapper = mergeFunctionWrapper;
         this.loserTree =
                 new LoserTree<>(
                         readers,
                         (e1, e2) -> userKeyComparator.compare(e2.key(), e1.key()),
-                        createSequenceComparator(userDefineSeqComparator));
+                        createSequenceComparator(userDefinedSeqComparator));
     }
 
     private Comparator<KeyValue> createSequenceComparator(
-            @Nullable FieldsComparator userDefineSeqComparator) {
-        if (userDefineSeqComparator == null) {
+            @Nullable FieldsComparator userDefinedSeqComparator) {
+        if (userDefinedSeqComparator == null) {
             return (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber());
         }
 
         return (o1, o2) -> {
-            int result = userDefineSeqComparator.compare(o2.value(), o1.value());
+            int result = userDefinedSeqComparator.compare(o2.value(), o1.value());
             if (result != 0) {
                 return result;
             }

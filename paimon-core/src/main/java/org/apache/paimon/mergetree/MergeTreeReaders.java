@@ -73,7 +73,7 @@ public class MergeTreeReaders {
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             MergeSorter mergeSorter)
             throws IOException {
@@ -82,7 +82,7 @@ public class MergeTreeReaders {
             readers.add(() -> readerForRun(run, readerFactory));
         }
         return mergeSorter.mergeSort(
-                readers, userKeyComparator, userDefineSeqComparator, mergeFunctionWrapper);
+                readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
     }
 
     public static RecordReader<KeyValue> readerForRun(

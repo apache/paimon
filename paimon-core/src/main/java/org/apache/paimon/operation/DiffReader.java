@@ -44,7 +44,7 @@ public class DiffReader {
             RecordReader<KeyValue> beforeReader,
             RecordReader<KeyValue> afterReader,
             Comparator<InternalRow> keyComparator,
-            @Nullable FieldsComparator userDefineSeqComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeSorter sorter,
             boolean keepDelete)
             throws IOException {
@@ -53,7 +53,7 @@ public class DiffReader {
                         () -> wrapLevelToReader(beforeReader, BEFORE_LEVEL),
                         () -> wrapLevelToReader(afterReader, AFTER_LEVEL)),
                 keyComparator,
-                userDefineSeqComparator,
+                userDefinedSeqComparator,
                 new DiffMerger(keepDelete));
     }
 

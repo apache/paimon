@@ -128,13 +128,13 @@ public class MergeSorterTest {
                 });
     }
 
-    private void innerTest(FieldsComparator userDefineSeqComparator) throws Exception {
+    private void innerTest(FieldsComparator userDefinedSeqComparator) throws Exception {
         Comparator<KeyValue> comparator =
                 Comparator.comparingInt((KeyValue o) -> o.key().getInt(0));
-        if (userDefineSeqComparator != null) {
+        if (userDefinedSeqComparator != null) {
             comparator =
                     comparator.thenComparing(
-                            (o1, o2) -> userDefineSeqComparator.compare(o1.value(), o2.value()));
+                            (o1, o2) -> userDefinedSeqComparator.compare(o1.value(), o2.value()));
         }
         comparator = comparator.thenComparingLong(KeyValue::sequenceNumber);
 
@@ -181,7 +181,7 @@ public class MergeSorterTest {
         sorter.mergeSort(
                         readers,
                         Comparator.comparingInt(o -> o.getInt(0)),
-                        userDefineSeqComparator,
+                        userDefinedSeqComparator,
                         collectFunc)
                 .forEachRemaining(all::addAll);
 
