@@ -419,7 +419,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
 
-        writer.flushMemory();
+        writer.flush(false, false);
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
@@ -430,7 +430,7 @@ public class AppendOnlyWriterTest {
         for (int j = 0; j < 100; j++) {
             writer.write(row(j, String.valueOf(s), PART));
         }
-        writer.flushMemory();
+        writer.flush(false, false);
 
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);

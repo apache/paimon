@@ -176,8 +176,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         return compactManager.isCompacting();
     }
 
-    private void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction)
-            throws Exception {
+    @VisibleForTesting
+    void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction) throws Exception {
         long start = System.currentTimeMillis();
         List<DataFileMeta> flushedFiles = sinkWriter.flush();
 
