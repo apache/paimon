@@ -45,7 +45,7 @@ public class JdbcCatalogTest extends CatalogTestBase {
         catalog = initCatalog("test-jdbc-catalog", Maps.newHashMap());
     }
 
-    private JdbcCatalog initCatalog(String catalogName, Map<String, String> props) {
+    private JdbcCatalog initCatalog(String storeKey, Map<String, String> props) {
         Map<String, String> properties = Maps.newHashMap();
         properties.put(
                 CatalogOptions.URI.key(),
@@ -55,10 +55,8 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
         properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
-
-        properties.put(JdbcCatalogOptions.INITIALIZE_CATALOG_TABLES.key(), "true");
         properties.putAll(props);
-        JdbcCatalog jdbcCatalog = new JdbcCatalog(fileIO, catalogName, properties, warehouse);
+        JdbcCatalog jdbcCatalog = new JdbcCatalog(fileIO, storeKey, properties, warehouse);
         return jdbcCatalog;
     }
 

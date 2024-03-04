@@ -18,7 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.ClientPoolImpl;
+import org.apache.paimon.client.ClientPoolImpl;
 
 import java.sql.Connection;
 import java.sql.DriverManager;

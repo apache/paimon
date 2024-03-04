@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon;
+package org.apache.paimon.client;
 
 /** Source: [core/src/main/java/org/apache/iceberg/ClientPool.java]. */
 public interface ClientPool<C, E extends Exception> {

@@ -38,7 +38,7 @@ import java.util.stream.Stream;
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
-    public static final String CATALOG_NAME = "catalog_name";
+    public static final String STORE_KEY = "store_key";
     public static final String TABLE_DATABASE = "database_name";
     public static final String TABLE_NAME = "table_name";
 
@@ -46,14 +46,14 @@ public class JdbcUtils {
             "CREATE TABLE "
                     + CATALOG_TABLE_NAME
                     + "("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " VARCHAR(255) NOT NULL,"
                     + TABLE_DATABASE
                     + " VARCHAR(255) NOT NULL,"
                     + TABLE_NAME
                     + " VARCHAR(255) NOT NULL,"
                     + " PRIMARY KEY ("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + ", "
                     + TABLE_DATABASE
                     + ", "
@@ -64,7 +64,7 @@ public class JdbcUtils {
             "SELECT * FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -74,7 +74,7 @@ public class JdbcUtils {
             "SELECT * FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ?";
@@ -83,7 +83,7 @@ public class JdbcUtils {
             "DELETE FROM  "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ?";
@@ -96,7 +96,7 @@ public class JdbcUtils {
                     + TABLE_NAME
                     + " = ? "
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -106,7 +106,7 @@ public class JdbcUtils {
             "DELETE FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -118,7 +118,7 @@ public class JdbcUtils {
                     + " FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? LIMIT 1";
@@ -129,13 +129,13 @@ public class JdbcUtils {
                     + " FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ?";
     static final String DO_COMMIT_CREATE_TABLE_SQL =
             "INSERT INTO "
                     + CATALOG_TABLE_NAME
                     + " ("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + ", "
                     + TABLE_DATABASE
                     + ", "
@@ -153,7 +153,7 @@ public class JdbcUtils {
             "CREATE TABLE "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + "("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " VARCHAR(255) NOT NULL,"
                     + DATABASE_NAME
                     + " VARCHAR(255) NOT NULL,"
@@ -162,7 +162,7 @@ public class JdbcUtils {
                     + DATABASE_PROPERTY_VALUE
                     + " VARCHAR(1000),"
                     + "PRIMARY KEY ("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + ", "
                     + DATABASE_NAME
                     + ", "
@@ -175,7 +175,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
@@ -183,7 +183,7 @@ public class JdbcUtils {
             "INSERT INTO "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " ("
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + ", "
                     + DATABASE_NAME
                     + ", "
@@ -197,7 +197,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
@@ -205,7 +205,7 @@ public class JdbcUtils {
             "DELETE FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ?";
@@ -215,7 +215,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + CATALOG_NAME
+                    + STORE_KEY
                     + " = ?";
 
     // Distributed locks table
@@ -238,19 +238,19 @@ public class JdbcUtils {
 
     /** Get paimon table metadata. */
     public static Map<String, String> getTable(
-            JdbcClientPool connections, String catalogName, String databaseName, String tableName)
+            JdbcClientPool connections, String storeKey, String databaseName, String tableName)
             throws SQLException, InterruptedException {
         return connections.run(
                 conn -> {
                     Map<String, String> table = Maps.newHashMap();
 
                     try (PreparedStatement sql = conn.prepareStatement(JdbcUtils.GET_TABLE_SQL)) {
-                        sql.setString(1, catalogName);
+                        sql.setString(1, storeKey);
                         sql.setString(2, databaseName);
                         sql.setString(3, tableName);
                         ResultSet rs = sql.executeQuery();
                         if (rs.next()) {
-                            table.put(CATALOG_NAME, rs.getString(CATALOG_NAME));
+                            table.put(STORE_KEY, rs.getString(STORE_KEY));
                             table.put(TABLE_DATABASE, rs.getString(TABLE_DATABASE));
                             table.put(TABLE_NAME, rs.getString(TABLE_NAME));
                         }
@@ -261,10 +261,7 @@ public class JdbcUtils {
     }
 
     public static void updateTable(
-            JdbcClientPool connections,
-            String catalogName,
-            Identifier fromTable,
-            Identifier toTable) {
+            JdbcClientPool connections, String storeKey, Identifier fromTable, Identifier toTable) {
         int updatedRecords =
                 execute(
                         err -> {
@@ -279,7 +276,7 @@ public class JdbcUtils {
                         JdbcUtils.RENAME_TABLE_SQL,
                         toTable.getDatabaseName(),
                         toTable.getObjectName(),
-                        catalogName,
+                        storeKey,
                         fromTable.getDatabaseName(),
                         fromTable.getObjectName());
 
@@ -295,21 +292,21 @@ public class JdbcUtils {
     }
 
     public static boolean databaseExists(
-            JdbcClientPool connections, String catalogName, String databaseName) {
+            JdbcClientPool connections, String storeKey, String databaseName) {
 
-        if (exists(connections, JdbcUtils.GET_DATABASE_SQL, catalogName, databaseName)) {
+        if (exists(connections, JdbcUtils.GET_DATABASE_SQL, storeKey, databaseName)) {
             return true;
         }
 
-        if (exists(connections, JdbcUtils.GET_DATABASE_PROPERTIES_SQL, catalogName, databaseName)) {
+        if (exists(connections, JdbcUtils.GET_DATABASE_PROPERTIES_SQL, storeKey, databaseName)) {
             return true;
         }
         return false;
     }
 
     public static boolean tableExists(
-            JdbcClientPool connections, String catalogName, String databaseName, String tableName) {
-        if (exists(connections, JdbcUtils.GET_TABLE_SQL, catalogName, databaseName, tableName)) {
+            JdbcClientPool connections, String storeKey, String databaseName, String tableName) {
+        if (exists(connections, JdbcUtils.GET_TABLE_SQL, storeKey, databaseName, tableName)) {
             return true;
         }
         return false;
@@ -369,7 +366,7 @@ public class JdbcUtils {
 
     public static boolean insertProperties(
             JdbcClientPool connections,
-            String catalogName,
+            String storeKey,
             String databaseName,
             Map<String, String> properties) {
         String[] args =
@@ -377,7 +374,7 @@ public class JdbcUtils {
                         .flatMap(
                                 entry ->
                                         Stream.of(
-                                                catalogName,
+                                                storeKey,
                                                 databaseName,
                                                 entry.getKey(),
                                                 entry.getValue()))

@@ -198,8 +198,7 @@ CREATE CATALOG my_jdbc WITH (
     'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
     'jdbc.user' = '...', 
     'jdbc.password' = '...', 
-    'catalog-name'='jdbc'
-    'initialize-catalog-tables'='true'
+    'store-key'='jdbc',
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
@@ -207,9 +206,7 @@ USE CATALOG my_jdbc;
 ```
 You can define any connection parameters for a database with the prefix "jdbc.".
 
-You can define the "initialize-catalog-tables" configuration to automatically create tables required for the initial JdbcCatalog. If it is true, tables will be automatically created when initializing JdbcCatalog. If it is false, tables will not be automatically created and you must manually create them.
-
-You can also customize the name of the created jdbc catalog through 'catalog-name'.
+You can also perform logical isolation for databases under multiple catalogs by specifying "store-key".
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 

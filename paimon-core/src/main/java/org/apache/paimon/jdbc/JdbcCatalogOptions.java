@@ -23,17 +23,12 @@ import org.apache.paimon.options.ConfigOptions;
 
 /** Options for jdbc catalog. */
 public final class JdbcCatalogOptions {
-    public static final ConfigOption<Boolean> INITIALIZE_CATALOG_TABLES =
-            ConfigOptions.key("initialize-catalog-tables")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Enable automatic table creation.");
 
-    public static final ConfigOption<String> CATALOG_NAME =
-            ConfigOptions.key("catalog-name")
+    public static final ConfigOption<String> STORE_KEY =
+            ConfigOptions.key("store-key")
                     .stringType()
                     .defaultValue(null)
-                    .withDescription("Custom jdbc catalog name.");
+                    .withDescription("Custom jdbc catalog store key.");
 
     private JdbcCatalogOptions() {}
 }
