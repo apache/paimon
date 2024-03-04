@@ -155,10 +155,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
-                coreOptions(),
-                newSnapshotReader(),
-                snapshotManager(),
-                DefaultValueAssigner.create(tableSchema));
+                coreOptions(), newSnapshotReader(), DefaultValueAssigner.create(tableSchema));
     }
 
     @Override
