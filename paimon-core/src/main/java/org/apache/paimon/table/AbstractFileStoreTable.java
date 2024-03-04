@@ -292,6 +292,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public ExpireSnapshots newExpireChangelog() {
+        return new ExpireChangelogImpl(
+                snapshotManager(),
+                store().newSnapshotDeletion(),
+                coreOptions().snapshotExpireCleanEmptyDirectories(),
+                false);
+    }
+
+    @Override
     public TableCommitImpl newCommit(String commitUser) {
         // Compatibility with previous design, the main branch is written by default
         return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
@@ -301,17 +310,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
+            ExpireSnapshots expireChangelog =
+                    newExpireChangelog().maxDeletes(options.snapshotExpireLimit());
             ExpireSnapshots expireSnapshots =
                     newExpireSnapshots()
                             .retainMax(options.snapshotNumRetainMax())
                             .retainMin(options.snapshotNumRetainMin())
                             .maxDeletes(options.snapshotExpireLimit());
             long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
+            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
             snapshotExpire =
-                    () ->
-                            expireSnapshots
-                                    .olderThanMills(System.currentTimeMillis() - snapshotTimeRetain)
-                                    .expire();
+                    () -> {
+                        long current = System.currentTimeMillis();
+                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                    };
         }
 
         return new TableCommitImpl(

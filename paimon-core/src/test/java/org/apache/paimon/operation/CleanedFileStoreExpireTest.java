@@ -19,6 +19,7 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.Path;
@@ -26,11 +27,13 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.table.ExpireChangelogImpl;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 
@@ -257,5 +260,52 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         ExpireSnapshots expire = store.newExpire(1, 1, Long.MAX_VALUE);
         expire.expire();
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
+    }
+
+    @Test
+    public void testChangelogOutLivedSnapshot() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(5, allData, snapshotPositions);
+        Thread.sleep(1500);
+        commit(5, allData, snapshotPositions);
+        Thread.sleep(1500);
+        commit(5, allData, snapshotPositions);
+        ExpireSnapshots snapshot = store.newExpire(1, 5, Long.MAX_VALUE, false);
+        ExpireSnapshots changelog = store.newChangelogExpire(3000, true);
+        // expire twice to check for idempotence
+        snapshot.expire();
+        snapshot.expire();
+
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int earliestSnapshotId = snapshotManager.earliestSnapshotId().intValue();
+        int latestLongLivedChangelogId = snapshotManager.latestLongLivedChangelogId().intValue();
+        int earliestLongLivedChangelogId =
+                snapshotManager.earliestLongLivedChangelogId().intValue();
+
+        // 5 snapshot in /snapshot
+        Assertions.assertThat(latestSnapshotId - earliestSnapshotId).isEqualTo(4);
+        Assertions.assertThat(earliestLongLivedChangelogId).isEqualTo(1);
+        Assertions.assertThat(earliestSnapshotId - latestLongLivedChangelogId).isEqualTo(1);
+
+        changelog.expire();
+        changelog.expire();
+
+        Assertions.assertThat(snapshotManager.latestSnapshotId().intValue())
+                .isEqualTo(latestSnapshotId);
+        Assertions.assertThat(snapshotManager.earliestSnapshotId().intValue())
+                .isEqualTo(earliestSnapshotId);
+
+        int latestLongLivedChangelogId2 = snapshotManager.latestLongLivedChangelogId().intValue();
+        int earliestLongLivedChangelogId2 =
+                snapshotManager.earliestLongLivedChangelogId().intValue();
+
+        for (int i = earliestLongLivedChangelogId2; i <= latestLongLivedChangelogId2; i++) {
+            Snapshot snap = snapshotManager.longLivedChangelog(i);
+            Assertions.assertThat(
+                            snap.timeMillis()
+                                    - ((ExpireChangelogImpl) changelog).getOlderThanMills())
+                    .isGreaterThan(0);
+        }
     }
 }

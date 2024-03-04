@@ -68,6 +68,7 @@ public class RollbackHelper {
     public void cleanLargerThan(Snapshot retainedSnapshot) {
         // clean data files
         List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
+        List<Snapshot> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
 
         // clean manifests
@@ -76,6 +77,10 @@ public class RollbackHelper {
 
         for (Snapshot snapshot : cleanedSnapshots) {
             snapshotDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
+        }
+
+        for (Snapshot snapshot : cleanedChangelogs) {
+            snapshotDeletion.cleanUnusedChangelogManifests(snapshot);
         }
 
         cleanedTags.removeAll(cleanedSnapshots);
@@ -112,6 +117,33 @@ public class RollbackHelper {
         // when deleting non-existing data files
         for (Snapshot snapshot : toBeCleaned) {
             snapshotDeletion.deleteAddedDataFiles(snapshot.deltaManifestList());
+            snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+        }
+
+        // delete directories
+        snapshotDeletion.cleanDataDirectories();
+
+        return toBeCleaned;
+    }
+
+    private List<Snapshot> cleanLongLivedChangelogDataFiles(Snapshot retainedSnapshot) {
+        Long earliest = snapshotManager.earliestLongLivedChangelogId();
+        Long latest = snapshotManager.latestLongLivedChangelogId();
+        if (earliest == null || latest == null) {
+            return Collections.emptyList();
+        }
+
+        // delete snapshot files first, cannot be read now
+        // it is possible that some snapshots have been expired
+        List<Snapshot> toBeCleaned = new ArrayList<>();
+        long to = Math.max(earliest, retainedSnapshot.id() + 1);
+        for (long i = latest; i >= to; i--) {
+            toBeCleaned.add(snapshotManager.changelog(i));
+            fileIO.deleteQuietly(snapshotManager.longLivedChangelogPath(i));
+        }
+
+        // delete data files of changelog
+        for (Snapshot snapshot : toBeCleaned) {
             snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
         }
 

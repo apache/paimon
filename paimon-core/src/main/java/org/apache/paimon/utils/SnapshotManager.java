@@ -40,6 +40,7 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.function.BinaryOperator;
+import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
@@ -53,6 +54,7 @@ public class SnapshotManager implements Serializable {
     private static final long serialVersionUID = 1L;
 
     private static final String SNAPSHOT_PREFIX = "snapshot-";
+    private static final String CHANGELOG_PREFIX = "changelog-";
     public static final String EARLIEST = "EARLIEST";
     public static final String LATEST = "LATEST";
     private static final int READ_HINT_RETRY_NUM = 3;
@@ -76,6 +78,14 @@ public class SnapshotManager implements Serializable {
 
     public Path snapshotDirectory() {
         return new Path(tablePath + "/snapshot");
+    }
+
+    public Path changelogDirectory() {
+        return new Path(tablePath + "/changelog");
+    }
+
+    public Path longLivedChangelogPath(long snapshotId) {
+        return new Path(tablePath + "/changelog/" + CHANGELOG_PREFIX + snapshotId);
     }
 
     public Path snapshotPath(long snapshotId) {
@@ -107,6 +117,22 @@ public class SnapshotManager implements Serializable {
         return snapshot(DEFAULT_MAIN_BRANCH, snapshotId);
     }
 
+    public Snapshot changelog(long snapshotId) {
+        Path changelogPath = longLivedChangelogPath(snapshotId);
+        try {
+            if (!fileIO.exists(changelogPath)) {
+                changelogPath = snapshotPath(snapshotId);
+            }
+            return Snapshot.fromPath(fileIO, changelogPath);
+        } catch (IOException e) {
+            throw new RuntimeException("Fails to read snapshot from path " + changelogPath, e);
+        }
+    }
+
+    public Snapshot longLivedChangelog(long snapshotId) {
+        return Snapshot.fromPath(fileIO, longLivedChangelogPath(snapshotId));
+    }
+
     public Snapshot snapshot(String branchName, long snapshotId) {
         Path snapshotPath = snapshotPathByBranch(branchName, snapshotId);
         return Snapshot.fromPath(fileIO, snapshotPath);
@@ -119,6 +145,17 @@ public class SnapshotManager implements Serializable {
         } catch (IOException e) {
             throw new RuntimeException(
                     "Failed to determine if snapshot #" + snapshotId + " exists in path " + path,
+                    e);
+        }
+    }
+
+    public boolean longLivedChangelogExists(long snapshotId) {
+        Path path = longLivedChangelogPath(snapshotId);
+        try {
+            return fileIO.exists(path);
+        } catch (IOException e) {
+            throw new RuntimeException(
+                    "Failed to determine if changelog #" + snapshotId + " exists in path " + path,
                     e);
         }
     }
@@ -138,7 +175,7 @@ public class SnapshotManager implements Serializable {
 
     public @Nullable Long latestSnapshotId(String branchName) {
         try {
-            return findLatest(branchName);
+            return findLatest(snapshotDirByBranch(branchName), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find latest snapshot id", e);
         }
@@ -153,9 +190,45 @@ public class SnapshotManager implements Serializable {
         return earliestSnapshotId(DEFAULT_MAIN_BRANCH);
     }
 
+    public @Nullable Long earliestLongLivedChangelogId() {
+        try {
+            return findEarliest(
+                    changelogDirectory(), CHANGELOG_PREFIX, this::longLivedChangelogPath);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find earliest changelog id", e);
+        }
+    }
+
+    public @Nullable Long latestLongLivedChangelogId() {
+        try {
+            return findLatest(changelogDirectory(), CHANGELOG_PREFIX, this::longLivedChangelogPath);
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find latest changelog id", e);
+        }
+    }
+
+    public @Nullable Long earliestChangelogId() {
+        try {
+            Long changelogId =
+                    findEarliest(
+                            changelogDirectory(), CHANGELOG_PREFIX, this::longLivedChangelogPath);
+            if (changelogId == null) {
+                return findEarliest(snapshotDirectory(), SNAPSHOT_PREFIX, this::snapshotPath);
+            }
+            return changelogId;
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to find earliest changelog id", e);
+        }
+    }
+
+    public @Nullable Long latestChangelogId() {
+        return latestSnapshotId();
+    }
+
     public @Nullable Long earliestSnapshotId(String branchName) {
         try {
-            return findEarliest(branchName);
+            return findEarliest(
+                    snapshotDirByBranch(branchName), SNAPSHOT_PREFIX, this::snapshotPath);
         } catch (IOException e) {
             throw new RuntimeException("Failed to find earliest snapshot id", e);
         }
@@ -351,6 +424,12 @@ public class SnapshotManager implements Serializable {
         return matchedSnapshots;
     }
 
+    public void moveToChangelog(long snapshotId) throws IOException {
+        Path src = snapshotPath(snapshotId);
+        Path dest = longLivedChangelogPath(snapshotId);
+        fileIO.rename(src, dest);
+    }
+
     /**
      * Traversal snapshots from latest to earliest safely, this is applied on the writer side
      * because the committer may delete obsolete snapshots, which may cause the writer to encounter
@@ -393,46 +472,45 @@ public class SnapshotManager implements Serializable {
         return null;
     }
 
-    private @Nullable Long findLatest(String branchName) throws IOException {
-        Path snapshotDir = snapshotDirByBranch(branchName);
-        if (!fileIO.exists(snapshotDir)) {
+    private @Nullable Long findLatest(Path dir, String prefix, Function<Long, Path> file)
+            throws IOException {
+        if (!fileIO.exists(dir)) {
             return null;
         }
 
-        Long snapshotId = readHint(LATEST, branchName);
+        Long snapshotId = readHint(LATEST, dir);
         if (snapshotId != null) {
             long nextSnapshot = snapshotId + 1;
             // it is the latest only there is no next one
-            if (!snapshotExists(nextSnapshot)) {
+            if (!fileIO.exists(file.apply(nextSnapshot))) {
                 return snapshotId;
             }
         }
 
-        return findByListFiles(Math::max, branchName);
+        return findByListFiles(Math::max, dir, prefix);
     }
 
-    private @Nullable Long findEarliest(String branchName) throws IOException {
-        Path snapshotDir = snapshotDirByBranch(branchName);
-        if (!fileIO.exists(snapshotDir)) {
+    private @Nullable Long findEarliest(Path dir, String prefix, Function<Long, Path> file)
+            throws IOException {
+        if (!fileIO.exists(dir)) {
             return null;
         }
 
-        Long snapshotId = readHint(EARLIEST, branchName);
+        Long snapshotId = readHint(EARLIEST, dir);
         // null and it is the earliest only it exists
-        if (snapshotId != null && snapshotExists(snapshotId)) {
+        if (snapshotId != null && fileIO.exists(file.apply(snapshotId))) {
             return snapshotId;
         }
 
-        return findByListFiles(Math::min, branchName);
+        return findByListFiles(Math::min, dir, prefix);
     }
 
     public Long readHint(String fileName) {
-        return readHint(fileName, DEFAULT_MAIN_BRANCH);
+        return readHint(fileName, snapshotDirByBranch(DEFAULT_MAIN_BRANCH));
     }
 
-    public Long readHint(String fileName, String branchName) {
-        Path snapshotDir = snapshotDirByBranch(branchName);
-        Path path = new Path(snapshotDir, fileName);
+    public Long readHint(String fileName, Path dir) {
+        Path path = new Path(dir, fileName);
         int retryNumber = 0;
         while (retryNumber++ < READ_HINT_RETRY_NUM) {
             try {
@@ -449,12 +527,9 @@ public class SnapshotManager implements Serializable {
         return null;
     }
 
-    private Long findByListFiles(BinaryOperator<Long> reducer, String branchName)
+    private Long findByListFiles(BinaryOperator<Long> reducer, Path dir, String prefix)
             throws IOException {
-        Path snapshotDir = snapshotDirByBranch(branchName);
-        return listVersionedFiles(fileIO, snapshotDir, SNAPSHOT_PREFIX)
-                .reduce(reducer)
-                .orElse(null);
+        return listVersionedFiles(fileIO, dir, prefix).reduce(reducer).orElse(null);
     }
 
     public void commitLatestHint(long snapshotId) throws IOException {
@@ -462,7 +537,15 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitLatestHint(long snapshotId, String branchName) throws IOException {
-        commitHint(snapshotId, LATEST, branchName);
+        commitHint(snapshotId, LATEST, snapshotDirByBranch(branchName));
+    }
+
+    public void commitLongLivedChangelogLatestHint(long snapshotId) throws IOException {
+        commitHint(snapshotId, LATEST, changelogDirectory());
+    }
+
+    public void commitLongLivedChangelogEarliestHint(long snapshotId) throws IOException {
+        commitHint(snapshotId, EARLIEST, changelogDirectory());
     }
 
     public void commitEarliestHint(long snapshotId) throws IOException {
@@ -470,13 +553,11 @@ public class SnapshotManager implements Serializable {
     }
 
     public void commitEarliestHint(long snapshotId, String branchName) throws IOException {
-        commitHint(snapshotId, EARLIEST, branchName);
+        commitHint(snapshotId, EARLIEST, snapshotDirByBranch(branchName));
     }
 
-    private void commitHint(long snapshotId, String fileName, String branchName)
-            throws IOException {
-        Path snapshotDir = snapshotDirByBranch(branchName);
-        Path hintFile = new Path(snapshotDir, fileName);
+    private void commitHint(long snapshotId, String fileName, Path dir) throws IOException {
+        Path hintFile = new Path(dir, fileName);
         fileIO.overwriteFileUtf8(hintFile, String.valueOf(snapshotId));
     }
 }

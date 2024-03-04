@@ -205,6 +205,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Duration> CHANGELOG_TIME_RETAINED =
+            key("changelog.time-retained")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("The minimum time of completed changelog to retain.");
+
     public static final ConfigOption<ExpireExecutionMode> SNAPSHOT_EXPIRE_EXECUTION_MODE =
             key("snapshot.expire.execution-mode")
                     .enumType(ExpireExecutionMode.class)
@@ -1233,6 +1239,10 @@ public class CoreOptions implements Serializable {
 
     public Duration snapshotTimeRetain() {
         return options.get(SNAPSHOT_TIME_RETAINED);
+    }
+
+    public Duration changelogTimeRetain() {
+        return options.get(CHANGELOG_TIME_RETAINED);
     }
 
     public ExpireExecutionMode snapshotExpireExecutionMode() {

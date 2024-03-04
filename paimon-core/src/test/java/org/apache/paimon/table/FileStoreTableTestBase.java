@@ -869,9 +869,19 @@ public abstract class FileStoreTableTestBase {
         List<java.nio.file.Path> files =
                 Files.walk(new File(tablePath.toUri().getPath()).toPath())
                         .collect(Collectors.toList());
-        assertThat(files.size()).isEqualTo(16);
-        // rollback snapshot case 0 plus 1:
-        // table-path/tag/tag-test1
+        if (expire) {
+            // rollback snapshot case 0 plus 5:
+            // table-path/tag/tag-test1
+            // table-path/changelog/
+            // table-path/changelog/changelog-1
+            // table-path/changelog/LATEST
+            // table-path/changelog/EARLIEST
+            assertThat(files.size()).isEqualTo(20);
+        } else {
+            // rollback snapshot case 0 plus 1:
+            // table-path/tag/tag-test1
+            assertThat(files.size()).isEqualTo(16);
+        }
     }
 
     private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {

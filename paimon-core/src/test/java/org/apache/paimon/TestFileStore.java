@@ -45,6 +45,7 @@ import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.CatalogEnvironment;
+import org.apache.paimon.table.ExpireChangelogImpl;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.sink.CommitMessageImpl;
@@ -152,6 +153,21 @@ public class TestFileStore extends KeyValueFileStore {
                 .retainMax(numRetainedMax)
                 .retainMin(numRetainedMin)
                 .olderThanMills(System.currentTimeMillis() - millisRetained);
+    }
+
+    public ExpireSnapshots newChangelogExpire(
+            long millisRetained, boolean snapshotExpireCleanEmptyDirectories, boolean keepLastOne) {
+        return new ExpireChangelogImpl(
+                        snapshotManager(),
+                        newSnapshotDeletion(),
+                        snapshotExpireCleanEmptyDirectories,
+                        keepLastOne)
+                .olderThanMills(System.currentTimeMillis() - millisRetained);
+    }
+
+    public ExpireSnapshots newChangelogExpire(
+            long millisRetained, boolean snapshotExpireCleanEmptyDirectories) {
+        return newChangelogExpire(millisRetained, snapshotExpireCleanEmptyDirectories, true);
     }
 
     public List<Snapshot> commitData(
@@ -464,7 +480,20 @@ public class TestFileStore extends KeyValueFileStore {
             fileIO.delete(latest, false);
             assertThat(latestId <= snapshotManager.latestSnapshotId()).isTrue();
         }
-        actualFiles.remove(latest);
+        Path changelogDir = snapshotManager.changelogDirectory();
+        Path earliestChangelog = new Path(changelogDir, SnapshotManager.EARLIEST);
+        Path latestChangelog = new Path(changelogDir, SnapshotManager.LATEST);
+
+        if (actualFiles.remove(earliestChangelog)) {
+            long earliestId = snapshotManager.readHint(SnapshotManager.EARLIEST, changelogDir);
+            fileIO.delete(earliest, false);
+            assertThat(earliestId <= snapshotManager.earliestLongLivedChangelogId()).isTrue();
+        }
+        if (actualFiles.remove(latestChangelog)) {
+            long latestId = snapshotManager.readHint(SnapshotManager.LATEST, changelogDir);
+            fileIO.delete(latest, false);
+            assertThat(latestId <= snapshotManager.latestLongLivedChangelogId()).isTrue();
+        }
 
         // for easier debugging
         String expectedString =
@@ -492,7 +521,8 @@ public class TestFileStore extends KeyValueFileStore {
 
         long firstInUseSnapshotId = Snapshot.FIRST_SNAPSHOT_ID;
         for (long id = latestSnapshotId - 1; id >= Snapshot.FIRST_SNAPSHOT_ID; id--) {
-            if (!snapshotManager.snapshotExists(id)) {
+            if (!snapshotManager.snapshotExists(id)
+                    && !snapshotManager.longLivedChangelogExists(id)) {
                 firstInUseSnapshotId = id + 1;
                 break;
             }
@@ -501,6 +531,7 @@ public class TestFileStore extends KeyValueFileStore {
         for (long id = firstInUseSnapshotId; id <= latestSnapshotId; id++) {
             result.addAll(getFilesInUse(id));
         }
+
         return result;
     }
 
@@ -515,6 +546,31 @@ public class TestFileStore extends KeyValueFileStore {
     }
 
     public static Set<Path> getFilesInUse(
+            long snapshotId,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            FileIO fileIO,
+            FileStorePathFactory pathFactory,
+            ManifestList manifestList) {
+        Set<Path> result = new HashSet<>();
+
+        if (snapshotManager.snapshotExists(snapshotId)) {
+            result.addAll(
+                    getSnapshotFileInUse(
+                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+        } else if (snapshotManager.longLivedChangelogExists(snapshotId)) {
+            result.addAll(
+                    getChangelogFileInUse(
+                            snapshotId, snapshotManager, scan, fileIO, pathFactory, manifestList));
+        } else {
+            throw new RuntimeException(
+                    String.format("The snapshot %s does not exist.", snapshotId));
+        }
+
+        return result;
+    }
+
+    private static Set<Path> getSnapshotFileInUse(
             long snapshotId,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
@@ -548,7 +604,41 @@ public class TestFileStore extends KeyValueFileStore {
                             pathFactory.bucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
+        return result;
+    }
 
+    private static Set<Path> getChangelogFileInUse(
+            long snapshotId,
+            SnapshotManager snapshotManager,
+            FileStoreScan scan,
+            FileIO fileIO,
+            FileStorePathFactory pathFactory,
+            ManifestList manifestList) {
+        Set<Path> result = new HashSet<>();
+
+        Path snapshotPath = snapshotManager.longLivedChangelogPath(snapshotId);
+        Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
+
+        // snapshot file
+        result.add(snapshotPath);
+
+        // manifest lists
+        if (snapshot.changelogManifestList() != null) {
+            result.add(pathFactory.toManifestListPath(snapshot.changelogManifestList()));
+        }
+
+        // manifests
+        List<ManifestFileMeta> manifests = snapshot.changelogManifests(manifestList);
+        manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
+
+        // data file
+        List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
+        for (ManifestEntry entry : entries) {
+            result.add(
+                    new Path(
+                            pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                            entry.file().fileName()));
+        }
         return result;
     }
 

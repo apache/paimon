@@ -150,7 +150,17 @@ public abstract class FileDeletionBase {
                 .add(entry.bucket());
     }
 
-    protected void cleanUnusedManifests(
+    public void cleanUnusedChangelogManifests(Snapshot snapshot) {
+        // clean changelog manifests
+        if (snapshot.changelogManifestList() != null) {
+            deleteFiles(
+                    tryReadManifestList(snapshot.changelogManifestList()),
+                    manifest -> manifestFile.delete(manifest.fileName()));
+            manifestList.delete(snapshot.changelogManifestList());
+        }
+    }
+
+    public void cleanUnusedManifests(
             Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
         // clean base and delta manifests
         List<String> toDeleteManifests = new ArrayList<>();
