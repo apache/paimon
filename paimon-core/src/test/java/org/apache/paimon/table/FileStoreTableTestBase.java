@@ -970,8 +970,6 @@ public abstract class FileStoreTableTestBase {
         assertThat(branchSchema.equals(schema0)).isTrue();
     }
 
-
-
     @Test
     public void testUnsupportedBranchName() throws Exception {
         FileStoreTable table = createFileStoreTable();

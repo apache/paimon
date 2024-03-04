@@ -379,7 +379,7 @@ public class SchemaManager implements Serializable {
             try {
                 boolean success = commit(newSchema);
                 if (success) {
-                    cache.put(newSchema.id(),newSchema);
+                    cache.put(newSchema.id(), newSchema);
                     return newSchema;
                 }
             } catch (Exception e) {
