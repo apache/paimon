@@ -191,6 +191,27 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MIN =
+            key("changelog.num-retained.min")
+                    .intType()
+                    .defaultValue(10)
+                    .withDescription(
+                            "The minimum number of completed changelog to retain. Should be greater than or equal to 1.");
+
+    @Documentation.OverrideDefault("infinite")
+    public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MAX =
+            key("changelog.num-retained.max")
+                    .intType()
+                    .defaultValue(Integer.MAX_VALUE)
+                    .withDescription(
+                            "The maximum number of completed changelog to retain. Should be greater than or equal to the minimum number.");
+
+    public static final ConfigOption<Duration> CHANGELOG_TIME_RETAINED =
+            key("changelog.time-retained")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription("The maximum time of completed changelog to retain.");
+
     public static final ConfigOption<ExpireExecutionMode> SNAPSHOT_EXPIRE_EXECUTION_MODE =
             key("snapshot.expire.execution-mode")
                     .enumType(ExpireExecutionMode.class)
@@ -1204,6 +1225,26 @@ public class CoreOptions implements Serializable {
 
     public Duration snapshotTimeRetain() {
         return options.get(SNAPSHOT_TIME_RETAINED);
+    }
+
+    public int changelogNumRetainMin() {
+        return options.get(CHANGELOG_NUM_RETAINED_MIN);
+    }
+
+    public int changelogNumRetainMax() {
+        return options.get(CHANGELOG_NUM_RETAINED_MAX);
+    }
+
+    public Duration changelogTimeRetain() {
+        return options.get(CHANGELOG_TIME_RETAINED);
+    }
+
+    public boolean changelogLifecycleDecoupled() {
+        return changelogNumRetainMax() > snapshotNumRetainMax()
+                || options.get(CHANGELOG_TIME_RETAINED)
+                                .compareTo(options.get(SNAPSHOT_TIME_RETAINED))
+                        > 0
+                || changelogNumRetainMin() > snapshotNumRetainMin();
     }
 
     public ExpireExecutionMode snapshotExpireExecutionMode() {

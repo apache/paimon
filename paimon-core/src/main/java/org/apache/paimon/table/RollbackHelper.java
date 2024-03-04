@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -33,6 +34,7 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.SortedMap;
@@ -68,6 +70,7 @@ public class RollbackHelper {
     public void cleanLargerThan(Snapshot retainedSnapshot) {
         // clean data files
         List<Snapshot> cleanedSnapshots = cleanSnapshotsDataFiles(retainedSnapshot);
+        List<Changelog> cleanedChangelogs = cleanLongLivedChangelogDataFiles(retainedSnapshot);
         List<Snapshot> cleanedTags = cleanTagsDataFiles(retainedSnapshot);
 
         // clean manifests
@@ -76,6 +79,17 @@ public class RollbackHelper {
 
         for (Snapshot snapshot : cleanedSnapshots) {
             snapshotDeletion.cleanUnusedManifests(snapshot, manifestsSkippingSet);
+        }
+
+        for (Changelog changelog : cleanedChangelogs) {
+            if (changelog.deltaManifestList() != null) {
+                snapshotDeletion.cleanUnusedManifestList(
+                        changelog.deltaManifestList(), new HashSet<>());
+            }
+            if (changelog.changelogManifestList() != null) {
+                snapshotDeletion.cleanUnusedManifestList(
+                        changelog.changelogManifestList(), new HashSet<>());
+            }
         }
 
         cleanedTags.removeAll(cleanedSnapshots);
@@ -113,6 +127,38 @@ public class RollbackHelper {
         for (Snapshot snapshot : toBeCleaned) {
             snapshotDeletion.deleteAddedDataFiles(snapshot.deltaManifestList());
             snapshotDeletion.deleteAddedDataFiles(snapshot.changelogManifestList());
+        }
+
+        // delete directories
+        snapshotDeletion.cleanDataDirectories();
+
+        return toBeCleaned;
+    }
+
+    private List<Changelog> cleanLongLivedChangelogDataFiles(Snapshot retainedSnapshot) {
+        Long earliest = snapshotManager.earliestLongLivedChangelogId();
+        Long latest = snapshotManager.latestLongLivedChangelogId();
+        if (earliest == null || latest == null) {
+            return Collections.emptyList();
+        }
+
+        // delete snapshot files first, cannot be read now
+        // it is possible that some snapshots have been expired
+        List<Changelog> toBeCleaned = new ArrayList<>();
+        long to = Math.max(earliest, retainedSnapshot.id() + 1);
+        for (long i = latest; i >= to; i--) {
+            toBeCleaned.add(snapshotManager.changelog(i));
+            fileIO.deleteQuietly(snapshotManager.longLivedChangelogPath(i));
+        }
+
+        // delete data files of changelog
+        for (Changelog changelog : toBeCleaned) {
+            if (changelog.changelogManifestList() != null) {
+                snapshotDeletion.deleteAddedDataFiles(changelog.changelogManifestList());
+            }
+            if (changelog.deltaManifestList() != null) {
+                snapshotDeletion.deleteAddedDataFiles(changelog.deltaManifestList());
+            }
         }
 
         // delete directories

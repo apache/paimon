@@ -46,7 +46,10 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
+import static org.apache.paimon.CoreOptions.CHANGELOG_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
@@ -58,6 +61,7 @@ import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
 import static org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction.SEQUENCE_GROUP;
 import static org.apache.paimon.schema.SystemColumns.KEY_FIELD_PREFIX;
@@ -119,6 +123,21 @@ public class SchemaValidation {
                 options.snapshotNumRetainMin() <= options.snapshotNumRetainMax(),
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
+                        + SNAPSHOT_NUM_RETAINED_MAX.key());
+        checkArgument(
+                options.changelogTimeRetain().toMillis() >= options.snapshotTimeRetain().toMillis(),
+                CHANGELOG_TIME_RETAINED.key()
+                        + " should not less than "
+                        + SNAPSHOT_TIME_RETAINED.key());
+        checkArgument(
+                options.changelogNumRetainMin() >= options.snapshotNumRetainMin(),
+                CHANGELOG_NUM_RETAINED_MIN.key()
+                        + " should not less than "
+                        + SNAPSHOT_NUM_RETAINED_MIN.key());
+        checkArgument(
+                options.changelogNumRetainMax() >= options.changelogNumRetainMax(),
+                CHANGELOG_NUM_RETAINED_MAX.key()
+                        + " should not less than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
 
         // Get the format type here which will try to convert string value to {@Code

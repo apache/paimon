@@ -843,6 +843,8 @@ public abstract class FileStoreTableTestBase {
             Options options = new Options();
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
+            options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MIN, 5);
+            options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 5);
             table.copy(options.toMap()).newCommit("").expireSnapshots();
         }
 

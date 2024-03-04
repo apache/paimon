@@ -18,11 +18,13 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -141,6 +143,11 @@ public class SnapshotManagerTest {
                 null);
     }
 
+    private Changelog createChangelogWithMillis(long id, long millis) {
+        return new Changelog(
+                id, 0L, null, "changelog-list", Snapshot.CommitKind.APPEND, millis, 1L, null);
+    }
+
     @Test
     public void testTraversalSnapshotsFromLatestSafely() throws IOException, InterruptedException {
         FileIO localFileIO = LocalFileIO.create();
@@ -233,5 +240,30 @@ public class SnapshotManagerTest {
         thread.join();
 
         assertThat(exception.get()).hasMessageContaining("Fails to read snapshot from path");
+    }
+
+    @Test
+    public void testLongLivedChangelog() throws Exception {
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        long millis = 1L;
+        for (long i = 1; i <= 5; i++) {
+            Changelog changelog = createChangelogWithMillis(i, millis + i * 1000);
+            localFileIO.writeFileUtf8(
+                    snapshotManager.longLivedChangelogPath(i), changelog.toJson());
+        }
+
+        for (long i = 6; i <= 10; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
+            localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
+        }
+
+        Assertions.assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        Assertions.assertThat(snapshotManager.latestChangelogId()).isEqualTo(10);
+        Assertions.assertThat(snapshotManager.latestLongLivedChangelogId()).isEqualTo(5);
+        Assertions.assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(6);
+        Assertions.assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+        Assertions.assertThat(snapshotManager.changelog(1)).isNotNull();
     }
 }
