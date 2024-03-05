@@ -45,7 +45,7 @@ public class JdbcClientPool extends ClientPoolImpl<Connection, SQLException> {
         if (matcher.matches()) {
             this.protocol = matcher.group(1);
         } else {
-            throw new RuntimeException("Valid Jdbc url failure: " + dbUrl);
+            throw new RuntimeException("Invalid Jdbc url: " + dbUrl);
         }
     }
 
