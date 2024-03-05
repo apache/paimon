@@ -30,6 +30,9 @@ import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -51,9 +54,16 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter) {
-        super(readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+        super(
+                readerFactory,
+                writerFactory,
+                keyComparator,
+                userDefinedSeqComparator,
+                mfFactory,
+                mergeSorter);
         this.maxLevel = maxLevel;
         this.mergeEngine = mergeEngine;
     }
@@ -112,7 +122,7 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
                                     section,
                                     readerFactory,
                                     keyComparator,
-                                    null,
+                                    userDefinedSeqComparator,
                                     createMergeWrapper(outputLevel),
                                     mergeSorter));
         }

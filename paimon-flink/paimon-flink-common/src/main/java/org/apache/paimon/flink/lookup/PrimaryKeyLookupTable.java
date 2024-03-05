@@ -91,16 +91,14 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
-            if (orderByLastField) {
+            if (userDefinedSeqComparator != null) {
                 InternalRow previous = tableState.get(primaryKeyRow);
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
                     continue;
                 }
             }

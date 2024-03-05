@@ -47,6 +47,7 @@ public class MergeTreeReaders {
             boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunction<KeyValue> mergeFunction,
             MergeSorter mergeSorter)
             throws IOException {
@@ -58,7 +59,7 @@ public class MergeTreeReaders {
                                     section,
                                     readerFactory,
                                     userKeyComparator,
-                                    null,
+                                    userDefinedSeqComparator,
                                     new ReducerMergeFunctionWrapper(mergeFunction),
                                     mergeSorter));
         }

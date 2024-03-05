@@ -72,8 +72,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
@@ -81,11 +80,10 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
             boolean previousFetched = false;
             InternalRow previous = null;
-            if (orderByLastField) {
+            if (userDefinedSeqComparator != null) {
                 previous = tableState.get(primaryKeyRow);
                 previousFetched = true;
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
                     continue;
                 }
             }

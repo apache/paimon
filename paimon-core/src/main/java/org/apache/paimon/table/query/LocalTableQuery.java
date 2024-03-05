@@ -109,7 +109,7 @@ public class LocalTableQuery implements TableQuery {
             int bucket,
             List<DataFileMeta> beforeFiles,
             List<DataFileMeta> dataFiles) {
-        LookupLevels lookupLevels =
+        LookupLevels<KeyValue> lookupLevels =
                 tableView.computeIfAbsent(partition, k -> new HashMap<>()).get(bucket);
         if (lookupLevels == null) {
             Preconditions.checkArgument(
