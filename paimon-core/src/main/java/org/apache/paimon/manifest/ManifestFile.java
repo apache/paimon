@@ -188,5 +188,16 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     suggestedFileSize,
                     cache);
         }
+
+        public ObjectsFile<SimpleFileEntry> createSimpleFileEntryReader() {
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
+            return new ObjectsFile<>(
+                    fileIO,
+                    new SimpleFileEntrySerializer(),
+                    fileFormat.createReaderFactory(entryType),
+                    fileFormat.createWriterFactory(entryType),
+                    pathFactory.manifestFileFactory(),
+                    cache);
+        }
     }
 }

@@ -19,7 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestEntry.Identifier;
+import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.BinaryTableStats;
@@ -215,7 +215,7 @@ public class ManifestFileMeta {
         }
 
         Map<Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        ManifestEntry.mergeEntries(manifestFile, candidates, map);
+        FileEntry.mergeEntries(manifestFile, candidates, map);
         if (!map.isEmpty()) {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
@@ -270,7 +270,7 @@ public class ManifestFileMeta {
         // 2.1. try to skip base files by partition filter
 
         Map<Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
-        ManifestEntry.mergeEntries(manifestFile, delta, deltaMerged);
+        FileEntry.mergeEntries(manifestFile, delta, deltaMerged);
 
         List<ManifestFileMeta> result = new ArrayList<>();
         int j = 0;
@@ -314,7 +314,7 @@ public class ManifestFileMeta {
         Map<Identifier, ManifestEntry> fullMerged = new LinkedHashMap<>();
         for (; j < base.size(); j++) {
             ManifestFileMeta file = base.get(j);
-            ManifestEntry.mergeEntries(manifestFile.read(file.fileName), fullMerged);
+            FileEntry.mergeEntries(manifestFile.read(file.fileName), fullMerged);
             boolean contains = false;
             for (Identifier identifier : deleteEntries) {
                 if (fullMerged.containsKey(identifier)) {
@@ -334,8 +334,8 @@ public class ManifestFileMeta {
 
         // 2.3. merge base files
 
-        ManifestEntry.mergeEntries(manifestFile, base.subList(j, base.size()), fullMerged);
-        ManifestEntry.mergeEntries(deltaMerged.values(), fullMerged);
+        FileEntry.mergeEntries(manifestFile, base.subList(j, base.size()), fullMerged);
+        FileEntry.mergeEntries(deltaMerged.values(), fullMerged);
 
         // 2.4. write new manifest files
 

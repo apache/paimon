@@ -24,6 +24,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
+import org.apache.paimon.manifest.FileEntry;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -256,7 +257,7 @@ public abstract class FileDeletionBase {
         for (String manifest : files) {
             List<ManifestEntry> entries;
             entries = manifestFile.readWithIOException(manifest);
-            ManifestEntry.mergeEntries(entries, map);
+            FileEntry.mergeEntries(entries, map);
         }
 
         return map.values();
