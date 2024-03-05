@@ -297,7 +297,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories(),
-                false);
+                true);
     }
 
     @Override
