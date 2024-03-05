@@ -40,7 +40,7 @@ import java.util.List;
 import static org.apache.paimon.utils.FileUtils.createFormatReader;
 
 /** A file which contains several {@link T}s, provides read and write. */
-public abstract class ObjectsFile<T> {
+public class ObjectsFile<T> {
 
     protected final FileIO fileIO;
     protected final ObjectSerializer<T> serializer;
@@ -50,7 +50,7 @@ public abstract class ObjectsFile<T> {
 
     @Nullable private final ObjectsCache<String, T> cache;
 
-    protected ObjectsFile(
+    public ObjectsFile(
             FileIO fileIO,
             ObjectSerializer<T> serializer,
             FormatReaderFactory readerFactory,
