@@ -400,7 +400,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
         public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
             result.reset(columnarBatch.getNumRows());
-            result.resetRowPosition(rowNumber);
+            result.resetRowPosition(rowNumber - 1);
             return result;
         }
     }

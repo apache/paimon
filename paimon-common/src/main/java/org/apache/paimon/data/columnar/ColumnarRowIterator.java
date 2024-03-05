@@ -45,7 +45,6 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         super(recycler);
         this.rowData = rowData;
         this.recycler = recycler;
-        this.rowPosition = 0;
     }
 
     /** Reset the number of rows in the vectorized batch and the start position in this batch. */
@@ -79,6 +78,13 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return rowPosition;
     }
 
+    public ColumnarRowIterator copy(ColumnVector[] vectors) {
+        ColumnarRowIterator newIterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
+        newIterator.reset(num);
+        newIterator.resetRowPosition(rowPosition);
+        return newIterator;
+    }
+
     public ColumnarRowIterator mapping(
             @Nullable PartitionInfo partitionInfo, @Nullable int[] indexMapping) {
         if (partitionInfo != null || indexMapping != null) {
@@ -90,9 +96,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             if (indexMapping != null) {
                 vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
             }
-            ColumnarRowIterator iterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
-            iterator.reset(num);
-            return iterator;
+            return copy(vectors);
         }
         return this;
     }

@@ -33,8 +33,7 @@ import java.util.function.Function;
 public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterator<T> {
 
     /**
-     * Get the row position of the row that will be returned by the following call to {@link
-     * RecordReader.RecordIterator#next}.
+     * Get the row position of the row called by {@link RecordReader.RecordIterator#next}.
      *
      * @return the row position from 0 to the number of rows in the file
      */
