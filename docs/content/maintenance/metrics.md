@@ -240,14 +240,9 @@ Below is lists of Paimon built-in metrics. They are summarized into types of sca
             <td>The average number of level 0 files currently handled by this writer. This value will become larger if asynchronous compaction cannot be done in time.</td>
         </tr>
         <tr>
-            <td>maxCompactionThreadBusy</td>
+            <td>compactionThreadBusy</td>
             <td>Gauge</td>
-            <td>The maximum business of a compaction thread in this writer. Value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
-        </tr>
-        <tr>
-            <td>avgCompactionThreadBusy</td>
-            <td>Gauge</td>
-            <td>The average business of a compaction thread in this writer. Value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
+            <td>The maximum business of compaction threads in this parallelism. Currently, there is only one compaction thread in each parallelism, so value of business ranges from 0 (idle) to 100 (compaction running all the time).</td>
         </tr>
     </tbody>
 </table>
