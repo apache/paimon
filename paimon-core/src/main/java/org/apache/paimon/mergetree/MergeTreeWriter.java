@@ -33,7 +33,6 @@ import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.mergetree.compact.MergeFunction;
-import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
@@ -78,8 +77,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private long newSequenceNumber;
     private WriteBuffer writeBuffer;
 
-    private final WriterMetrics writerMetrics;
-
     public MergeTreeWriter(
             boolean writeBufferSpillable,
             int sortMaxFan,
@@ -93,8 +90,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             boolean commitForceCompact,
             ChangelogProducer changelogProducer,
             @Nullable CommitIncrement increment,
-            @Nullable SequenceGenerator sequenceGenerator,
-            WriterMetrics writerMetrics) {
+            @Nullable SequenceGenerator sequenceGenerator) {
         this.writeBufferSpillable = writeBufferSpillable;
         this.sortMaxFan = sortMaxFan;
         this.sortCompression = sortCompression;
@@ -125,7 +121,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
             compactAfter.addAll(increment.compactIncrement().compactAfter());
             compactChangelog.addAll(increment.compactIncrement().changelogFiles());
         }
-        this.writerMetrics = writerMetrics;
     }
 
     private long newSequenceNumber() {
@@ -164,10 +159,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
         }
-
-        if (writerMetrics != null) {
-            writerMetrics.incWriteRecordNum();
-        }
     }
 
     @Override
@@ -200,7 +191,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     private void flushWriteBuffer(boolean waitForLatestCompaction, boolean forcedFullCompaction)
             throws Exception {
-        long start = System.currentTimeMillis();
         if (writeBuffer.size() > 0) {
             if (compactManager.shouldWaitForLatestCompaction()) {
                 waitForLatestCompaction = true;
@@ -240,26 +230,16 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
         trySyncLatestCompaction(waitForLatestCompaction);
         compactManager.triggerCompaction(forcedFullCompaction);
-        if (writerMetrics != null) {
-            writerMetrics.updateBufferFlushCostMillis(System.currentTimeMillis() - start);
-        }
     }
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        long start = System.currentTimeMillis();
         flushWriteBuffer(waitCompaction, false);
         trySyncLatestCompaction(
                 waitCompaction
                         || commitForceCompact
                         || compactManager.shouldWaitForPreparingCheckpoint());
-
-        CommitIncrement increment = drainIncrement();
-
-        if (writerMetrics != null) {
-            writerMetrics.updatePrepareCommitCostMillis(System.currentTimeMillis() - start);
-        }
-        return increment;
+        return drainIncrement();
     }
 
     @Override
@@ -320,9 +300,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
     @Override
     public void close() throws Exception {
-        if (writerMetrics != null) {
-            writerMetrics.close();
-        }
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();

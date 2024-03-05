@@ -85,7 +85,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             FileStoreScan scan,
             CoreOptions options,
             String tableName) {
-        super(commitUser, snapshotManager, scan, options, null, tableName, pathFactory);
+        super(commitUser, snapshotManager, scan, options, null, tableName);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -125,7 +125,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                getCompactionMetrics(partition, bucket));
+                                compactionMetrics == null
+                                        ? null
+                                        : compactionMetrics.createReporter(partition, bucket));
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -142,8 +144,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 useWriteBuffer || forceBufferSpill,
                 spillable || forceBufferSpill,
                 fileCompression,
-                statsCollectors,
-                getWriterMetrics(partition, bucket));
+                statsCollectors);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
