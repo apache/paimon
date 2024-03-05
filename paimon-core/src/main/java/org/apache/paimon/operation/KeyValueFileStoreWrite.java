@@ -110,7 +110,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
             String tableName) {
-        super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
+        super(commitUser, snapshotManager, scan, options, indexFactory, tableName);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
@@ -186,8 +186,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                SequenceGenerator.create(schema, options),
-                getWriterMetrics(partition, bucket));
+                SequenceGenerator.create(schema, options));
     }
 
     @VisibleForTesting
@@ -214,7 +213,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
                     rewriter,
-                    getCompactionMetrics(partition, bucket));
+                    compactionMetrics == null
+                            ? null
+                            : compactionMetrics.createReporter(partition, bucket));
         }
     }
 

@@ -38,9 +38,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
-import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
@@ -92,25 +90,6 @@ public abstract class WriterOperatorTestBase {
         harness.notifyOfCompletedCheckpoint(1);
 
         OperatorMetricGroup metricGroup = rowDataStoreWriteOperator.getMetricGroup();
-        MetricGroup writerMetricGroup =
-                metricGroup
-                        .addGroup("paimon")
-                        .addGroup("table", tableName)
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("writer");
-
-        Counter writeRecordCount = MetricUtils.getCounter(writerMetricGroup, "writeRecordCount");
-        Assertions.assertThat(writeRecordCount.getCount()).isEqualTo(size);
-
-        // test histogram has sample
-        Histogram flushCostMS = MetricUtils.getHistogram(writerMetricGroup, "flushCostMillis");
-        Assertions.assertThat(flushCostMS.getCount()).isGreaterThan(0);
-
-        Histogram prepareCommitCostMS =
-                MetricUtils.getHistogram(writerMetricGroup, "prepareCommitCostMillis");
-        Assertions.assertThat(prepareCommitCostMS.getCount()).isGreaterThan(0);
-
         MetricGroup writerBufferMetricGroup =
                 metricGroup
                         .addGroup("paimon")

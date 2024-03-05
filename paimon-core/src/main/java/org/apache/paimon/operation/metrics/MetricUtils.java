@@ -16,23 +16,18 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.metrics;
+package org.apache.paimon.operation.metrics;
 
-import java.util.LinkedHashMap;
-import java.util.Map;
+import org.slf4j.Logger;
 
-/** Factory to create {@link MetricGroup}s. */
-public abstract class MetricRegistry {
+/** Utils for metrics. */
+public class MetricUtils {
 
-    private static final String KEY_TABLE = "table";
-
-    public MetricGroup tableMetricGroup(String groupName, String tableName) {
-        Map<String, String> variables = new LinkedHashMap<>();
-        variables.put(KEY_TABLE, tableName);
-
-        return createMetricGroup(groupName, variables);
+    public static void safeCall(Runnable runnable, Logger logger) {
+        try {
+            runnable.run();
+        } catch (Throwable t) {
+            logger.warn("Exception occurs when reporting metrics", t);
+        }
     }
-
-    protected abstract MetricGroup createMetricGroup(
-            String groupName, Map<String, String> variables);
 }

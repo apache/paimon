@@ -33,7 +33,6 @@ import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
-import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -75,7 +74,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final IOManager ioManager;
 
     private MemorySegmentPool memorySegmentPool;
-    private WriterMetrics writerMetrics;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -92,8 +90,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
-            FieldStatsCollector.Factory[] statsCollectors,
-            WriterMetrics writerMetrics) {
+            FieldStatsCollector.Factory[] statsCollectors) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -118,7 +115,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
-        this.writerMetrics = writerMetrics;
     }
 
     @Override
@@ -137,10 +133,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 // code in SpillableBuffer.)
                 throw new RuntimeException("Mem table is too small to hold a single element.");
             }
-        }
-
-        if (writerMetrics != null) {
-            writerMetrics.incWriteRecordNum();
         }
     }
 
@@ -161,14 +153,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
-        long start = System.currentTimeMillis();
         flush(false, false);
         trySyncLatestCompaction(waitCompaction || forceCompact);
-        CommitIncrement increment = drainIncrement();
-        if (writerMetrics != null) {
-            writerMetrics.updatePrepareCommitCostMillis(System.currentTimeMillis() - start);
-        }
-        return increment;
+        return drainIncrement();
     }
 
     @Override
@@ -178,7 +165,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @VisibleForTesting
     void flush(boolean waitForLatestCompaction, boolean forcedFullCompaction) throws Exception {
-        long start = System.currentTimeMillis();
         List<DataFileMeta> flushedFiles = sinkWriter.flush();
 
         // add new generated files
@@ -186,9 +172,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         trySyncLatestCompaction(waitForLatestCompaction);
         compactManager.triggerCompaction(forcedFullCompaction);
         newFiles.addAll(flushedFiles);
-        if (writerMetrics != null) {
-            writerMetrics.updateBufferFlushCostMillis(System.currentTimeMillis() - start);
-        }
     }
 
     @Override
@@ -198,9 +181,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     @Override
     public void close() throws Exception {
-        if (writerMetrics != null) {
-            writerMetrics.close();
-        }
         // cancel compaction so that it does not block job cancelling
         compactManager.cancelCompaction();
         sync();
