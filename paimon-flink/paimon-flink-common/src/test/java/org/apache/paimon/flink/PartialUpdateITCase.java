@@ -20,6 +20,7 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
@@ -336,16 +337,20 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 .set(
                         ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
                         ExecutionConfigOptions.UpsertMaterialize.FORCE);
-        try (CloseableIterator<Row> ignored =
-                streamSqlIter(
-                        "INSERT INTO dwd_orders "
-                                + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
-                                + "UNION ALL "
-                                + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;")) {
+        sEnv.getConfig().set(RestartStrategyOptions.RESTART_STRATEGY, "none");
+        String sql =
+                "INSERT INTO dwd_orders "
+                        + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
+                        + "UNION ALL "
+                        + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;";
+        try {
+            sEnv.executeSql(sql).await();
             fail("Expecting exception");
         } catch (Exception e) {
             assertThat(e)
-                    .hasMessageContaining("Sink materializer must not be used with Paimon sink.");
+                    .hasRootCauseMessage(
+                            "Sink materializer must not be used with Paimon sink. "
+                                    + "Please set 'table.exec.sink.upsert-materialize' to 'NONE' in Flink's config.");
         }
     }
 
