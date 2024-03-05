@@ -22,6 +22,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -33,8 +34,10 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.Optional;
 import java.util.Properties;
 
+import static org.apache.paimon.hive.PaimonStorageHandler.PAIMON_SCHEMA;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -341,5 +344,22 @@ public class HiveTableSchemaTest {
         properties.setProperty("columns.comments", "col1 comment\0col2 comment\0col3 comment");
         properties.setProperty("location", tempDir.toString());
         return properties;
+    }
+
+    @Test
+    public void testReadSchemaFromProperties() throws Exception {
+        createSchema();
+        // cache the TableSchema to properties
+        Optional<TableSchema> existingSchema =
+                HiveSchema.getExistingSchema(null, tempDir.toString());
+        assertThat(existingSchema).isPresent();
+        Properties properties = new Properties();
+        TableSchema tableSchema = existingSchema.get();
+        properties.put(PAIMON_SCHEMA, tableSchema.toString());
+
+        // get the TableSchema from properties
+        Optional<TableSchema> tableSchemaFromCache = HiveSchema.getTableSchemaFromCache(properties);
+        assertThat(tableSchemaFromCache).isPresent();
+        assertThat(tableSchemaFromCache.get()).isEqualTo(tableSchema);
     }
 }

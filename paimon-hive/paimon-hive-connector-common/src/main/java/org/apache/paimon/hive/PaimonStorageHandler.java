@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.hive.mapred.PaimonInputFormat;
 import org.apache.paimon.hive.mapred.PaimonOutputCommitter;
 import org.apache.paimon.hive.mapred.PaimonOutputFormat;
+import org.apache.paimon.schema.TableSchema;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.metastore.HiveMetaHook;
@@ -38,6 +39,7 @@ import org.apache.hadoop.mapred.JobConf;
 import org.apache.hadoop.mapred.OutputFormat;
 
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 
 /** {@link HiveStorageHandler} for paimon. This is the entrance class of Hive API. */
@@ -45,6 +47,8 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
 
     private static final String MAPRED_OUTPUT_COMMITTER = "mapred.output.committer.class";
     private static final String PAIMON_WRITE = "paimon.write";
+
+    public static final String PAIMON_SCHEMA = "paimon.schema";
 
     private Configuration conf;
 
@@ -76,9 +80,16 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
     @Override
     public void configureInputJobProperties(TableDesc tableDesc, Map<String, String> map) {
         Properties properties = tableDesc.getProperties();
-        map.put(
-                LocationKeyExtractor.INTERNAL_LOCATION,
-                LocationKeyExtractor.getPaimonLocation(conf, properties));
+        String paimonLocation = LocationKeyExtractor.getPaimonLocation(conf, properties);
+        map.put(LocationKeyExtractor.INTERNAL_LOCATION, paimonLocation);
+
+        // cache the schema into table properties
+        Optional<TableSchema> existingSchema = HiveSchema.getExistingSchema(null, paimonLocation);
+        if (existingSchema.isPresent()) {
+            String tableSchema = existingSchema.get().toString();
+            tableDesc.getProperties().put(PAIMON_SCHEMA, tableSchema);
+            map.put(PAIMON_SCHEMA, tableSchema);
+        }
     }
 
     public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}
