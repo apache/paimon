@@ -45,10 +45,7 @@ public class PartitionPredicateTest {
     public void testNoPartition() {
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(RowType.of(), Collections.singletonList(EMPTY_ROW));
-
-        assertThat(predicate.test(EMPTY_ROW)).isTrue();
-        assertThat(predicate.test(1, EMPTY_ROW, EMPTY_ROW, BinaryArray.fromLongArray(new Long[0])))
-                .isTrue();
+        assertThat(predicate).isNull();
     }
 
     @Test
