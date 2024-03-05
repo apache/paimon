@@ -44,6 +44,7 @@ import org.apache.paimon.types.ReassignFieldId;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
@@ -67,6 +68,7 @@ import static org.apache.paimon.catalog.AbstractCatalog.DB_SUFFIX;
 import static org.apache.paimon.catalog.Identifier.UNKNOWN_DATABASE;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.BranchManager.getBranchPath;
+import static org.apache.paimon.utils.BranchManager.isMainBranch;
 import static org.apache.paimon.utils.FileUtils.listVersionedFiles;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -81,9 +83,21 @@ public class SchemaManager implements Serializable {
 
     @Nullable private transient Lock lock;
 
+    private final String branch;
+
     public SchemaManager(FileIO fileIO, Path tableRoot) {
+        this(fileIO, tableRoot, DEFAULT_MAIN_BRANCH);
+    }
+
+    /** Specify the default branch for data writing. */
+    public SchemaManager(FileIO fileIO, Path tableRoot, String branch) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
+        this.branch = StringUtils.isBlank(branch) ? DEFAULT_MAIN_BRANCH : branch;
+    }
+
+    public SchemaManager copyWithBranch(String branchName) {
+        return new SchemaManager(fileIO, tableRoot, branchName);
     }
 
     public SchemaManager withLock(@Nullable Lock lock) {
@@ -91,28 +105,18 @@ public class SchemaManager implements Serializable {
         return this;
     }
 
-    /** @return latest schema. */
     public Optional<TableSchema> latest() {
-        return latest(DEFAULT_MAIN_BRANCH);
-    }
-
-    public Optional<TableSchema> latest(String branchName) {
-        Path directoryPath =
-                branchName.equals(DEFAULT_MAIN_BRANCH)
-                        ? schemaDirectory()
-                        : branchSchemaDirectory(branchName);
         try {
-            return listVersionedFiles(fileIO, directoryPath, SCHEMA_PREFIX)
+            return listVersionedFiles(fileIO, schemaDirectory(), SCHEMA_PREFIX)
                     .reduce(Math::max)
-                    .map(this::schema);
+                    .map(id -> schema(id));
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
     }
 
-    /** List all schema. */
     public List<TableSchema> listAll() {
-        return listAllIds().stream().map(this::schema).collect(Collectors.toList());
+        return listAllIds().stream().map(id -> schema(id)).collect(Collectors.toList());
     }
 
     /** List all schema IDs. */
@@ -125,7 +129,6 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    /** Create a new schema from {@link Schema}. */
     public TableSchema createTable(Schema schema) throws Exception {
         return createTable(schema, false);
     }
@@ -471,7 +474,6 @@ public class SchemaManager implements Serializable {
     @VisibleForTesting
     boolean commit(TableSchema newSchema) throws Exception {
         SchemaValidation.validateTableSchema(newSchema);
-
         Path schemaPath = toSchemaPath(newSchema.id());
         Callable<Boolean> callable = () -> fileIO.writeFileUtf8(schemaPath, newSchema.toString());
         if (lock == null) {
@@ -497,22 +499,18 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    private Path schemaDirectory() {
-        return new Path(tableRoot + "/schema");
+    public Path schemaDirectory() {
+        return isMainBranch(branch)
+                ? new Path(tableRoot + "/schema")
+                : new Path(getBranchPath(tableRoot, branch) + "/schema");
     }
 
     @VisibleForTesting
-    public Path toSchemaPath(long id) {
-        return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
-    }
-
-    public Path branchSchemaDirectory(String branchName) {
-        return new Path(getBranchPath(tableRoot, branchName) + "/schema");
-    }
-
-    public Path branchSchemaPath(String branchName, long schemaId) {
-        return new Path(
-                getBranchPath(tableRoot, branchName) + "/schema/" + SCHEMA_PREFIX + schemaId);
+    public Path toSchemaPath(long schemaId) {
+        return isMainBranch(branch)
+                ? new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + schemaId)
+                : new Path(
+                        getBranchPath(tableRoot, branch) + "/schema/" + SCHEMA_PREFIX + schemaId);
     }
 
     /**

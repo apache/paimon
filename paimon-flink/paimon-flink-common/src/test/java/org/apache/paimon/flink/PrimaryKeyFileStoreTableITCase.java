@@ -168,6 +168,61 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
         innerTestChangelogProducing(Collections.singletonList("'changelog-producer' = 'lookup'"));
     }
 
+    @Test
+    public void testTableReadWriteBranch() throws Exception {
+        TableEnvironment sEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(ThreadLocalRandom.current().nextInt(900) + 100)
+                        .parallelism(1)
+                        .build();
+
+        sEnv.executeSql(createCatalogSql("testCatalog", path + "/warehouse"));
+        sEnv.executeSql("USE CATALOG testCatalog");
+        sEnv.executeSql(
+                "CREATE TABLE T2 ( k INT, v STRING, PRIMARY KEY (k) NOT ENFORCED ) "
+                        + "WITH ( "
+                        + "'bucket' = '2'"
+                        + ")");
+
+        CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T2").collect();
+
+        // insert data
+        sEnv.executeSql("INSERT INTO T2 VALUES (1, 'A')").await();
+        // read initial data
+        List<String> actual = new ArrayList<>();
+        for (int i = 0; i < 1; i++) {
+            actual.add(it.next().toString());
+        }
+
+        assertThat(actual).containsExactlyInAnyOrder("+I[1, A]");
+
+        // create tag
+        sEnv.executeSql(
+                String.format("CALL sys.create_tag('%s.%s', 'tag2', 1, '5 d')", "default", "T2"));
+        // create branch
+        sEnv.executeSql(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch1', 'tag2')", "default", "T2"));
+        // alter table
+        sEnv.executeSql("ALTER TABLE T2 SET ('changelog-producer'='full-compaction')");
+
+        CloseableIterator<Row> branchIt =
+                sEnv.executeSql("select * from T2 /*+ OPTIONS('branch' = 'branch1') */").collect();
+        // insert data to branch
+        sEnv.executeSql(
+                        "INSERT INTO T2/*+ OPTIONS('branch' = 'branch1') */ VALUES (10, 'v10'),(11, 'v11'),(12, 'v12')")
+                .await();
+
+        // read initial data
+        List<String> actualBranch = new ArrayList<>();
+        for (int i = 0; i < 4; i++) {
+            actualBranch.add(branchIt.next().toString());
+        }
+        assertThat(actualBranch)
+                .containsExactlyInAnyOrder("+I[1, A]", "+I[10, v10]", "+I[11, v11]", "+I[12, v12]");
+    }
+
     private void innerTestChangelogProducing(List<String> options) throws Exception {
         TableEnvironment sEnv =
                 tableEnvironmentBuilder()
