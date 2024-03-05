@@ -21,6 +21,8 @@ package org.apache.paimon.operation.metrics;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.utils.Preconditions;
 
+import javax.annotation.concurrent.ThreadSafe;
+
 import java.util.LinkedList;
 
 /**
@@ -33,6 +35,7 @@ import java.util.LinkedList;
  *       milliseconds, where <code>queryLengthMillis</code> is a constant.
  * </ul>
  */
+@ThreadSafe
 public class CompactTimer {
 
     private final long queryLengthMillis;
@@ -54,17 +57,19 @@ public class CompactTimer {
 
     @VisibleForTesting
     void start(long millis) {
-        removeExpiredIntervals(millis - queryLengthMillis);
-        Preconditions.checkArgument(
-                intervals.isEmpty() || intervals.getLast().finished(),
-                "There is an unfinished interval. This is unexpected.");
-        Preconditions.checkArgument(lastCallMillis <= millis, "millis must not decrease.");
-        lastCallMillis = millis;
+        synchronized (intervals) {
+            removeExpiredIntervals(millis - queryLengthMillis);
+            Preconditions.checkArgument(
+                    intervals.isEmpty() || intervals.getLast().finished(),
+                    "There is an unfinished interval. This is unexpected.");
+            Preconditions.checkArgument(lastCallMillis <= millis, "millis must not decrease.");
+            lastCallMillis = millis;
 
-        if (intervals.size() > 1) {
-            innerSum += intervals.getLast().totalLength();
+            if (intervals.size() > 1) {
+                innerSum += intervals.getLast().totalLength();
+            }
+            intervals.add(new TimeInterval(millis));
         }
-        intervals.add(new TimeInterval(millis));
     }
 
     public void finish() {
@@ -73,14 +78,16 @@ public class CompactTimer {
 
     @VisibleForTesting
     void finish(long millis) {
-        removeExpiredIntervals(millis - queryLengthMillis);
-        Preconditions.checkArgument(
-                intervals.size() > 0 && !intervals.getLast().finished(),
-                "There is no unfinished interval. This is unexpected.");
-        Preconditions.checkArgument(lastCallMillis <= millis, "millis must not decrease.");
-        lastCallMillis = millis;
+        synchronized (intervals) {
+            removeExpiredIntervals(millis - queryLengthMillis);
+            Preconditions.checkArgument(
+                    intervals.size() > 0 && !intervals.getLast().finished(),
+                    "There is no unfinished interval. This is unexpected.");
+            Preconditions.checkArgument(lastCallMillis <= millis, "millis must not decrease.");
+            lastCallMillis = millis;
 
-        intervals.getLast().finish(millis);
+            intervals.getLast().finish(millis);
+        }
     }
 
     public long calculateLength() {
@@ -89,22 +96,24 @@ public class CompactTimer {
 
     @VisibleForTesting
     long calculateLength(long toMillis) {
-        Preconditions.checkArgument(lastCallMillis <= toMillis, "millis must not decrease.");
-        lastCallMillis = toMillis;
+        synchronized (intervals) {
+            Preconditions.checkArgument(lastCallMillis <= toMillis, "millis must not decrease.");
+            lastCallMillis = toMillis;
 
-        long fromMillis = toMillis - queryLengthMillis;
-        removeExpiredIntervals(fromMillis);
+            long fromMillis = toMillis - queryLengthMillis;
+            removeExpiredIntervals(fromMillis);
 
-        if (intervals.isEmpty()) {
-            return 0;
-        } else if (intervals.size() == 1) {
-            return intervals.getFirst().calculateLength(fromMillis, toMillis);
-        } else {
-            // only the first and the last interval may not be complete,
-            // so we calculate them separately
-            return innerSum
-                    + intervals.getFirst().calculateLength(fromMillis, toMillis)
-                    + intervals.getLast().calculateLength(fromMillis, toMillis);
+            if (intervals.isEmpty()) {
+                return 0;
+            } else if (intervals.size() == 1) {
+                return intervals.getFirst().calculateLength(fromMillis, toMillis);
+            } else {
+                // only the first and the last interval may not be complete,
+                // so we calculate them separately
+                return innerSum
+                        + intervals.getFirst().calculateLength(fromMillis, toMillis)
+                        + intervals.getLast().calculateLength(fromMillis, toMillis);
+            }
         }
     }
 

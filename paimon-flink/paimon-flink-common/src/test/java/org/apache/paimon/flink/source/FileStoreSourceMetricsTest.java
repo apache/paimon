@@ -20,7 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -87,9 +87,11 @@ public class FileStoreSourceMetricsTest {
                         1,
                         FlinkConnectorOptions.SplitAssignMode.FAIR);
         staticFileStoreSource.restoreEnumerator(context, null);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
+        assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles")
+                                .getValue())
                 .isEqualTo(1L);
     }
 
@@ -102,20 +104,24 @@ public class FileStoreSourceMetricsTest {
                 (ContinuousFileSplitEnumerator)
                         continuousFileStoreSource.restoreEnumerator(context, null);
         enumerator.scanNextSnapshot();
-        assertThat(MetricUtils.getHistogram(scanMetricGroup, "scanDuration").getCount())
+        assertThat(TestingMetricUtils.getHistogram(scanMetricGroup, "scanDuration").getCount())
                 .isEqualTo(1);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
+        assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles")
+                                .getValue())
                 .isEqualTo(1L);
 
         writeAgain();
         enumerator.scanNextSnapshot();
-        assertThat(MetricUtils.getHistogram(scanMetricGroup, "scanDuration").getCount())
+        assertThat(TestingMetricUtils.getHistogram(scanMetricGroup, "scanDuration").getCount())
                 .isEqualTo(2);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
+        assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles")
+                                .getValue())
                 .isEqualTo(1L);
     }
 
@@ -125,9 +131,11 @@ public class FileStoreSourceMetricsTest {
         FlinkSource logHybridFileStoreSource =
                 LogHybridSourceFactory.buildHybridFirstSource(table, null, null);
         logHybridFileStoreSource.restoreEnumerator(context, null);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
+        assertThat(TestingMetricUtils.getGauge(scanMetricGroup, "lastScannedManifests").getValue())
                 .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(scanMetricGroup, "lastScanResultedTableFiles")
+                                .getValue())
                 .isEqualTo(1L);
     }
 

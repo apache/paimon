@@ -29,7 +29,7 @@ import java.lang.reflect.Field;
 import java.util.Map;
 
 /** Test utils for Flink's {@link Metric}s. */
-public class MetricUtils {
+public class TestingMetricUtils {
 
     public static <T> Gauge<T> getGauge(MetricGroup group, String metricName) {
         return (Gauge<T>) getMetric(group, metricName);

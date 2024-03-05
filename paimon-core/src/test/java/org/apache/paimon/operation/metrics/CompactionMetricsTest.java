@@ -34,10 +34,7 @@ public class CompactionMetricsTest {
         CompactionMetrics metrics = new CompactionMetrics(new MetricRegistryImpl(), "myTable");
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(-1L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(-1.0);
-        assertThat(getMetric(metrics, CompactionMetrics.MAX_COMPACTION_THREAD_BUSY))
-                .isEqualTo(-1.0);
-        assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_THREAD_BUSY))
-                .isEqualTo(-1.0);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
 
         CompactionMetrics.Reporter[] reporters = new CompactionMetrics.Reporter[3];
         for (int i = 0; i < reporters.length; i++) {
@@ -46,8 +43,7 @@ public class CompactionMetricsTest {
 
         assertThat(getMetric(metrics, CompactionMetrics.MAX_LEVEL0_FILE_COUNT)).isEqualTo(0L);
         assertThat(getMetric(metrics, CompactionMetrics.AVG_LEVEL0_FILE_COUNT)).isEqualTo(0.0);
-        assertThat(getMetric(metrics, CompactionMetrics.MAX_COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
-        assertThat(getMetric(metrics, CompactionMetrics.AVG_COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
+        assertThat(getMetric(metrics, CompactionMetrics.COMPACTION_THREAD_BUSY)).isEqualTo(0.0);
 
         reporters[0].reportLevel0FileCount(5);
         reporters[1].reportLevel0FileCount(3);

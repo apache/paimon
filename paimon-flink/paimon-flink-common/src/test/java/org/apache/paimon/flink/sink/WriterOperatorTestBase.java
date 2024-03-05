@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.ConfigOption;
@@ -97,17 +97,17 @@ public abstract class WriterOperatorTestBase {
                         .addGroup("writerBuffer");
 
         Gauge<Long> bufferPreemptCount =
-                MetricUtils.getGauge(writerBufferMetricGroup, "bufferPreemptCount");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "bufferPreemptCount");
         Assertions.assertThat(bufferPreemptCount.getValue()).isEqualTo(0);
 
         Gauge<Long> totalWriteBufferSizeByte =
-                MetricUtils.getGauge(writerBufferMetricGroup, "totalWriteBufferSizeByte");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "totalWriteBufferSizeByte");
         Assertions.assertThat(totalWriteBufferSizeByte.getValue()).isEqualTo(256);
 
         GenericRow row = GenericRow.of(1, 1);
         harness.processElement(row, 1);
         Gauge<Long> usedWriteBufferSizeByte =
-                MetricUtils.getGauge(writerBufferMetricGroup, "usedWriteBufferSizeByte");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "usedWriteBufferSizeByte");
         Assertions.assertThat(usedWriteBufferSizeByte.getValue()).isGreaterThan(0);
     }
 

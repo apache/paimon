@@ -26,6 +26,7 @@ import org.apache.paimon.metrics.MetricRegistry;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.DoubleStream;
 import java.util.stream.LongStream;
 
@@ -36,16 +37,17 @@ public class CompactionMetrics {
 
     public static final String MAX_LEVEL0_FILE_COUNT = "maxLevel0FileCount";
     public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
-    public static final String MAX_COMPACTION_THREAD_BUSY = "maxCompactionThreadBusy";
-    public static final String AVG_COMPACTION_THREAD_BUSY = "avgCompactionThreadBusy";
+    public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
     private static final long BUSY_MEASURE_MILLIS = 60_000;
 
     private final MetricGroup metricGroup;
     private final Map<PartitionAndBucket, ReporterImpl> reporters;
+    private final Map<Long, CompactTimer> compactTimers;
 
     public CompactionMetrics(MetricRegistry registry, String tableName) {
         this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
         this.reporters = new HashMap<>();
+        this.compactTimers = new ConcurrentHashMap<>();
 
         registerGenericCompactionMetrics();
     }
@@ -60,10 +62,7 @@ public class CompactionMetrics {
         metricGroup.gauge(
                 AVG_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().average().orElse(-1));
 
-        metricGroup.gauge(
-                MAX_COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().max().orElse(-1));
-        metricGroup.gauge(
-                AVG_COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().average().orElse(-1));
+        metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
     }
 
     private LongStream getLevel0FileCountStream() {
@@ -71,8 +70,8 @@ public class CompactionMetrics {
     }
 
     private DoubleStream getCompactBusyStream() {
-        return reporters.values().stream()
-                .mapToDouble(r -> 100.0 * r.timer.calculateLength() / BUSY_MEASURE_MILLIS);
+        return compactTimers.values().stream()
+                .mapToDouble(t -> 100.0 * t.calculateLength() / BUSY_MEASURE_MILLIS);
     }
 
     public void close() {
@@ -92,18 +91,18 @@ public class CompactionMetrics {
     private class ReporterImpl implements Reporter {
 
         private final PartitionAndBucket key;
-        private final CompactTimer timer;
         private long level0FileCount;
 
         private ReporterImpl(PartitionAndBucket key) {
             this.key = key;
-            this.timer = new CompactTimer(BUSY_MEASURE_MILLIS);
             this.level0FileCount = 0;
         }
 
         @Override
         public CompactTimer getCompactTimer() {
-            return timer;
+            return compactTimers.computeIfAbsent(
+                    Thread.currentThread().getId(),
+                    ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
         }
 
         @Override
