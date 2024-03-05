@@ -74,7 +74,6 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
-import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /**
  * Default implementation of {@link FileStoreCommit}.
@@ -187,7 +186,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             return commitIdentifiers;
         }
 
-        Optional<Snapshot> latestSnapshot = snapshotManager.latestSnapshotOfUser(commitUser);
+        Optional<Snapshot> latestSnapshot =
+                snapshotManager.latestSnapshotOfUser(branchName, commitUser);
         if (latestSnapshot.isPresent()) {
             Set<Long> result = new HashSet<>();
             for (Long identifier : commitIdentifiers) {
@@ -668,7 +668,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets) {
         int cnt = 0;
         while (true) {
-            Snapshot latestSnapshot = snapshotManager.latestSnapshot();
+            Snapshot latestSnapshot = snapshotManager.latestSnapshot(branchName);
 
             cnt++;
             List<ManifestEntry> changesWithOverwrite = new ArrayList<>();
@@ -736,10 +736,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable String newStatsFileName) {
         long newSnapshotId =
                 latestSnapshot == null ? Snapshot.FIRST_SNAPSHOT_ID : latestSnapshot.id() + 1;
-        Path newSnapshotPath =
-                branchName.equals(DEFAULT_MAIN_BRANCH)
-                        ? snapshotManager.snapshotPath(newSnapshotId)
-                        : snapshotManager.branchSnapshotPath(branchName, newSnapshotId);
+        Path newSnapshotPath = snapshotManager.snapshotPath(branchName, newSnapshotId);
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit table files to snapshot #" + newSnapshotId);

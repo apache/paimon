@@ -37,15 +37,15 @@ public class ContinuousCompactorStartingScanner extends AbstractStartingScanner 
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId(branch);
+        Long earliestSnapshotId = snapshotManager.earliestSnapshotId(branch);
         if (latestSnapshotId == null || earliestSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
             return new NoSnapshot();
         }
 
         for (long id = latestSnapshotId; id >= earliestSnapshotId; id--) {
-            Snapshot snapshot = snapshotManager.snapshot(id);
+            Snapshot snapshot = snapshotManager.snapshot(branch, id);
             if (snapshot.commitKind() == Snapshot.CommitKind.COMPACT) {
                 LOG.debug("Found latest compact snapshot {}, reading from the next snapshot.", id);
                 return new NextSnapshot(id + 1);

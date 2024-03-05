@@ -48,7 +48,7 @@ public abstract class FlinkWriteSink<T> extends FlinkSink<T> {
         // a restart.
         return (user, metricGroup) ->
                 new StoreCommitter(
-                        table.newCommit(user)
+                        table.newCommit(user, branch)
                                 .withOverwrite(overwritePartition)
                                 .ignoreEmptyCommit(!streamingCheckpointEnabled),
                         metricGroup);

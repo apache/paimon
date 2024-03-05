@@ -39,8 +39,10 @@ import org.apache.paimon.table.sink.CallbackUtils;
 import org.apache.paimon.table.sink.CommitCallback;
 import org.apache.paimon.table.sink.DynamicBucketRowKeyExtractor;
 import org.apache.paimon.table.sink.FixedBucketRowKeyExtractor;
+import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.sink.UnawareBucketRowKeyExtractor;
 import org.apache.paimon.table.source.InnerStreamTableScan;
 import org.apache.paimon.table.source.InnerStreamTableScanImpl;
@@ -160,6 +162,15 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public InnerTableScan newScan(String branch) {
+        return new InnerTableScanImpl(
+                coreOptions(),
+                newSnapshotReader(branch),
+                DefaultValueAssigner.create(tableSchema),
+                branch);
+    }
+
+    @Override
     public InnerStreamTableScan newStreamScan() {
         return new InnerStreamTableScanImpl(
                 coreOptions(),
@@ -167,6 +178,17 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 supportStreamingReadOverwrite(),
                 DefaultValueAssigner.create(tableSchema));
+    }
+
+    @Override
+    public InnerStreamTableScan newStreamScan(String branch) {
+        return new InnerStreamTableScanImpl(
+                coreOptions(),
+                newSnapshotReader(branch),
+                snapshotManager(),
+                supportStreamingReadOverwrite(),
+                DefaultValueAssigner.create(tableSchema),
+                branch);
     }
 
     protected abstract SplitGenerator splitGenerator();
@@ -242,6 +264,21 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public FileStoreTable copyWithLatestSchema(String branch) {
+        Map<String, String> options = tableSchema.options();
+        SchemaManager schemaManager = new SchemaManager(fileIO(), location());
+        Optional<TableSchema> optionalLatestSchema = schemaManager.latest(branch);
+        if (optionalLatestSchema.isPresent()) {
+            TableSchema newTableSchema = optionalLatestSchema.get();
+            newTableSchema = newTableSchema.copy(options);
+            SchemaValidation.validateTableSchema(newTableSchema);
+            return copy(newTableSchema);
+        } else {
+            return this;
+        }
+    }
+
+    @Override
     public FileStoreTable copyWithLatestSchema() {
         Map<String, String> options = tableSchema.options();
         SchemaManager schemaManager = new SchemaManager(fileIO(), location());
@@ -298,6 +335,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public TableCommitImpl newCommit(String commitUser) {
         // Compatibility with previous design, the main branch is written by default
         return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public TableWriteImpl<?> newWrite(String commitUser) {
+        return newWrite(commitUser, null, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public InnerTableWrite newWrite(String commitUser, String branch) {
+        return newWrite(commitUser, null, branch);
     }
 
     public TableCommitImpl newCommit(String commitUser, String branchName) {

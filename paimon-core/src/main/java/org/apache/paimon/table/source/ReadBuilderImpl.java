@@ -22,6 +22,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Projection;
 import org.apache.paimon.utils.TypeUtils;
 
@@ -42,6 +43,9 @@ public class ReadBuilderImpl implements ReadBuilder {
     private Integer limit = null;
 
     private Map<String, String> partitionSpec;
+
+    // default read main branch.
+    private String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public ReadBuilderImpl(InnerTable table) {
         this.table = table;
@@ -89,9 +93,15 @@ public class ReadBuilderImpl implements ReadBuilder {
     }
 
     @Override
+    public ReadBuilder fromBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
+    @Override
     public TableScan newScan() {
         InnerTableScan tableScan =
-                table.newScan().withFilter(filter).withPartitionFilter(partitionSpec);
+                table.newScan(branch).withFilter(filter).withPartitionFilter(partitionSpec);
         if (limit != null) {
             tableScan.withLimit(limit);
         }
@@ -100,12 +110,12 @@ public class ReadBuilderImpl implements ReadBuilder {
 
     @Override
     public StreamTableScan newStreamScan() {
-        return (StreamTableScan) table.newStreamScan().withFilter(filter);
+        return (StreamTableScan) table.newStreamScan(branch).withFilter(filter);
     }
 
     @Override
     public TableRead newRead() {
-        InnerTableRead read = table.newRead().withFilter(filter);
+        InnerTableRead read = table.newRead(branch).withFilter(filter);
         if (projection != null) {
             read.withProjection(projection);
         }

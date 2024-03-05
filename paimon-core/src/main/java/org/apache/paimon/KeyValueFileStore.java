@@ -130,6 +130,20 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newReaderFactoryBuilder());
     }
 
+    @Override
+    public KeyValueFileStoreRead newRead(String branchName) {
+        return new KeyValueFileStoreRead(
+                options,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                newKeyComparator(),
+                mfFactory,
+                newReaderFactoryBuilder(branchName),
+                branchName);
+    }
+
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
         return KeyValueFileReaderFactory.builder(
                 fileIO,
@@ -143,13 +157,38 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 options);
     }
 
+    public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder(String branch) {
+        return KeyValueFileReaderFactory.builder(
+                fileIO,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                FileFormatDiscover.of(options),
+                pathFactory(),
+                keyValueFieldsExtractor,
+                options,
+                branch);
+    }
+
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public KeyValueFileStoreWrite newWrite(String commitUser, String branch) {
+        return newWrite(commitUser, null, branch);
     }
 
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public KeyValueFileStoreWrite newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
         if (bucketMode() == BucketMode.DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
@@ -173,12 +212,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true, branchName).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
-                tableName);
+                tableName,
+                branchName);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

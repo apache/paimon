@@ -41,7 +41,7 @@ public class StaticFromSnapshotStartingScanner extends AbstractStartingScanner {
     @Override
     public Result scan(SnapshotReader snapshotReader) {
         if (snapshotManager.earliestSnapshotId() == null
-                || startingSnapshotId < snapshotManager.earliestSnapshotId()) {
+                || startingSnapshotId < snapshotManager.earliestSnapshotId(branch)) {
             return new NoSnapshot();
         }
         return StartingScanner.fromPlan(

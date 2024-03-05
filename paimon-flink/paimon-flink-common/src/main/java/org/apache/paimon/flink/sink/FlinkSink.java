@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SerializableRunnable;
 
@@ -76,10 +77,16 @@ public abstract class FlinkSink<T> implements Serializable {
 
     protected final FileStoreTable table;
     private final boolean ignorePreviousFiles;
+    protected String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public FlinkSink(FileStoreTable table, boolean ignorePreviousFiles) {
         this.table = table;
         this.ignorePreviousFiles = ignorePreviousFiles;
+    }
+
+    public FlinkSink<T> toBranch(String branch) {
+        this.branch = branch;
+        return this;
     }
 
     private StoreSinkWrite.Provider createWriteProvider(
@@ -128,7 +135,8 @@ public abstract class FlinkSink<T> implements Serializable {
                             finalDeltaCommits,
                             isStreaming,
                             memoryPool,
-                            metricGroup);
+                            metricGroup,
+                            branch);
                 };
             }
         }
@@ -144,7 +152,8 @@ public abstract class FlinkSink<T> implements Serializable {
                     waitCompaction,
                     isStreaming,
                     memoryPool,
-                    metricGroup);
+                    metricGroup,
+                    branch);
         };
     }
 
@@ -238,6 +247,7 @@ public abstract class FlinkSink<T> implements Serializable {
                         commitUser,
                         createCommitterFactory(streamingCheckpointEnabled),
                         createCommittableStateManager());
+
         if (Options.fromMap(table.options()).get(SINK_AUTO_TAG_FOR_SAVEPOINT)) {
             committerOperator =
                     new AutoTagForSavepointCommitterOperator<>(
@@ -245,14 +255,16 @@ public abstract class FlinkSink<T> implements Serializable {
                             table::snapshotManager,
                             table::tagManager,
                             () -> table.store().newTagDeletion(),
-                            () -> table.store().createTagCallbacks());
+                            () -> table.store().createTagCallbacks(),
+                            branch);
         }
         if (conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.BATCH
                 && table.coreOptions().tagCreationMode() == TagCreationMode.BATCH) {
             committerOperator =
                     new BatchWriteGeneratorTagOperator<>(
                             (CommitterOperator<Committable, ManifestCommittable>) committerOperator,
-                            table);
+                            table,
+                            branch);
         }
         SingleOutputStreamOperator<?> committed =
                 written.transform(

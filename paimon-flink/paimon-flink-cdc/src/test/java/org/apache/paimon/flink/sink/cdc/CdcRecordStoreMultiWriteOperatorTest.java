@@ -39,6 +39,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -722,7 +723,8 @@ public class CdcRecordStoreMultiWriteOperatorTest {
                                         false,
                                         true,
                                         memoryPoolFactory,
-                                        metricGroup),
+                                        metricGroup,
+                                        BranchManager.DEFAULT_MAIN_BRANCH),
                         commitUser,
                         Options.fromMap(new HashMap<>()));
         TypeSerializer<CdcMultiplexRecord> inputSerializer = new JavaSerializer<>();

@@ -45,6 +45,7 @@ public class FixedBucketSink extends FlinkWriteSink<InternalRow> {
     @Override
     protected OneInputStreamOperator<InternalRow, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser);
+        return new RowDataStoreWriteOperator(table, logSinkFunction, writeProvider, commitUser)
+                .toBranch(branch);
     }
 }

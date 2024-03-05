@@ -42,14 +42,14 @@ public class StaticFromTimestampStartingScanner extends AbstractStartingScanner 
     public StaticFromTimestampStartingScanner(SnapshotManager snapshotManager, long startupMillis) {
         super(snapshotManager);
         this.startupMillis = startupMillis;
-        Snapshot snapshot = timeTravelToTimestamp(snapshotManager, startupMillis);
-        if (snapshot != null) {
-            this.startingSnapshotId = snapshot.id();
-        }
     }
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
+        Snapshot snapshot = timeTravelToTimestamp(snapshotManager, startupMillis, branch);
+        if (snapshot != null) {
+            this.startingSnapshotId = snapshot.id();
+        }
         if (startingSnapshotId == null) {
             LOG.debug(
                     "There is currently no snapshot earlier than or equal to timestamp[{}]",
@@ -63,5 +63,11 @@ public class StaticFromTimestampStartingScanner extends AbstractStartingScanner 
     @Nullable
     public static Snapshot timeTravelToTimestamp(SnapshotManager snapshotManager, long timestamp) {
         return snapshotManager.earlierOrEqualTimeMills(timestamp);
+    }
+
+    @Nullable
+    public static Snapshot timeTravelToTimestamp(
+            SnapshotManager snapshotManager, long timestamp, String branch) {
+        return snapshotManager.earlierOrEqualTimeMills(branch, timestamp);
     }
 }

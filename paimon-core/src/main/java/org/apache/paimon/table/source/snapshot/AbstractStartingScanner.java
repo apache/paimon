@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 /** The abstract class for StartingScanner. */
@@ -28,12 +29,19 @@ public abstract class AbstractStartingScanner implements StartingScanner {
 
     protected Long startingSnapshotId = null;
 
+    protected String branch = BranchManager.DEFAULT_MAIN_BRANCH;
+
     AbstractStartingScanner(SnapshotManager snapshotManager) {
         this.snapshotManager = snapshotManager;
     }
 
     protected ScanMode startingScanMode() {
         return ScanMode.DELTA;
+    }
+
+    public StartingScanner withBranch(String branch) {
+        this.branch = branch;
+        return this;
     }
 
     @Override

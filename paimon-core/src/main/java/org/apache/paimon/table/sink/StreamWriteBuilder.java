@@ -51,6 +51,8 @@ public interface StreamWriteBuilder extends WriteBuilder {
      */
     StreamWriteBuilder withCommitUser(String commitUser);
 
+    StreamWriteBuilder toBranch(String branch);
+
     /** Create a {@link TableWrite} to write {@link InternalRow}s. */
     @Override
     StreamTableWrite newWrite();

@@ -79,7 +79,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -207,7 +208,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "paimon_sync_database");
         mySqlConfig.put("table-name", "my_table");
 
-        MySqlSyncDatabaseAction action = syncDatabaseActionBuilder(mySqlConfig).build();
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getTableConfig(new HashMap<>()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
+                        .build();
 
         assertThatThrownBy(action::run)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -222,7 +227,11 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "invalid");
 
-        MySqlSyncDatabaseAction action = syncDatabaseActionBuilder(mySqlConfig).build();
+        MySqlSyncDatabaseAction action =
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getTableConfig(new HashMap<>()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
+                        .build();
 
         assertThatThrownBy(action::run)
                 .isInstanceOf(IllegalArgumentException.class)
@@ -249,7 +258,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .ignoreIncompatible(true)
                         .build();
         runActionWithDefaultEnv(action);
@@ -296,7 +306,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
                         // test including check with affix
@@ -453,7 +464,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .includingTables(includingTables)
                         .excludingTables(excludingTables)
                         .build();
@@ -470,12 +482,13 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "paimon_ignore_CASE");
 
+        Map<String, String> catalogConfig = new HashMap<>();
+        catalogConfig.put(FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false");
+
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withCatalogConfig(
-                                Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(catalogConfig))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -569,6 +582,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .includingTables("t.+")
                         .excludingTables(".*a$")
                         .withMode(COMBINED.configString())
@@ -846,16 +861,15 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", databaseName);
         mySqlConfig.put("scan.incremental.snapshot.chunk.size", "1");
 
-        Map<String, String> catalogConfig =
-                testSchemaChange
-                        ? Collections.singletonMap(
-                                CatalogOptions.METASTORE.key(), "test-alter-table")
-                        : Collections.emptyMap();
+        Map<String, String> catalogConfig = new HashMap<>();
+        if (testSchemaChange) {
+            catalogConfig.put(CatalogOptions.METASTORE.key(), "test-alter-table");
+        }
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withCatalogConfig(catalogConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(catalogConfig))
                         .includingTables("t.+")
                         .withMode(COMBINED.configString())
                         .build();
@@ -895,7 +909,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(tableConfig)
+                        .withTableConfig(getTableConfig(tableConfig))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .withMode(COMBINED.configString())
                         .build();
         runActionWithDefaultEnv(action);
@@ -942,7 +957,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .withMode(mode.configString())
                         .build();
         runActionWithDefaultEnv(action);
@@ -1050,7 +1066,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .mergeShards(false)
                         .withMode(mode.configString())
                         .build();
@@ -1165,6 +1182,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getTableConfig(new HashMap<>()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .ignoreIncompatible(true)
                         .withMode(COMBINED.configString())
                         .build();
@@ -1202,7 +1221,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
         MySqlSyncDatabaseAction action1 =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(tableConfig)
+                        .withTableConfig(getTableConfig(tableConfig))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .withMode(COMBINED.configString())
                         .build();
 
@@ -1228,7 +1248,10 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         }
 
         MySqlSyncDatabaseAction action2 =
-                syncDatabaseActionBuilder(mySqlConfig).withTableConfig(tableConfig).build();
+                syncDatabaseActionBuilder(mySqlConfig)
+                        .withTableConfig(getTableConfig(tableConfig))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
+                        .build();
         runActionWithDefaultEnv(action2);
         waitingTables("t2");
 
@@ -1238,15 +1261,20 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
 
     @Test
     public void testCatalogAndTableConfig() {
+        Map<String, String> catalogConfig = new HashMap<>();
+        catalogConfig.put("catalog-key", "catalog-value");
+
+        Map<String, String> tableConfig = new HashMap<>();
+        tableConfig.put("table-key", "table-value");
+
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(getBasicMySqlConfig())
-                        .withCatalogConfig(Collections.singletonMap("catalog-key", "catalog-value"))
-                        .withTableConfig(Collections.singletonMap("table-key", "table-value"))
+                        .withTableConfig(getTableConfig(tableConfig))
+                        .withCatalogConfig(getCatalogOptions(catalogConfig))
                         .build();
 
         assertThat(action.catalogConfig()).containsEntry("catalog-key", "catalog-value");
-        assertThat(action.tableConfig())
-                .containsExactlyEntriesOf(Collections.singletonMap("table-key", "table-value"));
+        assertThat(action.tableConfig()).containsExactlyEntriesOf(getTableConfig(tableConfig));
     }
 
     @Test
@@ -1258,7 +1286,8 @@ public class MySqlSyncDatabaseActionITCase extends MySqlActionITCaseBase {
         MultiTablesSinkMode mode = ThreadLocalRandom.current().nextBoolean() ? DIVIDED : COMBINED;
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .withMode(mode.configString())
                         .withMetadataColumn(Arrays.asList("table_name", "database_name"))
                         .build();

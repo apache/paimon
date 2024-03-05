@@ -33,6 +33,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.AbstractDataTableRead;
 import org.apache.paimon.table.source.AppendOnlySplitGenerator;
@@ -41,6 +42,7 @@ import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
@@ -114,7 +116,22 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     public InnerTableRead newRead() {
         AppendOnlyFileStoreRead read = store().newRead();
         return new AbstractDataTableRead<InternalRow>(read, schema()) {
+            @Override
+            public void projection(int[][] projection) {
+                read.withProjection(projection);
+            }
 
+            @Override
+            public RecordReader<InternalRow> reader(Split split) throws IOException {
+                return read.createReader((DataSplit) split);
+            }
+        };
+    }
+
+    @Override
+    public InnerTableRead newRead(String branch) {
+        AppendOnlyFileStoreRead read = store().newRead(branch);
+        return new AbstractDataTableRead<InternalRow>(read, schema()) {
             @Override
             public void projection(int[][] projection) {
                 read.withProjection(projection);
@@ -129,15 +146,27 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public InnerTableWrite newWrite(String commitUser, String branch) {
+        return newWrite(commitUser, null, branch);
     }
 
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public TableWriteImpl<InternalRow> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         // if this table is unaware-bucket table, we skip compaction and restored files searching
         AppendOnlyFileStoreWrite writer =
-                store().newWrite(commitUser, manifestFilter).withBucketMode(bucketMode());
+                store().newWrite(commitUser, manifestFilter, branchName)
+                        .withBucketMode(bucketMode());
         return new TableWriteImpl<>(
                 writer,
                 createRowKeyExtractor(),

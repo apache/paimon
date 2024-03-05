@@ -149,7 +149,7 @@ public class CdcRecordStoreMultiWriteOperator
         if (!optionalConverted.isPresent()) {
             FileStoreTable latestTable = table;
             while (true) {
-                latestTable = latestTable.copyWithLatestSchema();
+                latestTable = latestTable.copyWithLatestSchema(branch);
                 tables.put(tableId, latestTable);
                 optionalConverted = toGenericRow(record.record(), latestTable.schema().fields());
                 if (optionalConverted.isPresent()) {

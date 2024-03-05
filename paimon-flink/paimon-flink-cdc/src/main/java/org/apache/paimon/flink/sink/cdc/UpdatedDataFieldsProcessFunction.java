@@ -44,8 +44,11 @@ public class UpdatedDataFieldsProcessFunction
     private final Identifier identifier;
 
     public UpdatedDataFieldsProcessFunction(
-            SchemaManager schemaManager, Identifier identifier, Catalog.Loader catalogLoader) {
-        super(catalogLoader);
+            SchemaManager schemaManager,
+            Identifier identifier,
+            Catalog.Loader catalogLoader,
+            String branch) {
+        super(catalogLoader, branch);
         this.schemaManager = schemaManager;
         this.identifier = identifier;
     }

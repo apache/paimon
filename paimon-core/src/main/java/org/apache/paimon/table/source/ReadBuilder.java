@@ -122,6 +122,9 @@ public interface ReadBuilder extends Serializable {
     /** the row number pushed down. */
     ReadBuilder withLimit(int limit);
 
+    /** which branch to read from. */
+    ReadBuilder fromBranch(String branch);
+
     /** Create a {@link TableScan} to perform batch planning. */
     TableScan newScan();
 

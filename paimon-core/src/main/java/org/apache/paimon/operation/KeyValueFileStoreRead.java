@@ -46,8 +46,10 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.Projection;
+import org.apache.paimon.utils.StringUtils;
 import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
@@ -95,8 +97,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             RowType valueType,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
-        this.tableSchema = schemaManager.schema(schemaId);
+            KeyValueFileReaderFactory.Builder readerFactoryBuilder,
+            String branch) {
+        this.tableSchema =
+                StringUtils.isBlank(branch)
+                        ? schemaManager.schema(schemaId)
+                        : schemaManager.schema(branch, schemaId);
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
@@ -105,6 +111,27 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
         this.sequenceFields = options.sequenceField();
+    }
+
+    public KeyValueFileStoreRead(
+            CoreOptions options,
+            SchemaManager schemaManager,
+            long schemaId,
+            RowType keyType,
+            RowType valueType,
+            Comparator<InternalRow> keyComparator,
+            MergeFunctionFactory<KeyValue> mfFactory,
+            KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
+        this(
+                options,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                keyComparator,
+                mfFactory,
+                readerFactoryBuilder,
+                BranchManager.DEFAULT_MAIN_BRANCH);
     }
 
     public KeyValueFileStoreRead withKeyProjection(@Nullable int[][] projectedFields) {

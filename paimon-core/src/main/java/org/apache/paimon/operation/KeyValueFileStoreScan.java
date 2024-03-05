@@ -70,10 +70,14 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 branchName);
         this.fieldKeyStatsConverters =
                 new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
+                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid, branchName)),
+                        schemaId);
         this.fieldValueStatsConverters =
                 new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)), schemaId);
+                        sid ->
+                                keyValueFieldsExtractor.valueFields(
+                                        scanTableSchema(sid, branchName)),
+                        schemaId);
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {

@@ -63,7 +63,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 scanManifestParallelism,
                 branchName);
         this.fieldStatsConverters =
-                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schemaId);
+                new FieldStatsConverters(
+                        sid -> scanTableSchema(sid, branchName).fields(), schemaId);
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {

@@ -62,7 +62,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
             CoreOptions options,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
-            String tableName) {
+            String tableName,
+            String branchName) {
         super(
                 commitUser,
                 snapshotManager,
@@ -70,7 +71,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 tableName,
-                options.writeMaxWritersToSpill());
+                options.writeMaxWritersToSpill(),
+                branchName);
         this.options = options;
         this.cacheManager = new CacheManager(options.lookupCacheMaxMemory());
     }

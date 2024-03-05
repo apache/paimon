@@ -29,6 +29,7 @@ import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecordEventParser;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.api.common.functions.FlatMapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -180,6 +181,12 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         String sinkParallelism = tableConfig.get(FlinkConnectorOptions.SINK_PARALLELISM.key());
         if (sinkParallelism != null) {
             sinkBuilder.withParallelism(Integer.parseInt(sinkParallelism));
+        }
+        String branch = tableConfig.get(FlinkConnectorOptions.BRANCH.key());
+        if (branch != null) {
+            sinkBuilder.toBranch(branch);
+        } else {
+            sinkBuilder.toBranch(BranchManager.DEFAULT_MAIN_BRANCH);
         }
         sinkBuilder.build();
     }

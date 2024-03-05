@@ -27,6 +27,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
@@ -35,6 +36,7 @@ import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.common.restartstrategy.RestartStrategies;
@@ -57,6 +59,9 @@ import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.options.CatalogOptions.BRANCH;
+import static org.apache.paimon.options.CatalogOptions.WAREHOUSE;
+
 /** {@link Action} test base. */
 public abstract class ActionITCaseBase extends AbstractTestBase {
 
@@ -67,7 +72,8 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected StreamTableWrite write;
     protected StreamTableCommit commit;
     protected Catalog catalog;
-    private long incrementalIdentifier;
+    protected long incrementalIdentifier;
+    protected String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     @BeforeEach
     public void before() throws IOException {
@@ -76,7 +82,12 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         tableName = "test_table_" + UUID.randomUUID();
         commitUser = UUID.randomUUID().toString();
         incrementalIdentifier = 0;
-        catalog = CatalogFactory.createCatalog(CatalogContext.create(new Path(warehouse)));
+        Map<String, String> options = new HashMap<>();
+        options.put(WAREHOUSE.key(), new Path(warehouse).toUri().toString());
+        if (!branch.equals(BranchManager.DEFAULT_MAIN_BRANCH)) {
+            options.put(BRANCH.key(), branch);
+        }
+        catalog = CatalogFactory.createCatalog(CatalogContext.create(Options.fromMap(options)));
     }
 
     @AfterEach

@@ -44,6 +44,6 @@ public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
     @Override
     protected OneInputStreamOperator<Tuple2<CdcRecord, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcDynamicBucketWriteOperator(table, writeProvider, commitUser);
+        return new CdcDynamicBucketWriteOperator(table, writeProvider, commitUser).toBranch(branch);
     }
 }

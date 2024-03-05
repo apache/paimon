@@ -36,13 +36,14 @@ public class CompactorSink extends FlinkSink<RowData> {
     @Override
     protected OneInputStreamOperator<RowData, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new StoreCompactOperator(table, writeProvider, commitUser);
+        return new StoreCompactOperator(table, writeProvider, commitUser).toBranch(branch);
     }
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
             boolean streamingCheckpointEnabled) {
-        return (user, metricGroup) -> new StoreCommitter(table.newCommit(user), metricGroup);
+        return (user, metricGroup) ->
+                new StoreCommitter(table.newCommit(user, branch), metricGroup);
     }
 
     @Override

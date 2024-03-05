@@ -53,7 +53,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
     public Result scan(SnapshotReader reader) {
         Map<Pair<BinaryRow, Integer>, List<DataFileMeta>> grouped = new HashMap<>();
         for (long i = startingSnapshotId + 1; i < endingSnapshotId + 1; i++) {
-            List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(i));
+            List<DataSplit> splits = readSplits(reader, snapshotManager.snapshot(branch, i));
             for (DataSplit split : splits) {
                 grouped.computeIfAbsent(
                                 Pair.of(split.partition(), split.bucket()), k -> new ArrayList<>())

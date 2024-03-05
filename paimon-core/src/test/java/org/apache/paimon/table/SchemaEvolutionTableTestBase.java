@@ -532,6 +532,11 @@ public abstract class SchemaEvolutionTableTestBase {
         public TableSchema schema(long id) {
             return checkNotNull(tableSchemas.get(id));
         }
+
+        @Override
+        public TableSchema schema(String branchName, long id) {
+            return checkNotNull(tableSchemas.get(id));
+        }
     }
 
     protected List<Split> toSplits(List<DataSplit> dataSplits) {

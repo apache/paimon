@@ -330,7 +330,7 @@ public class HiveCatalog extends AbstractCatalog {
         }
         Path tableLocation = getDataTableLocation(identifier);
         return new SchemaManager(fileIO, tableLocation)
-                .latest()
+                .latest(branchName)
                 .orElseThrow(
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
@@ -373,7 +373,7 @@ public class HiveCatalog extends AbstractCatalog {
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema tableSchema;
         try {
-            tableSchema = schemaManager(identifier).createTable(schema);
+            tableSchema = schemaManager(identifier).createTable(schema, branchName);
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to commit changes of table "
@@ -440,7 +440,7 @@ public class HiveCatalog extends AbstractCatalog {
 
         final SchemaManager schemaManager = schemaManager(identifier);
         // first commit changes to underlying files
-        TableSchema schema = schemaManager.commitChanges(changes);
+        TableSchema schema = schemaManager.commitChanges(branchName, changes);
 
         try {
             // sync to hive hms
@@ -450,7 +450,7 @@ public class HiveCatalog extends AbstractCatalog {
             client.alter_table(
                     identifier.getDatabaseName(), identifier.getObjectName(), table, true);
         } catch (Exception te) {
-            schemaManager.deleteSchema(schema.id());
+            schemaManager.deleteSchema(branchName, schema.id());
             throw new RuntimeException(te);
         }
     }

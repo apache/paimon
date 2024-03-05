@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.ActionITCaseBase;
 import org.apache.paimon.flink.action.cdc.kafka.KafkaSyncDatabaseActionFactory;
@@ -54,6 +55,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 
+import static org.apache.paimon.options.CatalogOptions.BRANCH;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** CDC IT case base. */
@@ -130,7 +132,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
                     break;
                 }
             }
-            table = table.copyWithLatestSchema();
+            table = table.copyWithLatestSchema(branch);
             Thread.sleep(1000);
         }
 
@@ -138,7 +140,7 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
         List<String> sortedExpected = new ArrayList<>(expected);
         Collections.sort(sortedExpected);
         while (true) {
-            ReadBuilder readBuilder = table.newReadBuilder();
+            ReadBuilder readBuilder = table.newReadBuilder().fromBranch(branch);
             TableScan.Plan plan = readBuilder.newScan().plan();
             List<String> result =
                     getResult(
@@ -152,6 +154,16 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             }
             Thread.sleep(1000);
         }
+    }
+
+    protected Map<String, String> getCatalogOptions(Map<String, String> catalogOptions) {
+        catalogOptions.put(BRANCH.key(), branch);
+        return catalogOptions;
+    }
+
+    protected Map<String, String> getTableConfig(Map<String, String> tableConfig) {
+        tableConfig.put(FlinkConnectorOptions.BRANCH.key(), branch);
+        return tableConfig;
     }
 
     protected Map<String, String> getBasicTableConfig() {

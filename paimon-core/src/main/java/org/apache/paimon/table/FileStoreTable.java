@@ -89,12 +89,18 @@ public interface FileStoreTable extends DataTable {
     FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions);
 
     /** TODO: this method is weird, old options will overwrite new options. */
+    FileStoreTable copyWithLatestSchema(String branch);
+
+    /** TODO: this method is weird, old options will overwrite new options. */
     FileStoreTable copyWithLatestSchema();
 
     @Override
     TableWriteImpl<?> newWrite(String commitUser);
 
     TableWriteImpl<?> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
+
+    TableWriteImpl<?> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName);
 
     @Override
     TableCommitImpl newCommit(String commitUser);

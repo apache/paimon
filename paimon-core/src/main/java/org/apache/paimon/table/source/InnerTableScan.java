@@ -29,6 +29,10 @@ public interface InnerTableScan extends TableScan {
 
     InnerTableScan withFilter(Predicate predicate);
 
+    default InnerTableScan withBranch(String branch) {
+        return this;
+    }
+
     default InnerTableScan withLimit(int limit) {
         return this;
     }

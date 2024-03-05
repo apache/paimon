@@ -23,6 +23,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.table.catalog.ResolvedCatalogTable;
 import org.apache.flink.table.connector.sink.DynamicTableSink;
@@ -58,11 +59,15 @@ public class FlinkTableFactory extends AbstractFlinkTableFactory {
         if (options.get(AUTO_CREATE)) {
             try {
                 Path tablePath = CoreOptions.path(table.getOptions());
+                String branch =
+                        options.getString(
+                                FlinkConnectorOptions.BRANCH.key(),
+                                BranchManager.DEFAULT_MAIN_BRANCH);
                 SchemaManager schemaManager =
                         new SchemaManager(
                                 FileIO.get(tablePath, createCatalogContext(context)), tablePath);
-                if (!schemaManager.latest().isPresent()) {
-                    schemaManager.createTable(FlinkCatalog.fromCatalogTable(table));
+                if (!schemaManager.latest(branch).isPresent()) {
+                    schemaManager.createTable(FlinkCatalog.fromCatalogTable(table), branch);
                 }
             } catch (Exception e) {
                 throw new RuntimeException(e);

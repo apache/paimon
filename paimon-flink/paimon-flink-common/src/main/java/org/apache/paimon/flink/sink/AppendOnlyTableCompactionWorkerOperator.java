@@ -74,7 +74,7 @@ public class AppendOnlyTableCompactionWorkerOperator
     @Override
     public void open() throws Exception {
         LOG.debug("Opened a append-only table compaction worker.");
-        this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser);
+        this.write = (AppendOnlyFileStoreWrite) table.store().newWrite(commitUser, branch);
         this.result = new LinkedList<>();
     }
 
@@ -149,7 +149,7 @@ public class AppendOnlyTableCompactionWorkerOperator
                 return;
             }
 
-            try (TableCommitImpl tableCommit = table.newCommit(commitUser)) {
+            try (TableCommitImpl tableCommit = table.newCommit(commitUser, branch)) {
                 tableCommit.abort(messages);
             }
         }

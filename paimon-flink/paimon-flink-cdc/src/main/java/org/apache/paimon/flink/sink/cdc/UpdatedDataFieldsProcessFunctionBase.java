@@ -28,7 +28,9 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeChecks;
 import org.apache.paimon.types.DataTypeRoot;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.functions.ProcessFunction;
@@ -64,8 +66,11 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     private static final List<DataTypeRoot> DECIMAL_TYPES = Arrays.asList(DataTypeRoot.DECIMAL);
 
-    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader) {
+    private final String branch;
+
+    protected UpdatedDataFieldsProcessFunctionBase(Catalog.Loader catalogLoader, String branch) {
         this.catalogLoader = catalogLoader;
+        this.branch = StringUtils.isEmpty(branch) ? BranchManager.DEFAULT_MAIN_BRANCH : branch;
     }
 
     @Override
@@ -96,7 +101,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
                     (SchemaChange.UpdateColumnType) schemaChange;
             TableSchema schema =
                     schemaManager
-                            .latest()
+                            .latest(branch)
                             .orElseThrow(
                                     () ->
                                             new RuntimeException(
@@ -180,7 +185,7 @@ public abstract class UpdatedDataFieldsProcessFunctionBase<I, O> extends Process
 
     protected List<SchemaChange> extractSchemaChanges(
             SchemaManager schemaManager, List<DataField> updatedDataFields) {
-        RowType oldRowType = schemaManager.latest().get().logicalRowType();
+        RowType oldRowType = schemaManager.latest(branch).get().logicalRowType();
         Map<String, DataField> oldFields = new HashMap<>();
         for (DataField oldField : oldRowType.getFields()) {
             oldFields.put(oldField.name(), oldField);

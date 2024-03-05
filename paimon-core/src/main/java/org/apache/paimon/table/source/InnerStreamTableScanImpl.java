@@ -36,6 +36,7 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -65,6 +66,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private boolean isFullPhaseEnd = false;
     @Nullable private Long currentWatermark;
     @Nullable private Long nextSnapshotId;
+    private String branch;
 
     public InnerStreamTableScanImpl(
             CoreOptions options,
@@ -72,11 +74,28 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
             SnapshotManager snapshotManager,
             boolean supportStreamingReadOverwrite,
             DefaultValueAssigner defaultValueAssigner) {
-        super(options, snapshotReader);
+        this(
+                options,
+                snapshotReader,
+                snapshotManager,
+                supportStreamingReadOverwrite,
+                defaultValueAssigner,
+                BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public InnerStreamTableScanImpl(
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            SnapshotManager snapshotManager,
+            boolean supportStreamingReadOverwrite,
+            DefaultValueAssigner defaultValueAssigner,
+            String branch) {
+        super(options, snapshotReader, branch);
         this.options = options;
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
+        this.branch = branch;
     }
 
     @Override
@@ -146,14 +165,15 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 nextSnapshotId = currentSnapshotId + 1;
             }
             isFullPhaseEnd =
-                    boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
+                    boundedChecker.shouldEndInput(
+                            snapshotManager.snapshot(branch, currentSnapshotId));
             return scannedResult.plan();
         } else if (result instanceof StartingScanner.NextSnapshot) {
             nextSnapshotId = ((StartingScanner.NextSnapshot) result).nextSnapshotId();
             isFullPhaseEnd =
-                    snapshotManager.snapshotExists(nextSnapshotId - 1)
+                    snapshotManager.snapshotExists(branch, nextSnapshotId - 1)
                             && boundedChecker.shouldEndInput(
-                                    snapshotManager.snapshot(nextSnapshotId - 1));
+                                    snapshotManager.snapshot(branch, nextSnapshotId - 1));
         }
         return SnapshotNotExistPlan.INSTANCE;
     }
@@ -164,8 +184,8 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 throw new EndOfScanException();
             }
 
-            if (!snapshotManager.snapshotExists(nextSnapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+            if (!snapshotManager.snapshotExists(branch, nextSnapshotId)) {
+                Long earliestSnapshotId = snapshotManager.earliestSnapshotId(branch);
                 if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
                     throw new OutOfRangeException(
                             String.format(
@@ -180,7 +200,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 return SnapshotNotExistPlan.INSTANCE;
             }
 
-            Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
+            Snapshot snapshot = snapshotManager.snapshot(branch, nextSnapshotId);
 
             if (boundedChecker.shouldEndInput(snapshot)) {
                 throw new EndOfScanException();

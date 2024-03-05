@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.sink.TagCallback;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SerializableSupplier;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -86,6 +87,8 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
 
     private transient ListState<Long> identifiersForTagsState;
 
+    private transient String branchName;
+
     public AutoTagForSavepointCommitterOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator,
             SerializableSupplier<SnapshotManager> snapshotManagerFactory,
@@ -98,6 +101,23 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         this.tagDeletionFactory = tagDeletionFactory;
         this.callbacksSupplier = callbacksSupplier;
         this.identifiersForTags = new TreeSet<>();
+        this.branchName = BranchManager.DEFAULT_MAIN_BRANCH;
+    }
+
+    public AutoTagForSavepointCommitterOperator(
+            CommitterOperator<CommitT, GlobalCommitT> commitOperator,
+            SerializableSupplier<SnapshotManager> snapshotManagerFactory,
+            SerializableSupplier<TagManager> tagManagerFactory,
+            SerializableSupplier<TagDeletion> tagDeletionFactory,
+            SerializableSupplier<List<TagCallback>> callbacksSupplier,
+            String branchName) {
+        this.commitOperator = commitOperator;
+        this.tagManagerFactory = tagManagerFactory;
+        this.snapshotManagerFactory = snapshotManagerFactory;
+        this.tagDeletionFactory = tagDeletionFactory;
+        this.callbacksSupplier = callbacksSupplier;
+        this.identifiersForTags = new TreeSet<>();
+        this.branchName = branchName;
     }
 
     @Override
@@ -155,19 +175,19 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         commitOperator.notifyCheckpointAborted(checkpointId);
         identifiersForTags.remove(checkpointId);
         String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
-        if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+        if (tagManager.tagExists(branchName, tagName)) {
+            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, branchName);
         }
     }
 
     private void createTagForIdentifiers(List<Long> identifiers) {
         List<Snapshot> snapshotForTags =
                 snapshotManager.findSnapshotsForIdentifiers(
-                        commitOperator.getCommitUser(), identifiers);
+                        commitOperator.getCommitUser(), identifiers, branchName);
         for (Snapshot snapshot : snapshotForTags) {
             String tagName = SAVEPOINT_TAG_PREFIX + snapshot.commitIdentifier();
-            if (!tagManager.tagExists(tagName)) {
-                tagManager.createTag(snapshot, tagName, callbacks);
+            if (!tagManager.tagExists(branchName, tagName)) {
+                tagManager.createTag(snapshot, tagName, callbacks, branchName);
             }
         }
     }

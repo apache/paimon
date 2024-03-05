@@ -62,6 +62,6 @@ public class RowDynamicBucketSink extends DynamicBucketSink<InternalRow> {
     @Override
     protected OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser);
+        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser).toBranch(branch);
     }
 }

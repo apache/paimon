@@ -28,6 +28,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -69,7 +70,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -103,7 +105,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(TOPIC.key(), String.join(";", topics));
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -112,6 +115,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
     private void testSchemaEvolutionImpl(
             List<String> topics, boolean writeOne, int fileCount, String format) throws Exception {
+
         waitingTables("t1", "t2");
 
         FileStoreTable table1 = getFileStoreTable("t1");
@@ -212,7 +216,11 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
 
-        KafkaSyncDatabaseAction action = syncDatabaseActionBuilder(kafkaConfig).build();
+        KafkaSyncDatabaseAction action =
+                syncDatabaseActionBuilder(kafkaConfig)
+                        .withTableConfig(getTableConfig(new HashMap<>()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
+                        .build();
 
         assertThatThrownBy(action::run)
                 .satisfies(
@@ -267,7 +275,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         // test including check with affix
                         .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
                         .build();
@@ -321,7 +330,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 syncDatabaseActionBuilder(kafkaConfig)
                         .withTablePrefix("test_prefix_")
                         .withTableSuffix("_test_suffix")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         // test including check with affix
                         .includingTables(ThreadLocalRandom.current().nextBoolean() ? "t1|t2" : ".*")
                         .build();
@@ -490,7 +500,8 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
                 syncDatabaseActionBuilder(kafkaConfig)
                         .includingTables(includingTables)
                         .excludingTables(excludingTables)
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -516,12 +527,13 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
         kafkaConfig.put(TOPIC.key(), topic);
 
+        Map<String, String> catalogConfig = new HashMap<>();
+        catalogConfig.put(FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false");
+
         KafkaSyncDatabaseAction action =
                 syncDatabaseActionBuilder(kafkaConfig)
-                        .withTableConfig(getBasicTableConfig())
-                        .withCatalogConfig(
-                                Collections.singletonMap(
-                                        FileSystemCatalogOptions.CASE_SENSITIVE.key(), "false"))
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(catalogConfig))
                         .build();
         runActionWithDefaultEnv(action);
 

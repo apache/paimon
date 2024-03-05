@@ -85,8 +85,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             CoreOptions options,
-            String tableName) {
-        super(commitUser, snapshotManager, scan, options, null, null, tableName);
+            String tableName,
+            String branchName) {
+        super(commitUser, snapshotManager, scan, options, null, null, tableName, branchName);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;

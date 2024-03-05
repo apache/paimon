@@ -22,6 +22,7 @@ import org.apache.paimon.flink.memory.FlinkMemorySegmentPool;
 import org.apache.paimon.flink.memory.MemorySegmentAllocator;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.runtime.memory.MemoryManager;
 import org.apache.flink.streaming.api.graph.StreamConfig;
@@ -49,10 +50,16 @@ public abstract class PrepareCommitOperator<IN, OUT> extends AbstractStreamOpera
     @Nullable private transient MemorySegmentAllocator memoryAllocator;
     private final Options options;
     private boolean endOfInput = false;
+    protected String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public PrepareCommitOperator(Options options) {
         this.options = options;
         setChainingStrategy(ChainingStrategy.ALWAYS);
+    }
+
+    public PrepareCommitOperator<IN, OUT> toBranch(String branch) {
+        this.branch = branch;
+        return this;
     }
 
     @Override

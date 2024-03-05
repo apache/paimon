@@ -30,6 +30,7 @@ import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
 import org.apache.paimon.options.description.TextElement;
+import org.apache.paimon.utils.BranchManager;
 
 import java.lang.reflect.Field;
 import java.time.Duration;
@@ -47,6 +48,12 @@ public class FlinkConnectorOptions {
     public static final String NONE = "none";
 
     public static final String TABLE_DYNAMIC_OPTION_PREFIX = "paimon";
+
+    public static final ConfigOption<String> BRANCH =
+            key("branch")
+                    .stringType()
+                    .defaultValue(BranchManager.DEFAULT_MAIN_BRANCH)
+                    .withDescription("Specify branch name.");
 
     @ExcludeFromDocumentation("Confused without log system")
     public static final ConfigOption<String> LOG_SYSTEM =

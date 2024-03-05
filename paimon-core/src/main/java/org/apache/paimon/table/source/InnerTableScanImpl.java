@@ -24,6 +24,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
+import org.apache.paimon.utils.BranchManager;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,7 +43,15 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
             CoreOptions options,
             SnapshotReader snapshotReader,
             DefaultValueAssigner defaultValueAssigner) {
-        super(options, snapshotReader);
+        this(options, snapshotReader, defaultValueAssigner, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public InnerTableScanImpl(
+            CoreOptions options,
+            SnapshotReader snapshotReader,
+            DefaultValueAssigner defaultValueAssigner,
+            String branch) {
+        super(options, snapshotReader, branch);
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
         if (options.deletionVectorsEnabled()) {

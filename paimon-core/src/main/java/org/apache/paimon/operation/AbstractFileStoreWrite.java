@@ -79,6 +79,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
+    private final String branchName;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -87,7 +88,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
             String tableName,
-            int writerNumberMax) {
+            int writerNumberMax,
+            String branchName) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
@@ -96,6 +98,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
+        this.branchName = branchName;
     }
 
     @Override
@@ -174,7 +177,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         } else {
             latestCommittedIdentifier =
                     snapshotManager
-                            .latestSnapshotOfUser(commitUser)
+                            .latestSnapshotOfUser(branchName, commitUser)
                             .map(Snapshot::commitIdentifier)
                             .orElse(Long.MIN_VALUE);
         }
@@ -362,7 +365,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             }
         }
 
-        Long latestSnapshotId = snapshotManager.latestSnapshotId();
+        Long latestSnapshotId = snapshotManager.latestSnapshotId(branchName);
         List<DataFileMeta> restoreFiles = new ArrayList<>();
         if (!ignorePreviousFiles && latestSnapshotId != null) {
             restoreFiles = scanExistingFileMetas(latestSnapshotId, partition, bucket);

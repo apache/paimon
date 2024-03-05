@@ -33,6 +33,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Projection;
@@ -63,6 +64,7 @@ public class KeyValueFileReaderFactory {
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final BinaryRow partition;
     private final DeletionVector.Factory dvFactory;
+    private final String branch;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -74,7 +76,8 @@ public class KeyValueFileReaderFactory {
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
-            DeletionVector.Factory dvFactory) {
+            DeletionVector.Factory dvFactory,
+            String branch) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -86,6 +89,7 @@ public class KeyValueFileReaderFactory {
         this.partition = partition;
         this.bulkFormatMappings = new HashMap<>();
         this.dvFactory = dvFactory;
+        this.branch = branch;
     }
 
     public RecordReader<KeyValue> createRecordReader(
@@ -110,8 +114,8 @@ public class KeyValueFileReaderFactory {
                 () ->
                         bulkFormatMappingBuilder.build(
                                 formatIdentifier,
-                                schemaManager.schema(this.schemaId),
-                                schemaManager.schema(schemaId));
+                                schemaManager.schema(branch, this.schemaId),
+                                schemaManager.schema(branch, schemaId));
 
         BulkFormatMapping bulkFormatMapping =
                 reuseFormat
@@ -148,6 +152,30 @@ public class KeyValueFileReaderFactory {
             FileStorePathFactory pathFactory,
             KeyValueFieldsExtractor extractor,
             CoreOptions options) {
+        return builder(
+                fileIO,
+                schemaManager,
+                schemaId,
+                keyType,
+                valueType,
+                formatDiscover,
+                pathFactory,
+                extractor,
+                options,
+                BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public static Builder builder(
+            FileIO fileIO,
+            SchemaManager schemaManager,
+            long schemaId,
+            RowType keyType,
+            RowType valueType,
+            FileFormatDiscover formatDiscover,
+            FileStorePathFactory pathFactory,
+            KeyValueFieldsExtractor extractor,
+            CoreOptions options,
+            String branch) {
         return new Builder(
                 fileIO,
                 schemaManager,
@@ -157,7 +185,8 @@ public class KeyValueFileReaderFactory {
                 formatDiscover,
                 pathFactory,
                 extractor,
-                options);
+                options,
+                branch);
     }
 
     /** Builder for {@link KeyValueFileReaderFactory}. */
@@ -178,6 +207,7 @@ public class KeyValueFileReaderFactory {
         private int[][] valueProjection;
         private RowType projectedKeyType;
         private RowType projectedValueType;
+        private String branch;
 
         private Builder(
                 FileIO fileIO,
@@ -188,7 +218,8 @@ public class KeyValueFileReaderFactory {
                 FileFormatDiscover formatDiscover,
                 FileStorePathFactory pathFactory,
                 KeyValueFieldsExtractor extractor,
-                CoreOptions options) {
+                CoreOptions options,
+                String branch) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
             this.schemaId = schemaId;
@@ -202,6 +233,7 @@ public class KeyValueFileReaderFactory {
             this.options = options;
             this.keyProjection = fullKeyProjection;
             this.valueProjection = Projection.range(0, valueType.getFieldCount()).toNestedIndexes();
+            this.branch = branch;
             applyProjection();
         }
 
@@ -215,7 +247,8 @@ public class KeyValueFileReaderFactory {
                     formatDiscover,
                     pathFactory,
                     extractor,
-                    options);
+                    options,
+                    branch);
         }
 
         public Builder withKeyProjection(int[][] projection) {
@@ -263,7 +296,8 @@ public class KeyValueFileReaderFactory {
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,
-                    dvFactory);
+                    dvFactory,
+                    branch);
         }
 
         private void applyProjection() {

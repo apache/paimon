@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import java.util.UUID;
 
@@ -31,6 +32,7 @@ public class StreamWriteBuilderImpl implements StreamWriteBuilder {
     private final InnerTable table;
 
     private String commitUser = UUID.randomUUID().toString();
+    private String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public StreamWriteBuilderImpl(InnerTable table) {
         this.table = table;
@@ -58,12 +60,18 @@ public class StreamWriteBuilderImpl implements StreamWriteBuilder {
     }
 
     @Override
+    public StreamWriteBuilder toBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
+    @Override
     public StreamTableWrite newWrite() {
-        return table.newWrite(commitUser);
+        return table.newWrite(commitUser, branch);
     }
 
     @Override
     public StreamTableCommit newCommit() {
-        return table.newCommit(commitUser).ignoreEmptyCommit(false);
+        return table.newCommit(commitUser, branch).ignoreEmptyCommit(false);
     }
 }

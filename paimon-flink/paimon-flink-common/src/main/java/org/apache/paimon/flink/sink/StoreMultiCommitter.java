@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
@@ -60,11 +61,21 @@ public class StoreMultiCommitter
     // compact job needs set "write-only" of a table to false
     private final boolean isCompactJob;
 
+    private String branch;
+
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
             String commitUser,
             @Nullable OperatorMetricGroup flinkMetricGroup) {
-        this(catalogLoader, commitUser, flinkMetricGroup, false);
+        this(catalogLoader, commitUser, flinkMetricGroup, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public StoreMultiCommitter(
+            Catalog.Loader catalogLoader,
+            String commitUser,
+            @Nullable OperatorMetricGroup flinkMetricGroup,
+            String branch) {
+        this(catalogLoader, commitUser, flinkMetricGroup, false, branch);
     }
 
     public StoreMultiCommitter(
@@ -72,11 +83,26 @@ public class StoreMultiCommitter
             String commitUser,
             @Nullable OperatorMetricGroup flinkMetricGroup,
             boolean isCompactJob) {
+        this(
+                catalogLoader,
+                commitUser,
+                flinkMetricGroup,
+                isCompactJob,
+                BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public StoreMultiCommitter(
+            Catalog.Loader catalogLoader,
+            String commitUser,
+            @Nullable OperatorMetricGroup flinkMetricGroup,
+            boolean isCompactJob,
+            String branch) {
         this.catalog = catalogLoader.load();
         this.commitUser = commitUser;
         this.flinkMetricGroup = flinkMetricGroup;
         this.tableCommitters = new HashMap<>();
         this.isCompactJob = isCompactJob;
+        this.branch = branch;
     }
 
     @Override
@@ -206,7 +232,7 @@ public class StoreMultiCommitter
             }
             committer =
                     new StoreCommitter(
-                            table.newCommit(commitUser).ignoreEmptyCommit(isCompactJob),
+                            table.newCommit(commitUser, branch).ignoreEmptyCommit(isCompactJob),
                             flinkMetricGroup);
             tableCommitters.put(tableId, committer);
         }

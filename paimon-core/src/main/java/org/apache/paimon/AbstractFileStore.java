@@ -188,7 +188,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 manifestFileFactory(),
                 manifestListFactory(),
                 indexManifestFileFactory(),
-                newScan(),
+                newScan(branchName),
                 options.bucket(),
                 options.manifestTargetSize(),
                 options.manifestFullCompactionThresholdSize(),

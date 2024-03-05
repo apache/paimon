@@ -68,6 +68,9 @@ public class MySqlActionITCaseBase extends CdcActionITCaseBase {
     }
 
     protected Statement getStatement() throws SQLException {
+        System.out.println(MYSQL_CONTAINER.getJdbcUrl());
+        System.out.println(MYSQL_CONTAINER.getUsername());
+        System.out.println(MYSQL_CONTAINER.getPassword());
         Connection conn =
                 DriverManager.getConnection(
                         MYSQL_CONTAINER.getJdbcUrl(),

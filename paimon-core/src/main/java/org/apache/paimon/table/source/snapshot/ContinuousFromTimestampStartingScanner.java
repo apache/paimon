@@ -53,7 +53,7 @@ public class ContinuousFromTimestampStartingScanner extends AbstractStartingScan
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long startingSnapshotId = snapshotManager.earlierThanTimeMills(startupMillis);
+        Long startingSnapshotId = snapshotManager.earlierThanTimeMills(branch, startupMillis);
         if (startingSnapshotId == null) {
             LOG.debug("There is currently no snapshot. Waiting for snapshot generation.");
             return new NoSnapshot();

@@ -61,7 +61,7 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
 
     @Override
     public void initializeState(StateInitializationContext context) throws Exception {
-        table = table.copyWithLatestSchema();
+        table = table.copyWithLatestSchema(branch);
         super.initializeState(context);
     }
 
@@ -76,7 +76,7 @@ public class CdcRecordStoreWriteOperator extends TableWriteOperator<CdcRecord> {
         Optional<GenericRow> optionalConverted = toGenericRow(record, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
-                table = table.copyWithLatestSchema();
+                table = table.copyWithLatestSchema(branch);
                 optionalConverted = toGenericRow(record, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;

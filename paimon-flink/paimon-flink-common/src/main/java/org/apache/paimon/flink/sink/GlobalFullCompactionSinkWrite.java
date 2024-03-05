@@ -75,7 +75,8 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
             int deltaCommits,
             boolean isStreaming,
             @Nullable MemorySegmentPool memoryPool,
-            MetricGroup metricGroup) {
+            MetricGroup metricGroup,
+            String branchName) {
         super(
                 table,
                 commitUser,
@@ -85,7 +86,8 @@ public class GlobalFullCompactionSinkWrite extends StoreSinkWriteImpl {
                 waitCompaction,
                 isStreaming,
                 memoryPool,
-                metricGroup);
+                metricGroup,
+                branchName);
 
         this.deltaCommits = deltaCommits;
 

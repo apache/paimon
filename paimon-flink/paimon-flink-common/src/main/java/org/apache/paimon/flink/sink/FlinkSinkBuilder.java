@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -38,13 +39,13 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public class FlinkSinkBuilder {
 
     private final FileStoreTable table;
-
     private DataStream<RowData> input;
     @Nullable private Map<String, String> overwritePartition;
     @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
     private boolean boundedInput = false;
     private boolean compactSink = false;
+    private String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public FlinkSinkBuilder(FileStoreTable table) {
         this.table = table;
@@ -89,6 +90,11 @@ public class FlinkSinkBuilder {
         return this;
     }
 
+    public FlinkSinkBuilder toBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -121,11 +127,18 @@ public class FlinkSinkBuilder {
         checkArgument(logSinkFunction == null, "Dynamic bucket mode can not work with log system.");
         return compactSink && !globalIndex
                 // todo support global index sort compact
-                ? new DynamicBucketCompactSink(table, overwritePartition).build(input, parallelism)
+                ? ((DynamicBucketCompactSink)
+                                new DynamicBucketCompactSink(table, overwritePartition)
+                                        .toBranch(branch))
+                        .build(input, parallelism)
                 : globalIndex
-                        ? new GlobalDynamicBucketSink(table, overwritePartition)
+                        ? ((GlobalDynamicBucketSink)
+                                        new GlobalDynamicBucketSink(table, overwritePartition)
+                                                .toBranch(branch))
                                 .build(input, parallelism)
-                        : new RowDynamicBucketSink(table, overwritePartition)
+                        : ((RowDynamicBucketSink)
+                                        new RowDynamicBucketSink(table, overwritePartition)
+                                                .toBranch(branch))
                                 .build(input, parallelism);
     }
 
@@ -135,7 +148,10 @@ public class FlinkSinkBuilder {
                         input,
                         new RowDataChannelComputer(table.schema(), logSinkFunction != null),
                         parallelism);
-        FixedBucketSink sink = new FixedBucketSink(table, overwritePartition, logSinkFunction);
+        FixedBucketSink sink =
+                (FixedBucketSink)
+                        new FixedBucketSink(table, overwritePartition, logSinkFunction)
+                                .toBranch(branch);
         return sink.sinkFrom(partitioned);
     }
 
@@ -145,6 +161,7 @@ public class FlinkSinkBuilder {
                 "Unaware bucket mode only works with append-only table for now.");
         return new RowUnawareBucketSink(
                         table, overwritePartition, logSinkFunction, parallelism, boundedInput)
+                .toBranch(branch)
                 .sinkFrom(input);
     }
 }

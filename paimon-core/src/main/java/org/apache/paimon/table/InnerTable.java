@@ -35,13 +35,29 @@ public interface InnerTable extends Table {
 
     InnerTableScan newScan();
 
+    default InnerTableScan newScan(String branch) {
+        return newScan();
+    }
+
     InnerStreamTableScan newStreamScan();
+
+    default InnerStreamTableScan newStreamScan(String branch) {
+        return newStreamScan();
+    }
 
     InnerTableRead newRead();
 
+    default InnerTableRead newRead(String branch) {
+        return newRead();
+    }
+
     InnerTableWrite newWrite(String commitUser);
 
+    InnerTableWrite newWrite(String commitUser, String branch);
+
     InnerTableCommit newCommit(String commitUser);
+
+    InnerTableCommit newCommit(String commitUser, String branch);
 
     @Override
     default ReadBuilder newReadBuilder() {

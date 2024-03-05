@@ -45,6 +45,7 @@ import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.flink.api.common.ExecutionConfig;
@@ -255,7 +256,8 @@ public class CompactorSinkITCase extends AbstractTestBase {
                                 false,
                                 false,
                                 memoryPool,
-                                metricGroup),
+                                metricGroup,
+                                BranchManager.DEFAULT_MAIN_BRANCH),
                 "test");
     }
 

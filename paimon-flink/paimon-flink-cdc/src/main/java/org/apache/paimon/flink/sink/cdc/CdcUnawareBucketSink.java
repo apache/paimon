@@ -35,6 +35,6 @@ public class CdcUnawareBucketSink extends UnawareBucketSink<CdcRecord> {
     @Override
     protected OneInputStreamOperator<CdcRecord, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser);
+        return new CdcUnawareBucketWriteOperator(table, writeProvider, commitUser).toBranch(branch);
     }
 }

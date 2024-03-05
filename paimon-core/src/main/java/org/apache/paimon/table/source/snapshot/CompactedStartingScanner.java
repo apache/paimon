@@ -47,7 +47,7 @@ public class CompactedStartingScanner extends AbstractStartingScanner {
     public Result scan(SnapshotReader snapshotReader) {
         Long startingSnapshotId = pick();
         if (startingSnapshotId == null) {
-            startingSnapshotId = snapshotManager.latestSnapshotId();
+            startingSnapshotId = snapshotManager.latestSnapshotId(branch);
             if (startingSnapshotId == null) {
                 LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
                 return new NoSnapshot();
@@ -64,6 +64,7 @@ public class CompactedStartingScanner extends AbstractStartingScanner {
 
     @Nullable
     protected Long pick() {
-        return snapshotManager.pickOrLatest(s -> s.commitKind() == Snapshot.CommitKind.COMPACT);
+        return snapshotManager.pickOrLatest(
+                branch, s -> s.commitKind() == Snapshot.CommitKind.COMPACT);
     }
 }

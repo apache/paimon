@@ -267,7 +267,8 @@ public class MultiTablesStoreCompactOperator
                                 finalDeltaCommits,
                                 isStreaming,
                                 memoryPool,
-                                metricGroup);
+                                metricGroup,
+                                branch);
             }
         }
 
@@ -281,6 +282,7 @@ public class MultiTablesStoreCompactOperator
                         waitCompaction,
                         isStreaming,
                         memoryPool,
-                        metricGroup);
+                        metricGroup,
+                        branch);
     }
 }

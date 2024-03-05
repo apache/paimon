@@ -36,6 +36,7 @@ import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
@@ -66,13 +67,24 @@ public class FlinkCdcMultiTableSink implements Serializable {
     private final double commitCpuCores;
     @Nullable private final MemorySize commitHeapMemory;
 
+    private final String branch;
+
     public FlinkCdcMultiTableSink(
             Catalog.Loader catalogLoader,
             double commitCpuCores,
             @Nullable MemorySize commitHeapMemory) {
+        this(catalogLoader, commitCpuCores, commitHeapMemory, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public FlinkCdcMultiTableSink(
+            Catalog.Loader catalogLoader,
+            double commitCpuCores,
+            @Nullable MemorySize commitHeapMemory,
+            String branch) {
         this.catalogLoader = catalogLoader;
         this.commitCpuCores = commitCpuCores;
         this.commitHeapMemory = commitHeapMemory;
+        this.branch = branch;
     }
 
     private StoreSinkWrite.WithWriteBufferProvider createWriteProvider() {
@@ -87,7 +99,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
                         false,
                         true,
                         memoryPoolFactory,
-                        metricGroup);
+                        metricGroup,
+                        branch);
     }
 
     public DataStreamSink<?> sinkFrom(DataStream<CdcMultiplexRecord> input) {
@@ -143,7 +156,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
     protected OneInputStreamOperator<CdcMultiplexRecord, MultiTableCommittable> createWriteOperator(
             StoreSinkWrite.WithWriteBufferProvider writeProvider, String commitUser) {
         return new CdcRecordStoreMultiWriteOperator(
-                catalogLoader, writeProvider, commitUser, new Options());
+                        catalogLoader, writeProvider, commitUser, new Options())
+                .toBranch(branch);
     }
 
     // Table committers are dynamically created at runtime
@@ -153,7 +167,8 @@ public class FlinkCdcMultiTableSink implements Serializable {
         // commit new files list even if they're empty.
         // Otherwise we can't tell if the commit is successful after
         // a restart.
-        return (user, metricGroup) -> new StoreMultiCommitter(catalogLoader, user, metricGroup);
+        return (user, metricGroup) ->
+                new StoreMultiCommitter(catalogLoader, user, metricGroup, branch);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {

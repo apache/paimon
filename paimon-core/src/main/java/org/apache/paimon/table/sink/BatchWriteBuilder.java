@@ -61,6 +61,8 @@ public interface BatchWriteBuilder extends WriteBuilder {
         return this;
     }
 
+    BatchWriteBuilder toBranch(String branch);
+
     /** Overwrite writing, same as the 'INSERT OVERWRITE T PARTITION (...)' semantics of SQL. */
     BatchWriteBuilder withOverwrite(@Nullable Map<String, String> staticPartition);
 

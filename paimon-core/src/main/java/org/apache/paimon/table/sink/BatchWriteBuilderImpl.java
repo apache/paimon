@@ -20,6 +20,7 @@ package org.apache.paimon.table.sink;
 
 import org.apache.paimon.table.InnerTable;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import javax.annotation.Nullable;
 
@@ -33,6 +34,7 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
 
     private final InnerTable table;
     private final String commitUser = UUID.randomUUID().toString();
+    private String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     private Map<String, String> staticPartition;
 
@@ -57,15 +59,22 @@ public class BatchWriteBuilderImpl implements BatchWriteBuilder {
     }
 
     @Override
+    public BatchWriteBuilder toBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
+    @Override
     public BatchTableWrite newWrite() {
-        return table.newWrite(commitUser)
+        return table.newWrite(commitUser, branch)
                 .withIgnorePreviousFiles(staticPartition != null)
                 .withExecutionMode(false);
     }
 
     @Override
     public BatchTableCommit newCommit() {
-        InnerTableCommit commit = table.newCommit(commitUser).withOverwrite(staticPartition);
+        InnerTableCommit commit =
+                table.newCommit(commitUser, branch).withOverwrite(staticPartition);
         commit.ignoreEmptyCommit(true);
         return commit;
     }

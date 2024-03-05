@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.operation.AppendOnlyFileStoreRead;
 import org.apache.paimon.operation.AppendOnlyFileStoreScan;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
+import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
@@ -89,13 +90,36 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     }
 
     @Override
+    public AppendOnlyFileStoreRead newRead(String branchName) {
+        return new AppendOnlyFileStoreRead(
+                fileIO,
+                schemaManager,
+                schemaId,
+                rowType,
+                FileFormatDiscover.of(options),
+                pathFactory(),
+                branchName);
+    }
+
+    @Override
     public AppendOnlyFileStoreWrite newWrite(String commitUser) {
-        return newWrite(commitUser, null);
+        return newWrite(commitUser, null, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public FileStoreWrite<InternalRow> newWrite(String commitUser, String branch) {
+        return newWrite(commitUser, null, branch);
     }
 
     @Override
     public AppendOnlyFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public AppendOnlyFileStoreWrite newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
@@ -104,9 +128,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true, branchName).withManifestCacheFilter(manifestFilter),
                 options,
-                tableName);
+                tableName,
+                branchName);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite, String branchName) {

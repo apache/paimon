@@ -59,10 +59,13 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
 
     private final CoreOptions options;
     protected final SnapshotReader snapshotReader;
+    protected final String branch;
 
-    protected AbstractInnerTableScan(CoreOptions options, SnapshotReader snapshotReader) {
+    protected AbstractInnerTableScan(
+            CoreOptions options, SnapshotReader snapshotReader, String branch) {
         this.options = options;
         this.snapshotReader = snapshotReader;
+        this.branch = branch;
     }
 
     @VisibleForTesting
@@ -106,10 +109,10 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             case COMPACT_BUCKET_TABLE:
                 checkArgument(
                         isStreaming, "Set 'streaming-compact' in batch mode. This is unexpected.");
-                return new ContinuousCompactorStartingScanner(snapshotManager);
+                return new ContinuousCompactorStartingScanner(snapshotManager).withBranch(branch);
             case COMPACT_APPEND_NO_BUCKET:
             case FILE_MONITOR:
-                return new FullStartingScanner(snapshotManager);
+                return new FullStartingScanner(snapshotManager).withBranch(branch);
         }
 
         // read from consumer id
@@ -119,18 +122,19 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(
-                        snapshotManager, consumer.get().nextSnapshot());
+                                snapshotManager, consumer.get().nextSnapshot())
+                        .withBranch(branch);
             }
         }
 
         CoreOptions.StartupMode startupMode = options.startupMode();
         switch (startupMode) {
             case LATEST_FULL:
-                return new FullStartingScanner(snapshotManager);
+                return new FullStartingScanner(snapshotManager).withBranch(branch);
             case LATEST:
                 return isStreaming
-                        ? new ContinuousLatestStartingScanner(snapshotManager)
-                        : new FullStartingScanner(snapshotManager);
+                        ? new ContinuousLatestStartingScanner(snapshotManager).withBranch(branch)
+                        : new FullStartingScanner(snapshotManager).withBranch(branch);
             case COMPACTED_FULL:
                 if (options.changelogProducer() == ChangelogProducer.FULL_COMPACTION
                         || options.toConfiguration().contains(FULL_COMPACTION_DELTA_COMMITS)) {
@@ -138,36 +142,45 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                             options.toConfiguration()
                                     .getOptional(FULL_COMPACTION_DELTA_COMMITS)
                                     .orElse(1);
-                    return new FullCompactedStartingScanner(snapshotManager, deltaCommits);
+                    return new FullCompactedStartingScanner(snapshotManager, deltaCommits)
+                            .withBranch(branch);
                 } else {
-                    return new CompactedStartingScanner(snapshotManager);
+                    return new CompactedStartingScanner(snapshotManager).withBranch(branch);
                 }
             case FROM_TIMESTAMP:
                 Long startupMillis = options.scanTimestampMills();
                 return isStreaming
                         ? new ContinuousFromTimestampStartingScanner(snapshotManager, startupMillis)
-                        : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
+                                .withBranch(branch)
+                        : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis)
+                                .withBranch(branch);
             case FROM_FILE_CREATION_TIME:
                 Long fileCreationTimeMills = options.scanFileCreationTimeMills();
-                return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills);
+                return new FileCreationTimeStartingScanner(snapshotManager, fileCreationTimeMills)
+                        .withBranch(branch);
             case FROM_SNAPSHOT:
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
                             ? new ContinuousFromSnapshotStartingScanner(
-                                    snapshotManager, options.scanSnapshotId())
+                                            snapshotManager, options.scanSnapshotId())
+                                    .withBranch(branch)
                             : new StaticFromSnapshotStartingScanner(
-                                    snapshotManager, options.scanSnapshotId());
+                                            snapshotManager, options.scanSnapshotId())
+                                    .withBranch(branch);
                 } else {
                     checkArgument(!isStreaming, "Cannot scan from tag in streaming mode.");
                     return new StaticFromTagStartingScanner(
-                            snapshotManager, options().scanTagName());
+                                    snapshotManager, options().scanTagName())
+                            .withBranch(branch);
                 }
             case FROM_SNAPSHOT_FULL:
                 return isStreaming
                         ? new ContinuousFromSnapshotFullStartingScanner(
-                                snapshotManager, options.scanSnapshotId())
+                                        snapshotManager, options.scanSnapshotId())
+                                .withBranch(branch)
                         : new StaticFromSnapshotStartingScanner(
-                                snapshotManager, options.scanSnapshotId());
+                                        snapshotManager, options.scanSnapshotId())
+                                .withBranch(branch);
             case INCREMENTAL:
                 checkArgument(!isStreaming, "Cannot read incremental in streaming mode.");
                 Pair<String, String> incrementalBetween = options.incrementalBetween();
@@ -188,22 +201,25 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 if (options.toMap().get(CoreOptions.INCREMENTAL_BETWEEN.key()) != null) {
                     try {
                         return new IncrementalStartingScanner(
-                                snapshotManager,
-                                Long.parseLong(incrementalBetween.getLeft()),
-                                Long.parseLong(incrementalBetween.getRight()),
-                                scanMode);
+                                        snapshotManager,
+                                        Long.parseLong(incrementalBetween.getLeft()),
+                                        Long.parseLong(incrementalBetween.getRight()),
+                                        scanMode)
+                                .withBranch(branch);
                     } catch (NumberFormatException e) {
                         return new IncrementalTagStartingScanner(
-                                snapshotManager,
-                                incrementalBetween.getLeft(),
-                                incrementalBetween.getRight());
+                                        snapshotManager,
+                                        incrementalBetween.getLeft(),
+                                        incrementalBetween.getRight())
+                                .withBranch(branch);
                     }
                 } else {
                     return new IncrementalTimeStampStartingScanner(
-                            snapshotManager,
-                            Long.parseLong(incrementalBetween.getLeft()),
-                            Long.parseLong(incrementalBetween.getRight()),
-                            scanMode);
+                                    snapshotManager,
+                                    Long.parseLong(incrementalBetween.getLeft()),
+                                    Long.parseLong(incrementalBetween.getRight()),
+                                    scanMode)
+                            .withBranch(branch);
                 }
             default:
                 throw new UnsupportedOperationException(

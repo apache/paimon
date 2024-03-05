@@ -99,13 +99,13 @@ public class BranchManager {
         try {
             // Copy the corresponding tag, snapshot and schema files into the branch directory
             fileIO.copyFileUtf8(
-                    tagManager.tagPath(tagName), tagManager.branchTagPath(branchName, tagName));
+                    tagManager.tagPath(tagName), tagManager.tagPath(branchName, tagName));
             fileIO.copyFileUtf8(
                     snapshotManager.snapshotPath(snapshot.id()),
-                    snapshotManager.branchSnapshotPath(branchName, snapshot.id()));
+                    snapshotManager.snapshotPath(branchName, snapshot.id()));
             fileIO.copyFileUtf8(
                     schemaManager.toSchemaPath(snapshot.schemaId()),
-                    schemaManager.branchSchemaPath(branchName, snapshot.schemaId()));
+                    schemaManager.toSchemaPath(branchName, snapshot.schemaId()));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

@@ -76,6 +76,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     private String database;
     private MultiTablesSinkMode mode;
 
+    private String branch;
+
     public FlinkCdcSyncDatabaseSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
         return this;
@@ -99,7 +101,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
     public FlinkCdcSyncDatabaseSinkBuilder<T> withTableOptions(Options options) {
         this.parallelism = options.get(FlinkConnectorOptions.SINK_PARALLELISM);
         this.committerCpu = options.get(FlinkConnectorOptions.SINK_COMMITTER_CPU);
-        this.committerMemory = options.get(FlinkConnectorOptions.SINK_COMMITTER_MEMORY);
+        this.branch = options.get(FlinkConnectorOptions.BRANCH);
         return this;
     }
 
@@ -150,7 +152,7 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         parsed,
                         CdcDynamicTableParsingProcessFunction.DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG)
                 .keyBy(t -> t.f0)
-                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader))
+                .process(new MultiTableUpdatedDataFieldsProcessFunction(catalogLoader, branch))
                 .name("Schema Evolution");
 
         DataStream<CdcMultiplexRecord> partitioned =
@@ -160,18 +162,18 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                         parallelism);
 
         FlinkCdcMultiTableSink sink =
-                new FlinkCdcMultiTableSink(catalogLoader, committerCpu, committerMemory);
+                new FlinkCdcMultiTableSink(catalogLoader, committerCpu, committerMemory, branch);
         sink.sinkFrom(partitioned);
     }
 
     private void buildForFixedBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(table.schema()), parallelism);
-        new CdcFixedBucketSink(table).sinkFrom(partitioned);
+        new CdcFixedBucketSink(table).toBranch(branch).sinkFrom(partitioned);
     }
 
     private void buildForUnawareBucket(FileStoreTable table, DataStream<CdcRecord> parsed) {
-        new CdcUnawareBucketSink(table, parallelism).sinkFrom(parsed);
+        new CdcUnawareBucketSink(table, parallelism).toBranch(branch).sinkFrom(parsed);
     }
 
     private void buildDividedCdcSink() {
@@ -192,7 +194,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                                     new UpdatedDataFieldsProcessFunction(
                                             new SchemaManager(table.fileIO(), table.location()),
                                             Identifier.create(database, table.name()),
-                                            catalogLoader));
+                                            catalogLoader,
+                                            branch));
             schemaChangeProcessFunction.getTransformation().setParallelism(1);
             schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
@@ -208,7 +211,8 @@ public class FlinkCdcSyncDatabaseSinkBuilder<T> {
                     buildForFixedBucket(table, parsedForTable);
                     break;
                 case DYNAMIC:
-                    new CdcDynamicBucketSink(table).build(parsedForTable, parallelism);
+                    ((CdcDynamicBucketSink) new CdcDynamicBucketSink(table).toBranch(branch))
+                            .build(parsedForTable, parallelism);
                     break;
                 case UNAWARE:
                     buildForUnawareBucket(table, parsedForTable);

@@ -41,6 +41,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -248,13 +249,18 @@ public abstract class AbstractFlinkTableFactory
         newOptions.putAll(origin.getOptions());
         newOptions.putAll(dynamicOptions);
 
+        String branch = dynamicOptions.get(FlinkConnectorOptions.BRANCH);
+        if (branch == null) {
+            branch = BranchManager.DEFAULT_MAIN_BRANCH;
+        }
+
         // notice that the Paimon table schema must be the same with the Flink's
         if (origin instanceof DataCatalogTable) {
             FileStoreTable fileStoreTable = (FileStoreTable) ((DataCatalogTable) origin).table();
             table = fileStoreTable.copyWithoutTimeTravel(newOptions);
         } else {
             table =
-                    FileStoreTableFactory.create(createCatalogContext(context))
+                    FileStoreTableFactory.create(createCatalogContext(context), branch)
                             .copyWithoutTimeTravel(newOptions);
         }
 

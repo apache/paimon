@@ -65,7 +65,7 @@ public class FullCompactedStartingScanner extends AbstractStartingScanner {
     public Result scan(SnapshotReader snapshotReader) {
         Long startingSnapshotId = pick();
         if (startingSnapshotId == null) {
-            startingSnapshotId = snapshotManager.latestSnapshotId();
+            startingSnapshotId = snapshotManager.latestSnapshotId(branch);
             if (startingSnapshotId == null) {
                 LOG.debug("There is currently no snapshot. Wait for the snapshot generation.");
                 return new NoSnapshot();

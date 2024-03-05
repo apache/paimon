@@ -369,6 +369,56 @@ CREATE TABLE t3 (
     v1 VARCHAR(10)
 );
 
+
+-- ################################################################################
+--  testSyncMultipleShardsWithBranch
+-- ################################################################################
+
+CREATE DATABASE database_branch_shard_1;
+USE database_branch_shard_1;
+
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t2 (
+    k BIGINT,
+    v1 DOUBLE,
+    PRIMARY KEY (k)
+);
+
+CREATE TABLE t3 (
+    k INT,
+    v1 VARCHAR(10),
+    PRIMARY KEY (k)
+);
+
+CREATE DATABASE database_branch_shard_2;
+USE database_branch_shard_2;
+
+-- test schema merging
+CREATE TABLE t1 (
+    k INT,
+    v1 VARCHAR(20),
+    v2 BIGINT,
+    PRIMARY KEY (k)
+);
+
+-- test schema evolution
+CREATE TABLE t2 (
+    k BIGINT,
+    v1 DOUBLE,
+    PRIMARY KEY (k)
+);
+
+-- test some shard doesn't have primary key
+CREATE TABLE t3 (
+    k INT,
+    v1 VARCHAR(10)
+);
+
 -- ################################################################################
 --  testSyncMultipleShardsWithoutMerging
 -- ################################################################################

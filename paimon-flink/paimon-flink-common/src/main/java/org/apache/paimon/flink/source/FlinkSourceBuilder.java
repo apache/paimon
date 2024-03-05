@@ -33,6 +33,7 @@ import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
@@ -80,6 +81,7 @@ public class FlinkSourceBuilder {
     @Nullable private Long limit;
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
     @Nullable private DynamicPartitionFilteringInfo dynamicPartitionFilteringInfo;
+    private String branch;
 
     public FlinkSourceBuilder(ObjectIdentifier tableIdentifier, Table table) {
         this.tableIdentifier = tableIdentifier;
@@ -128,6 +130,11 @@ public class FlinkSourceBuilder {
         return this;
     }
 
+    public FlinkSourceBuilder fromBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
     public FlinkSourceBuilder withDynamicPartitionFilteringFields(
             List<String> dynamicPartitionFilteringFields) {
         if (dynamicPartitionFilteringFields != null && !dynamicPartitionFilteringFields.isEmpty()) {
@@ -147,8 +154,13 @@ public class FlinkSourceBuilder {
     private ReadBuilder createReadBuilder() {
         ReadBuilder readBuilder =
                 table.newReadBuilder().withProjection(projectedFields).withFilter(predicate);
+
         if (limit != null) {
             readBuilder.withLimit(limit.intValue());
+        }
+
+        if (!StringUtils.isBlank(branch)) {
+            readBuilder.fromBranch(branch);
         }
         return readBuilder;
     }

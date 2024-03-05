@@ -45,8 +45,8 @@ public class IncrementalTagStartingScanner extends AbstractStartingScanner {
     public Result scan(SnapshotReader reader) {
         TagManager tagManager =
                 new TagManager(snapshotManager.fileIO(), snapshotManager.tablePath());
-        Snapshot tag1 = tagManager.taggedSnapshot(start);
-        Snapshot tag2 = tagManager.taggedSnapshot(end);
+        Snapshot tag1 = tagManager.taggedSnapshot(branch, start);
+        Snapshot tag2 = tagManager.taggedSnapshot(branch, end);
 
         if (tag2.id() <= tag1.id()) {
             throw new IllegalArgumentException(

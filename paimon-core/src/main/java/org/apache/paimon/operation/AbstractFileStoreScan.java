@@ -157,7 +157,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     @Override
     public FileStoreScan withSnapshot(long snapshotId) {
         checkState(specifiedManifests == null, "Cannot set both snapshot and manifests.");
-        this.specifiedSnapshot = snapshotManager.snapshot(snapshotId);
+        this.specifiedSnapshot = snapshotManager.snapshot(branchName, snapshotId);
         return this;
     }
 
@@ -406,8 +406,8 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
     // ------------------------------------------------------------------------
 
     /** Note: Keep this thread-safe. */
-    protected TableSchema scanTableSchema(long id) {
-        return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(id));
+    protected TableSchema scanTableSchema(long id, String branch) {
+        return tableSchemas.computeIfAbsent(id, key -> schemaManager.schema(branch, id));
     }
 
     /** Note: Keep this thread-safe. */

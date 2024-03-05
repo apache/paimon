@@ -26,6 +26,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -51,6 +52,8 @@ public class CdcSinkBuilder<T> {
     private Catalog.Loader catalogLoader = null;
 
     @Nullable private Integer parallelism;
+
+    private String branch = BranchManager.DEFAULT_MAIN_BRANCH;
 
     public CdcSinkBuilder<T> withInput(DataStream<T> input) {
         this.input = input;
@@ -82,6 +85,11 @@ public class CdcSinkBuilder<T> {
         return this;
     }
 
+    public CdcSinkBuilder<T> toBranch(String branch) {
+        this.branch = branch;
+        return this;
+    }
+
     public DataStreamSink<?> build() {
         Preconditions.checkNotNull(input, "Input DataStream can not be null.");
         Preconditions.checkNotNull(parserFactory, "Event ParserFactory can not be null.");
@@ -95,7 +103,6 @@ public class CdcSinkBuilder<T> {
         }
 
         FileStoreTable dataTable = (FileStoreTable) table;
-
         SingleOutputStreamOperator<CdcRecord> parsed =
                 input.forward()
                         .process(new CdcParsingProcessFunction<>(parserFactory))
@@ -108,7 +115,8 @@ public class CdcSinkBuilder<T> {
                                 new UpdatedDataFieldsProcessFunction(
                                         new SchemaManager(dataTable.fileIO(), dataTable.location()),
                                         identifier,
-                                        catalogLoader));
+                                        catalogLoader,
+                                        branch));
         schemaChangeProcessFunction.getTransformation().setParallelism(1);
         schemaChangeProcessFunction.getTransformation().setMaxParallelism(1);
 
@@ -117,7 +125,9 @@ public class CdcSinkBuilder<T> {
             case FIXED:
                 return buildForFixedBucket(parsed);
             case DYNAMIC:
-                return new CdcDynamicBucketSink((FileStoreTable) table).build(parsed, parallelism);
+                return ((CdcDynamicBucketSink)
+                                (new CdcDynamicBucketSink((FileStoreTable) table).toBranch(branch)))
+                        .build(parsed, parallelism);
             case UNAWARE:
                 return buildForUnawareBucket(parsed);
             default:
@@ -129,11 +139,11 @@ public class CdcSinkBuilder<T> {
         FileStoreTable dataTable = (FileStoreTable) table;
         DataStream<CdcRecord> partitioned =
                 partition(parsed, new CdcRecordChannelComputer(dataTable.schema()), parallelism);
-        return new CdcFixedBucketSink(dataTable).sinkFrom(partitioned);
+        return new CdcFixedBucketSink(dataTable).toBranch(branch).sinkFrom(partitioned);
     }
 
     private DataStreamSink<?> buildForUnawareBucket(DataStream<CdcRecord> parsed) {
         FileStoreTable dataTable = (FileStoreTable) table;
-        return new CdcUnawareBucketSink(dataTable, parallelism).sinkFrom(parsed);
+        return new CdcUnawareBucketSink(dataTable, parallelism).toBranch(branch).sinkFrom(parsed);
     }
 }

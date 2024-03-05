@@ -33,6 +33,7 @@ import org.apache.flink.configuration.Configuration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -74,7 +75,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -177,7 +179,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
 
         assertThatThrownBy(action::run)
@@ -216,7 +219,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
 
         assertThatThrownBy(action::run)
@@ -248,7 +252,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -289,7 +294,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -344,7 +350,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -396,7 +403,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -450,7 +458,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -506,7 +515,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                         .withPartitionKeys("_year")
                         .withPrimaryKeys("_id", "_year")
                         .withComputedColumnArgs("_year=year(_date)")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -542,7 +552,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -648,14 +659,17 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         config.put("scan.watermark.alignment.update-interval", "1 s");
 
         KafkaSyncTableAction action =
-                syncTableActionBuilder(kafkaConfig).withTableConfig(config).build();
+                syncTableActionBuilder(kafkaConfig)
+                        .withTableConfig(getTableConfig(config))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
+                        .build();
         runActionWithDefaultEnv(action);
 
         FileStoreTable table =
                 (FileStoreTable) catalog.getTable(new Identifier(database, tableName));
         while (true) {
-            if (table.snapshotManager().snapshotCount() > 0
-                    && table.snapshotManager().latestSnapshot().watermark()
+            if (table.snapshotManager().snapshotCount(branch) > 0
+                    && table.snapshotManager().latestSnapshot(branch).watermark()
                             != -9223372036854775808L) {
                 return;
             }
@@ -680,7 +694,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -717,7 +732,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 syncTableActionBuilder(kafkaConfig)
                         .withPartitionKeys("pt")
                         .withPrimaryKeys("pt", "_id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -969,7 +985,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig)
                         .withPrimaryKeys("id")
-                        .withTableConfig(getBasicTableConfig())
+                        .withTableConfig(getTableConfig(getBasicTableConfig()))
+                        .withCatalogConfig(getCatalogOptions(new HashMap<>()))
                         .build();
         runActionWithDefaultEnv(action);
 

@@ -44,13 +44,13 @@ public class UnawareBucketCompactionSink extends FlinkSink<AppendOnlyCompactionT
     @Override
     protected OneInputStreamOperator<AppendOnlyCompactionTask, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new AppendOnlyTableCompactionWorkerOperator(table, commitUser);
+        return new AppendOnlyTableCompactionWorkerOperator(table, commitUser).toBranch(branch);
     }
 
     @Override
     protected Committer.Factory<Committable, ManifestCommittable> createCommitterFactory(
             boolean streamingCheckpointEnabled) {
-        return (s, metricGroup) -> new StoreCommitter(table.newCommit(s), metricGroup);
+        return (s, metricGroup) -> new StoreCommitter(table.newCommit(s, branch), metricGroup);
     }
 
     @Override

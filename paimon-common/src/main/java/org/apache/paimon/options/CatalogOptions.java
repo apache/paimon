@@ -110,4 +110,10 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    public static final ConfigOption<String> BRANCH =
+            key("branch")
+                    .stringType()
+                    .defaultValue("main")
+                    .withDescription("Specify the branch submitted by the schema.");
 }

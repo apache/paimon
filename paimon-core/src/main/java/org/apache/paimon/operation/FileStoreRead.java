@@ -30,7 +30,6 @@ import java.io.IOException;
  * @param <T> type of record to read.
  */
 public interface FileStoreRead<T> {
-
     FileStoreRead<T> withFilter(Predicate predicate);
 
     /** Create a {@link RecordReader} from split. */

@@ -35,6 +35,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
@@ -139,7 +140,8 @@ public abstract class WriterOperatorTestBase {
                                 false,
                                 true,
                                 memoryPool,
-                                metricGroup);
+                                metricGroup,
+                                BranchManager.DEFAULT_MAIN_BRANCH);
         RowDataStoreWriteOperator operator =
                 new RowDataStoreWriteOperator(fileStoreTable, null, provider, "test");
         return operator;

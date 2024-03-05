@@ -37,6 +37,7 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
@@ -71,6 +72,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     @Nullable private List<Predicate> filters;
 
+    private String branch;
+
     public AppendOnlyFileStoreRead(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -78,6 +81,24 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
+        this(
+                fileIO,
+                schemaManager,
+                schemaId,
+                rowType,
+                formatDiscover,
+                pathFactory,
+                BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public AppendOnlyFileStoreRead(
+            FileIO fileIO,
+            SchemaManager schemaManager,
+            long schemaId,
+            RowType rowType,
+            FileFormatDiscover formatDiscover,
+            FileStorePathFactory pathFactory,
+            String branch) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -86,6 +107,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         this.bulkFormatMappings = new HashMap<>();
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
+        this.branch = branch;
     }
 
     public FileStoreRead<InternalRow> withProjection(int[][] projectedFields) {
@@ -113,8 +135,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> {
-                                TableSchema tableSchema = schemaManager.schema(this.schemaId);
-                                TableSchema dataSchema = schemaManager.schema(key.schemaId);
+                                TableSchema tableSchema =
+                                        schemaManager.schema(branch, this.schemaId);
+                                TableSchema dataSchema = schemaManager.schema(branch, key.schemaId);
 
                                 // projection to data schema
                                 int[][] dataProjection =

@@ -78,10 +78,26 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
+    default InnerTableWrite newWrite(String commitUser, String branch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newWrite with branch.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
     default InnerTableCommit newCommit(String commitUser) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support newCommit.",
+                        this.getClass().getSimpleName()));
+    }
+
+    @Override
+    default InnerTableCommit newCommit(String commitUser, String branch) {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support newCommit with branch.",
                         this.getClass().getSimpleName()));
     }
 

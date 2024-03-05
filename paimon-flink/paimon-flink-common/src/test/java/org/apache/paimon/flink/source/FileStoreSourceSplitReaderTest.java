@@ -28,13 +28,13 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.RecordWriter;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.base.source.reader.RecordsWithSplitIds;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsAddition;
 import org.apache.flink.connector.base.source.reader.splitreader.SplitsChange;
-import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.reader.BulkFormat.RecordIterator;
 import org.apache.flink.connector.file.src.util.RecordAndPosition;
 import org.apache.flink.table.data.RowData;
@@ -67,6 +67,8 @@ public class FileStoreSourceSplitReaderTest {
 
     @TempDir java.nio.file.Path tempDir;
 
+    protected String branch = BranchManager.DEFAULT_MAIN_BRANCH;
+
     @BeforeEach
     public void beforeEach() throws Exception {
         SchemaManager schemaManager =
@@ -84,7 +86,8 @@ public class FileStoreSourceSplitReaderTest {
                         Collections.singletonList("default"),
                         Arrays.asList("k", "default"),
                         Collections.emptyMap(),
-                        null));
+                        null),
+                branch);
     }
 
     @Test
@@ -106,10 +109,10 @@ public class FileStoreSourceSplitReaderTest {
 
     private void innerTestOnce(int skip) throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input, branch);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, skip));
 
@@ -132,10 +135,10 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testPrimaryKeyWithDelete() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input = kvs();
-        RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0);
+        RecordWriter<KeyValue> writer = rw.createMergeTreeWriter(row(1), 0, branch);
         for (Tuple2<Long, Long> tuple2 : input) {
             writer.write(
                     new KeyValue()
@@ -154,7 +157,7 @@ public class FileStoreSourceSplitReaderTest {
         writer.close();
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, true));
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
 
         List<Tuple2<RowKind, Long>> expected =
                 input.stream()
@@ -174,18 +177,18 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1, branch);
 
         List<Tuple2<Long, Long>> input2 = kvs(6);
-        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2, branch);
         files.addAll(files2);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files));
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
         assertRecords(
                 records,
                 null,
@@ -210,14 +213,14 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestore() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input, branch);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 3));
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
         assertRecords(
                 records,
                 null,
@@ -236,18 +239,18 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testRestoreMultipleBatchInSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1, branch);
 
         List<Tuple2<Long, Long>> input2 = kvs(6);
-        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2, branch);
         files.addAll(files2);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 7));
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
         assertRecords(
                 records,
                 null,
@@ -267,17 +270,17 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testMultipleSplits() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files1 = rw.writeFiles(row(1), 0, input1, branch);
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files1));
 
         List<Tuple2<Long, Long>> input2 = kvs();
-        List<DataFileMeta> files2 = rw.writeFiles(row(2), 1, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(2), 1, input2, branch);
         assignSplit(reader, newSourceSplit("id2", row(2), 1, files2));
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
         assertRecords(
                 records,
                 null,
@@ -305,7 +308,7 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testNoSplit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
         assertThatThrownBy(reader::fetch).hasMessageContaining("no split remaining");
         reader.close();
     }
@@ -313,14 +316,14 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testLimit() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), 2L);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), 2L);
 
         List<Tuple2<Long, Long>> input = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input, branch);
 
         assignSplit(reader, newSourceSplit("id1", row(1), 0, files, 0));
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
 
         List<Tuple2<RowKind, Long>> expected =
                 input.stream()
@@ -346,19 +349,19 @@ public class FileStoreSourceSplitReaderTest {
     @Test
     public void testPauseOrResumeSplits() throws Exception {
         TestChangelogDataReadWrite rw = new TestChangelogDataReadWrite(tempDir.toString());
-        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(), null);
+        FileStoreSourceSplitReader reader = createReader(rw.createReadWithKey(branch), null);
 
         List<Tuple2<Long, Long>> input1 = kvs();
-        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1);
+        List<DataFileMeta> files = rw.writeFiles(row(1), 0, input1, branch);
 
         List<Tuple2<Long, Long>> input2 = kvs(6);
-        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2);
+        List<DataFileMeta> files2 = rw.writeFiles(row(1), 0, input2, branch);
         files.addAll(files2);
 
         FileStoreSourceSplit split1 = newSourceSplit("id1", row(1), 0, files);
         assignSplit(reader, split1);
 
-        RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records = reader.fetch();
+        RecordsWithSplitIds<RecordIterator<RowData>> records = reader.fetch();
         assertRecords(
                 records,
                 null,
@@ -373,7 +376,7 @@ public class FileStoreSourceSplitReaderTest {
 
         // assign next split
         List<Tuple2<Long, Long>> input3 = kvs(12);
-        List<DataFileMeta> files3 = rw.writeFiles(row(1), 0, input3);
+        List<DataFileMeta> files3 = rw.writeFiles(row(1), 0, input3, branch);
         FileStoreSourceSplit split2 = newSourceSplit("id2", row(1), 0, files3);
         assignSplit(reader, split2);
 
@@ -408,7 +411,7 @@ public class FileStoreSourceSplitReaderTest {
     }
 
     private void assertRecords(
-            RecordsWithSplitIds<BulkFormat.RecordIterator<RowData>> records,
+            RecordsWithSplitIds<RecordIterator<RowData>> records,
             String finishedSplit,
             String nextSplit,
             long startRecordSkipCount,

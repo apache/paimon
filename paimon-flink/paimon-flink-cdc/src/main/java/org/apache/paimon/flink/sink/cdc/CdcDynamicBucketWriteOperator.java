@@ -69,7 +69,7 @@ public class CdcDynamicBucketWriteOperator extends TableWriteOperator<Tuple2<Cdc
         Optional<GenericRow> optionalConverted = toGenericRow(record.f0, table.schema().fields());
         if (!optionalConverted.isPresent()) {
             while (true) {
-                table = table.copyWithLatestSchema();
+                table = table.copyWithLatestSchema(branch);
                 optionalConverted = toGenericRow(record.f0, table.schema().fields());
                 if (optionalConverted.isPresent()) {
                     break;

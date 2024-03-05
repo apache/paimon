@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -65,10 +66,22 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
 
     protected final FileStoreTable table;
 
+    protected final String branchName;
+
     public BatchWriteGeneratorTagOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator, FileStoreTable table) {
         this.table = table;
         this.commitOperator = commitOperator;
+        this.branchName = BranchManager.DEFAULT_MAIN_BRANCH;
+    }
+
+    public BatchWriteGeneratorTagOperator(
+            CommitterOperator<CommitT, GlobalCommitT> commitOperator,
+            FileStoreTable table,
+            String branchName) {
+        this.table = table;
+        this.commitOperator = commitOperator;
+        this.branchName = branchName;
     }
 
     @Override
@@ -100,7 +113,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
 
     private void createTag() {
         SnapshotManager snapshotManager = table.snapshotManager();
-        Snapshot snapshot = snapshotManager.latestSnapshot();
+        Snapshot snapshot = snapshotManager.latestSnapshot(branchName);
         if (snapshot == null) {
             return;
         }
@@ -113,11 +126,11 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                         + localDateTime.format(DateTimeFormatter.ofPattern("yyyy-MM-dd"));
         try {
             // If the tag already exists, delete the tag
-            if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+            if (tagManager.tagExists(branchName, tagName)) {
+                tagManager.deleteTag(tagName, tagDeletion, snapshotManager, branchName);
             }
             // Create a new tag
-            tagManager.createTag(snapshot, tagName, table.store().createTagCallbacks());
+            tagManager.createTag(snapshot, tagName, table.store().createTagCallbacks(), branchName);
             // Expire the tag
             expireTag();
         } catch (Exception e) {
@@ -136,18 +149,20 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             }
             TagManager tagManager = table.tagManager();
             TagDeletion tagDeletion = table.store().newTagDeletion();
-            long tagCount = tagManager.tagCount();
+            long tagCount = tagManager.tagCount(branchName);
 
             while (tagCount > tagNumRetainedMax) {
-                for (List<String> tagNames : tagManager.tags().values()) {
+                for (List<String> tagNames : tagManager.tags(branchName).values()) {
                     if (tagCount - tagNames.size() >= tagNumRetainedMax) {
                         tagManager.deleteAllTagsOfOneSnapshot(
-                                tagNames, tagDeletion, snapshotManager);
+                                tagNames, tagDeletion, snapshotManager, branchName);
                         tagCount = tagCount - tagNames.size();
                     } else {
-                        List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
+                        List<String> sortedTagNames =
+                                tagManager.sortTagsOfOneSnapshot(branchName, tagNames);
                         for (String toBeDeleted : sortedTagNames) {
-                            tagManager.deleteTag(toBeDeleted, tagDeletion, snapshotManager);
+                            tagManager.deleteTag(
+                                    toBeDeleted, tagDeletion, snapshotManager, branchName);
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {
                                 break;

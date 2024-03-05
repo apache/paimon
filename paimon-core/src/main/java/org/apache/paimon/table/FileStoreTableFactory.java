@@ -26,6 +26,7 @@ import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.utils.BranchManager;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -36,13 +37,17 @@ import static org.apache.paimon.CoreOptions.PATH;
 public class FileStoreTableFactory {
 
     public static FileStoreTable create(CatalogContext context) {
+        return create(context, BranchManager.DEFAULT_MAIN_BRANCH);
+    }
+
+    public static FileStoreTable create(CatalogContext context, String branch) {
         FileIO fileIO;
         try {
             fileIO = FileIO.get(CoreOptions.path(context.options()), context);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-        return create(fileIO, context.options());
+        return create(fileIO, context.options(), branch);
     }
 
     public static FileStoreTable create(FileIO fileIO, Path path) {
@@ -51,11 +56,11 @@ public class FileStoreTableFactory {
         return create(fileIO, options);
     }
 
-    public static FileStoreTable create(FileIO fileIO, Options options) {
+    public static FileStoreTable create(FileIO fileIO, Options options, String branch) {
         Path tablePath = CoreOptions.path(options);
         TableSchema tableSchema =
                 new SchemaManager(fileIO, tablePath)
-                        .latest()
+                        .latest(branch)
                         .orElseThrow(
                                 () ->
                                         new IllegalArgumentException(
@@ -68,6 +73,10 @@ public class FileStoreTableFactory {
                 tableSchema,
                 options,
                 new CatalogEnvironment(Lock.emptyFactory(), null, null));
+    }
+
+    public static FileStoreTable create(FileIO fileIO, Options options) {
+        return create(fileIO, options, BranchManager.DEFAULT_MAIN_BRANCH);
     }
 
     public static FileStoreTable create(FileIO fileIO, Path tablePath, TableSchema tableSchema) {

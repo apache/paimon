@@ -51,8 +51,8 @@ public class MultiTableUpdatedDataFieldsProcessFunction
 
     private final Map<Identifier, SchemaManager> schemaManagers = new HashMap<>();
 
-    public MultiTableUpdatedDataFieldsProcessFunction(Catalog.Loader catalogLoader) {
-        super(catalogLoader);
+    public MultiTableUpdatedDataFieldsProcessFunction(Catalog.Loader catalogLoader, String branch) {
+        super(catalogLoader, branch);
     }
 
     @Override

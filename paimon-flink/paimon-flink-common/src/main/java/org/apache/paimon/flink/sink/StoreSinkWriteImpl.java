@@ -32,6 +32,8 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.SinkRecord;
 import org.apache.paimon.table.sink.TableWriteImpl;
+import org.apache.paimon.utils.BranchManager;
+import org.apache.paimon.utils.StringUtils;
 
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManager;
@@ -65,6 +67,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
 
     @Nullable private final MetricGroup metricGroup;
 
+    private final String branchName;
+
     public StoreSinkWriteImpl(
             FileStoreTable table,
             String commitUser,
@@ -74,7 +78,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean waitCompaction,
             boolean isStreamingMode,
             @Nullable MemorySegmentPool memoryPool,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup metricGroup,
+            String branchName) {
         this(
                 table,
                 commitUser,
@@ -85,7 +90,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 isStreamingMode,
                 memoryPool,
                 null,
-                metricGroup);
+                metricGroup,
+                branchName);
     }
 
     public StoreSinkWriteImpl(
@@ -97,7 +103,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean waitCompaction,
             boolean isStreamingMode,
             MemoryPoolFactory memoryPoolFactory,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup metricGroup,
+            String branchName) {
         this(
                 table,
                 commitUser,
@@ -108,7 +115,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 isStreamingMode,
                 null,
                 memoryPoolFactory,
-                metricGroup);
+                metricGroup,
+                branchName);
     }
 
     private StoreSinkWriteImpl(
@@ -121,7 +129,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
             boolean isStreamingMode,
             @Nullable MemorySegmentPool memoryPool,
             @Nullable MemoryPoolFactory memoryPoolFactory,
-            @Nullable MetricGroup metricGroup) {
+            @Nullable MetricGroup metricGroup,
+            String branchName) {
         this.commitUser = commitUser;
         this.state = state;
         this.paimonIOManager = new IOManagerImpl(ioManager.getSpillingDirectoriesPaths());
@@ -131,6 +140,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
         this.memoryPool = memoryPool;
         this.memoryPoolFactory = memoryPoolFactory;
         this.metricGroup = metricGroup;
+        this.branchName =
+                StringUtils.isBlank(branchName) ? BranchManager.DEFAULT_MAIN_BRANCH : branchName;
         this.write = newTableWrite(table);
     }
 
@@ -143,7 +154,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(
                                 commitUser,
                                 (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket))
+                                        state.stateValueFilter().filter(table.name(), part, bucket),
+                                branchName)
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)

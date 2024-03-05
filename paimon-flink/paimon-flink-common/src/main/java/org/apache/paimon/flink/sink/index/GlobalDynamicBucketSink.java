@@ -64,7 +64,7 @@ public class GlobalDynamicBucketSink extends FlinkWriteSink<Tuple2<InternalRow, 
     @Override
     protected OneInputStreamOperator<Tuple2<InternalRow, Integer>, Committable> createWriteOperator(
             StoreSinkWrite.Provider writeProvider, String commitUser) {
-        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser);
+        return new DynamicBucketRowWriteOperator(table, writeProvider, commitUser).toBranch(branch);
     }
 
     public DataStreamSink<?> build(DataStream<InternalRow> input, @Nullable Integer parallelism) {
