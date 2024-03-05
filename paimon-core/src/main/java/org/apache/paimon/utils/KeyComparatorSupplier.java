@@ -26,6 +26,7 @@ import org.apache.paimon.types.RowType;
 
 import java.util.Comparator;
 import java.util.function.Supplier;
+import java.util.stream.IntStream;
 
 /** A {@link Supplier} that returns the comparator for the file store key. */
 public class KeyComparatorSupplier implements SerializableSupplier<Comparator<InternalRow>> {
@@ -36,7 +37,10 @@ public class KeyComparatorSupplier implements SerializableSupplier<Comparator<In
 
     public KeyComparatorSupplier(RowType keyType) {
         genRecordComparator =
-                CodeGenUtils.generateRecordComparator(keyType.getFieldTypes(), "KeyComparator");
+                CodeGenUtils.generateRecordComparator(
+                        keyType.getFieldTypes(),
+                        IntStream.range(0, keyType.getFieldCount()).toArray(),
+                        "KeyComparator");
     }
 
     @Override

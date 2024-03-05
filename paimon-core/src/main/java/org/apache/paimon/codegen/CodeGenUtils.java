@@ -23,6 +23,7 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
 
 import java.util.List;
+import java.util.stream.IntStream;
 
 /** Utils for code generations. */
 public class CodeGenUtils {
@@ -46,15 +47,16 @@ public class CodeGenUtils {
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
-            List<DataType> fieldTypes, String name) {
+            List<DataType> inputTypes, int[] sortFields, String name) {
         return CodeGenLoader.getCodeGenerator()
-                .generateNormalizedKeyComputer(fieldTypes, name)
+                .generateNormalizedKeyComputer(inputTypes, sortFields, name)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 
     public static GeneratedClass<RecordComparator> generateRecordComparator(
-            List<DataType> fieldTypes, String name) {
-        return CodeGenLoader.getCodeGenerator().generateRecordComparator(fieldTypes, name);
+            List<DataType> inputTypes, int[] sortFields, String name) {
+        return CodeGenLoader.getCodeGenerator()
+                .generateRecordComparator(inputTypes, sortFields, name);
     }
 
     public static GeneratedClass<RecordEqualiser> generateRecordEqualiser(
@@ -62,8 +64,15 @@ public class CodeGenUtils {
         return CodeGenLoader.getCodeGenerator().generateRecordEqualiser(fieldTypes, name);
     }
 
-    public static RecordComparator newRecordComparator(List<DataType> fieldTypes, String name) {
-        return generateRecordComparator(fieldTypes, name)
+    public static RecordComparator newRecordComparator(
+            List<DataType> inputTypes, int[] sortFields, String name) {
+        return generateRecordComparator(inputTypes, sortFields, name)
+                .newInstance(CodeGenUtils.class.getClassLoader());
+    }
+
+    public static RecordComparator newRecordComparator(List<DataType> inputTypes, String name) {
+        return generateRecordComparator(
+                        inputTypes, IntStream.range(0, inputTypes.size()).toArray(), name)
                 .newInstance(CodeGenUtils.class.getClassLoader());
     }
 }

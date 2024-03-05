@@ -227,6 +227,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                             batchMergeRead(
                                     split.partition(), split.bucket(), split.dataFiles(), false),
                             keyComparator,
+                            null,
                             mergeSorter,
                             forceKeepDelete);
         }
@@ -255,6 +256,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                             ? overlappedSectionFactory
                                             : nonOverlappedSectionFactory,
                                     keyComparator,
+                                    null,
                                     mergeFuncWrapper,
                                     mergeSorter));
         }

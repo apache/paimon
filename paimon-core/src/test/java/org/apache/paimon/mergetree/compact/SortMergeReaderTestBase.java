@@ -48,6 +48,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
         return SortMergeReader.createSortMergeReader(
                 new ArrayList<>(readers),
                 KEY_COMPARATOR,
+                null,
                 new ReducerMergeFunctionWrapper(createMergeFunction()),
                 sortEngine);
     }
