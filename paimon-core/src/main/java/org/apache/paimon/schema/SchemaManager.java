@@ -45,9 +45,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Caffeine;
-
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
 
@@ -61,6 +58,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -81,19 +79,18 @@ public class SchemaManager implements Serializable {
     private final FileIO fileIO;
     private final Path tableRoot;
 
-    @Nullable private transient Lock lock;
+    private transient Lock lock;
 
-    private transient Cache<Long, TableSchema> cache;
+    private final Map<Long, TableSchema> cache;
 
     public SchemaManager(FileIO fileIO, Path tableRoot) {
-        this(fileIO, tableRoot, new HashMap<>());
+        this(fileIO, tableRoot, new ConcurrentHashMap<>());
     }
 
     public SchemaManager(FileIO fileIO, Path tableRoot, Map<Long, TableSchema> cache) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.cache = Caffeine.newBuilder().maximumSize(10).build();
-        this.cache.putAll(cache);
+        this.cache = cache;
     }
 
     public SchemaManager withLock(@Nullable Lock lock) {
@@ -136,7 +133,7 @@ public class SchemaManager implements Serializable {
     }
 
     @VisibleForTesting
-    Cache<Long, TableSchema> getCachedSchema() {
+    Map<Long, TableSchema> getCachedSchema() {
         return cache;
     }
 
@@ -379,7 +376,9 @@ public class SchemaManager implements Serializable {
             try {
                 boolean success = commit(newSchema);
                 if (success) {
-                    cache.put(newSchema.id(), newSchema);
+                    if (cache != null) {
+                        cache.put(newSchema.id(), newSchema);
+                    }
                     return newSchema;
                 }
             } catch (Exception e) {
@@ -484,7 +483,7 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        return this.cache.get(id, this::loadSchemaFromFile);
+        return cache.computeIfAbsent(id, this::loadSchemaFromFile);
     }
 
     private TableSchema loadSchemaFromFile(Long id) {
@@ -530,7 +529,9 @@ public class SchemaManager implements Serializable {
      */
     public void deleteSchema(long schemaId) {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
-        this.cache.invalidate(schemaId);
+        if (cache != null) {
+            this.cache.remove(schemaId);
+        }
     }
 
     public static void checkAlterTableOption(String key) {

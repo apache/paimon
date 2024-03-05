@@ -31,8 +31,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FailingFileIO;
 
-import org.apache.paimon.shade.caffeine2.com.github.benmanes.caffeine.cache.Cache;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -108,13 +106,12 @@ public class SchemaManagerTest {
         // schema-2
         manager.commitChanges(SchemaChange.setOption("ccc", "ddd"));
 
-        Cache<Long, TableSchema> cachedSchema = manager.getCachedSchema();
-        assertThat(cachedSchema.asMap()).hasSize(3);
+        Map<Long, TableSchema> cachedSchema = manager.getCachedSchema();
+        assertThat(cachedSchema).hasSize(3);
 
         manager.deleteSchema(1L);
-        Map<Long, TableSchema> map = cachedSchema.asMap();
-        assertThat(map).hasSize(2);
-        TableSchema tableSchema = map.get(2L);
+        assertThat(cachedSchema).hasSize(2);
+        TableSchema tableSchema = cachedSchema.get(2L);
         assertThat(tableSchema.options()).containsKey("ccc");
     }
 

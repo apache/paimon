@@ -63,11 +63,11 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -107,8 +107,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @NotNull
     private Map<Long, TableSchema> loadSchemaCache(FileIO fileIO, Path path) {
-        final Map<Long, TableSchema> schemaCache;
-        schemaCache = new LinkedHashMap<>();
+        Map<Long, TableSchema> schemaCache = new ConcurrentHashMap<>();
         SchemaManager schemaManager = new SchemaManager(fileIO, path);
         for (TableSchema schema : schemaManager.listAll()) {
             schemaCache.put(schema.id(), schema);
