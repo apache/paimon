@@ -178,7 +178,9 @@ For instance, using the option `hive.table.owner=Jon` will automatically add the
 
 ## Creating a Catalog with JDBC Metastore
 
-By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as MySQL, postgres, etc.
+By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite, MySQL, postgres, etc.
+
+Currently, lock configuration is only supported for MySQL and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
 
 {{< tabs "jdbc-metastore-example" >}}
 
@@ -198,15 +200,15 @@ CREATE CATALOG my_jdbc WITH (
     'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
     'jdbc.user' = '...', 
     'jdbc.password' = '...', 
-    'store-key'='jdbc',
+    'catalog-key'='jdbc',
     'warehouse' = 'hdfs:///path/to/warehouse'
 );
 
 USE CATALOG my_jdbc;
 ```
-You can define any connection parameters for a database with the prefix "jdbc.".
+You can configure any connection parameters that have been declared by JDBC through "jdbc.", the connection parameters may be different between different databases, please configure according to the actual situation.
 
-You can also perform logical isolation for databases under multiple catalogs by specifying "store-key".
+You can also perform logical isolation for databases under multiple catalogs by specifying "catalog-key".
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 

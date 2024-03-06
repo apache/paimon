@@ -18,7 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
-/** Distributed lock implementation based on sqlite table. */
+/** Distributed lock implementation based on mysql table. */
 public class MysqlDistributedLockDialect extends AbstractDistributedLockDialect {
 
     @Override

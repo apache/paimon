@@ -65,15 +65,15 @@ public class JdbcCatalog extends AbstractCatalog {
     public static final String PROPERTY_PREFIX = "jdbc.";
     private static final String DATABASE_EXISTS_PROPERTY = "exists";
     private JdbcClientPool connections;
-    private String storeKey = "jdbc";
+    private String catalogKey = "jdbc";
     private Map<String, String> configuration;
     private final String warehouse;
 
     protected JdbcCatalog(
-            FileIO fileIO, String storeKey, Map<String, String> config, String warehouse) {
+            FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
         super(fileIO);
-        if (!StringUtils.isBlank(storeKey)) {
-            this.storeKey = storeKey;
+        if (!StringUtils.isBlank(catalogKey)) {
+            this.catalogKey = catalogKey;
         }
         this.configuration = config;
         this.warehouse = warehouse;
@@ -148,19 +148,19 @@ public class JdbcCatalog extends AbstractCatalog {
                 fetch(
                         row -> row.getString(JdbcUtils.TABLE_DATABASE),
                         JdbcUtils.LIST_ALL_TABLE_DATABASES_SQL,
-                        storeKey));
+                        catalogKey));
 
         databases.addAll(
                 fetch(
                         row -> row.getString(JdbcUtils.DATABASE_NAME),
                         JdbcUtils.LIST_ALL_PROPERTY_DATABASES_SQL,
-                        storeKey));
+                        catalogKey));
         return databases;
     }
 
     @Override
     protected boolean databaseExistsImpl(String databaseName) {
-        return JdbcUtils.databaseExists(connections, storeKey, databaseName);
+        return JdbcUtils.databaseExists(connections, catalogKey, databaseName);
     }
 
     @Override
@@ -193,15 +193,15 @@ public class JdbcCatalog extends AbstractCatalog {
             Path databasePath = newDatabasePath(name);
             createProps.put(DB_LOCATION_PROP, databasePath.toString());
         }
-        insertProperties(connections, storeKey, name, createProps);
+        insertProperties(connections, catalogKey, name, createProps);
     }
 
     @Override
     protected void dropDatabaseImpl(String name) {
         // Delete table from paimon_tables
-        execute(connections, JdbcUtils.DELETE_TABLES_SQL, storeKey, name);
+        execute(connections, JdbcUtils.DELETE_TABLES_SQL, catalogKey, name);
         // Delete properties from paimon_database_properties
-        execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, storeKey, name);
+        execute(connections, JdbcUtils.DELETE_ALL_DATABASE_PROPERTIES_SQL, catalogKey, name);
     }
 
     @Override
@@ -212,7 +212,7 @@ public class JdbcCatalog extends AbstractCatalog {
         return fetch(
                 row -> row.getString(JdbcUtils.TABLE_NAME),
                 JdbcUtils.LIST_TABLES_SQL,
-                storeKey,
+                catalogKey,
                 databaseName);
     }
 
@@ -223,7 +223,7 @@ public class JdbcCatalog extends AbstractCatalog {
                     execute(
                             connections,
                             JdbcUtils.DROP_TABLE_SQL,
-                            storeKey,
+                            catalogKey,
                             identifier.getDatabaseName(),
                             identifier.getObjectName());
 
@@ -257,7 +257,7 @@ public class JdbcCatalog extends AbstractCatalog {
                                 try (PreparedStatement sql =
                                         conn.prepareStatement(
                                                 JdbcUtils.DO_COMMIT_CREATE_TABLE_SQL)) {
-                                    sql.setString(1, storeKey);
+                                    sql.setString(1, catalogKey);
                                     sql.setString(2, identifier.getDatabaseName());
                                     sql.setString(3, identifier.getObjectName());
                                     return sql.executeUpdate();
@@ -274,7 +274,7 @@ public class JdbcCatalog extends AbstractCatalog {
                 throw new RuntimeException(
                         String.format(
                                 "Failed to create table %s in catalog %s",
-                                identifier.getFullName(), storeKey));
+                                identifier.getFullName(), catalogKey));
             }
         } catch (Exception e) {
             throw new RuntimeException("Failed to create table " + identifier.getFullName(), e);
@@ -285,7 +285,7 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void renameTableImpl(Identifier fromTable, Identifier toTable) {
         try {
             // update table metadata info
-            updateTable(connections, storeKey, fromTable, toTable);
+            updateTable(connections, catalogKey, fromTable, toTable);
 
             Path fromPath = getDataTableLocation(fromTable);
             if (new SchemaManager(fileIO, fromPath).listAllIds().size() > 0) {
@@ -336,7 +336,7 @@ public class JdbcCatalog extends AbstractCatalog {
             return super.tableExists(identifier);
         }
         return JdbcUtils.tableExists(
-                connections, storeKey, identifier.getDatabaseName(), identifier.getObjectName());
+                connections, catalogKey, identifier.getDatabaseName(), identifier.getObjectName());
     }
 
     @Override
@@ -347,7 +347,7 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public Optional<CatalogLock.LockFactory> lockFactory() {
         return lockEnabled()
-                ? Optional.of(JdbcCatalogLock.createFactory(connections, storeKey, configuration))
+                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, configuration))
                 : Optional.empty();
     }
 
@@ -364,7 +364,7 @@ public class JdbcCatalog extends AbstractCatalog {
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
                         connections,
-                        storeKey,
+                        catalogKey,
                         checkMaxSleep(configuration),
                         acquireTimeout(configuration));
         return Lock.fromCatalog(lock, identifier);
@@ -393,7 +393,7 @@ public class JdbcCatalog extends AbstractCatalog {
                                         row.getString(JdbcUtils.DATABASE_PROPERTY_KEY),
                                         row.getString(JdbcUtils.DATABASE_PROPERTY_VALUE)),
                         JdbcUtils.GET_ALL_DATABASE_PROPERTIES_SQL,
-                        storeKey,
+                        catalogKey,
                         databaseName);
         return ImmutableMap.<String, String>builder().putAll(entries).build();
     }

@@ -38,7 +38,7 @@ import java.util.stream.Stream;
 public class JdbcUtils {
     private static final Logger LOG = LoggerFactory.getLogger(JdbcUtils.class);
     public static final String CATALOG_TABLE_NAME = "paimon_tables";
-    public static final String STORE_KEY = "store_key";
+    public static final String CATALOG_KEY = "catalog_key";
     public static final String TABLE_DATABASE = "database_name";
     public static final String TABLE_NAME = "table_name";
 
@@ -46,14 +46,14 @@ public class JdbcUtils {
             "CREATE TABLE "
                     + CATALOG_TABLE_NAME
                     + "("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " VARCHAR(255) NOT NULL,"
                     + TABLE_DATABASE
                     + " VARCHAR(255) NOT NULL,"
                     + TABLE_NAME
                     + " VARCHAR(255) NOT NULL,"
                     + " PRIMARY KEY ("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + ", "
                     + TABLE_DATABASE
                     + ", "
@@ -64,7 +64,7 @@ public class JdbcUtils {
             "SELECT * FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -74,7 +74,7 @@ public class JdbcUtils {
             "SELECT * FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ?";
@@ -83,7 +83,7 @@ public class JdbcUtils {
             "DELETE FROM  "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ?";
@@ -96,7 +96,7 @@ public class JdbcUtils {
                     + TABLE_NAME
                     + " = ? "
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -106,7 +106,7 @@ public class JdbcUtils {
             "DELETE FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? AND "
@@ -118,7 +118,7 @@ public class JdbcUtils {
                     + " FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + TABLE_DATABASE
                     + " = ? LIMIT 1";
@@ -129,13 +129,13 @@ public class JdbcUtils {
                     + " FROM "
                     + CATALOG_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ?";
     static final String DO_COMMIT_CREATE_TABLE_SQL =
             "INSERT INTO "
                     + CATALOG_TABLE_NAME
                     + " ("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + ", "
                     + TABLE_DATABASE
                     + ", "
@@ -153,7 +153,7 @@ public class JdbcUtils {
             "CREATE TABLE "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + "("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " VARCHAR(255) NOT NULL,"
                     + DATABASE_NAME
                     + " VARCHAR(255) NOT NULL,"
@@ -162,7 +162,7 @@ public class JdbcUtils {
                     + DATABASE_PROPERTY_VALUE
                     + " VARCHAR(1000),"
                     + "PRIMARY KEY ("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + ", "
                     + DATABASE_NAME
                     + ", "
@@ -175,7 +175,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
@@ -183,7 +183,7 @@ public class JdbcUtils {
             "INSERT INTO "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " ("
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + ", "
                     + DATABASE_NAME
                     + ", "
@@ -197,7 +197,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ? ";
@@ -205,7 +205,7 @@ public class JdbcUtils {
             "DELETE FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ? AND "
                     + DATABASE_NAME
                     + " = ?";
@@ -215,7 +215,7 @@ public class JdbcUtils {
                     + " FROM "
                     + DATABASE_PROPERTIES_TABLE_NAME
                     + " WHERE "
-                    + STORE_KEY
+                    + CATALOG_KEY
                     + " = ?";
 
     // Distributed locks table
@@ -250,7 +250,7 @@ public class JdbcUtils {
                         sql.setString(3, tableName);
                         ResultSet rs = sql.executeQuery();
                         if (rs.next()) {
-                            table.put(STORE_KEY, rs.getString(STORE_KEY));
+                            table.put(CATALOG_KEY, rs.getString(CATALOG_KEY));
                             table.put(TABLE_DATABASE, rs.getString(TABLE_DATABASE));
                             table.put(TABLE_NAME, rs.getString(TABLE_NAME));
                         }
