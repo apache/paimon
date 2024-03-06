@@ -48,8 +48,8 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     /**
-     * Reset the number of rows in the vectorized batch, the start position and the global start
-     * position in this batch.
+     * Reset the number of rows in the vectorized batch, the start position in this batch and the
+     * global position.
      */
     public void reset(int num, long nextGlobalPos) {
         this.num = num;
