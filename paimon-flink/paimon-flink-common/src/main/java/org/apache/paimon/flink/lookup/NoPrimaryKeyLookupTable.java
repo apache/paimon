@@ -68,11 +68,10 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
-        if (orderByLastField) {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+        if (userDefinedSeqComparator != null) {
             throw new IllegalArgumentException(
-                    "Append table does not support order by last field.");
+                    "Append table does not support user defined sequence fields.");
         }
 
         Predicate predicate = projectedPredicate();

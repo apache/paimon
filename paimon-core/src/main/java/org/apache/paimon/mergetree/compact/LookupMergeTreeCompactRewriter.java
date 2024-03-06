@@ -28,6 +28,9 @@ import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.LookupLevels;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
@@ -54,6 +57,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory) {
@@ -63,6 +67,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 readerFactory,
                 writerFactory,
                 keyComparator,
+                userDefinedSeqComparator,
                 mfFactory,
                 mergeSorter);
         this.lookupLevels = lookupLevels;

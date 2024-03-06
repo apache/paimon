@@ -30,6 +30,9 @@ import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
@@ -40,6 +43,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     protected final KeyValueFileReaderFactory readerFactory;
     protected final KeyValueFileWriterFactory writerFactory;
     protected final Comparator<InternalRow> keyComparator;
+    @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
 
@@ -47,11 +51,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
+        this.userDefinedSeqComparator = userDefinedSeqComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
     }
@@ -72,6 +78,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                         dropDelete,
                         readerFactory,
                         keyComparator,
+                        userDefinedSeqComparator,
                         mfFactory.create(),
                         mergeSorter);
         writer.write(new RecordReaderIterator<>(sectionsReader));

@@ -99,6 +99,29 @@ public final class RowType extends DataType {
         return -1;
     }
 
+    public boolean containsField(String fieldName) {
+        for (DataField field : fields) {
+            if (field.name().equals(fieldName)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    public boolean notContainsField(String fieldName) {
+        return !containsField(fieldName);
+    }
+
+    public DataField getField(String fieldName) {
+        for (DataField field : fields) {
+            if (field.name().equals(fieldName)) {
+                return field;
+            }
+        }
+
+        throw new RuntimeException("Cannot find field: " + fieldName);
+    }
+
     @Override
     public DataType copy(boolean isNullable) {
         return new RowType(

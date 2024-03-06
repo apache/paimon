@@ -210,60 +210,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testPaddingSequenceNumber() throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"pt", "a", "b", "sec", "non_time"});
-        GenericRow row1 = GenericRow.of(1, 10, 100, 1685530987, BinaryString.fromString("a1"));
-        GenericRow row2 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a2"));
-        GenericRow row3 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a3"));
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {
-                            conf.set(CoreOptions.SEQUENCE_FIELD, "sec");
-                            conf.set(
-                                    CoreOptions.SEQUENCE_AUTO_PADDING,
-                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO.toString());
-                        },
-                        rowType);
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-        write.write(row1);
-        write.write(row2);
-        commit.commit(0, write.prepareCommit(false, 0));
-        write.write(row3);
-        commit.commit(1, write.prepareCommit(false, 1));
-        write.close();
-        commit.close();
-
-        ReadBuilder readBuilder = table.newReadBuilder();
-        Function<InternalRow, String> toString =
-                row ->
-                        row.getInt(0)
-                                + "|"
-                                + row.getInt(1)
-                                + "|"
-                                + row.getInt(2)
-                                + "|"
-                                + row.getInt(3)
-                                + "|"
-                                + row.getString(4);
-        assertThat(
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                toString))
-                .isEqualTo(Collections.singletonList("1|10|101|1685530987|a3"));
-    }
-
-    @Test
     public void testBatchReadWrite() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
