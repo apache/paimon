@@ -50,6 +50,12 @@ Options for Hive catalog.
 
 {{< generated/hive_catalog_configuration >}}
 
+### JdbcCatalogOptions
+
+Options for Jdbc catalog.
+
+{{< generated/jdbc_catalog_configuration >}}
+
 ### FlinkCatalogOptions
 
 Flink catalog options for paimon.

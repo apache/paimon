@@ -39,7 +39,8 @@ public class CatalogOptions {
             ConfigOptions.key("metastore")
                     .stringType()
                     .defaultValue("filesystem")
-                    .withDescription("Metastore of paimon catalog, supports filesystem and hive.");
+                    .withDescription(
+                            "Metastore of paimon catalog, supports filesystem、hive and jdbc.");
 
     public static final ConfigOption<String> URI =
             ConfigOptions.key("uri")
@@ -77,6 +78,12 @@ public class CatalogOptions {
                     .defaultValue(true)
                     .withDescription(
                             "Allow to fallback to hadoop File IO when no file io found for the scheme.");
+
+    public static final ConfigOption<Integer> CLIENT_POOL_SIZE =
+            key("client-pool-size")
+                    .intType()
+                    .defaultValue(2)
+                    .withDescription("Configure the size of the connection pool.");
 
     public static final ConfigOption<String> LINEAGE_META =
             key("lineage-meta")
