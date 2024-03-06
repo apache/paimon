@@ -150,18 +150,12 @@ public interface RecordReader<T> extends Closeable {
     default void forEachRemainingWithPosition(BiConsumer<Long, ? super T> action)
             throws IOException {
         RecordWithPositionIterator<T> batch;
-        long rowPosition;
         T record;
 
         try {
             while ((batch = (RecordWithPositionIterator<T>) readBatch()) != null) {
-                while (true) {
-                    rowPosition = batch.rowPosition();
-                    record = batch.next();
-                    if (record == null) {
-                        break;
-                    }
-                    action.accept(rowPosition, record);
+                while ((record = batch.next()) != null) {
+                    action.accept(batch.returnedPosition(), record);
                 }
                 batch.releaseBatch();
             }
