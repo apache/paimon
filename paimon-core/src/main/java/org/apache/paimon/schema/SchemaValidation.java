@@ -116,6 +116,7 @@ public class SchemaValidation {
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
+        // TODO check changelog longer than snapshot
 
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.

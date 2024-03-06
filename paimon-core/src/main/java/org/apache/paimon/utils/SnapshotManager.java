@@ -18,6 +18,7 @@
 
 package org.apache.paimon.utils;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
@@ -129,8 +130,8 @@ public class SnapshotManager implements Serializable {
         }
     }
 
-    public Snapshot longLivedChangelog(long snapshotId) {
-        return Snapshot.fromPath(fileIO, longLivedChangelogPath(snapshotId));
+    public Changelog longLivedChangelog(long snapshotId) {
+        return Changelog.fromPath(fileIO, longLivedChangelogPath(snapshotId));
     }
 
     public Snapshot snapshot(String branchName, long snapshotId) {
@@ -428,6 +429,10 @@ public class SnapshotManager implements Serializable {
         Path src = snapshotPath(snapshotId);
         Path dest = longLivedChangelogPath(snapshotId);
         fileIO.rename(src, dest);
+    }
+
+    public void commitChangelog(Changelog changelog, long id) throws IOException {
+        fileIO.writeFileUtf8(longLivedChangelogPath(id), changelog.toJson());
     }
 
     /**

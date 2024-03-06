@@ -288,7 +288,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories());
+                coreOptions().snapshotExpireCleanEmptyDirectories(),
+                coreOptions().changelogLifecycleDecoupled());
     }
 
     @Override
@@ -296,8 +297,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return new ExpireChangelogImpl(
                 snapshotManager(),
                 store().newSnapshotDeletion(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                true);
+                coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
     @Override
@@ -311,7 +311,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
             ExpireSnapshots expireChangelog =
-                    newExpireChangelog().maxDeletes(options.snapshotExpireLimit());
+                    newExpireChangelog()
+                            .maxDeletes(options.snapshotExpireLimit())
+                            .retainMin(options.changelogNumRetainMin())
+                            .retainMax(options.changelogNumRetainMax());
             ExpireSnapshots expireSnapshots =
                     newExpireSnapshots()
                             .retainMax(options.snapshotNumRetainMax())
