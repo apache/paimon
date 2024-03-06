@@ -96,6 +96,12 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     @Override
     public AppendOnlyFileStoreWrite newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public AppendOnlyFileStoreWrite newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
@@ -104,9 +110,10 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 rowType,
                 pathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true, branchName).withManifestCacheFilter(manifestFilter),
                 options,
-                tableName);
+                tableName,
+                branchName);
     }
 
     private AppendOnlyFileStoreScan newScan(boolean forWrite, String branchName) {

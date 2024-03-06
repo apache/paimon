@@ -52,6 +52,7 @@ import java.util.function.BiConsumer;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.apache.paimon.predicate.PredicateBuilder.pickTransformFieldMapping;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /** {@link FileStoreTable} for primary key table. */
 class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
@@ -184,12 +185,18 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<KeyValue> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public TableWriteImpl<KeyValue> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         TableSchema schema = schema();
         CoreOptions options = store().options();
         RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
         KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
-                store().newWrite(commitUser, manifestFilter),
+                store().newWrite(commitUser, manifestFilter, branchName),
                 createRowKeyExtractor(),
                 record -> {
                     InternalRow row = record.row();

@@ -118,15 +118,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
-            String tableName) {
-        super(
-                commitUser,
-                snapshotManager,
-                scan,
-                options,
-                indexFactory,
-                deletionVectorsMaintainerFactory,
-                tableName);
+            String tableName,
+            String branchName) {
+        super(commitUser, snapshotManager, scan, options, indexFactory, deletionVectorsMaintainerFactory, tableName, branchName);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;

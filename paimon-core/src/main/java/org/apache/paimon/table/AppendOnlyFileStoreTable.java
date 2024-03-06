@@ -46,6 +46,8 @@ import org.apache.paimon.utils.Preconditions;
 import java.io.IOException;
 import java.util.function.BiConsumer;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
+
 /** {@link FileStoreTable} for append table. */
 class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
 
@@ -135,9 +137,16 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
     @Override
     public TableWriteImpl<InternalRow> newWrite(
             String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public TableWriteImpl<InternalRow> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         // if this table is unaware-bucket table, we skip compaction and restored files searching
         AppendOnlyFileStoreWrite writer =
-                store().newWrite(commitUser, manifestFilter).withBucketMode(bucketMode());
+                store().newWrite(commitUser, manifestFilter, branchName)
+                        .withBucketMode(bucketMode());
         return new TableWriteImpl<>(
                 writer,
                 createRowKeyExtractor(),

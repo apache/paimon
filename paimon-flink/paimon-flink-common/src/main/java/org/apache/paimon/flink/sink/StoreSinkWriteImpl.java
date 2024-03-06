@@ -45,6 +45,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.ExecutorService;
 
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Default implementation of {@link StoreSinkWrite}. This writer does not have states. */
@@ -143,7 +144,8 @@ public class StoreSinkWriteImpl implements StoreSinkWrite {
                 table.newWrite(
                                 commitUser,
                                 (part, bucket) ->
-                                        state.stateValueFilter().filter(table.name(), part, bucket))
+                                        state.stateValueFilter().filter(table.name(), part, bucket),
+                                DEFAULT_MAIN_BRANCH)
                         .withIOManager(paimonIOManager)
                         .withIgnorePreviousFiles(ignorePreviousFiles)
                         .withExecutionMode(isStreamingMode)

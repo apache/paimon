@@ -158,6 +158,12 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
 
     @Override
     public KeyValueFileStoreWrite newWrite(String commitUser, ManifestCacheFilter manifestFilter) {
+        return newWrite(commitUser, manifestFilter, DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public KeyValueFileStoreWrite newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName) {
         IndexMaintainer.Factory<KeyValue> indexFactory = null;
         if (bucketMode() == BucketMode.DYNAMIC) {
             indexFactory = new HashIndexMaintainer.Factory(newIndexFileHandler());
@@ -181,12 +187,13 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 format2PathFactory(),
                 snapshotManager(),
-                newScan(true, DEFAULT_MAIN_BRANCH).withManifestCacheFilter(manifestFilter),
+                newScan(true, branchName).withManifestCacheFilter(manifestFilter),
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 options,
                 keyValueFieldsExtractor,
-                tableName);
+                tableName,
+                branchName);
     }
 
     private Map<String, FileStorePathFactory> format2PathFactory() {

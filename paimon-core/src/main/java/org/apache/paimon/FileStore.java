@@ -79,6 +79,9 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreWrite<T> newWrite(String commitUser, ManifestCacheFilter manifestFilter);
 
+    FileStoreWrite<T> newWrite(
+            String commitUser, ManifestCacheFilter manifestFilter, String branchName);
+
     FileStoreCommit newCommit(String commitUser);
 
     FileStoreCommit newCommit(String commitUser, String branchName);
