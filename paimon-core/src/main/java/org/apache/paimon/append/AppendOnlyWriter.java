@@ -37,6 +37,7 @@ import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.LongCounter;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RecordWriter;
@@ -379,11 +380,19 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             if (writeBuffer != null) {
                 writeBuffer.complete();
                 RowDataRollingFileWriter writer = createRollingRowWriter();
+                IOException exception = null;
                 try (RowBuffer.RowBufferIterator iterator = writeBuffer.newIterator()) {
                     while (iterator.advanceNext()) {
                         writer.write(iterator.getRow());
                     }
+                } catch (IOException e) {
+                    exception = e;
                 } finally {
+                    if (exception != null) {
+                        IOUtils.closeQuietly(writer);
+                        // cleanup code that might throw another exception
+                        throw exception;
+                    }
                     writer.close();
                 }
                 flushedFiles.addAll(writer.result());
