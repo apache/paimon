@@ -18,7 +18,7 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.client.ClientPoolImpl;
+import org.apache.paimon.client.ClientPool;
 
 import java.sql.Connection;
 import java.sql.DriverManager;
@@ -30,7 +30,7 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 /** Client pool for jdbc. */
-public class JdbcClientPool extends ClientPoolImpl<Connection, SQLException> {
+public class JdbcClientPool extends ClientPool.ClientPoolImpl<Connection, SQLException> {
 
     private static final Pattern PROTOCOL_PATTERN = Pattern.compile("jdbc:([^:]+):(.*)");
     private final String dbUrl;

@@ -58,34 +58,38 @@ import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /** Support jdbc catalog. */
 public class JdbcCatalog extends AbstractCatalog {
 
     private static final Logger LOG = LoggerFactory.getLogger(JdbcCatalog.class);
+
     public static final String PROPERTY_PREFIX = "jdbc.";
     private static final String DATABASE_EXISTS_PROPERTY = "exists";
-    private JdbcClientPool connections;
-    private String catalogKey = "jdbc";
-    private Map<String, String> configuration;
+
+    private final JdbcClientPool connections;
+    private final String catalogKey;
+    private final Map<String, String> options;
     private final String warehouse;
 
     protected JdbcCatalog(
             FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
         super(fileIO);
-        if (!StringUtils.isBlank(catalogKey)) {
-            this.catalogKey = catalogKey;
-        }
-        this.configuration = config;
+        this.catalogKey = StringUtils.isBlank(catalogKey) ? "jdbc" : catalogKey;
+        this.options = config;
         this.warehouse = warehouse;
-        Preconditions.checkNotNull(configuration, "Invalid catalog properties: null");
+        Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
                 new JdbcClientPool(
                         Integer.parseInt(
                                 config.getOrDefault(
                                         CatalogOptions.CLIENT_POOL_SIZE.key(),
                                         CatalogOptions.CLIENT_POOL_SIZE.defaultValue().toString())),
-                        configuration.get(CatalogOptions.URI.key()),
-                        configuration);
+                        options.get(CatalogOptions.URI.key()),
+                        options);
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
@@ -102,7 +106,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     /** Initialize catalog tables. */
     private void initializeCatalogTablesIfNeed() throws SQLException, InterruptedException {
-        String uri = configuration.get(CatalogOptions.URI.key());
+        String uri = options.get(CatalogOptions.URI.key());
         Preconditions.checkNotNull(uri, "JDBC connection URI is required");
         // Check and create catalog table.
         connections.run(
@@ -311,8 +315,7 @@ public class JdbcCatalog extends AbstractCatalog {
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
         if (!tableExists(identifier)) {
-            throw new RuntimeException(
-                    String.format("Table is not exists {}", identifier.getFullName()));
+            throw new RuntimeException("Table is not exists " + identifier.getFullName());
         }
         SchemaManager schemaManager = getSchemaManager(identifier);
         schemaManager.commitChanges(changes);
@@ -347,14 +350,13 @@ public class JdbcCatalog extends AbstractCatalog {
     @Override
     public Optional<CatalogLock.LockFactory> lockFactory() {
         return lockEnabled()
-                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, configuration))
+                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, options))
                 : Optional.empty();
     }
 
     private boolean lockEnabled() {
         return Boolean.parseBoolean(
-                configuration.getOrDefault(
-                        LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+                options.getOrDefault(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
     }
 
     private Lock lock(Identifier identifier) {
@@ -363,10 +365,7 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
-                        connections,
-                        catalogKey,
-                        checkMaxSleep(configuration),
-                        acquireTimeout(configuration));
+                        connections, catalogKey, checkMaxSleep(options), acquireTimeout(options));
         return Lock.fromCatalog(lock, identifier);
     }
 

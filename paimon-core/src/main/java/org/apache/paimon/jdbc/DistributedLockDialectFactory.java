@@ -35,8 +35,7 @@ class DistributedLockDialectFactory {
     /** Supported jdbc protocol. */
     enum JdbcProtocol {
         SQLITE,
-        // for mysql.
         MARIADB,
-        MYSQL;
+        MYSQL
     }
 }
