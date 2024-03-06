@@ -155,7 +155,7 @@ public interface RecordReader<T> extends Closeable {
         try {
             while ((batch = (RecordWithPositionIterator<T>) readBatch()) != null) {
                 while ((record = batch.next()) != null) {
-                    action.accept(batch.rowPosition(), record);
+                    action.accept(batch.returnedPosition(), record);
                 }
                 batch.releaseBatch();
             }
