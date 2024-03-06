@@ -24,6 +24,7 @@ import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -116,6 +117,26 @@ public class TableSchemaTest {
         assertThatThrownBy(() -> RowType.currentHighestFieldId(fields2))
                 .isInstanceOf(RuntimeException.class)
                 .hasMessage("Broken schema, field id 0 is duplicated.");
+    }
+
+    @Test
+    public void testValidatePartitionKeys() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> partitionKeys = Arrays.asList("f0", "f1", "f2");
+        Map<String, String> options = new HashMap<>();
+
+        TableSchema schema =
+                new TableSchema(1, fields, 10, partitionKeys, new ArrayList<>(), options, "");
+
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage(
+                        "Partition key constraint [f0, f1, f2] should not be same with fields [f0, f1, f2],"
+                                + " this will result in same record in a partition");
     }
 
     static RowType newRowType(boolean isNullable, int fieldId) {

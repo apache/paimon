@@ -33,6 +33,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.MultisetType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.Preconditions;
 
 import java.util.Arrays;
 import java.util.Collection;
@@ -89,6 +90,8 @@ public class SchemaValidation {
         validateStartupMode(options);
 
         validateSequenceGroup(schema, options);
+
+        validatePartitionKeys(schema.fields(), schema.partitionKeys());
 
         ChangelogProducer changelogProducer = options.changelogProducer();
         if (schema.primaryKeys().isEmpty() && changelogProducer != ChangelogProducer.NONE) {
@@ -467,6 +470,25 @@ public class SchemaValidation {
                             e);
                 }
             }
+        }
+    }
+
+    private static void validatePartitionKeys(List<DataField> fields, List<String> partitionKeys) {
+        if (partitionKeys.size() > 0) {
+            List<String> fieldsName =
+                    fields.stream().map(DataField::name).collect(Collectors.toList());
+
+            List<String> adjusted =
+                    fieldsName.stream()
+                            .filter(pk -> !partitionKeys.contains(pk))
+                            .collect(Collectors.toList());
+
+            Preconditions.checkState(
+                    adjusted.size() > 0,
+                    String.format(
+                            "Partition key constraint %s should not be same with fields %s,"
+                                    + " this will result in same record in a partition",
+                            partitionKeys, fieldsName));
         }
     }
 }
