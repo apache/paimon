@@ -28,9 +28,9 @@ import org.apache.hadoop.mapreduce.JobID;
 
 import java.util.Objects;
 
-/*
- * Utility class to enrich the JobContext and TaskAttemptContext with the vertex id.
- * copied form iceberg
+/**
+ * Utility class to enrich the JobContext and TaskAttemptContext with the vertex id. copied form
+ * iceberg.
  */
 public class TezUtil {
 
