@@ -196,6 +196,17 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         sinkWriter.close();
     }
 
+    public void toBufferedWriter() throws Exception {
+        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter()) {
+            flush(false, false);
+            trySyncLatestCompaction(true);
+
+            sinkWriter.close();
+            sinkWriter = new BufferedSinkWriter(true);
+            sinkWriter.setMemoryPool(memorySegmentPool);
+        }
+    }
+
     private RowDataRollingFileWriter createRollingRowWriter() {
         return new RowDataRollingFileWriter(
                 fileIO,
@@ -207,17 +218,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors);
-    }
-
-    public void toBufferedWriter() throws Exception {
-        if (sinkWriter != null && !sinkWriter.bufferSpillableWriter()) {
-            flush(false, false);
-            trySyncLatestCompaction(true);
-
-            sinkWriter.close();
-            sinkWriter = new BufferedSinkWriter(true);
-            sinkWriter.setMemoryPool(memorySegmentPool);
-        }
     }
 
     private void trySyncLatestCompaction(boolean blocking)
