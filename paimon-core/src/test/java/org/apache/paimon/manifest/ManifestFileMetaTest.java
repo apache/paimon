@@ -210,7 +210,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testTriggerFullCompaction() {
+    public void testTriggerFullCompaction() throws Exception {
         List<ManifestEntry> entries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
             entries.add(makeEntry(true, String.valueOf(i)));
@@ -260,7 +260,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMultiPartitionsFullCompaction() {
+    public void testMultiPartitionsFullCompaction() throws Exception {
 
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 

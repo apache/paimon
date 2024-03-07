@@ -81,14 +81,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                new RollingFileWriter<>(
-                        () ->
-                                new ManifestEntryWriter(
-                                        writerFactory,
-                                        pathFactory.newPath(),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
-                        suggestedFileSize);
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
         try {
             writer.write(entries);
             writer.close();
@@ -96,6 +89,16 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             throw new RuntimeException(e);
         }
         return writer.result();
+    }
+
+    public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
+        return new RollingFileWriter<>(
+                () ->
+                        new ManifestEntryWriter(
+                                writerFactory,
+                                pathFactory.newPath(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue()),
+                suggestedFileSize);
     }
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
