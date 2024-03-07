@@ -49,8 +49,9 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
-                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING)",
-                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED) WITH('changelog-producer'='input')");
+                "CREATE TABLE IF NOT EXISTS T1 (a STRING, b STRING, c STRING) WITH ('bucket' = '1')",
+                "CREATE TABLE IF NOT EXISTS T2 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
+                        + " WITH ('changelog-producer'='input', 'bucket' = '1')");
     }
 
     @Test
@@ -150,6 +151,29 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("7", "8", "9"));
         iterator.close();
+    }
+
+    @Test
+    public void testConsumerIdInBatch() throws Exception {
+        String table = "T2";
+
+        batchSql("INSERT INTO %s VALUES ('1', '2', '3'), ('4', '5', '6')", table);
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table));
+
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(Row.of("1", "2", "3"), Row.of("4", "5", "6"));
+
+        Thread.sleep(1000);
+        iterator.close();
+
+        batchSql("INSERT INTO %s VALUES ('7', '8', '9')", table);
+        // ignore the consumer id in batch mode
+        assertThat(sql("SELECT * FROM %s /*+ OPTIONS('consumer-id'='me') */", table))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
     }
 
     @Test
@@ -528,7 +552,7 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true')");
+                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
 
         sql("INSERT INTO ignore_delete VALUES (1, 'A')");
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));

@@ -43,6 +43,8 @@ import org.apache.flink.table.operations.Operation;
 import org.apache.flink.table.operations.ddl.CreateCatalogOperation;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
+import org.assertj.core.api.Assertions;
+import org.assertj.core.api.ListAssert;
 import org.junit.jupiter.api.BeforeEach;
 
 import javax.annotation.Nullable;
@@ -55,6 +57,7 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
@@ -153,6 +156,26 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
             return ImmutableList.copyOf(iter);
         } catch (Exception e) {
             throw new RuntimeException(e);
+        }
+    }
+
+    protected void sqlAssertWithRetry(
+            String query, Consumer<ListAssert<Row>> checker, Object... args) {
+        long start = System.currentTimeMillis();
+        while (true) {
+            try (CloseableIterator<Row> iter =
+                    tEnv.executeSql(String.format(query, args)).collect()) {
+                try {
+                    checker.accept(Assertions.assertThat(ImmutableList.copyOf(iter)));
+                    return;
+                } catch (AssertionError e) {
+                    if (System.currentTimeMillis() - start >= 3 * 60 * 1000) {
+                        throw new RuntimeException(e);
+                    }
+                }
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 

@@ -19,6 +19,8 @@
 package org.apache.paimon.partition;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.data.serializer.Serializer;
 import org.apache.paimon.format.FieldStats;
@@ -27,6 +29,8 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
+
+import javax.annotation.Nullable;
 
 import java.util.HashSet;
 import java.util.List;
@@ -37,14 +41,24 @@ public interface PartitionPredicate {
 
     boolean test(BinaryRow part);
 
-    boolean test(long rowCount, FieldStats[] fieldStats);
+    boolean test(
+            long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
+    @Nullable
     static PartitionPredicate fromPredicate(RowType partitionType, Predicate predicate) {
-        return new DefaultPartitionPredicate(
-                new RowDataToObjectArrayConverter(partitionType), predicate);
+        if (partitionType.getFieldCount() == 0 || predicate == null) {
+            return null;
+        }
+
+        return new DefaultPartitionPredicate(predicate);
     }
 
+    @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
+        if (partitionType.getFieldCount() == 0 || partitions.isEmpty()) {
+            return null;
+        }
+
         return new MultiplePartitionPredicate(
                 new RowDataToObjectArrayConverter(partitionType), new HashSet<>(partitions));
     }
@@ -52,23 +66,24 @@ public interface PartitionPredicate {
     /** A {@link PartitionPredicate} using {@link Predicate}. */
     class DefaultPartitionPredicate implements PartitionPredicate {
 
-        private final RowDataToObjectArrayConverter converter;
         private final Predicate predicate;
 
-        private DefaultPartitionPredicate(
-                RowDataToObjectArrayConverter converter, Predicate predicate) {
-            this.converter = converter;
+        private DefaultPartitionPredicate(Predicate predicate) {
             this.predicate = predicate;
         }
 
         @Override
         public boolean test(BinaryRow part) {
-            return predicate.test(converter.convert(part));
+            return predicate.test(part);
         }
 
         @Override
-        public boolean test(long rowCount, FieldStats[] fieldStats) {
-            return predicate.test(rowCount, fieldStats);
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            return predicate.test(rowCount, minValues, maxValues, nullCounts);
         }
     }
 
@@ -79,7 +94,7 @@ public interface PartitionPredicate {
     class MultiplePartitionPredicate implements PartitionPredicate {
 
         private final Set<BinaryRow> partitions;
-
+        private final int fieldNum;
         private final Predicate[] min;
         private final Predicate[] max;
 
@@ -87,7 +102,7 @@ public interface PartitionPredicate {
                 RowDataToObjectArrayConverter converter, Set<BinaryRow> partitions) {
             this.partitions = partitions;
             RowType partitionType = converter.rowType();
-            int fieldNum = partitionType.getFieldCount();
+            this.fieldNum = partitionType.getFieldCount();
             @SuppressWarnings("unchecked")
             Serializer<Object>[] serializers = new Serializer[fieldNum];
             FullFieldStatsCollector[] collectors = new FullFieldStatsCollector[fieldNum];
@@ -117,13 +132,18 @@ public interface PartitionPredicate {
         }
 
         @Override
-        public boolean test(long rowCount, FieldStats[] fieldStats) {
-            if (fieldStats.length == 0) {
+        public boolean test(
+                long rowCount,
+                InternalRow minValues,
+                InternalRow maxValues,
+                InternalArray nullCounts) {
+            if (fieldNum == 0) {
                 return true;
             }
 
-            for (int i = 0; i < fieldStats.length; i++) {
-                if (!min[i].test(rowCount, fieldStats) || !max[i].test(rowCount, fieldStats)) {
+            for (int i = 0; i < fieldNum; i++) {
+                if (!min[i].test(rowCount, minValues, maxValues, nullCounts)
+                        || !max[i].test(rowCount, minValues, maxValues, nullCounts)) {
                     return false;
                 }
             }

@@ -44,7 +44,7 @@ public class DeltaFollowUpScanner implements FollowUpScanner {
     }
 
     @Override
-    public SnapshotReader.Plan scan(long snapshotId, SnapshotReader snapshotReader) {
-        return snapshotReader.withMode(ScanMode.DELTA).withSnapshot(snapshotId).read();
+    public SnapshotReader.Plan scan(Snapshot snapshot, SnapshotReader snapshotReader) {
+        return snapshotReader.withMode(ScanMode.DELTA).withSnapshot(snapshot).read();
     }
 }

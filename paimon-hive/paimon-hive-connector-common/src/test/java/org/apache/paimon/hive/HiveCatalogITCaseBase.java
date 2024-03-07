@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -689,11 +689,9 @@ public abstract class HiveCatalogITCaseBase {
     @Test
     public void testHiveLock() throws InterruptedException {
         tEnv.executeSql("CREATE TABLE t (a INT)");
-        CatalogLock.Factory lockFactory =
-                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get())
-                        .catalog()
-                        .lockFactory()
-                        .get();
+        Catalog catalog =
+                ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
+        CatalogLock.LockFactory lockFactory = catalog.lockFactory().get();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -708,7 +706,7 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock = lockFactory.create();
+                                CatalogLock lock = lockFactory.create(catalog.lockContext().get());
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock("test_db", "t", unsafeIncrement);
@@ -933,6 +931,41 @@ public abstract class HiveCatalogITCaseBase {
                         "2\t20\t2023-10-17",
                         "3\t30\t2023-10-17",
                         "4\t40\t2023-10-17");
+    }
+
+    @Test
+    public void testHistoryPartitionsCascadeToUpdate() throws Exception {
+        tEnv.executeSql(
+                String.join(
+                        "\n",
+                        "CREATE TABLE t (",
+                        "    k INT,",
+                        "    v BIGINT,",
+                        "    PRIMARY KEY (k) NOT ENFORCED",
+                        ") WITH (",
+                        "    'bucket' = '2',",
+                        "    'metastore.tag-to-partition' = 'dt'",
+                        ")"));
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10", "2\t20");
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10\t2023-10-16", "2\t20\t2023-10-16");
+
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
+
+        tEnv.executeSql("ALTER TABLE t ADD z INT");
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30, 5), (4, 40, 6)").await();
+
+        assertThat(hiveShell.executeQuery("SELECT * FROM t WHERE dt='2023-10-16'"))
+                .containsExactlyInAnyOrder("1\t10\tNULL\t2023-10-16", "2\t20\tNULL\t2023-10-16");
     }
 
     @Test

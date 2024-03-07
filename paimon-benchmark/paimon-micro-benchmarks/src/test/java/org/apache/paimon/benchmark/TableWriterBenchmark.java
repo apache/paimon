@@ -106,7 +106,8 @@ public class TableWriterBenchmark extends TableBenchmark {
     }
 
     public void innerTest(String name, Options options) throws Exception {
-        StreamWriteBuilder writeBuilder = createTable(options).newStreamWriteBuilder();
+        options.set(CoreOptions.BUCKET, 1);
+        StreamWriteBuilder writeBuilder = createTable(options, "T").newStreamWriteBuilder();
         StreamTableWrite write = writeBuilder.newWrite();
         StreamTableCommit commit = writeBuilder.newCommit();
         long valuesPerIteration = 300_000;

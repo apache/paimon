@@ -23,7 +23,6 @@ import org.apache.paimon.table.system.AllTableOptionsTable;
 import org.apache.paimon.table.system.CatalogOptionsTable;
 import org.apache.paimon.table.system.SinkTableLineageTable;
 import org.apache.paimon.table.system.SourceTableLineageTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.commons.lang3.StringUtils;
@@ -37,6 +36,8 @@ import javax.annotation.Nonnull;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.flink.table.api.config.TableConfigOptions.TABLE_DML_SYNC;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -630,6 +631,32 @@ public class CatalogTableITCase extends CatalogITCaseBase {
                                                 : "[5],[10]")));
     }
 
+    @Test
+    public void testFilesTableWithFilter() {
+        tEnv.getConfig().set(TABLE_DML_SYNC, true);
+        sql(
+                "CREATE TABLE T_WITH_FILTER (k INT, p INT, v INT, PRIMARY KEY (k, p) NOT ENFORCED) "
+                        + "PARTITIONED BY (p) WITH ('bucket'='2')");
+        sql("INSERT INTO T_WITH_FILTER VALUES (1, 2, 3), (4, 5, 6)");
+        sql("CALL sys.compact('default.T_WITH_FILTER')");
+        sql("INSERT INTO T_WITH_FILTER VALUES (7, 8, 9)");
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files"))
+                .containsExactlyInAnyOrder(
+                        Row.of("[2]", 0, 5), Row.of("[5]", 0, 5), Row.of("[8]", 1, 0));
+
+        assertThat(
+                        sql(
+                                "SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE `partition`='[2]'"))
+                .containsExactlyInAnyOrder(Row.of("[2]", 0, 5));
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE bucket=0"))
+                .containsExactlyInAnyOrder(Row.of("[2]", 0, 5), Row.of("[5]", 0, 5));
+
+        assertThat(sql("SELECT `partition`, bucket, level FROM T_WITH_FILTER$files WHERE level=0"))
+                .containsExactlyInAnyOrder(Row.of("[8]", 1, 0));
+    }
+
     @Nonnull
     private List<String> getRowStringList(List<Row> rows) {
         return rows.stream()
@@ -725,14 +752,14 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
         assertThatThrownBy(() -> sql(ddl, "full-compaction"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));
 
         assertThatThrownBy(() -> sql(ddl, "lookup"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 UnsupportedOperationException.class,
                                 "Cannot set streaming-read-overwrite to true when changelog producer "
                                         + "is full-compaction or lookup because it will read duplicated changes."));
@@ -754,8 +781,15 @@ public class CatalogTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testReadOptimizedTable() {
-        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED)");
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '1')");
+        innerTestReadOptimizedTable();
 
+        sql("DROP TABLE T");
+        sql("CREATE TABLE T (k INT, v INT, PRIMARY KEY (k) NOT ENFORCED) WITH ('bucket' = '-1')");
+        innerTestReadOptimizedTable();
+    }
+
+    private void innerTestReadOptimizedTable() {
         // full compaction will always be performed at the end of batch jobs, as long as
         // full-compaction.delta-commits is set, regardless of its value
         sql(

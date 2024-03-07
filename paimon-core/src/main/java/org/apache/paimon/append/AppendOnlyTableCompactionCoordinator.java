@@ -23,11 +23,11 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.table.AppendOnlyFileStoreTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.Split;
+import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 
@@ -41,14 +41,14 @@ import java.util.Map;
 import java.util.stream.Collectors;
 
 /**
- * {@link AppendOnlyFileStoreTable} compact coordinator.
+ * Compact coordinator for append only tables.
  *
- * <p>Note: AppendOnlyTableCompactionCoordinator scan files in snapshot, read APPEND and COMPACT
- * snapshot then load those new files. It will try it best to generate compaction task for the
- * restored files scanned in snapshot, but to reduce memory usage, it won't remain single file for a
- * long time. After ten times scan, single file with one partition will be ignored and removed from
- * memory, which means, it will not participate in compaction again until restart the compaction
- * job.
+ * <p>Note: {@link AppendOnlyTableCompactionCoordinator} scan files in snapshot, read APPEND and
+ * COMPACT snapshot then load those new files. It will try it best to generate compaction task for
+ * the restored files scanned in snapshot, but to reduce memory usage, it won't remain single file
+ * for a long time. After ten times scan, single file with one partition will be ignored and removed
+ * from memory, which means, it will not participate in compaction again until restart the
+ * compaction job.
  *
  * <p>When a third task delete file in latest snapshot(including batch delete/update and overwrite),
  * the file in coordinator will still remain and participate in compaction task. When this happens,
@@ -70,18 +70,17 @@ public class AppendOnlyTableCompactionCoordinator {
     final Map<BinaryRow, PartitionCompactCoordinator> partitionCompactCoordinators =
             new HashMap<>();
 
-    public AppendOnlyTableCompactionCoordinator(AppendOnlyFileStoreTable table) {
+    public AppendOnlyTableCompactionCoordinator(FileStoreTable table) {
         this(table, true);
     }
 
-    public AppendOnlyTableCompactionCoordinator(
-            AppendOnlyFileStoreTable table, boolean isStreaming) {
+    public AppendOnlyTableCompactionCoordinator(FileStoreTable table, boolean isStreaming) {
         this(table, isStreaming, null);
     }
 
     public AppendOnlyTableCompactionCoordinator(
-            AppendOnlyFileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
-
+            FileStoreTable table, boolean isStreaming, @Nullable Predicate filter) {
+        Preconditions.checkArgument(table.primaryKeys().isEmpty());
         FileStoreTable tableCopy = table.copy(compactScanType());
         if (isStreaming) {
             scan = tableCopy.newStreamScan();

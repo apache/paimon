@@ -54,8 +54,8 @@ public class MergeTreeCompactTask extends CompactTask {
             CompactRewriter rewriter,
             CompactUnit unit,
             boolean dropDelete,
-            @Nullable CompactionMetrics metrics) {
-        super(metrics);
+            @Nullable CompactionMetrics.Reporter metricsReporter) {
+        super(metricsReporter);
         this.minFileSize = minFileSize;
         this.rewriter = rewriter;
         this.outputLevel = unit.outputLevel();

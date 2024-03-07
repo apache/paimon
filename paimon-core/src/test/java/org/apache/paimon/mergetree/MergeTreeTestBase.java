@@ -416,6 +416,7 @@ public abstract class MergeTreeTestBase {
                 new MergeTreeWriter(
                         false,
                         128,
+                        "lz4",
                         null,
                         compactManager,
                         maxSequenceNumber,
@@ -553,6 +554,7 @@ public abstract class MergeTreeTestBase {
                         dropDelete,
                         readerFactory,
                         comparator,
+                        null,
                         DeduplicateMergeFunction.factory().create(),
                         new MergeSorter(options, null, null, null));
         List<TestRecord> records = new ArrayList<>();
@@ -599,6 +601,7 @@ public abstract class MergeTreeTestBase {
                             dropDelete,
                             compactReaderFactory,
                             comparator,
+                            null,
                             DeduplicateMergeFunction.factory().create(),
                             new MergeSorter(options, null, null, null));
             writer.write(new RecordReaderIterator<>(sectionsReader));

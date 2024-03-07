@@ -356,8 +356,6 @@ When stream read Paimon tables, the next snapshot id to be recorded into the fil
    If you don't want this behavior, you can set `'consumer.ignore-progress'` to true.
 2. When deciding whether a snapshot has expired, Paimon looks at all the consumers of the table in the file system,
    and if there are consumers that still depend on this snapshot, then this snapshot will not be deleted by expiration.
-3. When there is no watermark definition, the Paimon table will pass the watermark in the snapshot to the downstream
-   Paimon table, which means you can track the progress of the watermark for the entire pipeline.
 
 {{< hint info >}}
 NOTE: The consumer will prevent expiration of the snapshot. You can specify 'consumer.expiration-time' to manage the 
@@ -370,9 +368,7 @@ recorded in the consumer is the snapshot-id + 1 that all readers have exactly co
 readers into the consumer. This mode can provide more capabilities, such as watermark alignment.
 
 {{< hint warning >}}
-1. When there is no watermark definition, the consumer in `at-least-once` mode cannot provide the ability to pass the 
-watermark in the snapshot to the downstream. 
-2. Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
+Since the implementation of `exactly-once` mode and `at-least-once` mode are completely different, the state of 
 flink is incompatible and cannot be restored from the state when switching modes.
 {{< /hint >}}
 

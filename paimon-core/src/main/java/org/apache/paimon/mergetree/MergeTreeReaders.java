@@ -28,6 +28,9 @@ import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -44,6 +47,7 @@ public class MergeTreeReaders {
             boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunction<KeyValue> mergeFunction,
             MergeSorter mergeSorter)
             throws IOException {
@@ -55,6 +59,7 @@ public class MergeTreeReaders {
                                     section,
                                     readerFactory,
                                     userKeyComparator,
+                                    userDefinedSeqComparator,
                                     new ReducerMergeFunctionWrapper(mergeFunction),
                                     mergeSorter));
         }
@@ -69,6 +74,7 @@ public class MergeTreeReaders {
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             MergeSorter mergeSorter)
             throws IOException {
@@ -76,7 +82,8 @@ public class MergeTreeReaders {
         for (SortedRun run : section) {
             readers.add(() -> readerForRun(run, readerFactory));
         }
-        return mergeSorter.mergeSort(readers, userKeyComparator, mergeFunctionWrapper);
+        return mergeSorter.mergeSort(
+                readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
     }
 
     public static RecordReader<KeyValue> readerForRun(

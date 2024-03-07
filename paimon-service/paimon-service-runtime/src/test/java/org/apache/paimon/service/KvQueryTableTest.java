@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.query.QueryLocationImpl;
 import org.apache.paimon.service.client.KvQueryClient;
 import org.apache.paimon.service.network.stats.DisabledServiceRequestStats;
@@ -56,6 +57,13 @@ public class KvQueryTableTest extends PrimaryKeyTableTestBase {
     private KvQueryServer server1;
 
     private KvQueryClient client;
+
+    @Override
+    protected Options tableOptions() {
+        Options options = new Options();
+        options.set("bucket", "1");
+        return options;
+    }
 
     @BeforeEach
     public void beforeEach() {

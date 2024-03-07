@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import java.util.Optional
@@ -24,10 +25,16 @@ import scala.language.implicitConversions
 object PaimonImplicits {
   implicit def toScalaOption[T](o: Optional[T]): Option[T] = {
     if (o.isPresent) {
-      Option.apply(o.get())
+      Some(o.get)
     } else {
       None
     }
   }
 
+  implicit def toJavaOptional[T, U](o: Option[T]): Optional[U] = {
+    o match {
+      case Some(t) => Optional.ofNullable(t.asInstanceOf[U])
+      case _ => Optional.empty[U]
+    }
+  }
 }

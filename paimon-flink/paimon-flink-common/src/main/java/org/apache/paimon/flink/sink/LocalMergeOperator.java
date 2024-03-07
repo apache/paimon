@@ -31,12 +31,12 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.KeyComparatorSupplier;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.apache.flink.streaming.api.operators.AbstractStreamOperator;
 import org.apache.flink.streaming.api.operators.BoundedOneInput;
@@ -62,7 +62,6 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
     private transient RecordComparator keyComparator;
 
     private transient long recordCount;
-    private transient SequenceGenerator sequenceGenerator;
     private transient RowKindGenerator rowKindGenerator;
     private transient MergeFunction<KeyValue> mergeFunction;
 
@@ -88,12 +87,10 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         CoreOptions options = new CoreOptions(schema.options());
 
         keyProjection =
-                CodeGenUtils.newProjection(
-                        schema.logicalRowType(), schema.projection(schema.primaryKeys()));
+                CodeGenUtils.newProjection(valueType, schema.projection(schema.primaryKeys()));
         keyComparator = new KeyComparatorSupplier(keyType).get();
 
         recordCount = 0;
-        sequenceGenerator = SequenceGenerator.create(schema, options);
         rowKindGenerator = RowKindGenerator.create(schema, options);
         mergeFunction =
                 PrimaryKeyTableUtils.createMergeFunctionFactory(
@@ -119,10 +116,12 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                 new SortBufferWriteBuffer(
                         keyType,
                         valueType,
+                        UserDefinedSeqComparator.create(valueType, options),
                         new HeapMemorySegmentPool(
                                 options.localMergeBufferSize(), options.pageSize()),
                         false,
                         options.localSortMaxNumFileHandles(),
+                        options.spillCompression(),
                         null);
         currentWatermark = Long.MIN_VALUE;
 
@@ -140,11 +139,9 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
         row.setRowKind(RowKind.INSERT);
 
         InternalRow key = keyProjection.apply(row);
-        long sequenceNumber =
-                sequenceGenerator == null ? recordCount : sequenceGenerator.generate(row);
-        if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+        if (!buffer.put(recordCount, rowKind, key, row)) {
             flushBuffer();
-            if (!buffer.put(sequenceNumber, rowKind, key, row)) {
+            if (!buffer.put(recordCount, rowKind, key, row)) {
                 // change row kind back
                 row.setRowKind(rowKind);
                 output.collect(record);

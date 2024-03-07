@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.service.network;
 
 import org.apache.paimon.service.network.messages.MessageBody;
@@ -27,17 +23,17 @@ import org.apache.paimon.utils.ExecutorUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.paimon.shade.guava30.com.google.common.util.concurrent.ThreadFactoryBuilder;
+import org.apache.paimon.shade.netty4.io.netty.bootstrap.ServerBootstrap;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFuture;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelInitializer;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelOption;
+import org.apache.paimon.shade.netty4.io.netty.channel.EventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.nio.NioEventLoopGroup;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.SocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
+import org.apache.paimon.shade.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
+import org.apache.paimon.shade.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 
-import org.apache.flink.shaded.netty4.io.netty.bootstrap.ServerBootstrap;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelInitializer;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelOption;
-import org.apache.flink.shaded.netty4.io.netty.channel.EventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.nio.NioEventLoopGroup;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.SocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.channel.socket.nio.NioServerSocketChannel;
-import org.apache.flink.shaded.netty4.io.netty.handler.codec.LengthFieldBasedFrameDecoder;
-import org.apache.flink.shaded.netty4.io.netty.handler.stream.ChunkedWriteHandler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -52,6 +48,10 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+
+/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /**
  * The base class for every server. It is using pure netty to send and receive messages of type

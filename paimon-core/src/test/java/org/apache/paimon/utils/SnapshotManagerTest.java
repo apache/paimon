@@ -28,8 +28,12 @@ import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.atomic.AtomicReference;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.fail;
@@ -50,6 +54,52 @@ public class SnapshotManagerTest {
     }
 
     @Test
+    public void testEarlierThanTimeMillis() throws IOException {
+        long base = System.currentTimeMillis();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        int numSnapshots = random.nextInt(1, 20);
+        Set<Long> set = new HashSet<>();
+        while (set.size() < numSnapshots) {
+            set.add(base + random.nextLong(0, 1_000_000));
+        }
+        List<Long> millis = set.stream().sorted().collect(Collectors.toList());
+
+        FileIO localFileIO = LocalFileIO.create();
+        SnapshotManager snapshotManager =
+                new SnapshotManager(localFileIO, new Path(tempDir.toString()));
+        int firstSnapshotId = random.nextInt(1, 100);
+        for (int i = 0; i < numSnapshots; i++) {
+            Snapshot snapshot = createSnapshotWithMillis(firstSnapshotId + i, millis.get(i));
+            localFileIO.writeFileUtf8(
+                    snapshotManager.snapshotPath(firstSnapshotId + i), snapshot.toJson());
+        }
+
+        for (int tries = 0; tries < 10; tries++) {
+            long time;
+            if (random.nextBoolean()) {
+                // pick a random time
+                time = base + random.nextLong(0, 1_000_000);
+            } else {
+                // pick a random time equal to one of the snapshots
+                time = millis.get(random.nextInt(numSnapshots));
+            }
+            Long actual = snapshotManager.earlierThanTimeMills(time);
+
+            if (millis.get(numSnapshots - 1) < time) {
+                assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);
+            } else {
+                for (int i = 0; i < numSnapshots; i++) {
+                    if (millis.get(i) >= time) {
+                        assertThat(actual).isEqualTo(firstSnapshotId + i - 1);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    @Test
     public void testEarlierOrEqualTimeMills() throws IOException {
         long millis = 1684726826L;
         FileIO localFileIO = LocalFileIO.create();
@@ -57,24 +107,7 @@ public class SnapshotManagerTest {
                 new SnapshotManager(localFileIO, new Path(tempDir.toString()));
         // create 10 snapshots
         for (long i = 0; i < 10; i++) {
-            Snapshot snapshot =
-                    new Snapshot(
-                            i,
-                            0L,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            0L,
-                            Snapshot.CommitKind.APPEND,
-                            millis + i * 1000,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null,
-                            null);
+            Snapshot snapshot = createSnapshotWithMillis(i, millis + i * 1000);
             localFileIO.writeFileUtf8(snapshotManager.snapshotPath(i), snapshot.toJson());
         }
         // smaller than the second snapshot return the first snapshot
@@ -86,6 +119,26 @@ public class SnapshotManagerTest {
         // larger than the second snapshot return the second snapshot
         assertThat(snapshotManager.earlierOrEqualTimeMills(millis + 1001).timeMillis())
                 .isEqualTo(millis + 1000);
+    }
+
+    private Snapshot createSnapshotWithMillis(long id, long millis) {
+        return new Snapshot(
+                id,
+                0L,
+                null,
+                null,
+                null,
+                null,
+                null,
+                0L,
+                Snapshot.CommitKind.APPEND,
+                millis,
+                null,
+                null,
+                null,
+                null,
+                null,
+                null);
     }
 
     @Test

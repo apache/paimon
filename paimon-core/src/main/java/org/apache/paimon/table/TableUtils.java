@@ -22,7 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateFilter;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
@@ -58,7 +58,7 @@ public class TableUtils {
                 BatchTableCommit commit = writeBuilder.newCommit()) {
             write.withIOManager(ioManager);
             CloseableIterator<InternalRow> iterator = reader.toCloseableIterator();
-            PredicateFilter filter = new PredicateFilter(table.rowType(), filters);
+            Predicate filter = PredicateBuilder.and(filters);
             while (iterator.hasNext()) {
                 InternalRow row = iterator.next();
                 if (filter.test(row)) {

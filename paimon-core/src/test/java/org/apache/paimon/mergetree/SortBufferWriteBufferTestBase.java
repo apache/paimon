@@ -66,9 +66,11 @@ public abstract class SortBufferWriteBufferTestBase {
                     new RowType(Collections.singletonList(new DataField(0, "key", new IntType()))),
                     new RowType(
                             Collections.singletonList(new DataField(1, "value", new BigIntType()))),
+                    null,
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
                     128,
+                    "lz4",
                     null);
 
     protected abstract boolean addOnly();

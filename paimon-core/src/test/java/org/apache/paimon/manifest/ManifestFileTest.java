@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,6 +19,7 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -41,6 +42,7 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_PART_TYPE;
+import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link ManifestFile}. */
@@ -128,12 +130,16 @@ public class ManifestFileTest {
                 .isEqualTo(expected.numDeletedFiles());
 
         // check stats
-        for (int i = 0; i < expected.partitionStats().fields(null).length; i++) {
+        FieldStats[] fieldStats =
+                convertWithoutSchemaEvolution(expected.partitionStats(), DEFAULT_PART_TYPE);
+        for (int i = 0; i < fieldStats.length; i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    expected.partitionStats().fields(null)[i],
+                    fieldStats[i],
                     actual,
-                    meta -> meta.partitionStats().fields(null)[idx]);
+                    meta ->
+                            convertWithoutSchemaEvolution(meta.partitionStats(), DEFAULT_PART_TYPE)[
+                                    idx]);
         }
     }
 }

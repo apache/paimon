@@ -23,7 +23,6 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.RowCompactedSerializer;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataOutputSerializer;
 import org.apache.paimon.lookup.LookupStoreFactory;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
@@ -57,12 +56,12 @@ import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Provide lookup by key. */
-public class LookupLevels implements Levels.DropFileCallback, Closeable {
+public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
     private final Levels levels;
     private final Comparator<InternalRow> keyComparator;
     private final RowCompactedSerializer keySerializer;
-    private final RowCompactedSerializer valueSerializer;
+    private final ValueProcessor<T> valueProcessor;
     private final IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory;
     private final Supplier<File> localFileFactory;
     private final LookupStoreFactory lookupStoreFactory;
@@ -73,7 +72,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             Levels levels,
             Comparator<InternalRow> keyComparator,
             RowType keyType,
-            RowType valueType,
+            ValueProcessor<T> valueProcessor,
             IOFunction<DataFileMeta, RecordReader<KeyValue>> fileReaderFactory,
             Supplier<File> localFileFactory,
             LookupStoreFactory lookupStoreFactory,
@@ -83,7 +82,7 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         this.levels = levels;
         this.keyComparator = keyComparator;
         this.keySerializer = new RowCompactedSerializer(keyType);
-        this.valueSerializer = new RowCompactedSerializer(valueType);
+        this.valueProcessor = valueProcessor;
         this.fileReaderFactory = fileReaderFactory;
         this.localFileFactory = localFileFactory;
         this.lookupStoreFactory = lookupStoreFactory;
@@ -114,42 +113,36 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
     }
 
     @Nullable
-    public KeyValue lookup(InternalRow key, int startLevel) throws IOException {
+    public T lookup(InternalRow key, int startLevel) throws IOException {
         return LookupUtils.lookup(levels, key, startLevel, this::lookup, this::lookupLevel0);
     }
 
     @Nullable
-    private KeyValue lookupLevel0(InternalRow key, TreeSet<DataFileMeta> level0)
-            throws IOException {
+    private T lookupLevel0(InternalRow key, TreeSet<DataFileMeta> level0) throws IOException {
         return LookupUtils.lookupLevel0(keyComparator, key, level0, this::lookup);
     }
 
     @Nullable
-    private KeyValue lookup(InternalRow key, SortedRun level) throws IOException {
+    private T lookup(InternalRow key, SortedRun level) throws IOException {
         return LookupUtils.lookup(keyComparator, key, level, this::lookup);
     }
 
     @Nullable
-    private KeyValue lookup(InternalRow key, DataFileMeta file) throws IOException {
+    private T lookup(InternalRow key, DataFileMeta file) throws IOException {
         LookupFile lookupFile = lookupFiles.getIfPresent(file.fileName());
-
-        byte[] keyBytes = keySerializer.serializeToBytes(key);
 
         while (lookupFile == null || lookupFile.isClosed) {
             lookupFile = createLookupFile(file);
             lookupFiles.put(file.fileName(), lookupFile);
         }
 
+        byte[] keyBytes = keySerializer.serializeToBytes(key);
         byte[] valueBytes = lookupFile.get(keyBytes);
         if (valueBytes == null) {
             return null;
         }
-        InternalRow value = valueSerializer.deserialize(valueBytes);
-        long sequenceNumber = MemorySegment.wrap(valueBytes).getLong(valueBytes.length - 9);
-        RowKind rowKind = RowKind.fromByteValue(valueBytes[valueBytes.length - 1]);
-        return new KeyValue()
-                .replace(key, sequenceNumber, rowKind, value)
-                .setLevel(lookupFile.remoteFile().level());
+
+        return valueProcessor.readFromDisk(key, lookupFile.remoteFile().level(), valueBytes);
     }
 
     private int fileWeigh(String file, LookupFile lookupFile) {
@@ -171,21 +164,16 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         if (!localFile.createNewFile()) {
             throw new IOException("Can not create new file: " + localFile);
         }
-        try (LookupStoreWriter kvWriter =
-                        lookupStoreFactory.createWriter(
-                                localFile, bfGenerator.apply(file.rowCount()));
-                RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
-            DataOutputSerializer valueOut = new DataOutputSerializer(32);
+        LookupStoreWriter kvWriter =
+                lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
+        LookupStoreFactory.Context context;
+        try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
             while ((batch = reader.readBatch()) != null) {
                 while ((kv = batch.next()) != null) {
                     byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                    valueOut.clear();
-                    valueOut.write(valueSerializer.serializeToBytes(kv.value()));
-                    valueOut.writeLong(kv.sequenceNumber());
-                    valueOut.writeByte(kv.valueKind().toByteValue());
-                    byte[] valueBytes = valueOut.getCopyOfBuffer();
+                    byte[] valueBytes = valueProcessor.persistToDisk(kv);
                     kvWriter.put(keyBytes, valueBytes);
                 }
                 batch.releaseBatch();
@@ -193,9 +181,11 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
             throw e;
+        } finally {
+            context = kvWriter.close();
         }
 
-        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile));
+        return new LookupFile(localFile, file, lookupStoreFactory.createReader(localFile, context));
     }
 
     @Override
@@ -232,6 +222,59 @@ public class LookupLevels implements Levels.DropFileCallback, Closeable {
             reader.close();
             isClosed = true;
             FileIOUtils.deleteFileOrDirectory(localFile);
+        }
+    }
+
+    /** Processor to process value. */
+    public interface ValueProcessor<T> {
+
+        byte[] persistToDisk(KeyValue kv);
+
+        T readFromDisk(InternalRow key, int level, byte[] valueBytes);
+    }
+
+    /** A {@link ValueProcessor} to return {@link KeyValue}. */
+    public static class KeyValueProcessor implements ValueProcessor<KeyValue> {
+
+        private final RowCompactedSerializer valueSerializer;
+
+        public KeyValueProcessor(RowType valueType) {
+            this.valueSerializer = new RowCompactedSerializer(valueType);
+        }
+
+        @Override
+        public byte[] persistToDisk(KeyValue kv) {
+            byte[] vBytes = valueSerializer.serializeToBytes(kv.value());
+            byte[] bytes = new byte[vBytes.length + 8 + 1];
+            MemorySegment segment = MemorySegment.wrap(bytes);
+            segment.put(0, vBytes);
+            segment.putLong(bytes.length - 9, kv.sequenceNumber());
+            segment.put(bytes.length - 1, kv.valueKind().toByteValue());
+            return bytes;
+        }
+
+        @Override
+        public KeyValue readFromDisk(InternalRow key, int level, byte[] bytes) {
+            InternalRow value = valueSerializer.deserialize(bytes);
+            long sequenceNumber = MemorySegment.wrap(bytes).getLong(bytes.length - 9);
+            RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
+            return new KeyValue().replace(key, sequenceNumber, rowKind, value).setLevel(level);
+        }
+    }
+
+    /** A {@link ValueProcessor} to return {@link Boolean} only. */
+    public static class ContainsValueProcessor implements ValueProcessor<Boolean> {
+
+        private static final byte[] EMPTY_BYTES = new byte[0];
+
+        @Override
+        public byte[] persistToDisk(KeyValue kv) {
+            return EMPTY_BYTES;
+        }
+
+        @Override
+        public Boolean readFromDisk(InternalRow key, int level, byte[] bytes) {
+            return Boolean.TRUE;
         }
     }
 }

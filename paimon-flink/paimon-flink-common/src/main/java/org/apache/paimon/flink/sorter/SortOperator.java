@@ -31,6 +31,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 
+import java.util.stream.IntStream;
+
 /** SortOperator to sort the `InternalRow`s by the `KeyType`. */
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
@@ -41,6 +43,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
     private final int pageSize;
     private final int arity;
     private final int spillSortMaxNumFiles;
+    private final String spillCompression;
     private final int sinkParallelism;
 
     private transient BinaryExternalSortBuffer buffer;
@@ -52,6 +55,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
             long maxMemory,
             int pageSize,
             int spillSortMaxNumFiles,
+            String spillCompression,
             int sinkParallelism) {
         this.keyType = keyType;
         this.rowType = rowType;
@@ -59,6 +63,7 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         this.pageSize = pageSize;
         this.arity = rowType.getFieldCount();
         this.spillSortMaxNumFiles = spillSortMaxNumFiles;
+        this.spillCompression = spillCompression;
         this.sinkParallelism = sinkParallelism;
     }
 
@@ -83,7 +88,13 @@ public class SortOperator extends TableStreamOperator<InternalRow>
                                 .getSpillingDirectoriesPaths());
         buffer =
                 BinaryExternalSortBuffer.create(
-                        ioManager, keyType, rowType, maxMemory, pageSize, spillSortMaxNumFiles);
+                        ioManager,
+                        rowType,
+                        IntStream.range(0, keyType.getFieldCount()).toArray(),
+                        maxMemory,
+                        pageSize,
+                        spillSortMaxNumFiles,
+                        spillCompression);
     }
 
     @Override

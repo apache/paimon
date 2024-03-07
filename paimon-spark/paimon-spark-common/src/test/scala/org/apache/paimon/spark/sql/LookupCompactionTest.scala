@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.CoreOptions
@@ -39,7 +40,7 @@ class LookupCompactionTest extends PaimonSparkTestBase {
           spark.sql(
             s"""
                |CREATE TABLE T (id INT, name STRING, count INT)
-               |TBLPROPERTIES ('primary-key' = 'id', 'merge-engine' = '$mergeEngine', 'changelog-producer' = 'lookup' $extraOptions)
+               |TBLPROPERTIES ('primary-key' = 'id', 'bucket' = '1', 'merge-engine' = '$mergeEngine', 'changelog-producer' = 'lookup' $extraOptions)
                |""".stripMargin)
 
           val table = loadTable("T")

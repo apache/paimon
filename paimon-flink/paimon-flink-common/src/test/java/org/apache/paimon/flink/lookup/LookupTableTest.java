@@ -29,6 +29,7 @@ import org.apache.paimon.flink.lookup.FullCacheLookupTable.TableBulkLoader;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -36,7 +37,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.TableTestBase;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -63,6 +63,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static java.util.Collections.emptyList;
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.types.DataTypes.INT;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -111,10 +112,11 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
         // test bulk load error
         {
@@ -128,7 +130,7 @@ public class LookupTableTest extends TableTestBase {
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 100_000; i++) {
             InternalRow row = row(i, 11 * i, 111 * i);
-            records.add(Pair.of(table.toKeyBytes(row), table.toValueBytes(sequence(row, -1L))));
+            records.add(Pair.of(table.toKeyBytes(row), table.toValueBytes(row)));
         }
         records.sort((o1, o2) -> SortUtil.compareBinary(o1.getKey(), o2.getKey()));
         TableBulkLoader bulkLoader = table.createBulkLoader();
@@ -144,18 +146,16 @@ public class LookupTableTest extends TableTestBase {
         }
 
         // test refresh to update
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // test refresh to delete
-        table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), false);
+        table.refresh(singletonList(row(RowKind.DELETE, 1, 11, 111)).iterator());
         assertThat(table.get(row(1))).hasSize(0);
 
-        table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 3, 33, 333), -1L)).iterator(), false);
+        table.refresh(singletonList(row(RowKind.DELETE, 3, 33, 333)).iterator());
         assertThat(table.get(row(3))).hasSize(0);
     }
 
@@ -169,14 +169,15 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
-            InternalRow row = sequence(row(i, 11 * i, 111 * i), -1L);
+            InternalRow row = row(i, 11 * i, 111 * i);
             records.add(Pair.of(table.toKeyBytes(row), table.toValueBytes(row)));
         }
         records.sort((o1, o2) -> SortUtil.compareBinary(o1.getKey(), o2.getKey()));
@@ -187,20 +188,19 @@ public class LookupTableTest extends TableTestBase {
         bulkLoader.finish();
 
         // test refresh to update
-        table.refresh(singletonList(sequence(row(1, 22, 222), 1L)).iterator(), true);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // refresh with old sequence
-        table.refresh(singletonList((sequence(row(1, 33, 333), 0L))).iterator(), true);
+        table.refresh(singletonList((row(1, 11, 333))).iterator());
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
         // test refresh delete data with old sequence
-        table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), true);
+        table.refresh(singletonList(row(RowKind.DELETE, 1, 11, 111)).iterator());
         assertThat(table.get(row(1))).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
     }
@@ -213,26 +213,26 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        r -> r.getInt(0) < 3,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 1, 11, 111), -1L)).iterator(), false);
+        table.refresh(singletonList(row(RowKind.DELETE, 1, 11, 111)).iterator());
         assertThat(table.get(row(1))).hasSize(0);
 
-        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator(), false);
+        table.refresh(singletonList(row(3, 33, 333)).iterator());
         assertThat(table.get(row(3))).hasSize(0);
     }
 
@@ -244,17 +244,18 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT(), INT())).lessThan(1, 22),
                         tempDir.toFile(),
-                        r -> r.getInt(1) < 22,
                         singletonList("f0"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         result = table.get(row(1));
         assertThat(result).hasSize(0);
     }
@@ -267,10 +268,11 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -279,7 +281,7 @@ public class LookupTableTest extends TableTestBase {
         for (int i = 1; i <= 100_000; i++) {
             int secKey = rnd.nextInt(i);
             InternalRow row = row(i, secKey, 111 * i);
-            records.add(Pair.of(table.toKeyBytes(row), table.toValueBytes(sequence(row, -1L))));
+            records.add(Pair.of(table.toKeyBytes(row), table.toValueBytes(row)));
             secKeyToPk.computeIfAbsent(secKey, k -> new HashSet<>()).add(i);
         }
         records.sort((o1, o2) -> SortUtil.compareBinary(o1.getKey(), o2.getKey()));
@@ -296,7 +298,7 @@ public class LookupTableTest extends TableTestBase {
         }
 
         // add new sec key to pk
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
@@ -311,10 +313,11 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         Random rnd = new Random();
@@ -338,21 +341,14 @@ public class LookupTableTest extends TableTestBase {
                     .containsExactlyInAnyOrderElementsOf(entry.getValue());
         }
 
-        JoinedRow joined = new JoinedRow();
         // add new sec key to pk
-        table.refresh(
-                singletonList((InternalRow) joined.replace(row(1, 22, 222), GenericRow.of(1L)))
-                        .iterator(),
-                true);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
         assertThat(result.stream().map(InternalRow::getFieldCount)).allMatch(n -> n == 3);
 
         // refresh with old value
-        table.refresh(
-                singletonList((InternalRow) joined.replace(row(1, 22, 333), GenericRow.of(0L)))
-                        .iterator(),
-                true);
+        table.refresh(singletonList(row(1, 11, 333)).iterator());
         result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(2))).doesNotContain(333);
     }
@@ -365,35 +361,35 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT())).lessThan(0, 3),
                         tempDir.toFile(),
-                        r -> r.getInt(0) < 3,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
-        table.refresh(singletonList(sequence(row(1, 11, 111), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(sequence(row(1, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 222)).iterator());
         assertThat(table.get(row(11))).hasSize(0);
         result = table.get(row(22));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(singletonList(sequence(row(2, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(2, 22, 222)).iterator());
         result = table.get(row(22));
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 22, 222);
         assertRow(result.get(1), 2, 22, 222);
 
-        table.refresh(
-                singletonList(sequence(row(RowKind.DELETE, 2, 22, 222), -1L)).iterator(), false);
+        table.refresh(singletonList(row(RowKind.DELETE, 2, 22, 222)).iterator());
         result = table.get(row(22));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 22, 222);
 
-        table.refresh(singletonList(sequence(row(3, 33, 333), -1L)).iterator(), false);
+        table.refresh(singletonList(row(3, 33, 333)).iterator());
         assertThat(table.get(row(33))).hasSize(0);
     }
 
@@ -405,10 +401,11 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        null,
                         tempDir.toFile(),
-                        r -> true,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
         // test bulk load 100_000 records
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -434,7 +431,7 @@ public class LookupTableTest extends TableTestBase {
         }
 
         // add new join key value
-        table.refresh(singletonList(row(1, 22, 333)).iterator(), false);
+        table.refresh(singletonList(row(1, 22, 333)).iterator());
         List<InternalRow> result = table.get(row(22));
         assertThat(result.stream().map(row -> row.getInt(0))).contains(1);
     }
@@ -447,21 +444,22 @@ public class LookupTableTest extends TableTestBase {
                         storeTable,
                         new int[] {0, 1, 2},
                         null,
+                        new PredicateBuilder(RowType.of(INT(), INT(), INT())).lessThan(2, 222),
                         tempDir.toFile(),
-                        r -> r.getInt(2) < 222,
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
 
-        table.refresh(singletonList(row(1, 11, 333)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 333)).iterator());
         List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(0);
 
-        table.refresh(singletonList(row(1, 11, 111)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
         result = table.get(row(11));
         assertThat(result).hasSize(1);
         assertRow(result.get(0), 1, 11, 111);
 
-        table.refresh(singletonList(row(1, 11, 111)).iterator(), false);
+        table.refresh(singletonList(row(1, 11, 111)).iterator());
         result = table.get(row(11));
         assertThat(result).hasSize(2);
         assertRow(result.get(0), 1, 11, 111);
@@ -477,6 +475,8 @@ public class LookupTableTest extends TableTestBase {
                         new int[] {0, 1, 2},
                         tempDir.toFile(),
                         ImmutableList.of("pk1", "pk2"));
+        table.open();
+
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -507,6 +507,7 @@ public class LookupTableTest extends TableTestBase {
                         new int[] {2, 1},
                         tempDir.toFile(),
                         ImmutableList.of("pk1", "pk2"));
+        table.open();
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -532,6 +533,8 @@ public class LookupTableTest extends TableTestBase {
                         new int[] {2, 1},
                         tempDir.toFile(),
                         ImmutableList.of("pk2", "pk1"));
+        table.open();
+
         List<InternalRow> result = table.get(row(-1, 1));
         assertThat(result).hasSize(0);
 
@@ -555,9 +558,9 @@ public class LookupTableTest extends TableTestBase {
                         String.format("%s/%s.db/%s", warehouse, database, "T"));
         Schema schema =
                 Schema.newBuilder()
-                        .column("pk1", DataTypes.INT())
-                        .column("pk2", DataTypes.INT())
-                        .column("col2", DataTypes.INT())
+                        .column("pk1", INT())
+                        .column("pk2", INT())
+                        .column("col2", INT())
                         .primaryKey("pk1", "pk2")
                         .option(CoreOptions.BUCKET.key(), "2")
                         .option(CoreOptions.BUCKET_KEY.key(), "pk2")
@@ -579,10 +582,6 @@ public class LookupTableTest extends TableTestBase {
         }
 
         return row;
-    }
-
-    private static InternalRow sequence(InternalRow row, long sequenceNumber) {
-        return new JoinedRow(row.getRowKind(), row, GenericRow.of(sequenceNumber));
     }
 
     private static void assertRow(InternalRow resultRow, int... expected) {

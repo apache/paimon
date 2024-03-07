@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import org.junit.jupiter.api.Test;
 
@@ -30,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.HashMap;
 import java.util.Map;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -168,7 +168,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
 
     @Test
     public void testSystemTableTimeTravel() throws Exception {
-        spark.sql("CREATE TABLE t (k INT, v STRING)");
+        spark.sql("CREATE TABLE t (k INT, v STRING) TBLPROPERTIES ('bucket' = '1')");
 
         // snapshot 1
         writeTable(
@@ -234,7 +234,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
         assertThatThrownBy(
                         () -> spark.sql("SELECT * FROM t VERSION AS OF 'unknown'").collectAsList())
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 RuntimeException.class,
                                 "Cannot find a time travel version for unknown"));
     }

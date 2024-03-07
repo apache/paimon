@@ -24,7 +24,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
-import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoveQueryExecutor;
+import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.RemoteQueryExecutor;
 import org.apache.paimon.lookup.RocksDBOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -142,7 +142,7 @@ public class FileStoreLookupFunctionTest {
         assertThat(lookupFunction.lookupTable()).isInstanceOf(PrimaryKeyPartialLookupTable.class);
         QueryExecutor queryExecutor =
                 ((PrimaryKeyPartialLookupTable) lookupFunction.lookupTable()).queryExecutor();
-        assertThat(queryExecutor).isInstanceOf(RemoveQueryExecutor.class);
+        assertThat(queryExecutor).isInstanceOf(RemoteQueryExecutor.class);
     }
 
     @Test

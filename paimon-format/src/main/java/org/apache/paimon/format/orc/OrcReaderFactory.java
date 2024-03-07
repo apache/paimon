@@ -176,12 +176,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
             return orcVectorizedRowBatch;
         }
 
-        private RecordIterator<InternalRow> convertAndGetIterator(VectorizedRowBatch orcBatch) {
+        private RecordIterator<InternalRow> convertAndGetIterator(
+                VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
             paimonColumnBatch.setNumRows(batchSize);
-            result.set(batchSize);
+            result.reset(batchSize, rowNumber);
             return result;
         }
     }
@@ -218,12 +219,13 @@ public class OrcReaderFactory implements FormatReaderFactory {
             final OrcReaderBatch batch = getCachedEntry();
             final VectorizedRowBatch orcVectorBatch = batch.orcVectorizedRowBatch();
 
+            long rowNumber = orcReader.getRowNumber();
             if (!nextBatch(orcReader, orcVectorBatch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator(orcVectorBatch);
+            return batch.convertAndGetIterator(orcVectorBatch, rowNumber);
         }
 
         @Override

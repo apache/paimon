@@ -23,7 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.sink.BatchTableCommit;
@@ -55,7 +55,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -83,7 +82,8 @@ public class OperatorSourceTest {
                         .column("b", DataTypes.INT())
                         .column("c", DataTypes.INT())
                         .primaryKey("a")
-                        .options(Collections.singletonMap(CONSUMER_ID.key(), "my_consumer"))
+                        .option(CONSUMER_ID.key(), "my_consumer")
+                        .option("bucket", "1")
                         .build();
         Identifier identifier = Identifier.create("default", "t");
         catalog.createDatabase("default", false);
@@ -194,24 +194,26 @@ public class OperatorSourceTest {
         MetricGroup readerOperatorMetricGroup = readOperator.getMetricGroup();
         harness.open();
         assertThat(
-                        MetricUtils.getGauge(readerOperatorMetricGroup, "currentFetchEventTimeLag")
+                        TestingMetricUtils.getGauge(
+                                        readerOperatorMetricGroup, "currentFetchEventTimeLag")
                                 .getValue())
                 .isEqualTo(-1L);
         assertThat(
-                        MetricUtils.getGauge(readerOperatorMetricGroup, "currentEmitEventTimeLag")
+                        TestingMetricUtils.getGauge(
+                                        readerOperatorMetricGroup, "currentEmitEventTimeLag")
                                 .getValue())
                 .isEqualTo(-1L);
         harness.processElement(new StreamRecord<>(splits.get(0)));
         assertThat(
                         (Long)
-                                MetricUtils.getGauge(
+                                TestingMetricUtils.getGauge(
                                                 readerOperatorMetricGroup,
                                                 "currentFetchEventTimeLag")
                                         .getValue())
                 .isGreaterThan(0);
         assertThat(
                         (Long)
-                                MetricUtils.getGauge(
+                                TestingMetricUtils.getGauge(
                                                 readerOperatorMetricGroup,
                                                 "currentEmitEventTimeLag")
                                         .getValue())

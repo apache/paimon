@@ -112,6 +112,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
             // change options to test whether CompactorSourceBuilder work normally
             options.put(CoreOptions.SCAN_SNAPSHOT_ID.key(), "2");
         }
+        options.put("bucket", "1");
         long monitorInterval = 1000;
 
         for (String dbName : DATABASE_NAMES) {
@@ -203,6 +204,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                     CoreOptions.ChangelogProducer.NONE.toString());
             options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
         }
+        options.put("bucket", "1");
         long monitorInterval = 1000;
         List<FileStoreTable> tables = new ArrayList<>();
         for (String dbName : DATABASE_NAMES) {
@@ -372,6 +374,7 @@ public class MultiTablesCompactorSourceBuilderITCase extends AbstractTestBase
                     CoreOptions.ChangelogProducer.NONE.toString());
             options.put(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "0");
         }
+        options.put("bucket", "1");
         long monitorInterval = 1000;
 
         for (String dbName : DATABASE_NAMES) {

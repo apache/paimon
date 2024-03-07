@@ -22,6 +22,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalSerializers;
 import org.apache.paimon.lookup.BulkLoader;
 import org.apache.paimon.lookup.RocksDBValueState;
+import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.KeyProjectedRow;
@@ -38,30 +39,23 @@ import java.util.List;
 /** A {@link LookupTable} for primary key table. */
 public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
-    protected final RocksDBValueState<InternalRow, InternalRow> tableState;
-
-    protected int[] primaryKeyMapping;
+    protected final long lruCacheSize;
 
     protected final KeyProjectedRow primaryKeyRow;
 
     @Nullable private final ProjectedRow keyRearrange;
 
+    protected RocksDBValueState<InternalRow, InternalRow> tableState;
+
     public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
             throws IOException {
         super(context);
+        this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
         FileStoreTable table = context.table;
-        this.primaryKeyMapping =
+        int[] primaryKeyMapping =
                 table.primaryKeys().stream().mapToInt(fieldNames::indexOf).toArray();
         this.primaryKeyRow = new KeyProjectedRow(primaryKeyMapping);
-
-        this.tableState =
-                stateFactory.valueState(
-                        "table",
-                        InternalSerializers.create(
-                                TypeUtils.project(projectedType, primaryKeyMapping)),
-                        InternalSerializers.create(projectedType),
-                        lruCacheSize);
 
         ProjectedRow keyRearrange = null;
         if (!table.primaryKeys().equals(joinKey)) {
@@ -76,6 +70,18 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
+    public void open() throws Exception {
+        this.tableState =
+                stateFactory.valueState(
+                        "table",
+                        InternalSerializers.create(
+                                TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
+                        InternalSerializers.create(projectedType),
+                        lruCacheSize);
+        super.open();
+    }
+
+    @Override
     public List<InternalRow> innerGet(InternalRow key) throws IOException {
         if (keyRearrange != null) {
             key = keyRearrange.replaceRow(key);
@@ -85,21 +91,20 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+        Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
-            if (orderByLastField) {
+            if (userDefinedSeqComparator != null) {
                 InternalRow previous = tableState.get(primaryKeyRow);
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
                     continue;
                 }
             }
 
             if (row.getRowKind() == RowKind.INSERT || row.getRowKind() == RowKind.UPDATE_AFTER) {
-                if (recordFilter().test(row)) {
+                if (predicate == null || predicate.test(row)) {
                     tableState.put(primaryKeyRow, row);
                 } else {
                     // The new record under primary key is filtered

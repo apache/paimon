@@ -20,7 +20,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.utils.BlockingIterator;
 
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -335,16 +337,76 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                 .set(
                         ExecutionConfigOptions.TABLE_EXEC_SINK_UPSERT_MATERIALIZE,
                         ExecutionConfigOptions.UpsertMaterialize.FORCE);
-        try (CloseableIterator<Row> ignored =
-                streamSqlIter(
-                        "INSERT INTO dwd_orders "
-                                + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
-                                + "UNION ALL "
-                                + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;")) {
+        sEnv.getConfig().set(RestartStrategyOptions.RESTART_STRATEGY, "none");
+        String sql =
+                "INSERT INTO dwd_orders "
+                        + "SELECT OrderID, OrderNumber, PersonID, CAST(NULL AS STRING), CAST(NULL AS STRING), CAST(NULL AS INT) FROM ods_orders "
+                        + "UNION ALL "
+                        + "SELECT OrderID, CAST(NULL AS INT), dim_persons.PersonID, LastName, FirstName, Age FROM dim_persons JOIN ods_orders ON dim_persons.PersonID = ods_orders.PersonID;";
+        try {
+            sEnv.executeSql(sql).await();
             fail("Expecting exception");
         } catch (Exception e) {
             assertThat(e)
-                    .hasMessageContaining("Sink materializer must not be used with Paimon sink.");
+                    .hasRootCauseMessage(
+                            "Sink materializer must not be used with Paimon sink. "
+                                    + "Please set 'table.exec.sink.upsert-materialize' to 'NONE' in Flink's config.");
         }
+    }
+
+    @Test
+    public void testPartialUpdateProjectionPushDownWithDeleteMessage() throws Exception {
+        List<Row> input = Arrays.asList(Row.ofKind(RowKind.INSERT, 1, 1, 1));
+
+        String id = TestValuesTableFactory.registerData(input);
+        // create temp table in stream table env
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE source (k INT, a INT, g_1 INT, PRIMARY KEY (k) NOT ENFORCED) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D,UA,UB')",
+                        id));
+
+        sql(
+                "CREATE TABLE TEST ("
+                        + "k INT, a INT, b INT, g_1 INT, g_2 INT, PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.g_2.sequence-group'='b');");
+
+        CloseableIterator<Row> insert1 =
+                streamSqlIter(
+                        "INSERT INTO TEST SELECT k, a, CAST(NULL AS INT) AS b, g_1,"
+                                + " CAST(NULL AS INT) as g_2 FROM source");
+
+        sqlAssertWithRetry(
+                "SELECT * FROM TEST",
+                list -> list.containsExactlyInAnyOrder(Row.of(1, 1, null, 1, null)));
+
+        // insert the delete message
+        input = Arrays.asList(Row.ofKind(RowKind.DELETE, 1, 1, 2));
+
+        id = TestValuesTableFactory.registerData(input);
+
+        // create temp table in stream table env
+        sEnv.executeSql(
+                String.format(
+                        "CREATE TEMPORARY TABLE source2 (k INT, a INT, g_1 INT) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s')",
+                        id));
+
+        CloseableIterator<Row> insert2 =
+                streamSqlIter(
+                        "INSERT INTO TEST SELECT k, a, CAST(NULL AS INT) AS b, g_1,"
+                                + " CAST(NULL AS INT) as g_2 FROM source2");
+
+        sqlAssertWithRetry(
+                "SELECT * FROM TEST",
+                list -> list.containsExactlyInAnyOrder(Row.of(1, null, null, 2, null)));
+
+        assertThat(sql("SELECT COUNT(*) FROM TEST")).containsExactlyInAnyOrder(Row.of(1L));
+        insert1.close();
+        insert2.close();
     }
 }

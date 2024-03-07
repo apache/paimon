@@ -22,7 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.service.network.messages.MessageBody;
 import org.apache.paimon.service.network.messages.MessageDeserializer;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;

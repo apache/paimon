@@ -24,18 +24,15 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
-import org.apache.paimon.utils.SnapshotManager;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 
 /** {@link TableScan} implementation for batch planning. */
 public class InnerTableScanImpl extends AbstractInnerTableScan {
 
-    private final SnapshotManager snapshotManager;
     private final DefaultValueAssigner defaultValueAssigner;
 
     private StartingScanner startingScanner;
@@ -46,10 +43,8 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     public InnerTableScanImpl(
             CoreOptions options,
             SnapshotReader snapshotReader,
-            SnapshotManager snapshotManager,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
-        this.snapshotManager = snapshotManager;
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
     }
@@ -57,12 +52,6 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     @Override
     public InnerTableScan withFilter(Predicate predicate) {
         snapshotReader.withFilter(defaultValueAssigner.handlePredicate(predicate));
-        return this;
-    }
-
-    @Override
-    public InnerTableScan withPartitionFilter(Map<String, String> partitionSpec) {
-        snapshotReader.withPartitionFilter(partitionSpec);
         return this;
     }
 

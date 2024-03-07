@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- *    http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -24,10 +24,11 @@ import org.apache.paimon.service.network.stats.ServiceRequestStats;
 import org.apache.paimon.utils.FutureUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
-import org.apache.flink.shaded.netty4.io.netty.channel.Channel;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFuture;
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelFutureListener;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.channel.Channel;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFuture;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelFutureListener;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

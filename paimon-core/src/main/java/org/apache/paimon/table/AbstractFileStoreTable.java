@@ -68,6 +68,7 @@ import java.util.Optional;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -134,8 +135,13 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public SnapshotReader newSnapshotReader() {
+        return newSnapshotReader(DEFAULT_MAIN_BRANCH);
+    }
+
+    @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
         return new SnapshotReaderImpl(
-                store().newScan(),
+                store().newScan(branchName),
                 tableSchema,
                 coreOptions(),
                 snapshotManager(),
@@ -149,10 +155,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
-                coreOptions(),
-                newSnapshotReader(),
-                snapshotManager(),
-                DefaultValueAssigner.create(tableSchema));
+                coreOptions(), newSnapshotReader(), DefaultValueAssigner.create(tableSchema));
     }
 
     @Override
@@ -168,8 +171,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     protected abstract SplitGenerator splitGenerator();
 
     protected abstract BiConsumer<FileStoreScan, Predicate> nonPartitionFilterConsumer();
-
-    protected abstract FileStoreTable copy(TableSchema newTableSchema);
 
     @Override
     public FileStoreTable copy(Map<String, String> dynamicOptions) {
@@ -195,6 +196,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 (k, v) -> {
                     if (!Objects.equals(v, options.get(k))) {
                         SchemaManager.checkAlterTableOption(k);
+
+                        if (CoreOptions.BUCKET.key().equals(k)) {
+                            throw new UnsupportedOperationException(
+                                    "Cannot change bucket number through dynamic options. You might need to rescale bucket.");
+                        }
                     }
                 });
     }
@@ -289,6 +295,11 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public TableCommitImpl newCommit(String commitUser) {
+        // Compatibility with previous design, the main branch is written by default
+        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
+    }
+
+    public TableCommitImpl newCommit(String commitUser, String branchName) {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
@@ -304,8 +315,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                                     .olderThanMills(System.currentTimeMillis() - snapshotTimeRetain)
                                     .expire();
         }
+
         return new TableCommitImpl(
-                store().newCommit(commitUser),
+                store().newCommit(commitUser, branchName),
                 createCommitCallbacks(),
                 snapshotExpire,
                 options.writeOnly() ? null : store().newPartitionExpire(commitUser),

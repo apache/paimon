@@ -22,6 +22,7 @@ import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.CommonTestUtils;
@@ -39,6 +40,7 @@ import org.mockito.MockedStatic;
 import org.mockito.Mockito;
 
 import java.lang.reflect.Field;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -214,6 +216,56 @@ public class HiveCatalogTest extends CatalogTestBase {
             assertThat(tableProperties)
                     .containsEntry(
                             TABLE_TYPE_PROP, PAIMON_TABLE_TYPE_VALUE.toUpperCase(Locale.ROOT));
+        } catch (Exception e) {
+            fail("Test failed due to exception: " + e.getMessage());
+        }
+    }
+
+    @Test
+    public void testAlterHiveTableParameters() {
+        try {
+            // Create a new database for the test
+            String databaseName = "test_db";
+            catalog.createDatabase(databaseName, false);
+
+            // Create a new table with Hive table parameters
+            String tableName = "new_table";
+            Map<String, String> options = new HashMap<>();
+            options.put("hive.table.owner", "Jon");
+            options.put("hive.storage.format", "ORC");
+
+            Schema addHiveTableParametersSchema =
+                    new Schema(
+                            Lists.newArrayList(
+                                    new DataField(0, "pk", DataTypes.INT()),
+                                    new DataField(1, "col1", DataTypes.STRING()),
+                                    new DataField(2, "col2", DataTypes.STRING())),
+                            Collections.emptyList(),
+                            Collections.emptyList(),
+                            options,
+                            "");
+
+            catalog.createTable(
+                    Identifier.create(databaseName, tableName),
+                    addHiveTableParametersSchema,
+                    false);
+
+            SchemaChange schemaChange1 = SchemaChange.setOption("hive.table.owner", "Hms");
+            SchemaChange schemaChange2 =
+                    SchemaChange.setOption("hive.table.create_time", "2024-01-22");
+            catalog.alterTable(
+                    Identifier.create(databaseName, tableName),
+                    Arrays.asList(schemaChange1, schemaChange2),
+                    false);
+
+            Field clientField = HiveCatalog.class.getDeclaredField("client");
+            clientField.setAccessible(true);
+            IMetaStoreClient client = (IMetaStoreClient) clientField.get(catalog);
+            Table table = client.getTable(databaseName, tableName);
+            Map<String, String> tableProperties = table.getParameters();
+
+            assertThat(tableProperties).containsEntry("table.owner", "Hms");
+            assertThat(tableProperties).containsEntry("table.create_time", "2024-01-22");
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }

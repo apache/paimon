@@ -122,7 +122,8 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         Identifier identifier = new Identifier(database, table);
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
-            fileStoreTable = (FileStoreTable) catalog.getTable(identifier).copy(tableConfig);
+            fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
+            fileStoreTable = copyOptionsWithoutBucket(fileStoreTable);
             try {
                 Schema retrievedSchema = retrieveSchema();
                 computedColumns =

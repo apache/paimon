@@ -18,8 +18,10 @@
 
 package org.apache.paimon.partition;
 
+import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -43,9 +45,7 @@ public class PartitionPredicateTest {
     public void testNoPartition() {
         PartitionPredicate predicate =
                 PartitionPredicate.fromMultiple(RowType.of(), Collections.singletonList(EMPTY_ROW));
-
-        assertThat(predicate.test(EMPTY_ROW)).isTrue();
-        assertThat(predicate.test(1, new FieldStats[] {})).isTrue();
+        assertThat(predicate).isNull();
     }
 
     @Test
@@ -150,7 +150,16 @@ public class PartitionPredicateTest {
     }
 
     private boolean validate(PartitionPredicate predicate, FieldStats[] fieldStats) {
-        return predicate.test(3, fieldStats);
+        Object[] min = new Object[fieldStats.length];
+        Object[] max = new Object[fieldStats.length];
+        Long[] nullCounts = new Long[fieldStats.length];
+        for (int i = 0; i < fieldStats.length; i++) {
+            min[i] = fieldStats[i].minValue();
+            max[i] = fieldStats[i].maxValue();
+            nullCounts[i] = fieldStats[i].nullCount();
+        }
+        return predicate.test(
+                3, GenericRow.of(min), GenericRow.of(max), BinaryArray.fromLongArray(nullCounts));
     }
 
     private static BinaryRow createPart(int i, int j) {

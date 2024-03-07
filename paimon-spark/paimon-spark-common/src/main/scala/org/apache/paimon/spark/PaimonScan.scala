@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.predicate.Predicate
@@ -32,8 +33,9 @@ case class PaimonScan(
     table: Table,
     requiredSchema: StructType,
     filters: Array[Predicate],
+    reservedFilters: Array[Filter],
     pushDownLimit: Option[Int])
-  extends PaimonBaseScan(table, requiredSchema, filters, pushDownLimit)
+  extends PaimonBaseScan(table, requiredSchema, filters, reservedFilters, pushDownLimit)
   with SupportsRuntimeFiltering {
 
   override def filterAttributes(): Array[NamedReference] = {

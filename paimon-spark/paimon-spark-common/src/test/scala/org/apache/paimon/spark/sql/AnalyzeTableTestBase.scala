@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.Decimal
@@ -24,10 +25,10 @@ import org.apache.paimon.stats.ColStats
 import org.apache.paimon.utils.DateTimeUtils
 
 import org.apache.spark.sql.Row
+import org.apache.spark.sql.catalyst.plans.logical.Statistics
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2ScanRelation
 import org.assertj.core.api.Assertions.assertThatThrownBy
 import org.junit.jupiter.api.Assertions
-
-import java.util.concurrent.TimeUnit
 
 abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
@@ -283,7 +284,75 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
   }
 
-  private def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
+  test("Paimon analyze: spark use table stats") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val stats = getScanStatistic("SELECT * FROM T")
+    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
+  }
+
+  test("Paimon analyze: spark use col stats") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
+
+    val stats = getScanStatistic("SELECT * FROM T")
+    Assertions.assertEquals(2L, stats.rowCount.get.longValue())
+    Assertions.assertEquals(if (supportsColStats()) 4 else 0, stats.attributeStats.size)
+  }
+
+  test("Paimon analyze: partition filter push down hit") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, pt INT)
+                 |TBLPROPERTIES ('primary-key'='id, pt', 'bucket'='2')
+                 |PARTITIONED BY (pt)
+                 |""".stripMargin)
+
+    spark.sql("INSERT INTO T VALUES (1, 'a', 1), (2, 'b', 1), (3, 'c', 2), (4, 'd', 3)")
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS FOR ALL COLUMNS")
+
+    // paimon will reserve partition filter and not return it to spark, we need to ensure stats are filtered correctly.
+    // partition push down hit
+    var sql = "SELECT * FROM T WHERE pt < 1"
+    Assertions.assertEquals(
+      if (supportsColStats()) 0L else 4L,
+      getScanStatistic(sql).rowCount.get.longValue())
+    checkAnswer(spark.sql(sql), Nil)
+
+    // partition push down not hit
+    sql = "SELECT * FROM T WHERE id < 1"
+    Assertions.assertEquals(4L, getScanStatistic(sql).rowCount.get.longValue())
+    checkAnswer(spark.sql(sql), Nil)
+  }
+
+  protected def statsFileCount(tableLocation: Path, fileIO: FileIO): Int = {
     fileIO.listStatus(new Path(tableLocation, "statistics")).length
   }
+
+  protected def getScanStatistic(sql: String): Statistics = {
+    val relation = spark
+      .sql(sql)
+      .queryExecution
+      .optimizedPlan
+      .collectFirst { case relation: DataSourceV2ScanRelation => relation }
+      .get
+    relation.computeStats()
+  }
+
+  /** Spark supports the use of col stats for v2 table since 3.4+. */
+  protected def supportsColStats(): Boolean = true
 }

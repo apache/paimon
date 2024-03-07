@@ -38,13 +38,11 @@ import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.stats.ColStats;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.stats.StatsFileHandler;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
-import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
@@ -73,6 +71,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -650,8 +649,6 @@ public class FileStoreCommitTest {
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
         // check data
-        RowDataToObjectArrayConverter partitionConverter =
-                new RowDataToObjectArrayConverter(TestKeyValueGenerator.DEFAULT_PART_TYPE);
         org.apache.paimon.predicate.Predicate partitionFilter =
                 partitions.stream()
                         .map(
@@ -663,7 +660,7 @@ public class FileStoreCommitTest {
 
         List<KeyValue> expectedKvs = new ArrayList<>();
         for (Map.Entry<BinaryRow, List<KeyValue>> entry : data.entrySet()) {
-            if (partitionFilter.test(partitionConverter.convert(entry.getKey()))) {
+            if (partitionFilter.test(entry.getKey())) {
                 continue;
             }
             expectedKvs.addAll(entry.getValue());
@@ -686,7 +683,7 @@ public class FileStoreCommitTest {
         TestFileStore store = createStore(false);
         assertThatThrownBy(() -> store.dropPartitions(Collections.emptyList()))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Partitions list cannot be empty."));
     }

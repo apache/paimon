@@ -1,23 +1,27 @@
 /*
- * Copyright 2015 LinkedIn Corp. All rights reserved.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
-/* This file is based on source code of StorageWriter from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.io.CompressedPageFileOutput;
+import org.apache.paimon.io.PageFileOutput;
+import org.apache.paimon.lookup.LookupStoreFactory.Context;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.utils.BloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
@@ -36,7 +40,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.io.OutputStream;
 import java.io.RandomAccessFile;
 import java.nio.MappedByteBuffer;
 import java.nio.channels.FileChannel;
@@ -45,6 +48,10 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.UUID;
+
+/* This file is based on source code of StorageWriter from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /** Internal write implementation for hash kv store. */
 public class HashLookupStoreWriter implements LookupStoreWriter {
@@ -56,7 +63,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private final double loadFactor;
     // Output
     private final File tempFolder;
-    private final OutputStream outputStream;
+    private final File outputFile;
     // Index stream
     private File[] indexFiles;
     private DataOutputStream[] indexStreams;
@@ -68,8 +75,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int[] lastValuesLength;
     // Data length
     private long[] dataLengths;
-    // Index length
-    private long indexesLength;
     // Max offset length
     private int[] maxOffsetLengths;
     // Number of keys
@@ -79,11 +84,23 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     private int valueCount;
     // Number of collisions
     private int collisions;
+
     @Nullable private final BloomFilter.Builder bloomFilter;
 
-    HashLookupStoreWriter(double loadFactor, File file, @Nullable BloomFilter.Builder bloomFilter)
+    @Nullable private final BlockCompressionFactory compressionFactory;
+    private final int compressPageSize;
+
+    HashLookupStoreWriter(
+            double loadFactor,
+            File file,
+            @Nullable BloomFilter.Builder bloomFilter,
+            @Nullable BlockCompressionFactory compressionFactory,
+            int compressPageSize)
             throws IOException {
         this.loadFactor = loadFactor;
+        this.outputFile = file;
+        this.compressionFactory = compressionFactory;
+        this.compressPageSize = compressPageSize;
         if (loadFactor <= 0.0 || loadFactor >= 1.0) {
             throw new IllegalArgumentException(
                     "Illegal load factor = " + loadFactor + ", should be between 0.0 and 1.0.");
@@ -93,7 +110,6 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         if (!tempFolder.mkdir()) {
             throw new IOException("Can not create temp folder: " + tempFolder);
         }
-        this.outputStream = new BufferedOutputStream(new FileOutputStream(file));
         this.indexStreams = new DataOutputStream[0];
         this.dataStreams = new DataOutputStream[0];
         this.indexFiles = new File[0];
@@ -157,7 +173,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     }
 
     @Override
-    public void close() throws IOException {
+    public Context close() throws IOException {
         // Close the data and index streams
         for (DataOutputStream dos : dataStreams) {
             if (dos != null) {
@@ -177,17 +193,67 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
         // Prepare files to merge
         List<File> filesToMerge = new ArrayList<>();
 
-        try {
+        int bloomFilterBytes = bloomFilter == null ? 0 : bloomFilter.getBuffer().size();
+        HashContext context =
+                new HashContext(
+                        bloomFilter != null,
+                        bloomFilter == null ? 0 : bloomFilter.expectedEntries(),
+                        bloomFilterBytes,
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new int[keyCounts.length],
+                        new long[keyCounts.length],
+                        0,
+                        null);
 
-            // Write metadata file
-            File metadataFile = new File(tempFolder, "metadata.dat");
-            metadataFile.deleteOnExit();
-            FileOutputStream metadataOutputStream = new FileOutputStream(metadataFile);
-            DataOutputStream metadataDataOutputStream = new DataOutputStream(metadataOutputStream);
-            writeMetadata(metadataDataOutputStream);
-            metadataDataOutputStream.close();
-            metadataOutputStream.close();
-            filesToMerge.add(metadataFile);
+        long indexesLength = bloomFilterBytes;
+        long datasLength = 0;
+        for (int i = 0; i < this.keyCounts.length; i++) {
+            if (this.keyCounts[i] > 0) {
+                // Write the key Count
+                context.keyCounts[i] = keyCounts[i];
+
+                // Write slot count
+                int slots = (int) Math.round(keyCounts[i] / loadFactor);
+                context.slots[i] = slots;
+
+                // Write slot size
+                int offsetLength = maxOffsetLengths[i];
+                context.slotSizes[i] = i + offsetLength;
+
+                // Write index offset
+                context.indexOffsets[i] = (int) indexesLength;
+
+                // Increment index length
+                indexesLength += (long) (i + offsetLength) * slots;
+
+                // Write data length
+                context.dataOffsets[i] = datasLength;
+
+                // Increment data length
+                datasLength += dataLengths[i];
+            }
+        }
+
+        // adjust data offsets
+        for (int i = 0; i < context.dataOffsets.length; i++) {
+            context.dataOffsets[i] = indexesLength + context.dataOffsets[i];
+        }
+
+        PageFileOutput output =
+                PageFileOutput.create(outputFile, compressPageSize, compressionFactory);
+        try {
+            // Write bloom filter file
+            if (bloomFilter != null) {
+                File bloomFilterFile = new File(tempFolder, "bloomfilter.dat");
+                bloomFilterFile.deleteOnExit();
+                try (FileOutputStream bfOutputStream = new FileOutputStream(bloomFilterFile)) {
+                    bfOutputStream.write(bloomFilter.getBuffer().getArray());
+                    LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+                }
+                filesToMerge.add(bloomFilterFile);
+            }
 
             // Build index file
             for (int i = 0; i < indexFiles.length; i++) {
@@ -208,81 +274,21 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
 
             // Merge and write to output
             checkFreeDiskSpace(filesToMerge);
-            mergeFiles(filesToMerge, outputStream);
+            mergeFiles(filesToMerge, output);
         } finally {
-            outputStream.close();
             cleanup(filesToMerge);
-        }
-    }
-
-    private void writeMetadata(DataOutputStream dataOutputStream) throws IOException {
-        // Write time
-        dataOutputStream.writeLong(System.currentTimeMillis());
-
-        // Prepare
-        int keyLengthCount = getNumKeyCount();
-        int maxKeyLength = keyCounts.length - 1;
-
-        // Write size (number of keys)
-        dataOutputStream.writeInt(keyCount);
-
-        // Write the number of different key length
-        dataOutputStream.writeInt(keyLengthCount);
-
-        // Write the max value for keyLength
-        dataOutputStream.writeInt(maxKeyLength);
-
-        // Write whether the bloom filter is enabled.
-        dataOutputStream.writeBoolean(bloomFilter != null);
-
-        if (bloomFilter != null) {
-            dataOutputStream.writeLong(bloomFilter.getNumRecords());
-            dataOutputStream.writeInt(bloomFilter.getBuffer().size());
-
-            // Write the bloom filter start index
-            dataOutputStream.writeInt(dataOutputStream.size() + Integer.SIZE / Byte.SIZE);
-
-            dataOutputStream.write(bloomFilter.getBuffer().getArray());
-            LOG.info("Bloom filter size: {} bytes", bloomFilter.getBuffer().size());
+            output.close();
         }
 
-        // For each keyLength
-        long datasLength = 0L;
-        for (int i = 0; i < keyCounts.length; i++) {
-            if (keyCounts[i] > 0) {
-                // Write the key length
-                dataOutputStream.writeInt(i);
+        LOG.info(
+                "Compressed Total store size: {} Mb",
+                new DecimalFormat("#,##0.0").format(outputFile.length() / (1024 * 1024)));
 
-                // Write key count
-                dataOutputStream.writeInt(keyCounts[i]);
-
-                // Write slot count
-                int slots = (int) Math.round(keyCounts[i] / loadFactor);
-                dataOutputStream.writeInt(slots);
-
-                // Write slot size
-                int offsetLength = maxOffsetLengths[i];
-                dataOutputStream.writeInt(i + offsetLength);
-
-                // Write index offset
-                dataOutputStream.writeInt((int) indexesLength);
-
-                // Increment index length
-                indexesLength += (long) (i + offsetLength) * slots;
-
-                // Write data length
-                dataOutputStream.writeLong(datasLength);
-
-                // Increment data length
-                datasLength += dataLengths[i];
-            }
+        if (output instanceof CompressedPageFileOutput) {
+            CompressedPageFileOutput compressedOutput = (CompressedPageFileOutput) output;
+            context = context.copy(compressedOutput.uncompressBytes(), compressedOutput.pages());
         }
-
-        // Write the position of the index and the data
-        int indexOffset =
-                dataOutputStream.size() + (Integer.SIZE / Byte.SIZE) + (Long.SIZE / Byte.SIZE);
-        dataOutputStream.writeInt(indexOffset);
-        dataOutputStream.writeLong(indexOffset + indexesLength);
+        return context;
     }
 
     private File buildIndex(int keyLength) throws IOException {
@@ -400,7 +406,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
     }
 
     // Merge files to the provided fileChannel
-    private void mergeFiles(List<File> inputFiles, OutputStream outputStream) throws IOException {
+    private void mergeFiles(List<File> inputFiles, PageFileOutput output) throws IOException {
         long startTime = System.nanoTime();
 
         // Merge files
@@ -414,7 +420,7 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
                     byte[] buffer = new byte[8192];
                     int length;
                     while ((length = bufferedInputStream.read(buffer)) > 0) {
-                        outputStream.write(buffer, 0, length);
+                        output.write(buffer, 0, length);
                     }
                 } finally {
                     bufferedInputStream.close();
@@ -491,15 +497,5 @@ public class HashLookupStoreWriter implements LookupStoreWriter {
             dataLengths[keyLength]++;
         }
         return dos;
-    }
-
-    private int getNumKeyCount() {
-        int res = 0;
-        for (int count : keyCounts) {
-            if (count != 0) {
-                res++;
-            }
-        }
-        return res;
     }
 }

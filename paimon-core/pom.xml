@@ -25,7 +25,7 @@ under the License.
     <parent>
         <artifactId>paimon-parent</artifactId>
         <groupId>org.apache.paimon</groupId>
-        <version>0.7-SNAPSHOT</version>
+        <version>0.8-SNAPSHOT</version>
     </parent>
 
     <artifactId>paimon-core</artifactId>
@@ -33,6 +33,7 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
+        <RoaringBitmap.version>1.0.1</RoaringBitmap.version>
     </properties>
 
     <dependencies>
@@ -57,16 +58,16 @@ under the License.
         <!-- flink dependencies -->
 
         <dependency>
-            <groupId>org.lz4</groupId>
-            <artifactId>lz4-java</artifactId>
-            <version>${lz4.version}</version>
-        </dependency>
-
-        <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>frocksdbjni</artifactId>
             <version>${frocksdbjni.version}</version>
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.roaringbitmap</groupId>
+            <artifactId>RoaringBitmap</artifactId>
+            <version>${RoaringBitmap.version}</version>
         </dependency>
 
         <!-- test dependencies -->
@@ -187,6 +188,13 @@ under the License.
             <groupId>org.apache.commons</groupId>
             <artifactId>commons-math3</artifactId>
             <version>3.6.1</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.xerial</groupId>
+            <artifactId>sqlite-jdbc</artifactId>
+            <version>3.44.0.0</version>
+            <scope>test</scope>
         </dependency>
 
     </dependencies>

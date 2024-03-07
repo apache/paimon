@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -591,6 +591,7 @@ public class HiveWriteITCase extends HiveTestBase {
         Options conf = new Options();
         conf.set(CatalogOptions.WAREHOUSE, root);
         conf.set(CoreOptions.FILE_FORMAT, CoreOptions.FileFormatType.AVRO);
+        conf.set("bucket", "1");
         Table table =
                 FileStoreTestUtils.createFileStoreTable(
                         conf,

@@ -76,7 +76,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testParquetNonPartitionTable() throws Exception {
+    public void testParquet() throws Exception {
         testUpgradeNonPartitionTable("parquet");
         resetMetastore();
         testUpgradePartitionTable("parquet");
@@ -202,7 +202,7 @@ public class MigrateTableProcedureITCase extends ActionITCaseBase {
         Assertions.assertThatList(r1).containsExactlyInAnyOrderElementsOf(r2);
     }
 
-    private String data(int i) {
+    protected static String data(int i) {
         Random random = new Random();
         StringBuilder stringBuilder = new StringBuilder();
         for (int m = 0; m < i; m++) {

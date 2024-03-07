@@ -66,6 +66,7 @@ public class ManifestsTableTest extends TableTestBase {
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option("bucket", "1")
                         .build();
         catalog.createTable(identifier, schema, true);
         table = catalog.getTable(identifier);

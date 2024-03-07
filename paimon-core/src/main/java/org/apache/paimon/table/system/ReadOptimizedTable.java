@@ -98,11 +98,15 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     }
 
     @Override
+    public SnapshotReader newSnapshotReader(String branchName) {
+        return dataTable.newSnapshotReader(branchName);
+    }
+
+    @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
                 coreOptions(),
                 newSnapshotReader(),
-                snapshotManager(),
                 DefaultValueAssigner.create(dataTable.schema()));
     }
 

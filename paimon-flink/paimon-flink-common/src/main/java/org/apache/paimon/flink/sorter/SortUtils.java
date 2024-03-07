@@ -161,6 +161,7 @@ public class SortUtils {
                                 options.writeBufferSize(),
                                 options.pageSize(),
                                 options.localSortMaxNumFileHandles(),
+                                options.spillCompression(),
                                 sinkParallelism))
                 .setParallelism(sinkParallelism)
                 // remove the key column from every row

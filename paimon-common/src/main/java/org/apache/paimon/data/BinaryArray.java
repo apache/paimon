@@ -567,4 +567,37 @@ public final class BinaryArray extends BinarySection implements InternalArray, D
         result.pointTo(MemorySegment.wrap(data), 0, (int) totalSize);
         return result;
     }
+
+    public static BinaryArray fromLongArray(Long[] arr) {
+        BinaryArray array = new BinaryArray();
+        BinaryArrayWriter writer = new BinaryArrayWriter(array, arr.length, 8);
+        for (int i = 0; i < arr.length; i++) {
+            Long v = arr[i];
+            if (v == null) {
+                writer.setNullLong(i);
+            } else {
+                writer.writeLong(i, v);
+            }
+        }
+        writer.complete();
+        return array;
+    }
+
+    public static BinaryArray fromLongArray(InternalArray arr) {
+        if (arr instanceof BinaryArray) {
+            return (BinaryArray) arr;
+        }
+
+        BinaryArray array = new BinaryArray();
+        BinaryArrayWriter writer = new BinaryArrayWriter(array, arr.size(), 8);
+        for (int i = 0; i < arr.size(); i++) {
+            if (arr.isNullAt(i)) {
+                writer.setNullLong(i);
+            } else {
+                writer.writeLong(i, arr.getLong(i));
+            }
+        }
+        writer.complete();
+        return array;
+    }
 }

@@ -54,6 +54,7 @@ import static org.assertj.core.api.AssertionsForClassTypes.assertThat;
 
 /** Tests for {@link DataTableSource}. */
 class DataTableSourceTest {
+
     @Test
     void testInferScanParallelism(@TempDir java.nio.file.Path path) throws Exception {
         FileIO fileIO = LocalFileIO.create();
@@ -64,6 +65,7 @@ class DataTableSourceTest {
                         Schema.newBuilder()
                                 .column("a", DataTypes.INT())
                                 .column("b", DataTypes.BIGINT())
+                                .option("bucket", "1")
                                 .build());
         FileStoreTable fileStoreTable =
                 FileStoreTableFactory.create(fileIO, tablePath, tableSchema);

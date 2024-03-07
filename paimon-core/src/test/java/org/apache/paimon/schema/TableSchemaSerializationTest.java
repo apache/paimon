@@ -33,6 +33,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.schema.TableSchema.PAIMON_07_VERSION;
 import static org.apache.paimon.schema.TableSchemaTest.newRowType;
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -57,11 +58,29 @@ public class TableSchemaSerializationTest {
         options.put("option-1", "value-1");
         options.put("option-2", "value-2");
 
-        TableSchema tableSchema =
-                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment");
-        String serialized = JsonSerdeUtil.toJson(tableSchema);
+        assertSerDeser(
+                new TableSchema(1, fields, 10, partitionKeys, primaryKeys, options, "my_comment"),
+                Collections.emptyMap());
+        assertSerDeser(
+                new TableSchema(
+                        PAIMON_07_VERSION,
+                        1,
+                        fields,
+                        10,
+                        partitionKeys,
+                        primaryKeys,
+                        options,
+                        "my_comment",
+                        System.currentTimeMillis()),
+                Collections.singletonMap("bucket", "1"));
+    }
 
+    private void assertSerDeser(TableSchema tableSchema, Map<String, String> additionalOptions) {
+        String serialized = JsonSerdeUtil.toJson(tableSchema);
         TableSchema deserialized = JsonSerdeUtil.fromJson(serialized, TableSchema.class);
-        assertThat(deserialized).isEqualTo(tableSchema);
+        Map<String, String> newOptions = new HashMap<>(tableSchema.options());
+        newOptions.putAll(additionalOptions);
+        assertThat(deserialized.version()).isEqualTo(tableSchema.version());
+        assertThat(deserialized).isEqualTo(tableSchema.copy(newOptions));
     }
 }

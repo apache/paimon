@@ -86,29 +86,30 @@ public class LookupLevelsTest {
                 new Levels(
                         comparator,
                         Arrays.asList(
-                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
-                                newFile(2, kv(2, 22), kv(5, 55))),
+                                newFile(1, kv(1, 11, 1), kv(3, 33, 2), kv(5, 5, 3)),
+                                newFile(2, kv(2, 22, 4), kv(5, 55, 5))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
         KeyValue kv = lookupLevels.lookup(row(1), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(1);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(11);
 
         // only in level 2
         kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(4);
         assertThat(kv.level()).isEqualTo(2);
         assertThat(kv.value().getInt(1)).isEqualTo(22);
 
         // both in level 1 and level 2
         kv = lookupLevels.lookup(row(5), 1);
         assertThat(kv).isNotNull();
-        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.sequenceNumber()).isEqualTo(3);
         assertThat(kv.level()).isEqualTo(1);
         assertThat(kv.value().getInt(1)).isEqualTo(5);
 
@@ -131,7 +132,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(7, 77), kv(8, 88)),
                                 newFile(1, kv(10, 1010), kv(11, 1111))),
                         1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         Map<Integer, Integer> contains =
                 new HashMap<Integer, Integer>() {
@@ -178,7 +180,8 @@ public class LookupLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofKibiBytes(20));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
@@ -209,32 +212,74 @@ public class LookupLevelsTest {
                                 // empty level 2
                                 newFile(3, kv(2, 22), kv(5, 55))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         KeyValue kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
     }
 
-    private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
-        return new LookupLevels(
+    @Test
+    public void testLookupLevel0() throws Exception {
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(0, kv(1, 0)),
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        KeyValue kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(0);
+        assertThat(kv.value().getInt(1)).isEqualTo(0);
+
+        levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        // not in level 0
+        kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(1);
+        assertThat(kv.value().getInt(1)).isEqualTo(11);
+    }
+
+    private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
+        return new LookupLevels<>(
                 levels,
                 comparator,
                 keyType,
-                rowType,
+                new LookupLevels.KeyValueProcessor(rowType),
                 file ->
                         createReaderFactory()
                                 .createRecordReader(
                                         0, file.fileName(), file.fileSize(), file.level()),
                 () -> new File(tempDir.toFile(), LOOKUP_FILE_PREFIX + UUID.randomUUID()),
-                new HashLookupStoreFactory(new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75),
+                new HashLookupStoreFactory(
+                        new CacheManager(MemorySize.ofMebiBytes(1)), 2048, 0.75, "none"),
                 Duration.ofHours(1),
                 maxDiskSize,
                 rowCount -> BloomFilter.builder(rowCount, 0.05));
     }
 
     private KeyValue kv(int key, int value) {
+        return kv(key, value, UNKNOWN_SEQUENCE);
+    }
+
+    private KeyValue kv(int key, int value, long seqNumber) {
         return new KeyValue()
-                .replace(GenericRow.of(key), RowKind.INSERT, GenericRow.of(key, value));
+                .replace(GenericRow.of(key), seqNumber, RowKind.INSERT, GenericRow.of(key, value));
     }
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {

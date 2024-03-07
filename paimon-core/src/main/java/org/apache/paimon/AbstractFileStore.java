@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
@@ -52,6 +53,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+
+import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /**
  * Base {@link FileStore} implementation.
@@ -141,7 +144,8 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
         return new IndexFileHandler(
                 snapshotManager(),
                 indexManifestFileFactory().create(),
-                new HashIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
+                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
     }
 
     @Override
@@ -169,6 +173,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     @Override
     public FileStoreCommitImpl newCommit(String commitUser) {
+        return newCommit(commitUser, DEFAULT_MAIN_BRANCH);
+    }
+
+    public FileStoreCommitImpl newCommit(String commitUser, String branchName) {
         return new FileStoreCommitImpl(
                 fileIO,
                 schemaManager,
@@ -186,6 +194,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
                 options.manifestMergeMinCount(),
                 partitionType.getFieldCount() > 0 && options.dynamicPartitionOverwrite(),
                 newKeyComparator(),
+                branchName,
                 newStatsFileHandler());
     }
 

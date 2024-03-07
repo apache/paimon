@@ -24,6 +24,7 @@ import org.apache.paimon.mergetree.compact.aggregate.FieldNestedUpdateAgg;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
+import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
@@ -1442,6 +1443,12 @@ public class PreAggregationITCase {
     /** ITCase for {@link FieldCollectAgg}. */
     public static class CollectAggregationITCase extends CatalogITCaseBase {
 
+        @Override
+        protected int defaultParallelism() {
+            // set parallelism to 1 so that the order of input data is determined
+            return 1;
+        }
+
         @Test
         public void testAggWithDistinct() {
             sql(
@@ -1509,6 +1516,76 @@ public class PreAggregationITCase {
             checkOneRecord(result.get(0), 1, "paimon", "paimon");
             checkOneRecord(result.get(1), 2, "A", "A", "B", "B", "B", "C");
             checkOneRecord(result.get(2), 3, "car", "watch");
+        }
+
+        @Test
+        public void testRetractWithAggregation() throws Exception {
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'aggregation',"
+                            + "  'fields.f0.aggregate-function' = 'collect'"
+                            + ")");
+
+            innerTestRetract(false);
+        }
+
+        @Test
+        public void testRetractWithPartialUpdate() throws Exception {
+            sql(
+                    "CREATE TABLE test_collect("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>,"
+                            + "  f1 INT"
+                            + ") WITH ("
+                            + "  'merge-engine' = 'partial-update',"
+                            + "  'fields.f0.aggregate-function' = 'collect',"
+                            + "  'fields.f1.sequence-group' = 'f0'"
+                            + ")");
+
+            innerTestRetract(true);
+        }
+
+        private void innerTestRetract(boolean partialUpdate) throws Exception {
+            String temporaryTable =
+                    "CREATE TEMPORARY TABLE INPUT ("
+                            + "  id INT PRIMARY KEY NOT ENFORCED,"
+                            + "  f0 ARRAY<STRING>"
+                            + "  %s) WITH (\n"
+                            + "  'connector' = 'values',\n"
+                            + "  'data-id' = '%s',\n"
+                            + "  'bounded' = 'true',\n"
+                            + "  'changelog-mode' = 'I,UA,UB'\n"
+                            + ")";
+
+            String f1;
+            List<Row> inputRecords;
+            if (partialUpdate) {
+                f1 = ", f1 INT";
+                inputRecords =
+                        Arrays.asList(
+                                Row.ofKind(RowKind.INSERT, 1, new String[] {"A", "B"}, 10),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 1, new String[] {"A", "B"}, 10),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"C", "D"}, 20));
+            } else {
+                f1 = "";
+                inputRecords =
+                        Arrays.asList(
+                                Row.ofKind(RowKind.INSERT, 1, new String[] {"A", "B"}),
+                                Row.ofKind(RowKind.UPDATE_BEFORE, 1, new String[] {"A", "B"}),
+                                Row.ofKind(RowKind.UPDATE_AFTER, 1, new String[] {"C", "D"}));
+            }
+            streamSqlIter(temporaryTable, f1, TestValuesTableFactory.registerData(inputRecords))
+                    .close();
+
+            sEnv.executeSql("INSERT INTO test_collect SELECT * FROM INPUT").await();
+
+            List<Row> result = sql("SELECT * FROM test_collect");
+            assertThat(result.size()).isEqualTo(1);
+            // if not retracted, the result would be ['A', 'B', 'C', 'D']
+            checkOneRecord(result.get(0), 1, "C", "D");
         }
 
         private void checkOneRecord(Row row, int id, String... elements) {

@@ -19,6 +19,7 @@
 package org.apache.paimon.stats;
 
 import org.apache.paimon.AbstractFileStore;
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.io.DataFileMeta;
@@ -45,6 +46,7 @@ public class StatsTableTest extends TableTestBase {
         Identifier identifier = identifier("T");
         Options options = new Options();
         options.set(METADATA_STATS_MODE, "NONE");
+        options.set(CoreOptions.BUCKET, 1);
         Schema schema =
                 Schema.newBuilder()
                         .column("pt", DataTypes.INT())
@@ -73,18 +75,18 @@ public class StatsTableTest extends TableTestBase {
 
         // should have partition stats
         BinaryTableStats partitionStats = manifest.partitionStats();
-        assertThat(partitionStats.min().getInt(0)).isEqualTo(1);
-        assertThat(partitionStats.max().getInt(0)).isEqualTo(2);
+        assertThat(partitionStats.minValues().getInt(0)).isEqualTo(1);
+        assertThat(partitionStats.maxValues().getInt(0)).isEqualTo(2);
 
         // should not have record stats because of NONE mode
         ManifestFile manifestFile = store.manifestFileFactory().create();
         DataFileMeta file = manifestFile.read(manifest.fileName()).get(0).file();
         BinaryTableStats recordStats = file.valueStats();
-        assertThat(recordStats.min().isNullAt(0)).isTrue();
-        assertThat(recordStats.min().isNullAt(1)).isTrue();
-        assertThat(recordStats.min().isNullAt(2)).isTrue();
-        assertThat(recordStats.max().isNullAt(0)).isTrue();
-        assertThat(recordStats.max().isNullAt(1)).isTrue();
-        assertThat(recordStats.max().isNullAt(2)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(0)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.minValues().isNullAt(2)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(0)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(1)).isTrue();
+        assertThat(recordStats.maxValues().isNullAt(2)).isTrue();
     }
 }

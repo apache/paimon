@@ -21,6 +21,7 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
@@ -38,13 +39,29 @@ public class SortMergeReaderWithLoserTree<T> implements SortMergeReader<T> {
     public SortMergeReaderWithLoserTree(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper) {
         this.mergeFunctionWrapper = mergeFunctionWrapper;
         this.loserTree =
                 new LoserTree<>(
                         readers,
                         (e1, e2) -> userKeyComparator.compare(e2.key(), e1.key()),
-                        (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber()));
+                        createSequenceComparator(userDefinedSeqComparator));
+    }
+
+    private Comparator<KeyValue> createSequenceComparator(
+            @Nullable FieldsComparator userDefinedSeqComparator) {
+        if (userDefinedSeqComparator == null) {
+            return (e1, e2) -> Long.compare(e2.sequenceNumber(), e1.sequenceNumber());
+        }
+
+        return (o1, o2) -> {
+            int result = userDefinedSeqComparator.compare(o2.value(), o1.value());
+            if (result != 0) {
+                return result;
+            }
+            return Long.compare(o2.sequenceNumber(), o1.sequenceNumber());
+        };
     }
 
     /** Compared with heapsort, {@link LoserTree} will only produce one batch. */

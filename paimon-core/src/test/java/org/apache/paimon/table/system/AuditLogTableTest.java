@@ -64,6 +64,7 @@ public class AuditLogTableTest extends TableTestBase {
                         .partitionKeys("pt")
                         .primaryKey("pk", "pt")
                         .option(CoreOptions.CHANGELOG_PRODUCER.key(), "input")
+                        .option("bucket", "1")
                         .build();
 
         TableSchema tableSchema =

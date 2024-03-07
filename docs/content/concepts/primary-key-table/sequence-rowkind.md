@@ -37,36 +37,22 @@ there will be some cases that lead to data disorder. At this time, you can use a
 {{< tabs "sequence.field" >}}
 {{< tab "Flink" >}}
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     pk BIGINT PRIMARY KEY NOT ENFORCED,
     v1 DOUBLE,
     v2 BIGINT,
-    dt TIMESTAMP
+    update_time TIMESTAMP
 ) WITH (
-    'sequence.field' = 'dt'
+    'sequence.field' = 'update_time'
 );
 ```
 {{< /tab >}}
 {{< /tabs >}}
 
-The record with the largest `sequence.field` value will be the last to merge, regardless of the input order.
+The record with the largest `sequence.field` value will be the last to merge, if the values are the same, the input
+order will be used to determine which one is the last one.
 
-**Sequence Auto Padding**:
-
-When the record is updated or deleted, the `sequence.field` must become larger and cannot remain unchanged.
-For -U and +U, their sequence-fields must be different. If you cannot meet this requirement, Paimon provides
-option to automatically pad the sequence field for you.
-
-1. `'sequence.auto-padding' = 'row-kind-flag'`: If you are using same value for -U and +U, just like "`op_ts`"
-   (the time that the change was made in the database) in Mysql Binlog. It is recommended to use the automatic
-   padding for row kind flag, which will automatically distinguish between -U (-D) and +U (+I).
-
-2. Insufficient precision: If the provided `sequence.field` doesn't meet the precision, like a rough second or
-   millisecond, you can set `sequence.auto-padding` to `second-to-micro` or `millis-to-micro` so that the precision
-   of sequence number will be made up to microsecond by system.
-
-3. Composite pattern: for example, "second-to-micro,row-kind-flag", first, add the micro to the second, and then
-   pad the row kind flag.
+You can define multiple fields for `sequence.field`, for example `'update_time,flag'`, multiple fields will be compared in order.
 
 ## Row Kind Field
 

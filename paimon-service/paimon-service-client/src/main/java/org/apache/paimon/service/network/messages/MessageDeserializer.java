@@ -18,7 +18,7 @@
 
 package org.apache.paimon.service.network.messages;
 
-import org.apache.flink.shaded.netty4.io.netty.buffer.ByteBuf;
+import org.apache.paimon.shade.netty4.io.netty.buffer.ByteBuf;
 
 /**
  * A utility used to deserialize a {@link MessageBody message}.

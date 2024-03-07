@@ -18,7 +18,6 @@
 
 package org.apache.paimon.predicate;
 
-import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.types.DataType;
 
 import java.io.Serializable;
@@ -31,7 +30,12 @@ public abstract class LeafFunction implements Serializable {
     public abstract boolean test(DataType type, Object field, List<Object> literals);
 
     public abstract boolean test(
-            DataType type, long rowCount, FieldStats fieldStats, List<Object> literals);
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            List<Object> literals);
 
     public abstract Optional<LeafFunction> negate();
 

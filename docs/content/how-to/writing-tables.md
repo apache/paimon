@@ -86,7 +86,7 @@ we have a column key1 in table A which is primary key, primary key cannot be nul
 which is nullable. If we run a sql like this:
 
 ``` sql
-INSERT INTO A key1 SELECT key2 FROM B
+INSERT INTO a key1 SELECT key2 FROM b
 ```
 We will catch an exception,
 - In spark: "Cannot write nullable values to non-null column 'key1'."
@@ -96,7 +96,7 @@ Other engines will throw respective exception to announce this. We can use funct
 turn a nullable column into a non-null column to escape exception:
 
 ```sql
-INSERT INTO A key1 SELECT COALESCE(key2, <non-null expression>) FROM B;
+INSERT INTO a key1 SELECT COALESCE(key2, <non-null expression>) FROM b;
 ```
 
 ## Applying Records/Changes to Tables
@@ -108,7 +108,7 @@ INSERT INTO A key1 SELECT COALESCE(key2, <non-null expression>) FROM B;
 Use `INSERT INTO` to apply records and changes to tables.
 
 ```sql
-INSERT INTO MyTable SELECT ...
+INSERT INTO my_table SELECT ...
 ```
 
 Paimon supports shuffle data by partition and bucket in sink phase.
@@ -120,7 +120,7 @@ Paimon supports shuffle data by partition and bucket in sink phase.
 Use `INSERT INTO` to apply records and changes to tables.
 
 ```sql
-INSERT INTO MyTable SELECT ...
+INSERT INTO my_table SELECT ...
 ```
 
 {{< /tab >}}
@@ -144,7 +144,7 @@ Use `INSERT OVERWRITE` to overwrite the whole unpartitioned table.
 {{< tab "Flink" >}}
 
 ```sql
-INSERT OVERWRITE MyTable SELECT ...
+INSERT OVERWRITE my_table SELECT ...
 ```
 
 {{< /tab >}}
@@ -152,7 +152,7 @@ INSERT OVERWRITE MyTable SELECT ...
 {{< tab "Spark" >}}
 
 ```sql
-INSERT OVERWRITE MyTable SELECT ...
+INSERT OVERWRITE my_table SELECT ...
 ```
 
 {{< /tab >}}
@@ -170,7 +170,7 @@ Use `INSERT OVERWRITE` to overwrite a partition.
 {{< tab "Flink" >}}
 
 ```sql
-INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
+INSERT OVERWRITE my_table PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
 ```
 
 {{< /tab >}}
@@ -178,7 +178,7 @@ INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ..
 {{< tab "Spark" >}}
 
 ```sql
-INSERT OVERWRITE MyTable PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
+INSERT OVERWRITE my_table PARTITION (key1 = value1, key2 = value2, ...) SELECT ...
 ```
 
 {{< /tab >}}
@@ -198,10 +198,10 @@ appear in the overwritten data). You can configure `dynamic-partition-overwrite`
 -- MyTable is a Partitioned Table
 
 -- Dynamic overwrite
-INSERT OVERWRITE MyTable SELECT ...
+INSERT OVERWRITE my_table SELECT ...
 
 -- Static overwrite (Overwrite whole table)
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite' = 'false') */ SELECT ...
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite' = 'false') */ SELECT ...
 ```
 
 {{< /tab >}}
@@ -218,11 +218,11 @@ Spark's default overwrite mode is static partition overwrite. To enable dynamic 
 -- MyTable is a Partitioned Table
 
 -- Static overwrite (Overwrite whole table)
-INSERT OVERWRITE MyTable SELECT ...
+INSERT OVERWRITE my_table SELECT ...
 
 -- Dynamic overwrite
 SET spark.sql.sources.partitionOverwriteMode=dynamic;
-INSERT OVERWRITE MyTable SELECT ...
+INSERT OVERWRITE my_table SELECT ...
 ```
 
 {{< /tab >}}
@@ -238,7 +238,7 @@ INSERT OVERWRITE MyTable SELECT ...
 You can use `INSERT OVERWRITE` to purge tables by inserting empty value.
 
 ```sql
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM MyTable WHERE false;
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ SELECT * FROM my_table WHERE false;
 ```
 
 {{< /tab >}}
@@ -246,7 +246,7 @@ INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ S
 {{< tab "Flink 1.18" >}}
 
 ```sql
-TRUNCATE TABLE MyTable;
+TRUNCATE TABLE my_table;
 ```
 
 {{< /tab >}}
@@ -254,7 +254,7 @@ TRUNCATE TABLE MyTable;
 {{< tab "Spark" >}}
 
 ```sql
-TRUNCATE TABLE MyTable;
+TRUNCATE TABLE my_table;
 ```
 
 {{< /tab >}}
@@ -276,24 +276,24 @@ Currently, Paimon supports two ways to purge partitions.
 
 ```sql
 -- Syntax
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM MyTable WHERE false;
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (key1 = value1, key2 = value2, ...) SELECT selectSpec FROM my_table WHERE false;
 
 -- The following SQL is an example:
 -- table definition
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     k0 INT,
     k1 INT,
     v STRING
 ) PARTITIONED BY (k0, k1);
 
 -- you can use
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (k0 = 0) SELECT k1, v FROM MyTable WHERE false;
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (k0 = 0) SELECT k1, v FROM my_table WHERE false;
 
 -- or
-INSERT OVERWRITE MyTable /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
-PARTITION (k0 = 0, k1 = 0) SELECT v FROM MyTable WHERE false;
+INSERT OVERWRITE my_table /*+ OPTIONS('dynamic-partition-overwrite'='false') */ 
+PARTITION (k0 = 0, k1 = 0) SELECT v FROM my_table WHERE false;
 ```
 
 {{< /tab >}}
@@ -352,7 +352,7 @@ UPDATE table_identifier SET column1 = value1, column2 = value2, ... WHERE condit
 
 -- The following SQL is an example:
 -- table definition
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
 	a STRING,
 	b INT,
 	c INT,
@@ -362,7 +362,7 @@ CREATE TABLE MyTable (
 );
 
 -- you can use
-UPDATE MyTable SET b = 1, c = 2 WHERE a = 'myTable';
+UPDATE my_table SET b = 1, c = 2 WHERE a = 'myTable';
 ```
 
 {{< /tab >}}
@@ -381,7 +381,7 @@ spark supports update PrimitiveType and StructType, for example:
 -- Syntax
 UPDATE table_identifier SET column1 = value1, column2 = value2, ... WHERE condition;
 
-CREATE TABLE T (
+CREATE TABLE t (
   id INT, 
   s STRUCT<c1: INT, c2: STRING>, 
   name STRING)
@@ -391,8 +391,8 @@ TBLPROPERTIES (
 );
 
 -- you can use
-UPDATE T SET name = 'a_new' WHERE id = 1;
-UPDATE T SET s.c2 = 'a_new' WHERE s.c1 = 1;
+UPDATE t SET name = 'a_new' WHERE id = 1;
+UPDATE t SET s.c2 = 'a_new' WHERE s.c1 = 1;
 ```
 
 {{< /tab >}}
@@ -452,7 +452,7 @@ DELETE FROM table_identifier WHERE conditions;
 
 -- The following SQL is an example:
 -- table definition
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     id BIGINT NOT NULL,
     currency STRING,
     rate BIGINT,
@@ -463,7 +463,7 @@ CREATE TABLE MyTable (
 );
 
 -- you can use
-DELETE FROM MyTable WHERE currency = 'UNKNOWN';
+DELETE FROM my_table WHERE currency = 'UNKNOWN';
 ```
 
 {{< /tab >}}
@@ -482,7 +482,7 @@ To enable delete needs these configs below:
 ```
 
 ```sql
-DELETE FROM MyTable WHERE currency = 'UNKNOWN';
+DELETE FROM my_table WHERE currency = 'UNKNOWN';
 ```
 
 {{< /tab >}}

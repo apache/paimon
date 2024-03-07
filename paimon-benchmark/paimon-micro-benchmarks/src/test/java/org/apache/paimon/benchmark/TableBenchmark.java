@@ -52,7 +52,7 @@ public class TableBenchmark {
 
     private final RandomDataGenerator random = new RandomDataGenerator();
 
-    protected Table createTable(Options tableOptions) throws Exception {
+    protected Table createTable(Options tableOptions, String tableName) throws Exception {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempFile.toUri().toString());
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
@@ -72,7 +72,7 @@ public class TableBenchmark {
                         singletonList("k"),
                         tableOptions.toMap(),
                         "");
-        Identifier identifier = Identifier.create(database, "T");
+        Identifier identifier = Identifier.create(database, tableName);
         catalog.createTable(identifier, schema, false);
         return catalog.getTable(identifier);
     }

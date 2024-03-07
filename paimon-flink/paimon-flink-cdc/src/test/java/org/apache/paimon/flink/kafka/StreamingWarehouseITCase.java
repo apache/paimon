@@ -82,6 +82,7 @@ public class StreamingWarehouseITCase extends KafkaTableTestBase {
                                 + "  )\n"
                                 + "PARTITIONED BY (dt)\n"
                                 + "WITH (\n"
+                                + "    'bucket' = '1',\n"
                                 + "    'log.system' = 'kafka',\n"
                                 + "    'kafka.bootstrap.servers' = '%s',\n"
                                 + "    'kafka.topic' = 'cleaned_trade_order');",

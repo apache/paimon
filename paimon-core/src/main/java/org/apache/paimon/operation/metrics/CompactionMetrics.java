@@ -19,21 +19,36 @@
 package org.apache.paimon.operation.metrics;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.metrics.Histogram;
+import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metrics.MetricGroup;
 import org.apache.paimon.metrics.MetricRegistry;
+
+import java.util.HashMap;
+import java.util.Map;
+import java.util.Objects;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.stream.DoubleStream;
+import java.util.stream.LongStream;
 
 /** Metrics to measure a compaction. */
 public class CompactionMetrics {
 
-    private static final int HISTOGRAM_WINDOW_SIZE = 100;
     private static final String GROUP_NAME = "compaction";
 
-    private final MetricGroup metricGroup;
+    public static final String MAX_LEVEL0_FILE_COUNT = "maxLevel0FileCount";
+    public static final String AVG_LEVEL0_FILE_COUNT = "avgLevel0FileCount";
+    public static final String COMPACTION_THREAD_BUSY = "compactionThreadBusy";
+    private static final long BUSY_MEASURE_MILLIS = 60_000;
 
-    public CompactionMetrics(
-            MetricRegistry registry, String tableName, String partition, int bucket) {
-        this.metricGroup = registry.bucketMetricGroup(GROUP_NAME, tableName, partition, bucket);
+    private final MetricGroup metricGroup;
+    private final Map<PartitionAndBucket, ReporterImpl> reporters;
+    private final Map<Long, CompactTimer> compactTimers;
+
+    public CompactionMetrics(MetricRegistry registry, String tableName) {
+        this.metricGroup = registry.tableMetricGroup(GROUP_NAME, tableName);
+        this.reporters = new HashMap<>();
+        this.compactTimers = new ConcurrentHashMap<>();
+
         registerGenericCompactionMetrics();
     }
 
@@ -42,78 +57,97 @@ public class CompactionMetrics {
         return metricGroup;
     }
 
-    private Histogram durationHistogram;
-    private CompactionStats latestCompaction;
-    private long level0FileCount = -1;
-
-    @VisibleForTesting static final String LAST_COMPACTION_DURATION = "lastCompactionDuration";
-    @VisibleForTesting static final String COMPACTION_DURATION = "compactionDuration";
-
-    @VisibleForTesting
-    static final String LAST_TABLE_FILES_COMPACTED_BEFORE = "lastTableFilesCompactedBefore";
-
-    @VisibleForTesting
-    static final String LAST_TABLE_FILES_COMPACTED_AFTER = "lastTableFilesCompactedAfter";
-
-    @VisibleForTesting
-    static final String LAST_CHANGELOG_FILES_COMPACTED = "lastChangelogFilesCompacted";
-
-    @VisibleForTesting
-    static final String LAST_REWRITE_INPUT_FILE_SIZE = "lastRewriteInputFileSize";
-
-    @VisibleForTesting
-    static final String LAST_REWRITE_OUTPUT_FILE_SIZE = "lastRewriteOutputFileSize";
-
-    @VisibleForTesting
-    static final String LAST_REWRITE_CHANGELOG_FILE_SIZE = "lastRewriteChangelogFileSize";
-
-    @VisibleForTesting static final String LEVEL_0_FILE_COUNT = "level0FileCount";
-
     private void registerGenericCompactionMetrics() {
+        metricGroup.gauge(MAX_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().max().orElse(-1));
         metricGroup.gauge(
-                LAST_COMPACTION_DURATION,
-                () -> latestCompaction == null ? 0L : latestCompaction.getDuration());
-        durationHistogram = metricGroup.histogram(COMPACTION_DURATION, HISTOGRAM_WINDOW_SIZE);
-        metricGroup.gauge(
-                LAST_TABLE_FILES_COMPACTED_BEFORE,
-                () ->
-                        latestCompaction == null
-                                ? 0L
-                                : latestCompaction.getCompactedDataFilesBefore());
-        metricGroup.gauge(
-                LAST_TABLE_FILES_COMPACTED_AFTER,
-                () ->
-                        latestCompaction == null
-                                ? 0L
-                                : latestCompaction.getCompactedDataFilesAfter());
-        metricGroup.gauge(
-                LAST_CHANGELOG_FILES_COMPACTED,
-                () -> latestCompaction == null ? 0L : latestCompaction.getCompactedChangelogs());
-        metricGroup.gauge(
-                LAST_REWRITE_INPUT_FILE_SIZE,
-                () -> latestCompaction == null ? 0L : latestCompaction.getRewriteInputFileSize());
-        metricGroup.gauge(
-                LAST_REWRITE_OUTPUT_FILE_SIZE,
-                () -> latestCompaction == null ? 0L : latestCompaction.getRewriteOutputFileSize());
-        metricGroup.gauge(
-                LAST_REWRITE_CHANGELOG_FILE_SIZE,
-                () ->
-                        latestCompaction == null
-                                ? 0L
-                                : latestCompaction.getRewriteChangelogFileSize());
-        metricGroup.gauge(LEVEL_0_FILE_COUNT, () -> level0FileCount);
+                AVG_LEVEL0_FILE_COUNT, () -> getLevel0FileCountStream().average().orElse(-1));
+
+        metricGroup.gauge(COMPACTION_THREAD_BUSY, () -> getCompactBusyStream().sum());
     }
 
-    public void reportCompaction(CompactionStats compactionStats) {
-        latestCompaction = compactionStats;
-        durationHistogram.update(compactionStats.getDuration());
+    private LongStream getLevel0FileCountStream() {
+        return reporters.values().stream().mapToLong(r -> r.level0FileCount);
     }
 
-    public void reportLevel0FileCount(long count) {
-        this.level0FileCount = count;
+    private DoubleStream getCompactBusyStream() {
+        return compactTimers.values().stream()
+                .mapToDouble(t -> 100.0 * t.calculateLength() / BUSY_MEASURE_MILLIS);
     }
 
     public void close() {
         metricGroup.close();
+    }
+
+    /** Report metrics value to the {@link CompactionMetrics} object. */
+    public interface Reporter {
+
+        CompactTimer getCompactTimer();
+
+        void reportLevel0FileCount(long count);
+
+        void unregister();
+    }
+
+    private class ReporterImpl implements Reporter {
+
+        private final PartitionAndBucket key;
+        private long level0FileCount;
+
+        private ReporterImpl(PartitionAndBucket key) {
+            this.key = key;
+            this.level0FileCount = 0;
+        }
+
+        @Override
+        public CompactTimer getCompactTimer() {
+            return compactTimers.computeIfAbsent(
+                    Thread.currentThread().getId(),
+                    ignore -> new CompactTimer(BUSY_MEASURE_MILLIS));
+        }
+
+        @Override
+        public void reportLevel0FileCount(long count) {
+            this.level0FileCount = count;
+        }
+
+        @Override
+        public void unregister() {
+            reporters.remove(key);
+        }
+    }
+
+    public Reporter createReporter(BinaryRow partition, int bucket) {
+        PartitionAndBucket key = new PartitionAndBucket(partition, bucket);
+        ReporterImpl reporter = new ReporterImpl(key);
+        reporters.put(key, reporter);
+        return reporter;
+    }
+
+    private static class PartitionAndBucket {
+
+        private final BinaryRow partition;
+        private final int bucket;
+
+        private PartitionAndBucket(BinaryRow partition, int bucket) {
+            this.partition = partition;
+            this.bucket = bucket;
+        }
+
+        @Override
+        public int hashCode() {
+            return Objects.hash(partition, bucket);
+        }
+
+        @Override
+        public boolean equals(Object o) {
+            if (this == o) {
+                return true;
+            }
+            if (!(o instanceof PartitionAndBucket)) {
+                return false;
+            }
+            PartitionAndBucket other = (PartitionAndBucket) o;
+            return Objects.equals(partition, other.partition) && bucket == other.bucket;
+        }
     }
 }

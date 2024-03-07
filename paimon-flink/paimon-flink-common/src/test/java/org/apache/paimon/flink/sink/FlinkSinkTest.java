@@ -19,10 +19,8 @@
 package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.flink.utils.MetricUtils;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
@@ -45,7 +43,6 @@ import org.apache.flink.api.common.state.ListState;
 import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
-import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.runtime.io.disk.iomanager.IOManagerAsync;
 import org.apache.flink.runtime.state.StateInitializationContextImpl;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -55,16 +52,12 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.api.operators.SimpleOperatorFactory;
 import org.apache.flink.streaming.api.operators.collect.utils.MockOperatorStateStore;
 import org.apache.flink.streaming.api.transformations.OneInputTransformation;
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.nio.file.Path;
-import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -87,142 +80,6 @@ public class FlinkSinkTest {
         // set this to streaming, we should get a false then
         streamExecutionEnvironment.setRuntimeMode(RuntimeExecutionMode.STREAMING);
         assertThat(testSpillable(streamExecutionEnvironment, fileStoreTable)).isFalse();
-    }
-
-    @Test
-    public void testCompactionMetrics() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        RowDataStoreWriteOperator operator = createWriteOperator(table);
-        OneInputStreamOperatorTestHarness<InternalRow, Committable> testHarness =
-                createTestHarness(operator);
-        MetricGroup compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", table.name())
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        testHarness.open();
-
-        final GenericRow row1 = GenericRow.of(1, 2);
-        final GenericRow row2 = GenericRow.of(2, 3);
-        final GenericRow row3 = GenericRow.of(3, 4);
-        final GenericRow row4 = GenericRow.of(4, 5);
-
-        List<StreamRecord<InternalRow>> streamRecords = new ArrayList<>();
-        streamRecords.add(new StreamRecord<>(row1));
-        streamRecords.add(new StreamRecord<>(row2));
-        streamRecords.add(new StreamRecord<>(row3));
-
-        long cpId = 1L;
-        testHarness.processElements(streamRecords);
-        operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.write.prepareCommit(true, cpId++);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        testHarness.processElement(row4, 0);
-        operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.write.prepareCommit(true, cpId);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        // operator closed, metric groups should be unregistered
-        testHarness.close();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
-                .isNull();
-    }
-
-    @Test
-    public void testDynamicBucketCompactionMetrics() throws Exception {
-        FileStoreTable table = createFileStoreTable();
-        DynamicBucketRowWriteOperator operator = createDynamicBucketWriteOperator(table);
-        OneInputStreamOperatorTestHarness<Tuple2<InternalRow, Integer>, Committable> testHarness =
-                createDynamicBucketTestHarness(operator);
-        MetricGroup compactionMetricGroup =
-                operator.getMetricGroup()
-                        .addGroup("paimon")
-                        .addGroup("table", table.name())
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("compaction");
-        testHarness.open();
-
-        final GenericRow row1 = GenericRow.of(1, 2);
-        final GenericRow row2 = GenericRow.of(2, 3);
-        final GenericRow row3 = GenericRow.of(3, 4);
-        final GenericRow row4 = GenericRow.of(4, 5);
-
-        List<StreamRecord<Tuple2<InternalRow, Integer>>> streamRecords = new ArrayList<>();
-        streamRecords.add(new StreamRecord<>(Tuple2.of(row1, 0)));
-        streamRecords.add(new StreamRecord<>(Tuple2.of(row2, 1)));
-        streamRecords.add(new StreamRecord<>(Tuple2.of(row3, 2)));
-
-        long cpId = 1L;
-        testHarness.processElements(streamRecords);
-        operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.write.prepareCommit(true, cpId++);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        testHarness.processElement(Tuple2.of(row4, 0), 0);
-        operator.write.compact(BinaryRow.EMPTY_ROW, 0, true);
-        operator.write.prepareCommit(true, cpId);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore")
-                                .getValue())
-                .isEqualTo(2L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter")
-                                .getValue())
-                .isEqualTo(1L);
-        assertThat(
-                        MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted")
-                                .getValue())
-                .isEqualTo(0L);
-
-        // operator closed, metric groups should be unregistered
-        testHarness.close();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedBefore"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastTableFilesCompactedAfter"))
-                .isNull();
-        assertThat(MetricUtils.getGauge(compactionMetricGroup, "lastChangelogFilesCompacted"))
-                .isNull();
     }
 
     private boolean testSpillable(
@@ -263,22 +120,23 @@ public class FlinkSinkTest {
 
     private FileStoreTable createFileStoreTable() throws Exception {
         org.apache.paimon.fs.Path tablePath = new org.apache.paimon.fs.Path(tempPath.toString());
-        Options conf = new Options();
-        conf.set(CoreOptions.PATH, tablePath.toString());
+        Options options = new Options();
+        options.set(CoreOptions.PATH, tablePath.toString());
+        options.set(CoreOptions.BUCKET, 1);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
                                 Collections.emptyList(),
-                                Arrays.asList("pk"),
-                                conf.toMap(),
+                                Collections.singletonList("pk"),
+                                options.toMap(),
                                 ""));
         return FileStoreTableFactory.create(
                 FileIOFinder.find(tablePath),
                 tablePath,
                 tableSchema,
-                conf,
+                options,
                 new CatalogEnvironment(Lock.emptyFactory(), null, null));
     }
 

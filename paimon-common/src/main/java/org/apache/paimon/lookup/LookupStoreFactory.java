@@ -42,7 +42,7 @@ public interface LookupStoreFactory {
     LookupStoreWriter createWriter(File file, @Nullable BloomFilter.Builder bloomFilter)
             throws IOException;
 
-    LookupStoreReader createReader(File file) throws IOException;
+    LookupStoreReader createReader(File file, Context context) throws IOException;
 
     static Function<Long, BloomFilter.Builder> bfGenerator(Options options) {
         Function<Long, BloomFilter.Builder> bfGenerator = rowCount -> null;
@@ -58,4 +58,7 @@ public interface LookupStoreFactory {
         }
         return bfGenerator;
     }
+
+    /** Context between writer and reader. */
+    interface Context {}
 }

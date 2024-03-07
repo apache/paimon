@@ -15,11 +15,13 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
+
+import org.apache.paimon.spark.util.CTERelationRefUtils
 
 import org.apache.spark.sql.catalyst.dsl.expressions._
 import org.apache.spark.sql.catalyst.expressions.{Attribute, GetStructField, NamedExpression, ScalarSubquery}
-import org.apache.spark.sql.catalyst.plans.logical.CTERelationRef
 
 class PaimonOptimizationTest extends PaimonOptimizationTestBase {
 
@@ -27,7 +29,9 @@ class PaimonOptimizationTest extends PaimonOptimizationTestBase {
       cteIndex: Int,
       output: Seq[Attribute],
       fieldIndex: Int): NamedExpression = {
-    GetStructField(ScalarSubquery(CTERelationRef(cteIndex, _resolved = true, output)), fieldIndex)
+    GetStructField(
+      ScalarSubquery(CTERelationRefUtils.createCTERelationRef(cteIndex, _resolved = true, output)),
+      fieldIndex)
       .as("scalarsubquery()")
   }
 }

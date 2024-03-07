@@ -34,7 +34,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>bucket</h5></td>
-            <td style="word-wrap: break-word;">1</td>
+            <td style="word-wrap: break-word;">-1</td>
             <td>Integer</td>
             <td>Bucket number for file store.</td>
         </tr>
@@ -46,7 +46,7 @@ under the License.
         </tr>
         <tr>
             <td><h5>cache-page-size</h5></td>
-            <td style="word-wrap: break-word;">16 kb</td>
+            <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
             <td>Memory page size for caching.</td>
         </tr>
@@ -263,7 +263,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.cache-max-disk-size</h5></td>
-            <td style="word-wrap: break-word;">9223372036854775807 bytes</td>
+            <td style="word-wrap: break-word;">infinite</td>
             <td>MemorySize</td>
             <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
         </tr>
@@ -272,6 +272,12 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
             <td style="word-wrap: break-word;">256 mb</td>
             <td>MemorySize</td>
             <td>Max memory size for lookup cache.</td>
+        </tr>
+        <tr>
+            <td><h5>lookup.cache-spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"lz4"</td>
+            <td>String</td>
+            <td>Spill compression for lookup cache, currently none, lz4, lzo and zstd are supported.</td>
         </tr>
         <tr>
             <td><h5>lookup.cache.bloom.filter.enabled</h5></td>
@@ -522,12 +528,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Optional timestamp used in case of "from-timestamp" scan mode. If there is no snapshot earlier than this time, the earliest snapshot will be chosen.</td>
         </tr>
         <tr>
-            <td><h5>sequence.auto-padding</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Specify the way of padding precision, if the provided sequence field is used to indicate "time" but doesn't meet the precise.<ul><li>You can specific:</li><li>1. "row-kind-flag": Pads a bit flag to indicate whether it is retract (0) or add (1) message.</li><li>2. "second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>3. "millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li><li>4. Composite pattern: for example, "second-to-micro,row-kind-flag".</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -559,7 +559,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
-            <td style="word-wrap: break-word;">2147483647</td>
+            <td style="word-wrap: break-word;">infinite</td>
             <td>Integer</td>
             <td>The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.</td>
         </tr>
@@ -574,6 +574,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">1 h</td>
             <td>Duration</td>
             <td>The maximum time of completed snapshots to retain.</td>
+        </tr>
+        <tr>
+            <td><h5>snapshot.watermark-idle-timeout</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Duration</td>
+            <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>
@@ -604,6 +610,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">128 mb</td>
             <td>MemorySize</td>
             <td>Target size of a source split when scanning a bucket.</td>
+        </tr>
+        <tr>
+            <td><h5>spill-compression</h5></td>
+            <td style="word-wrap: break-word;">"LZ4"</td>
+            <td>String</td>
+            <td>Compression for spill, currently lz4, lzo and zstd are supported.</td>
         </tr>
         <tr>
             <td><h5>streaming-read-mode</h5></td>

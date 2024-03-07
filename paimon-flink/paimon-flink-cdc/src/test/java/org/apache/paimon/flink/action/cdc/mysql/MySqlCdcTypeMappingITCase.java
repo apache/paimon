@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.flink.action.cdc.TypeMapping;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -44,6 +43,7 @@ import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.LON
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TINYINT1_NOT_BOOL;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_NULLABLE;
 import static org.apache.paimon.flink.action.cdc.TypeMapping.TypeMappingMode.TO_STRING;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -135,7 +135,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
 
         assertThatThrownBy(action::run)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Type mapping option 'tinyint1-not-bool' conflicts with "
                                         + "jdbc properties 'jdbc.properties.tinyInt1isBit=true'. "
@@ -343,6 +343,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                         .excludingTables("all_types_table")
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(TO_STRING.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -419,6 +420,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(TO_NULLABLE.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -477,6 +479,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(CHAR_TO_STRING.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -543,6 +546,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(LONGTEXT_TO_BYTES.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 
@@ -612,6 +616,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
                 syncDatabaseActionBuilder(mySqlConfig)
                         .withMode(COMBINED.configString())
                         .withTypeMappingModes(BIGINT_UNSIGNED_TO_BIGINT.configString())
+                        .withTableConfig(getBasicTableConfig())
                         .build();
         runActionWithDefaultEnv(action);
 

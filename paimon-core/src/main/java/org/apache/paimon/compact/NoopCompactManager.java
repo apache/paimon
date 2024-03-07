@@ -71,5 +71,10 @@ public class NoopCompactManager implements CompactManager {
     public void cancelCompaction() {}
 
     @Override
+    public boolean isCompacting() {
+        return false;
+    }
+
+    @Override
     public void close() throws IOException {}
 }

@@ -18,57 +18,27 @@
 
 package org.apache.paimon.flink.sink.cdc;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.flink.sink.Committable;
-import org.apache.paimon.flink.sink.DynamicBucketSink;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.table.sink.ChannelComputer;
-import org.apache.paimon.table.sink.PartitionKeyExtractor;
-import org.apache.paimon.utils.SerializableFunction;
+import org.apache.paimon.table.sink.KeyAndBucketExtractor;
 
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 
-/** Sink for dynamic bucket table. */
-public class CdcDynamicBucketSink extends DynamicBucketSink<CdcRecord> {
+/** {@link CdcDynamicBucketSinkBase} for {@link CdcRecord}. */
+public class CdcDynamicBucketSink extends CdcDynamicBucketSinkBase<CdcRecord> {
 
-    private static final long serialVersionUID = 1L;
+    private static final long serialVersionUID = 2L;
 
     public CdcDynamicBucketSink(FileStoreTable table) {
-        super(table, null);
+        super(table);
     }
 
     @Override
-    protected ChannelComputer<CdcRecord> assignerChannelComputer(Integer numAssigners) {
-        return new CdcAssignerChannelComputer(table.schema(), numAssigners);
-    }
-
-    @Override
-    protected ChannelComputer<Tuple2<CdcRecord, Integer>> channelComputer2() {
-        return new CdcWithBucketChannelComputer(table.schema());
-    }
-
-    @Override
-    protected SerializableFunction<TableSchema, PartitionKeyExtractor<CdcRecord>>
-            extractorFunction() {
-        return schema -> {
-            CdcRecordKeyAndBucketExtractor extractor = new CdcRecordKeyAndBucketExtractor(schema);
-            return new PartitionKeyExtractor<CdcRecord>() {
-                @Override
-                public BinaryRow partition(CdcRecord record) {
-                    extractor.setRecord(record);
-                    return extractor.partition();
-                }
-
-                @Override
-                public BinaryRow trimmedPrimaryKey(CdcRecord record) {
-                    extractor.setRecord(record);
-                    return extractor.trimmedPrimaryKey();
-                }
-            };
-        };
+    protected KeyAndBucketExtractor<CdcRecord> createExtractor(TableSchema schema) {
+        return new CdcRecordKeyAndBucketExtractor(schema);
     }
 
     @Override

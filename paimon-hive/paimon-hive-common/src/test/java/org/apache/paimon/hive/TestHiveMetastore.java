@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.hive;
 
 import org.apache.hadoop.conf.Configuration;
@@ -54,6 +50,10 @@ import java.util.concurrent.Executors;
 import static java.nio.file.Files.createTempDirectory;
 import static java.nio.file.attribute.PosixFilePermissions.asFileAttribute;
 import static java.nio.file.attribute.PosixFilePermissions.fromString;
+
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /**
  * A metastore to run locally.

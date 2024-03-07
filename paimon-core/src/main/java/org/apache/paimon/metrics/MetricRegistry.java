@@ -25,22 +25,10 @@ import java.util.Map;
 public abstract class MetricRegistry {
 
     private static final String KEY_TABLE = "table";
-    private static final String KEY_PARTITION = "partition";
-    private static final String KEY_BUCKET = "bucket";
 
     public MetricGroup tableMetricGroup(String groupName, String tableName) {
         Map<String, String> variables = new LinkedHashMap<>();
         variables.put(KEY_TABLE, tableName);
-
-        return createMetricGroup(groupName, variables);
-    }
-
-    public MetricGroup bucketMetricGroup(
-            String groupName, String tableName, String partition, int bucket) {
-        Map<String, String> variables = new LinkedHashMap<>();
-        variables.put(KEY_TABLE, tableName);
-        variables.put(KEY_PARTITION, partition);
-        variables.put(KEY_BUCKET, String.valueOf(bucket));
 
         return createMetricGroup(groupName, variables);
     }

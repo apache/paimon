@@ -40,6 +40,8 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import javax.annotation.Nullable;
@@ -48,6 +50,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.IntStream;
 
 /** A {@link WriteBuffer} which stores records in {@link BinaryInMemorySortBuffer}. */
 public class SortBufferWriteBuffer implements WriteBuffer {
@@ -60,23 +63,43 @@ public class SortBufferWriteBuffer implements WriteBuffer {
     public SortBufferWriteBuffer(
             RowType keyType,
             RowType valueType,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MemorySegmentPool memoryPool,
             boolean spillable,
             int sortMaxFan,
+            String compression,
             IOManager ioManager) {
         this.keyType = keyType;
         this.valueType = valueType;
         this.serializer = new KeyValueSerializer(keyType, valueType);
 
-        // user key + sequenceNumber
-        List<DataType> sortKeyTypes = new ArrayList<>(keyType.getFieldTypes());
-        sortKeyTypes.add(new BigIntType(false));
+        // key fields
+        IntStream sortFields = IntStream.range(0, keyType.getFieldCount());
 
-        // for sort binary buffer
+        // user define sequence fields
+        if (userDefinedSeqComparator != null) {
+            IntStream udsFields =
+                    IntStream.of(userDefinedSeqComparator.compareFields())
+                            .map(operand -> operand + keyType.getFieldCount() + 2);
+            sortFields = IntStream.concat(sortFields, udsFields);
+        }
+
+        // sequence field
+        sortFields = IntStream.concat(sortFields, IntStream.of(keyType.getFieldCount()));
+
+        int[] sortFieldArray = sortFields.toArray();
+
+        // row type
+        List<DataType> fieldTypes = new ArrayList<>(keyType.getFieldTypes());
+        fieldTypes.add(new BigIntType(false));
+        fieldTypes.add(new TinyIntType(false));
+        fieldTypes.addAll(valueType.getFieldTypes());
+
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(sortKeyTypes, "MemTableKeyComputer");
+                CodeGenUtils.newNormalizedKeyComputer(
+                        fieldTypes, sortFieldArray, "MemTableKeyComputer");
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(sortKeyTypes, "MemTableComparator");
+                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, "MemTableComparator");
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(
@@ -95,7 +118,8 @@ public class SortBufferWriteBuffer implements WriteBuffer {
                                 memoryPool.pageSize(),
                                 inMemorySortBuffer,
                                 ioManager,
-                                sortMaxFan)
+                                sortMaxFan,
+                                compression)
                         : inMemorySortBuffer;
     }
 

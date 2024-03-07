@@ -28,7 +28,7 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
@@ -119,6 +119,7 @@ class StoreMultiCommitterTest {
         Options firstOptions = new Options();
         firstOptions.set(
                 CoreOptions.TAG_AUTOMATIC_CREATION, CoreOptions.TagCreationMode.PROCESS_TIME);
+        firstOptions.setString("bucket", "-1");
         Schema firstTableSchema =
                 new Schema(
                         rowType1.getFields(),
@@ -132,7 +133,7 @@ class StoreMultiCommitterTest {
                         rowType2.getFields(),
                         Collections.emptyList(),
                         Collections.emptyList(),
-                        Collections.emptyMap(),
+                        Collections.singletonMap("bucket", "1"),
                         "");
         createTestTables(
                 catalog,
@@ -585,25 +586,39 @@ class StoreMultiCommitterTest {
                         .addGroup("table", table2.name())
                         .addGroup("commit");
 
-        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAdded").getValue())
-                .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesDeleted").getValue())
-                .isEqualTo(0L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAppended").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAdded")
+                                .getValue())
                 .isEqualTo(1L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup1, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(commitMetricGroup1, "lastTableFilesDeleted")
+                                .getValue())
+                .isEqualTo(0L);
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup1, "lastTableFilesAppended")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup1, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(0L);
 
-        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAdded").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAdded")
+                                .getValue())
                 .isEqualTo(4L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesDeleted").getValue())
-                .isEqualTo(3L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAppended").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup2, "lastTableFilesDeleted")
+                                .getValue())
                 .isEqualTo(3L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup2, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(commitMetricGroup2, "lastTableFilesAppended")
+                                .getValue())
+                .isEqualTo(3L);
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup2, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(4L);
 

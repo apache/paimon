@@ -15,10 +15,10 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
-import org.apache.paimon.table.{AppendOnlyFileStoreTable, Table}
-import org.apache.paimon.table.source.ReadBuilder
+import org.apache.paimon.table.Table
 
 import org.apache.spark.sql.connector.read.SupportsPushDownLimit
 
@@ -27,7 +27,7 @@ class PaimonScanBuilder(table: Table)
   with SupportsPushDownLimit {
 
   override def pushLimit(limit: Int): Boolean = {
-    if (table.isInstanceOf[AppendOnlyFileStoreTable]) {
+    if (table.primaryKeys().isEmpty) {
       pushDownLimit = Some(limit)
     }
     // just make a best effort to push down limit

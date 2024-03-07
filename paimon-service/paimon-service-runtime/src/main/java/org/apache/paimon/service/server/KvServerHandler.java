@@ -31,7 +31,7 @@ import org.apache.paimon.table.query.TableQuery;
 import org.apache.paimon.utils.ExceptionUtils;
 import org.apache.paimon.utils.Preconditions;
 
-import org.apache.flink.shaded.netty4.io.netty.channel.ChannelHandler;
+import org.apache.paimon.shade.netty4.io.netty.channel.ChannelHandler;
 
 import java.util.concurrent.CompletableFuture;
 

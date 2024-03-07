@@ -67,6 +67,7 @@ import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiConsumer;
 import java.util.function.Function;
+import java.util.stream.IntStream;
 
 import static org.apache.paimon.lookup.RocksDBOptions.BLOCK_CACHE_SIZE;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -285,11 +286,12 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
         BinaryExternalSortBuffer keyIdBuffer =
                 BinaryExternalSortBuffer.create(
                         ioManager,
-                        keyWithIdType,
                         keyWithRowType,
+                        IntStream.range(0, keyWithIdType.getFieldCount()).toArray(),
                         coreOptions.writeBufferSize() / 2,
                         coreOptions.pageSize(),
-                        coreOptions.localSortMaxNumFileHandles());
+                        coreOptions.localSortMaxNumFileHandles(),
+                        coreOptions.spillCompression());
 
         Function<SortOrder, RowIterator> iteratorFunction =
                 sortOrder -> {

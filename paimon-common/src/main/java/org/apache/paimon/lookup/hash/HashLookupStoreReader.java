@@ -1,25 +1,27 @@
 /*
- * Copyright 2015 LinkedIn Corp. All rights reserved.
+ * Licensed to the Apache Software Foundation (ASF) under one
+ * or more contributor license agreements.  See the NOTICE file
+ * distributed with this work for additional information
+ * regarding copyright ownership.  The ASF licenses this file
+ * to you under the Apache License, Version 2.0 (the
+ * "License"); you may not use this file except in compliance
+ * with the License.  You may obtain a copy of the License at
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
-
-/* This file is based on source code of StorageReader from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
 
 package org.apache.paimon.lookup.hash;
 
+import org.apache.paimon.compression.BlockCompressionFactory;
+import org.apache.paimon.io.PageFileInput;
 import org.apache.paimon.io.cache.CacheManager;
-import org.apache.paimon.io.cache.CachedRandomInputView;
+import org.apache.paimon.io.cache.FileBasedRandomInputView;
 import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.utils.FileBasedBloomFilter;
 import org.apache.paimon.utils.MurmurHashUtils;
@@ -30,18 +32,16 @@ import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
 
-import java.io.BufferedInputStream;
-import java.io.DataInputStream;
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.text.DecimalFormat;
-import java.text.SimpleDateFormat;
 import java.util.Arrays;
-import java.util.Calendar;
 import java.util.Iterator;
 import java.util.Map;
+
+/* This file is based on source code of StorageReader from the PalDB Project (https://github.com/linkedin/PalDB), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /** Internal read implementation for hash kv store. */
 public class HashLookupStoreReader
@@ -61,114 +61,55 @@ public class HashLookupStoreReader
     // Offset of the data for different key length
     private final long[] dataOffsets;
     // File input view
-    private CachedRandomInputView inputView;
+    private FileBasedRandomInputView inputView;
     // Buffers
     private final byte[] slotBuffer;
+
     @Nullable private FileBasedBloomFilter bloomFilter;
 
-    HashLookupStoreReader(CacheManager cacheManager, int cachePageSize, File file)
+    HashLookupStoreReader(
+            File file,
+            HashContext context,
+            CacheManager cacheManager,
+            int cachePageSize,
+            @Nullable BlockCompressionFactory compressionFactory)
             throws IOException {
         // File path
         if (!file.exists()) {
             throw new FileNotFoundException("File " + file.getAbsolutePath() + " not found");
         }
+
+        keyCounts = context.keyCounts;
+        slots = context.slots;
+        slotSizes = context.slotSizes;
+        int maxSlotSize = 0;
+        for (int slotSize : slotSizes) {
+            maxSlotSize = Math.max(maxSlotSize, slotSize);
+        }
+        slotBuffer = new byte[maxSlotSize];
+        indexOffsets = context.indexOffsets;
+        dataOffsets = context.dataOffsets;
+
         LOG.info("Opening file {}", file.getName());
-        // Create Mapped file in read-only mode
-        inputView = new CachedRandomInputView(file, cacheManager, cachePageSize);
 
-        // Open file and read metadata
-        long createdAt;
-        FileInputStream inputStream = new FileInputStream(file);
-        DataInputStream dataInputStream = new DataInputStream(new BufferedInputStream(inputStream));
-        // Offset of the index in the channel
-        int keyCount;
-        int indexOffset;
-        long dataOffset;
-        boolean bloomFilterEnabled;
-        try {
-            // Time
-            createdAt = dataInputStream.readLong();
+        PageFileInput fileInput =
+                PageFileInput.create(
+                        file,
+                        cachePageSize,
+                        compressionFactory,
+                        context.uncompressBytes,
+                        context.compressPages);
+        inputView = new FileBasedRandomInputView(fileInput, cacheManager);
 
-            // Metadata counters
-            keyCount = dataInputStream.readInt();
-            // Number of different key length
-            int keyLengthCount = dataInputStream.readInt();
-            // Max key length
-            int maxKeyLength = dataInputStream.readInt();
-            // BloomFilter
-            bloomFilterEnabled = dataInputStream.readBoolean();
-            if (bloomFilterEnabled) {
-                long recordCount = dataInputStream.readLong();
-                int bfBytes = dataInputStream.readInt();
-                // Bloom filter buffer start index
-                int bfStartIndex = dataInputStream.readInt();
-                // Skip bloom filter buffers
-                dataInputStream.skipBytes(bfBytes);
-                bloomFilter =
-                        new FileBasedBloomFilter(
-                                inputView.file(), cacheManager, recordCount, bfStartIndex, bfBytes);
-            }
-
-            // Read offset counts and keys
-            indexOffsets = new int[maxKeyLength + 1];
-            dataOffsets = new long[maxKeyLength + 1];
-            keyCounts = new int[maxKeyLength + 1];
-            slots = new int[maxKeyLength + 1];
-            slotSizes = new int[maxKeyLength + 1];
-
-            int maxSlotSize = 0;
-            for (int i = 0; i < keyLengthCount; i++) {
-                int keyLength = dataInputStream.readInt();
-
-                keyCounts[keyLength] = dataInputStream.readInt();
-                slots[keyLength] = dataInputStream.readInt();
-                slotSizes[keyLength] = dataInputStream.readInt();
-                indexOffsets[keyLength] = dataInputStream.readInt();
-                dataOffsets[keyLength] = dataInputStream.readLong();
-
-                maxSlotSize = Math.max(maxSlotSize, slotSizes[keyLength]);
-            }
-
-            slotBuffer = new byte[maxSlotSize];
-
-            // Read index offset to resign indexOffsets
-            indexOffset = dataInputStream.readInt();
-            for (int i = 0; i < indexOffsets.length; i++) {
-                indexOffsets[i] = indexOffset + indexOffsets[i];
-            }
-            // Read data offset to resign dataOffsets
-            dataOffset = dataInputStream.readLong();
-            for (int i = 0; i < dataOffsets.length; i++) {
-                dataOffsets[i] = dataOffset + dataOffsets[i];
-            }
-        } finally {
-            // Close metadata
-            dataInputStream.close();
-            inputStream.close();
+        if (context.bloomFilterEnabled) {
+            bloomFilter =
+                    new FileBasedBloomFilter(
+                            fileInput,
+                            cacheManager,
+                            context.bloomFilterExpectedEntries,
+                            0,
+                            context.bloomFilterBytes);
         }
-
-        // logging
-        DecimalFormat integerFormat = new DecimalFormat("#,##0.00");
-        StringBuilder statMsg = new StringBuilder("Storage metadata\n");
-        statMsg.append("  Created at: ").append(formatCreatedAt(createdAt)).append("\n");
-        statMsg.append("  Key count: ").append(keyCount).append("\n");
-        statMsg.append("  Bloom filter: ").append(bloomFilterEnabled).append("\n");
-        for (int i = 0; i < keyCounts.length; i++) {
-            if (keyCounts[i] > 0) {
-                statMsg.append("  Key count for key length ")
-                        .append(i)
-                        .append(": ")
-                        .append(keyCounts[i])
-                        .append("\n");
-            }
-        }
-        statMsg.append("  Index size: ")
-                .append(integerFormat.format((dataOffset - indexOffset) / (1024.0 * 1024.0)))
-                .append(" Mb\n");
-        statMsg.append("  Data size: ")
-                .append(integerFormat.format((file.length() - dataOffset) / (1024.0 * 1024.0)))
-                .append(" Mb\n");
-        LOG.info(statMsg.toString());
     }
 
     @Override
@@ -224,13 +165,6 @@ public class HashLookupStoreReader
         byte[] res = new byte[size];
         inputView.readFully(res);
         return res;
-    }
-
-    private String formatCreatedAt(long createdAt) {
-        SimpleDateFormat sdf = new SimpleDateFormat("yyyy.MM.dd G 'at' HH:mm:ss z");
-        Calendar cl = Calendar.getInstance();
-        cl.setTimeInMillis(createdAt);
-        return sdf.format(cl.getTime());
     }
 
     @Override
