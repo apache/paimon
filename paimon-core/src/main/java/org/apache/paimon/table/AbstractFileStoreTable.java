@@ -325,8 +325,9 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 catalogEnvironment.lockFactory().create(),
                 CoreOptions.fromMap(options()).consumerExpireTime(),
                 new ConsumerManager(fileIO, path),
-                options.snapshotExpireExecutionMode(),
-                name());
+                coreOptions().snapshotExpireExecutionMode(),
+                name(),
+                coreOptions().forceCreatingSnapshot());
     }
 
     private List<CommitCallback> createCommitCallbacks() {

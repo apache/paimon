@@ -1069,6 +1069,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
+    public static final ConfigOption<Boolean> COMMIT_FORCE_CREATE_SNAPSHOT =
+            key("commit.force-create-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force create snapshot on commit.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1561,6 +1567,10 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
+    }
+
+    public boolean forceCreatingSnapshot() {
+        return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
     }
 
     public Map<String, String> getFieldDefaultValues() {
