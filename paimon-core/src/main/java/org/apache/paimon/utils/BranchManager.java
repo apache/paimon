@@ -163,28 +163,25 @@ public class BranchManager {
                                     fileIO, snapshotManager.snapshotDirectory(), "snapshot-")
                             .map(FileStatus::getPath)
                             .filter(
-                                    path -> {
-                                        return Snapshot.fromPath(fileIO, path).id()
-                                                >= earliestSnapshotId;
-                                    })
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
                             .collect(Collectors.toList());
             List<Path> deleteSchemaPaths =
                     listVersionedFileStatus(fileIO, schemaManager.schemaDirectory(), "schema-")
                             .map(FileStatus::getPath)
                             .filter(
-                                    path -> {
-                                        return TableSchema.fromPath(fileIO, path).id()
-                                                >= earliestSchemaId;
-                                    })
+                                    path ->
+                                            TableSchema.fromPath(fileIO, path).id()
+                                                    >= earliestSchemaId)
                             .collect(Collectors.toList());
             List<Path> deleteTagPaths =
                     listVersionedFileStatus(fileIO, tagManager.tagDirectory(), "tag-")
                             .map(FileStatus::getPath)
                             .filter(
-                                    path -> {
-                                        return Snapshot.fromPath(fileIO, path).id()
-                                                >= earliestSnapshotId;
-                                    })
+                                    path ->
+                                            Snapshot.fromPath(fileIO, path).id()
+                                                    >= earliestSnapshotId)
                             .collect(Collectors.toList());
 
             List<Path> deletePaths =

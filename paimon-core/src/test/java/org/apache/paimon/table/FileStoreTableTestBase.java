@@ -1054,13 +1054,13 @@ public abstract class FileStoreTableTestBase {
         // Test for unsupported branch name
         assertThatThrownBy(() -> table.mergeBranch("test-branch"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'test-branch' doesn't exist."));
 
         assertThatThrownBy(() -> table.mergeBranch("main"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "Branch name 'main' do not use in merge branch."));
 
