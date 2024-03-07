@@ -484,6 +484,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testForceCreateSnapshotCommit() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options ->
+                                options.set(
+                                        CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT.key(), "true"));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+    }
+
+    @Test
     public void testEmptyCommitWithProcessTimeTag() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
