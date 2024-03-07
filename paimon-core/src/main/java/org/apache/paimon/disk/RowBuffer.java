@@ -39,6 +39,8 @@ public interface RowBuffer {
 
     void reset();
 
+    boolean flushMemory() throws IOException;
+
     RowBufferIterator newIterator();
 
     /** Iterator to fetch record from buffer. */

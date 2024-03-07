@@ -22,6 +22,9 @@ import org.apache.paimon.CoreOptions.SortEngine;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.List;
@@ -38,15 +41,16 @@ public interface SortMergeReader<T> extends RecordReader<T> {
     static <T> SortMergeReader<T> createSortMergeReader(
             List<RecordReader<KeyValue>> readers,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             SortEngine sortEngine) {
         switch (sortEngine) {
             case MIN_HEAP:
                 return new SortMergeReaderWithMinHeap<>(
-                        readers, userKeyComparator, mergeFunctionWrapper);
+                        readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
             case LOSER_TREE:
                 return new SortMergeReaderWithLoserTree<>(
-                        readers, userKeyComparator, mergeFunctionWrapper);
+                        readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
             default:
                 throw new UnsupportedOperationException("Unsupported sort engine: " + sortEngine);
         }

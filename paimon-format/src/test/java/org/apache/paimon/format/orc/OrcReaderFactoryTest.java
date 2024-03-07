@@ -198,6 +198,26 @@ class OrcReaderFactoryTest {
     }
 
     @Test
+    void testReadRowPositionWithTransformAndFilter() throws IOException {
+        int randomPooSize = new Random().nextInt(3) + 1;
+        OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1});
+
+        try (RecordReader<InternalRow> reader =
+                format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
+            reader.transform(row -> row)
+                    .filter(row -> row.getInt(1) % 123 == 0)
+                    .forEachRemainingWithPosition(
+                            (rowPosition, row) -> {
+                                // check row position
+                                // Note: in flatFile, field _col0's value is row position + 1, we
+                                // can use it
+                                // to check row position
+                                assertThat(rowPosition + 1).isEqualTo(row.getInt(1));
+                            });
+        }
+    }
+
+    @Test
     void testReadDecimalTypeFile() throws IOException {
         OrcReaderFactory format = createFormat(DECIMAL_FILE_TYPE, new int[] {0});
 

@@ -29,8 +29,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -56,8 +54,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 public class SnapshotsTableTest extends TableTestBase {
     private static final String tableName = "MyTable";
 
-    private FileStoreTable table;
-    private FileStoreScan scan;
     private SnapshotsTable snapshotsTable;
     private SnapshotManager snapshotManager;
 
@@ -78,8 +74,8 @@ public class SnapshotsTableTest extends TableTestBase {
         snapshotManager = new SnapshotManager(fileIO, tablePath);
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(new SchemaManager(fileIO, tablePath), schema);
-        table = FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
-        scan = table.store().newScan();
+        FileStoreTable table =
+                FileStoreTableFactory.create(LocalFileIO.create(), tablePath, tableSchema);
 
         Identifier filesTableId =
                 identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + SnapshotsTable.SNAPSHOTS);
@@ -102,7 +98,6 @@ public class SnapshotsTableTest extends TableTestBase {
     private List<InternalRow> getExceptedResult(long[] snapshotIds) {
         List<InternalRow> expectedRow = new ArrayList<>();
         for (long snapshotId : snapshotIds) {
-            FileStoreScan.Plan plan = scan.withSnapshot(snapshotId).plan();
             Snapshot snapshot = snapshotManager.snapshot(snapshotId);
             expectedRow.add(
                     GenericRow.of(
@@ -121,8 +116,6 @@ public class SnapshotsTableTest extends TableTestBase {
                             snapshot.totalRecordCount(),
                             snapshot.deltaRecordCount(),
                             snapshot.changelogRecordCount(),
-                            plan.files(FileKind.ADD).size(),
-                            plan.files(FileKind.DELETE).size(),
                             snapshot.watermark()));
         }
 

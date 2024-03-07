@@ -34,6 +34,7 @@ import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.DataType;
@@ -54,6 +55,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
@@ -336,6 +338,60 @@ public class AppendOnlyWriterTest {
     }
 
     @Test
+    public void testSpillWorksAndMoreSmallFilesGenerated() throws Exception {
+        List<AppendOnlyWriter> writers = new ArrayList<>();
+        HeapMemorySegmentPool heapMemorySegmentPool = new HeapMemorySegmentPool(2501024L, 1024);
+        MemoryPoolFactory memoryPoolFactory = new MemoryPoolFactory(heapMemorySegmentPool);
+        for (int i = 0; i < 1000; i++) {
+            AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE, true);
+            memoryPoolFactory.addOwners(Arrays.asList(writer));
+            memoryPoolFactory.notifyNewOwner(writer);
+            writers.add(writer);
+        }
+
+        char[] s = new char[1024];
+        Arrays.fill(s, 'a');
+
+        for (AppendOnlyWriter writer : writers) {
+            writer.write(row(0, String.valueOf("a"), PART));
+        }
+
+        for (AppendOnlyWriter writer : writers) {
+            writer.write(row(0, String.valueOf(s), PART));
+        }
+
+        for (int j = 0; j < 100; j++) {
+            for (AppendOnlyWriter writer : writers) {
+                writer.write(row(j, String.valueOf(s), PART));
+                writer.write(row(j, String.valueOf(s), PART));
+                writer.write(row(j, String.valueOf(s), PART));
+                writer.write(row(j, String.valueOf(s), PART));
+                writer.write(row(j, String.valueOf(s), PART));
+            }
+        }
+
+        writers.forEach(
+                writer -> {
+                    try {
+                        List<DataFileMeta> fileMetas =
+                                writer.prepareCommit(false).newFilesIncrement().newFiles();
+                        assertThat(fileMetas.size()).isEqualTo(1);
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        writers.forEach(
+                writer -> {
+                    try {
+                        writer.close();
+                    } catch (Exception e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+    }
+
+    @Test
     public void testNoBuffer() throws Exception {
         AppendOnlyWriter writer = createEmptyWriter(Long.MAX_VALUE);
 
@@ -363,7 +419,7 @@ public class AppendOnlyWriterTest {
             writer.write(row(j, String.valueOf(s), PART));
         }
 
-        writer.flushMemory();
+        writer.flush(false, false);
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
         Assertions.assertThat(writer.getNewFiles().size()).isGreaterThan(0);
@@ -374,7 +430,7 @@ public class AppendOnlyWriterTest {
         for (int j = 0; j < 100; j++) {
             writer.write(row(j, String.valueOf(s), PART));
         }
-        writer.flushMemory();
+        writer.flush(false, false);
 
         Assertions.assertThat(writer.memoryOccupancy()).isEqualTo(0L);
         Assertions.assertThat(writer.getWriteBuffer().size()).isEqualTo(0);
@@ -546,8 +602,7 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
-                        null);
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

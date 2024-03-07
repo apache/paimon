@@ -37,9 +37,13 @@ import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.KeyComparatorSupplier;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 import org.apache.paimon.utils.ValueEqualiserSupplier;
+
+import javax.annotation.Nullable;
 
 import java.util.Comparator;
 import java.util.HashMap;
@@ -123,6 +127,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 newKeyComparator(),
+                userDefinedSeqComparator(),
                 mfFactory,
                 newReaderFactoryBuilder());
     }
@@ -138,6 +143,11 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 pathFactory(),
                 keyValueFieldsExtractor,
                 options);
+    }
+
+    @Nullable
+    private FieldsComparator userDefinedSeqComparator() {
+        return UserDefinedSeqComparator.create(valueType, options);
     }
 
     @Override
@@ -159,6 +169,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 keyType,
                 valueType,
                 keyComparatorSupplier,
+                this::userDefinedSeqComparator,
                 valueEqualiserSupplier,
                 mfFactory,
                 pathFactory(),

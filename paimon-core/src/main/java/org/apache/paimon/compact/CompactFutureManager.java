@@ -20,9 +20,6 @@ package org.apache.paimon.compact;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import java.util.Optional;
 import java.util.concurrent.CancellationException;
 import java.util.concurrent.ExecutionException;
@@ -30,8 +27,6 @@ import java.util.concurrent.Future;
 
 /** Base implementation of {@link CompactManager} which runs compaction in a separate thread. */
 public abstract class CompactFutureManager implements CompactManager {
-
-    private static final Logger LOG = LoggerFactory.getLogger(CompactFutureManager.class);
 
     protected Future<CompactResult> taskFuture;
 

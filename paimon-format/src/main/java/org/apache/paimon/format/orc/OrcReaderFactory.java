@@ -182,8 +182,7 @@ public class OrcReaderFactory implements FormatReaderFactory {
             // because they point to the same data arrays internally design
             int batchSize = orcBatch.size;
             paimonColumnBatch.setNumRows(batchSize);
-            result.reset(batchSize);
-            result.resetRowPosition(rowNumber);
+            result.reset(batchSize, rowNumber);
             return result;
         }
     }

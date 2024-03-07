@@ -38,36 +38,31 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     private final Runnable recycler;
 
     private int num;
-    private int pos;
-    private long rowPosition;
+    private int nextPos;
+    private long nextGlobalPos;
 
     public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
         super(recycler);
         this.rowData = rowData;
         this.recycler = recycler;
-        this.rowPosition = 0;
-    }
-
-    /** Reset the number of rows in the vectorized batch and the start position in this batch. */
-    public void reset(int num) {
-        this.num = num;
-        this.pos = 0;
     }
 
     /**
-     * Reset the current record's row position in the file, and it needs to be ensured that the row
-     * position after reset is strictly incremented by 1.
+     * Reset the number of rows in the vectorized batch, the start position in this batch and the
+     * global position.
      */
-    public void resetRowPosition(long rowPosition) {
-        this.rowPosition = rowPosition;
+    public void reset(int num, long nextGlobalPos) {
+        this.num = num;
+        this.nextPos = 0;
+        this.nextGlobalPos = nextGlobalPos;
     }
 
     @Nullable
     @Override
     public InternalRow next() {
-        if (pos < num) {
-            rowData.setRowId(pos++);
-            rowPosition++;
+        if (nextPos < num) {
+            rowData.setRowId(nextPos++);
+            nextGlobalPos++;
             return rowData;
         } else {
             return null;
@@ -75,8 +70,14 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     }
 
     @Override
-    public long rowPosition() {
-        return rowPosition;
+    public long returnedPosition() {
+        return nextGlobalPos - 1;
+    }
+
+    public ColumnarRowIterator copy(ColumnVector[] vectors) {
+        ColumnarRowIterator newIterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
+        newIterator.reset(num, nextGlobalPos);
+        return newIterator;
     }
 
     public ColumnarRowIterator mapping(
@@ -90,9 +91,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
             if (indexMapping != null) {
                 vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
             }
-            ColumnarRowIterator iterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
-            iterator.reset(num);
-            return iterator;
+            return copy(vectors);
         }
         return this;
     }

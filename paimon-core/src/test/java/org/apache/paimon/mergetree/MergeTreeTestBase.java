@@ -426,7 +426,6 @@ public abstract class MergeTreeTestBase {
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,
                         null,
-                        null,
                         null);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
@@ -555,6 +554,7 @@ public abstract class MergeTreeTestBase {
                         dropDelete,
                         readerFactory,
                         comparator,
+                        null,
                         DeduplicateMergeFunction.factory().create(),
                         new MergeSorter(options, null, null, null));
         List<TestRecord> records = new ArrayList<>();
@@ -601,6 +601,7 @@ public abstract class MergeTreeTestBase {
                             dropDelete,
                             compactReaderFactory,
                             comparator,
+                            null,
                             DeduplicateMergeFunction.factory().create(),
                             new MergeSorter(options, null, null, null));
             writer.write(new RecordReaderIterator<>(sectionsReader));

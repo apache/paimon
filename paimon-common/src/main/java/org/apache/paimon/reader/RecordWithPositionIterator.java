@@ -33,20 +33,19 @@ import java.util.function.Function;
 public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterator<T> {
 
     /**
-     * Get the row position of the row that will be returned by the following call to {@link
-     * RecordReader.RecordIterator#next}.
+     * Get the row position of the row returned by {@link RecordReader.RecordIterator#next}.
      *
      * @return the row position from 0 to the number of rows in the file
      */
-    long rowPosition();
+    long returnedPosition();
 
     @Override
     default <R> RecordWithPositionIterator<R> transform(Function<T, R> function) {
         RecordWithPositionIterator<T> thisIterator = this;
         return new RecordWithPositionIterator<R>() {
             @Override
-            public long rowPosition() {
-                return thisIterator.rowPosition();
+            public long returnedPosition() {
+                return thisIterator.returnedPosition();
             }
 
             @Nullable
@@ -71,8 +70,8 @@ public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterat
         RecordWithPositionIterator<T> thisIterator = this;
         return new RecordWithPositionIterator<T>() {
             @Override
-            public long rowPosition() {
-                return thisIterator.rowPosition();
+            public long returnedPosition() {
+                return thisIterator.returnedPosition();
             }
 
             @Nullable

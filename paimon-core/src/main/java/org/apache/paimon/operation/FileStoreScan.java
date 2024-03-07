@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
+import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.partition.PartitionPredicate;
 import org.apache.paimon.predicate.Predicate;
@@ -72,6 +73,12 @@ public interface FileStoreScan {
 
     /** Produce a {@link Plan}. */
     Plan plan();
+
+    /**
+     * Read {@link SimpleFileEntry}s, SimpleFileEntry only retains some critical information, so it
+     * cannot perform filtering based on statistical information.
+     */
+    List<SimpleFileEntry> readSimpleEntries();
 
     /** Result plan of this scan. */
     interface Plan {

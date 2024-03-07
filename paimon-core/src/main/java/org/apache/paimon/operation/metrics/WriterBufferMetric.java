@@ -33,7 +33,7 @@ public class WriterBufferMetric {
     private static final String USED_WRITE_BUFFER_SIZE = "usedWriteBufferSizeByte";
     private static final String TOTAL_WRITE_BUFFER_SIZE = "totalWriteBufferSizeByte";
 
-    private MetricGroup metricGroup;
+    private final MetricGroup metricGroup;
 
     public WriterBufferMetric(
             Supplier<MemoryPoolFactory> memoryPoolFactorySupplier,

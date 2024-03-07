@@ -28,6 +28,7 @@ import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.disk.IOManagerImpl;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -79,9 +80,11 @@ import java.util.function.Function;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -207,60 +210,6 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testPaddingSequenceNumber() throws Exception {
-        RowType rowType =
-                RowType.of(
-                        new DataType[] {
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.INT(),
-                            DataTypes.STRING()
-                        },
-                        new String[] {"pt", "a", "b", "sec", "non_time"});
-        GenericRow row1 = GenericRow.of(1, 10, 100, 1685530987, BinaryString.fromString("a1"));
-        GenericRow row2 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a2"));
-        GenericRow row3 = GenericRow.of(1, 10, 101, 1685530987, BinaryString.fromString("a3"));
-        FileStoreTable table =
-                createFileStoreTable(
-                        conf -> {
-                            conf.set(CoreOptions.SEQUENCE_FIELD, "sec");
-                            conf.set(
-                                    CoreOptions.SEQUENCE_AUTO_PADDING,
-                                    CoreOptions.SequenceAutoPadding.SECOND_TO_MICRO.toString());
-                        },
-                        rowType);
-        StreamTableWrite write = table.newWrite(commitUser);
-        StreamTableCommit commit = table.newCommit(commitUser);
-        write.write(row1);
-        write.write(row2);
-        commit.commit(0, write.prepareCommit(false, 0));
-        write.write(row3);
-        commit.commit(1, write.prepareCommit(false, 1));
-        write.close();
-        commit.close();
-
-        ReadBuilder readBuilder = table.newReadBuilder();
-        Function<InternalRow, String> toString =
-                row ->
-                        row.getInt(0)
-                                + "|"
-                                + row.getInt(1)
-                                + "|"
-                                + row.getInt(2)
-                                + "|"
-                                + row.getInt(3)
-                                + "|"
-                                + row.getString(4);
-        assertThat(
-                        getResult(
-                                readBuilder.newRead(),
-                                readBuilder.newScan().plan().splits(),
-                                toString))
-                .isEqualTo(Collections.singletonList("1|10|101|1685530987|a3"));
-    }
-
-    @Test
     public void testBatchReadWrite() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
@@ -315,7 +264,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
+        Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
                 toSplits(table.newSnapshotReader().withFilter(predicate).read().dataSplits());
         TableRead read = table.newRead();
@@ -395,7 +344,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         FileStoreTable table = createFileStoreTable();
         PredicateBuilder builder = new PredicateBuilder(table.schema().logicalRowType());
 
-        Predicate predicate = PredicateBuilder.and(builder.equal(2, 201L), builder.equal(1, 21));
+        Predicate predicate = and(builder.equal(2, 201L), builder.equal(1, 21));
         List<Split> splits =
                 toSplits(
                         table.newSnapshotReader()
@@ -910,7 +859,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 auditLogTable
                         .newSnapshotReader()
                         .withFilter(
-                                PredicateBuilder.and(
+                                and(
                                         predicateBuilder.equal(predicateBuilder.indexOf("b"), 300),
                                         predicateBuilder.equal(predicateBuilder.indexOf("pt"), 2)));
         InnerTableRead read = auditLogTable.newRead();
@@ -1232,7 +1181,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
 
     @Test
     public void testReadOptimizedTable() throws Exception {
-        FileStoreTable table = createFileStoreTable();
+        // let max level has many files
+        FileStoreTable table =
+                createFileStoreTable(options -> options.set(TARGET_FILE_SIZE, new MemorySize(1)));
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -1251,16 +1202,14 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 DataTypes.ROW(
                                         DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
 
-        SnapshotReader snapshotReader = roTable.newSnapshotReader();
         TableRead read = roTable.newRead();
-        List<String> result =
-                getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        List<String> result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result).isEmpty();
 
         write.compact(binaryRow(1), 0, true);
         commit.commit(2, write.prepareCommit(true, 2));
 
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result).containsExactlyInAnyOrder("+I[1, 10, 100]", "+I[1, 11, 110]");
 
         write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 101L));
@@ -1268,10 +1217,26 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.compact(binaryRow(2), 0, true);
         commit.commit(3, write.prepareCommit(true, 3));
 
-        result = getResult(read, toSplits(snapshotReader.read().dataSplits()), rowDataToString);
+        result = getResult(read, roTable.newScan().plan().splits(), rowDataToString);
         assertThat(result)
                 .containsExactlyInAnyOrder(
                         "+I[1, 10, 100]", "+I[1, 11, 110]", "+I[2, 20, 201]", "+I[2, 21, 210]");
+
+        // test value filter on ro table
+
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        Predicate filter = builder.equal(0, 2);
+
+        // no value filter, return two files
+        List<Split> splits = roTable.newScan().withFilter(filter).plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(2);
+
+        // with value filter, return one files
+        filter = and(filter, builder.equal(2, 210L));
+        splits = roTable.newScan().withFilter(filter).plan().splits();
+        assertThat(splits).hasSize(1);
+        assertThat(splits.get(0).convertToRawFiles().get()).hasSize(1);
 
         write.close();
         commit.close();

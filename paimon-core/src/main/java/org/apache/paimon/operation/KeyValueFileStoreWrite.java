@@ -55,12 +55,12 @@ import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -84,9 +84,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     private final KeyValueFileReaderFactory.Builder readerFactoryBuilder;
     private final KeyValueFileWriterFactory.Builder writerFactoryBuilder;
     private final Supplier<Comparator<InternalRow>> keyComparatorSupplier;
+    private final Supplier<FieldsComparator> udsComparatorSupplier;
     private final Supplier<RecordEqualiser> valueEqualiserSupplier;
     private final MergeFunctionFactory<KeyValue> mfFactory;
-    private final TableSchema schema;
     private final CoreOptions options;
     private final FileIO fileIO;
     private final RowType keyType;
@@ -100,6 +100,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             RowType keyType,
             RowType valueType,
             Supplier<Comparator<InternalRow>> keyComparatorSupplier,
+            Supplier<FieldsComparator> udsComparatorSupplier,
             Supplier<RecordEqualiser> valueEqualiserSupplier,
             MergeFunctionFactory<KeyValue> mfFactory,
             FileStorePathFactory pathFactory,
@@ -110,10 +111,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CoreOptions options,
             KeyValueFieldsExtractor extractor,
             String tableName) {
-        super(commitUser, snapshotManager, scan, options, indexFactory, tableName, pathFactory);
+        super(commitUser, snapshotManager, scan, options, indexFactory, tableName);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;
+        this.udsComparatorSupplier = udsComparatorSupplier;
         this.readerFactoryBuilder =
                 KeyValueFileReaderFactory.builder(
                         fileIO,
@@ -137,7 +139,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.keyComparatorSupplier = keyComparatorSupplier;
         this.valueEqualiserSupplier = valueEqualiserSupplier;
         this.mfFactory = mfFactory;
-        this.schema = schemaManager.schema(schemaId);
         this.options = options;
     }
 
@@ -186,8 +187,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 options.commitForceCompact(),
                 options.changelogProducer(),
                 restoreIncrement,
-                SequenceGenerator.create(schema, options),
-                getWriterMetrics(partition, bucket));
+                UserDefinedSeqComparator.create(valueType, options));
     }
 
     @VisibleForTesting
@@ -205,7 +205,10 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             return new NoopCompactManager();
         } else {
             Comparator<InternalRow> keyComparator = keyComparatorSupplier.get();
-            CompactRewriter rewriter = createRewriter(partition, bucket, keyComparator, levels);
+            @Nullable FieldsComparator userDefinedSeqComparator = udsComparatorSupplier.get();
+            CompactRewriter rewriter =
+                    createRewriter(
+                            partition, bucket, keyComparator, userDefinedSeqComparator, levels);
             return new MergeTreeCompactManager(
                     compactExecutor,
                     levels,
@@ -214,12 +217,18 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     options.compactionFileSize(),
                     options.numSortedRunStopTrigger(),
                     rewriter,
-                    getCompactionMetrics(partition, bucket));
+                    compactionMetrics == null
+                            ? null
+                            : compactionMetrics.createReporter(partition, bucket));
         }
     }
 
     private MergeTreeCompactRewriter createRewriter(
-            BinaryRow partition, int bucket, Comparator<InternalRow> keyComparator, Levels levels) {
+            BinaryRow partition,
+            int bucket,
+            Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
+            Levels levels) {
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
                 writerFactoryBuilder.build(partition, bucket, options);
@@ -234,6 +243,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         readerFactory,
                         writerFactory,
                         keyComparator,
+                        userDefinedSeqComparator,
                         mfFactory,
                         mergeSorter,
                         valueEqualiserSupplier.get(),
@@ -252,6 +262,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             readerFactory,
                             writerFactory,
                             keyComparator,
+                            userDefinedSeqComparator,
                             mfFactory,
                             mergeSorter,
                             new FirstRowMergeFunctionWrapperFactory());
@@ -264,6 +275,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             readerFactory,
                             writerFactory,
                             keyComparator,
+                            userDefinedSeqComparator,
                             mfFactory,
                             mergeSorter,
                             new LookupMergeFunctionWrapperFactory(
@@ -272,7 +284,12 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 }
             default:
                 return new MergeTreeCompactRewriter(
-                        readerFactory, writerFactory, keyComparator, mfFactory, mergeSorter);
+                        readerFactory,
+                        writerFactory,
+                        keyComparator,
+                        userDefinedSeqComparator,
+                        mfFactory,
+                        mergeSorter);
         }
     }
 
