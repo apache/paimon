@@ -86,26 +86,11 @@ public class JdbcCatalogLock implements CatalogLock {
         // Do nothing
     }
 
-    /** Create a jdbc lock factory. */
-    public static LockFactory createFactory(
-            JdbcClientPool connections, String catalogName, Map<String, String> conf) {
-        return new JdbcCatalogLockFactory(connections, catalogName, conf);
-    }
-
-    private static class JdbcCatalogLockFactory implements LockFactory {
+    /** Jdbc catalog lock factory. */
+    public static class JdbcCatalogLockFactory implements LockFactory {
 
         private static final long serialVersionUID = 1L;
-        private static final String IDENTIFIER = "jdbc";
-        private final JdbcClientPool connections;
-        private final String catalogName;
-        private final Map<String, String> conf;
-
-        public JdbcCatalogLockFactory(
-                JdbcClientPool connections, String catalogName, Map<String, String> conf) {
-            this.connections = connections;
-            this.catalogName = catalogName;
-            this.conf = conf;
-        }
+        public static final String IDENTIFIER = "jdbc";
 
         @Override
         public String identifier() {
@@ -114,8 +99,25 @@ public class JdbcCatalogLock implements CatalogLock {
 
         @Override
         public CatalogLock create(LockContext context) {
+            JdbcLockContext lockContext = (JdbcLockContext) context;
             return new JdbcCatalogLock(
-                    connections, catalogName, checkMaxSleep(conf), acquireTimeout(conf));
+                    lockContext.connections,
+                    lockContext.catalogName,
+                    checkMaxSleep(lockContext.conf),
+                    acquireTimeout(lockContext.conf));
+        }
+    }
+
+    static class JdbcLockContext implements LockContext {
+        private final JdbcClientPool connections;
+        private final String catalogName;
+        private final Map<String, String> conf;
+
+        public JdbcLockContext(
+                JdbcClientPool connections, String catalogName, Map<String, String> conf) {
+            this.connections = connections;
+            this.catalogName = catalogName;
+            this.conf = conf;
         }
     }
 
