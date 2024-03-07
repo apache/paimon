@@ -153,6 +153,7 @@ public class DataFileTestDataGenerator {
                         "data-" + UUID.randomUUID(),
                         totalSize,
                         kvs.size(),
+                        kvs.stream().filter(kv -> kv.valueKind().isRetract()).count(),
                         minKey,
                         maxKey,
                         keyStatsSerializer.toBinary(keyStatsCollector.extract()),

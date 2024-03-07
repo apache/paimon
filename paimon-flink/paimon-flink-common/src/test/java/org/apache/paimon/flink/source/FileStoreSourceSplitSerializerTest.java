@@ -77,6 +77,7 @@ public class FileStoreSourceSplitSerializerTest {
                 "",
                 0,
                 1,
+                0L,
                 row(0),
                 row(0),
                 StatsTestUtils.newEmptyTableStats(),

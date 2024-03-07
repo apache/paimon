@@ -32,6 +32,8 @@ import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 
+import javax.annotation.Nullable;
+
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -58,7 +60,13 @@ public class DataFileMeta {
 
     private final String fileName;
     private final long fileSize;
+
+    // rowCount = addRowCount + deleteRowCount
+    // Why don't we keep addRowCount and deleteRowCount?
+    // Because in previous versions of DataFileMeta, we only keep rowCount.
+    // We have to keep the compatibility.
     private final long rowCount;
+    private final @Nullable Long deleteRowCount;
 
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
@@ -85,6 +93,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                0L,
                 EMPTY_MIN_KEY,
                 EMPTY_MAX_KEY,
                 EMPTY_KEY_STATS,
@@ -99,6 +108,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
+            @Nullable Long deleteRowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -111,6 +121,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -127,6 +138,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
+            @Nullable Long deleteRowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -139,7 +151,9 @@ public class DataFileMeta {
             Timestamp creationTime) {
         this.fileName = fileName;
         this.fileSize = fileSize;
+
         this.rowCount = rowCount;
+        this.deleteRowCount = deleteRowCount;
 
         this.minKey = minKey;
         this.maxKey = maxKey;
@@ -164,6 +178,14 @@ public class DataFileMeta {
 
     public long rowCount() {
         return rowCount;
+    }
+
+    public Optional<Long> addRowCount() {
+        return Optional.ofNullable(deleteRowCount).map(c -> rowCount - c);
+    }
+
+    public Optional<Long> deleteRowCount() {
+        return Optional.ofNullable(deleteRowCount);
     }
 
     public BinaryRow minKey() {
@@ -241,6 +263,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -265,6 +288,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -279,6 +303,9 @@ public class DataFileMeta {
 
     @Override
     public boolean equals(Object o) {
+        if (o == this) {
+            return true;
+        }
         if (!(o instanceof DataFileMeta)) {
             return false;
         }
@@ -286,6 +313,7 @@ public class DataFileMeta {
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
+                && Objects.equals(deleteRowCount, that.deleteRowCount)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
                 && Objects.equals(keyStats, that.keyStats)
@@ -304,6 +332,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -319,10 +348,14 @@ public class DataFileMeta {
     @Override
     public String toString() {
         return String.format(
-                "{%s, %d, %d, %s, %s, %s, %s, %d, %d, %d, %d, %s, %s}",
+                "{fileName: %s, fileSize: %d, rowCount: %d, deleteRowCount: %d, "
+                        + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
+                        + "minSequenceNumber: %d, maxSequenceNumber: %d, "
+                        + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s}",
                 fileName,
                 fileSize,
                 rowCount,
+                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -350,6 +383,7 @@ public class DataFileMeta {
         fields.add(new DataField(10, "_LEVEL", new IntType(false)));
         fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
+        fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
         return new RowType(fields);
     }
 

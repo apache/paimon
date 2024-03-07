@@ -182,6 +182,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                         rewriter,
                         unit,
                         dropDelete,
+                        levels.maxLevel(),
                         metricsReporter);
         if (LOG.isDebugEnabled()) {
             LOG.debug(

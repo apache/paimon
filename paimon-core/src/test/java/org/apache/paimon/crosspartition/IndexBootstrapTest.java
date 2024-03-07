@@ -120,6 +120,7 @@ public class IndexBootstrapTest extends TableTestBase {
                 "",
                 1,
                 1,
+                0L,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
                 DataFileMeta.EMPTY_KEY_STATS,

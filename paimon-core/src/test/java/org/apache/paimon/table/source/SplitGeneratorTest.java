@@ -43,6 +43,7 @@ public class SplitGeneratorTest {
                 name,
                 rowCount,
                 1,
+                0L,
                 EMPTY_ROW,
                 EMPTY_ROW,
                 null,

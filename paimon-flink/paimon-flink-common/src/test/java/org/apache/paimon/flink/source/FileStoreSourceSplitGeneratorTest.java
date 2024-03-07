@@ -104,6 +104,7 @@ public class FileStoreSourceSplitGeneratorTest {
                             fileName,
                             0, // not used
                             0, // not used
+                            0L, // not used
                             null, // not used
                             null, // not used
                             StatsTestUtils.newEmptyTableStats(), // not used

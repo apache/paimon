@@ -171,6 +171,7 @@ public class IntervalPartitionTest {
                 "DUMMY",
                 100,
                 25,
+                0L,
                 minKey,
                 maxKey,
                 newTableStats(left, right),

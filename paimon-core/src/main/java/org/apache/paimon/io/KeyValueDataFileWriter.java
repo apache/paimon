@@ -67,6 +67,7 @@ public class KeyValueDataFileWriter
     private InternalRow maxKey = null;
     private long minSeqNumber = Long.MAX_VALUE;
     private long maxSeqNumber = Long.MIN_VALUE;
+    private long deleteRecordCount = 0;
 
     public KeyValueDataFileWriter(
             FileIO fileIO,
@@ -110,6 +111,10 @@ public class KeyValueDataFileWriter
 
         updateMinSeqNumber(kv);
         updateMaxSeqNumber(kv);
+
+        if (kv.valueKind().isRetract()) {
+            deleteRecordCount++;
+        }
 
         if (LOG.isDebugEnabled()) {
             LOG.debug("Write to Path " + path + " key value " + kv.toString(keyType, valueType));
@@ -155,6 +160,7 @@ public class KeyValueDataFileWriter
                 path.getName(),
                 fileIO.getFileSize(path),
                 recordCount(),
+                deleteRecordCount,
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),
                 keyStats,
