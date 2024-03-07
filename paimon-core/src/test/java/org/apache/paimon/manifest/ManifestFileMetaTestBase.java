@@ -107,6 +107,7 @@ public abstract class ManifestFileMetaTestBase {
                         .collect(Collectors.toList());
         List<String> entryBeforeMerge =
                 FileEntry.mergeEntries(inputEntry).stream()
+                        .filter(entry -> entry.kind() == FileKind.ADD)
                         .map(entry -> entry.kind() + "-" + entry.file().fileName())
                         .collect(Collectors.toList());
 

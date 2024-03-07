@@ -23,6 +23,7 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.Preconditions;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -30,7 +31,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
-import java.util.stream.Collectors;
+import java.util.concurrent.Future;
+import java.util.function.Supplier;
 
 /** Entry representing a file. */
 public interface FileEntry {
@@ -117,23 +119,10 @@ public interface FileEntry {
             ManifestFile manifestFile,
             List<ManifestFileMeta> manifestFiles,
             Map<Identifier, ManifestEntry> map) {
-        List<CompletableFuture<List<ManifestEntry>>> manifestReadFutures =
-                manifestFiles.stream()
-                        .map(
-                                manifestFileMeta ->
-                                        CompletableFuture.supplyAsync(
-                                                () ->
-                                                        manifestFile.read(
-                                                                manifestFileMeta.fileName()),
-                                                FileUtils.COMMON_IO_FORK_JOIN_POOL))
-                        .collect(Collectors.toList());
-
-        try {
-            for (CompletableFuture<List<ManifestEntry>> taskResult : manifestReadFutures) {
-                mergeEntries(taskResult.get(), map);
-            }
-        } catch (ExecutionException | InterruptedException e) {
-            throw new RuntimeException("Failed to read manifest file.", e);
+        List<Supplier<List<ManifestEntry>>> manifestReadFutures =
+                readManifestEntries(manifestFile, manifestFiles);
+        for (Supplier<List<ManifestEntry>> taskResult : manifestReadFutures) {
+            mergeEntries(taskResult.get(), map);
         }
     }
 
@@ -165,6 +154,26 @@ public interface FileEntry {
                             "Unknown value kind " + entry.kind().name());
             }
         }
+    }
+
+    static List<Supplier<List<ManifestEntry>>> readManifestEntries(
+            ManifestFile manifestFile, List<ManifestFileMeta> manifestFiles) {
+        List<Supplier<List<ManifestEntry>>> result = new ArrayList<>();
+        for (ManifestFileMeta file : manifestFiles) {
+            Future<List<ManifestEntry>> future =
+                    CompletableFuture.supplyAsync(
+                            () -> manifestFile.read(file.fileName()),
+                            FileUtils.COMMON_IO_FORK_JOIN_POOL);
+            result.add(
+                    () -> {
+                        try {
+                            return future.get();
+                        } catch (ExecutionException | InterruptedException e) {
+                            throw new RuntimeException("Failed to read manifest file.", e);
+                        }
+                    });
+        }
+        return result;
     }
 
     static <T extends FileEntry> void assertNoDelete(Collection<T> entries) {
