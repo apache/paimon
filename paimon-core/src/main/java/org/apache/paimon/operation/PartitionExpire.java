@@ -28,6 +28,9 @@ import org.apache.paimon.partition.PartitionTimeExtractor;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
@@ -49,6 +52,8 @@ public class PartitionExpire {
     private final FileStoreCommit commit;
 
     private LocalDateTime lastCheck;
+    private boolean ignoreExpireCheckInterval = false;
+    private static final Logger LOG = LoggerFactory.getLogger(PartitionExpire.class);
 
     public PartitionExpire(
             RowType partitionType,
@@ -84,7 +89,7 @@ public class PartitionExpire {
 
     @VisibleForTesting
     void expire(LocalDateTime now, long commitIdentifier) {
-        if (now.isAfter(lastCheck.plus(checkInterval))) {
+        if (ignoreExpireCheckInterval || now.isAfter(lastCheck.plus(checkInterval))) {
             doExpire(now.minus(expirationTime), commitIdentifier);
             lastCheck = now;
         }
@@ -96,7 +101,9 @@ public class PartitionExpire {
             Object[] array = toObjectArrayConverter.convert(partition);
             expired.add(toPartitionString(array));
         }
-        if (expired.size() > 0) {
+
+        if (!expired.isEmpty()) {
+            LOG.info("{} partitions will be marked as expired.", expired.size());
             commit.dropPartitions(expired, commitIdentifier);
         }
     }
@@ -115,6 +122,10 @@ public class PartitionExpire {
                 .map(ManifestEntry::partition)
                 .distinct()
                 .collect(Collectors.toList());
+    }
+
+    public void ignoreExpireCheckInterval() {
+        this.ignoreExpireCheckInterval = true;
     }
 
     private class PartitionTimePredicate implements PartitionPredicate {

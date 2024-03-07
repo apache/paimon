@@ -144,6 +144,10 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         }
 
         pollInputs();
+
+        LOG.info("Reach end input, ignore the expiration check interval of partition.");
+        committer.ignoreExpireCheckInterval();
+
         commitUpToCheckpoint(Long.MAX_VALUE);
     }
 

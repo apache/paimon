@@ -60,4 +60,7 @@ public interface Committer<CommitT, GlobalCommitT> extends AutoCloseable {
         Committer<CommitT, GlobalCommitT> create(
                 String commitUser, OperatorMetricGroup metricGroup);
     }
+
+    /** Ignore the expiration check interval. */
+    void ignoreExpireCheckInterval();
 }

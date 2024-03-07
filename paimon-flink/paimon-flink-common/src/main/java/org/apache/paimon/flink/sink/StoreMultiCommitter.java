@@ -59,6 +59,7 @@ public class StoreMultiCommitter
 
     // compact job needs set "write-only" of a table to false
     private final boolean isCompactJob;
+    private boolean ignoreExpireCheckInterval = false;
 
     public StoreMultiCommitter(
             Catalog.Loader catalogLoader,
@@ -211,6 +212,10 @@ public class StoreMultiCommitter
             tableCommitters.put(tableId, committer);
         }
 
+        if (ignoreExpireCheckInterval) {
+            committer.ignoreExpireCheckInterval();
+        }
+
         return committer;
     }
 
@@ -219,5 +224,10 @@ public class StoreMultiCommitter
         for (StoreCommitter committer : tableCommitters.values()) {
             committer.close();
         }
+    }
+
+    @Override
+    public void ignoreExpireCheckInterval() {
+        this.ignoreExpireCheckInterval = true;
     }
 }
