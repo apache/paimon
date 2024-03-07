@@ -114,6 +114,16 @@ public interface Table extends Serializable {
     @Experimental
     void replaceBranch(String fromBranch);
 
+    /** Replace main branch. */
+    @Experimental
+    void replaceMainBranch(String branchName);
+
+    @Experimental
+    void cleanMainBranchFile();
+
+    @Experimental
+    void mainBranch();
+
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental
     ExpireSnapshots newExpireSnapshots();

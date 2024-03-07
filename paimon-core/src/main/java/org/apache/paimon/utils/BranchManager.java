@@ -74,9 +74,13 @@ public class BranchManager {
     }
 
     /** Commit specify branch to main. */
-    public void commitMainBranch(String branchName) throws IOException {
+    public void commitMainBranch(String branchName) {
         Path mainBranchFile = new Path(tablePath, MAIN_BRANCH_FILE);
-        fileIO.overwriteFileUtf8(mainBranchFile, branchName);
+        try {
+            fileIO.overwriteFileUtf8(mainBranchFile, branchName);
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     /** Return the root Directory of branch. */
@@ -125,9 +129,33 @@ public class BranchManager {
         }
     }
 
+    /** Get main branch. */
+    public String mainBranch() {
+        Path path = new Path(tablePath, MAIN_BRANCH_FILE);
+        try {
+            if (fileIO.exists(path)) {
+                return fileIO.readFileUtf8(path);
+            } else {
+                return DEFAULT_MAIN_BRANCH;
+            }
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
     /** Return the path of a branch. */
     public Path branchPath(String branchName) {
         return new Path(getBranchPath(fileIO, tablePath, branchName));
+    }
+
+    /** Clean the main branch file and use default. */
+    public void cleanMainBranchFile() {
+        Path mainBranchFile = new Path(tablePath, MAIN_BRANCH_FILE);
+        try {
+            fileIO.delete(mainBranchFile, false);
+        } catch (IOException e) {
+            throw new RuntimeException("Exception occurs when clean main branch file.", e);
+        }
     }
 
     /** Create empty branch. */

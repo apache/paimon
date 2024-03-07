@@ -255,4 +255,51 @@ class BranchActionITCase extends ActionITCaseBase {
                 String.format("CALL sys.create_tag('%s.%s', 'tag3', 3)", database, tableName));
         assertThat(tagManager.tagExists("tag3")).isTrue();
     }
+
+    @Test
+    void testReplaceMainBranchAndCleanMainBranch() throws Exception {
+
+        init(warehouse);
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.BIGINT(), DataTypes.STRING()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(
+                        rowType,
+                        Collections.emptyList(),
+                        Collections.singletonList("k"),
+                        Collections.emptyList(),
+                        Collections.emptyMap());
+
+        StreamWriteBuilder writeBuilder = table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = writeBuilder.newWrite();
+        commit = writeBuilder.newCommit();
+
+        // 3 snapshots
+        writeData(rowData(1L, BinaryString.fromString("Hi")));
+        writeData(rowData(2L, BinaryString.fromString("Hello")));
+        writeData(rowData(3L, BinaryString.fromString("Paimon")));
+
+        // Create tag2
+        TagManager tagManager = new TagManager(table.fileIO(), table.location());
+        callProcedure(
+                String.format("CALL sys.create_tag('%s.%s', 'tag2', 2)", database, tableName));
+        assertThat(tagManager.tagExists("tag2")).isTrue();
+
+        BranchManager branchManager = table.branchManager();
+        callProcedure(
+                String.format(
+                        "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
+                        database, tableName));
+        assertThat(branchManager.branchExists("branch_name")).isTrue();
+
+        callProcedure(
+                String.format(
+                        "CALL sys.set_main_branch('%s.%s', 'branch_name')", database, tableName));
+        assertThat(branchManager.mainBranch()).isEqualTo("branch_name");
+
+        callProcedure(String.format("CALL sys.clean_main_branch('%s.%s')", database, tableName));
+        assertThat(branchManager.mainBranch()).isEqualTo("main");
+    }
 }
