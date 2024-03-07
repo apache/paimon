@@ -192,6 +192,9 @@ public class BranchManager {
                                     deleteTagPaths.stream())
                             .collect(Collectors.toList());
 
+            // Delete latest snapshot
+            snapshotManager.deleteLatestHint();
+
             fileIO.deleteFilesQuietly(deletePaths);
             fileIO.copyFilesUtf8(
                     snapshotManager.branchSnapshotDirectory(branchName),
