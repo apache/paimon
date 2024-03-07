@@ -98,7 +98,10 @@ public class BranchManager {
                 "Branch name cannot be pure numeric string but is '%s'.",
                 branchName);
         try {
-            fileIO.mkdirs(branchPath(branchName));
+            TableSchema latestSchema = schemaManager.latest().get();
+            fileIO.copyFileUtf8(
+                    schemaManager.toSchemaPath(latestSchema.id()),
+                    schemaManager.branchSchemaPath(branchName, latestSchema.id()));
         } catch (IOException e) {
             throw new RuntimeException(
                     String.format(

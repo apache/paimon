@@ -92,7 +92,7 @@ public interface Table extends Serializable {
     @Experimental
     void createBranch(String branchName);
 
-    /** Create a branch from given tag. */
+    /** Create a branch from given snapshot. */
     @Experimental
     void createBranch(String branchName, long snapshotId);
 
