@@ -353,11 +353,6 @@ public class JdbcCatalog extends AbstractCatalog {
                 : Optional.empty();
     }
 
-    private boolean lockEnabled() {
-        return Boolean.parseBoolean(
-                options.getOrDefault(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
-    }
-
     private Lock lock(Identifier identifier) {
         if (!lockEnabled()) {
             return new Lock.EmptyLock();
