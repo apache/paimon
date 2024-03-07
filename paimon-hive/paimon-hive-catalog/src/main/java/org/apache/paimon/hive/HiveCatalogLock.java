@@ -114,6 +114,7 @@ public class HiveCatalogLock implements CatalogLock {
         this.client.close();
     }
 
+    /** Catalog lock factory for hive. */
     public static class HiveCatalogLockFactory implements LockFactory {
 
         private static final long serialVersionUID = 1L;
