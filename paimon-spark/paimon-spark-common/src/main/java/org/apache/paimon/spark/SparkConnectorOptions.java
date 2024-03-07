@@ -24,6 +24,13 @@ import static org.apache.paimon.options.ConfigOptions.key;
 
 /** Options for spark connector. */
 public class SparkConnectorOptions {
+
+    public static final ConfigOption<Boolean> INNER_SESSION_CATALOG =
+            key("catalog.inner-session-catalog")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "If true, create and use an inner session catalog instead of default session catalog when use SparkGenericCatalog.");
     public static final ConfigOption<Boolean> MERGE_SCHEMA =
             key("write.merge-schema")
                     .booleanType()
