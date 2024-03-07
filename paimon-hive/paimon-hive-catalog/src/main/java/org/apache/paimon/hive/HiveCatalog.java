@@ -149,11 +149,6 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockFactory> lockFactory() {
-        return lockEnabled() ? Optional.of(HiveCatalogLock.createFactory()) : Optional.empty();
-    }
-
-    @Override
     public Optional<CatalogLock.LockContext> lockContext() {
         return Optional.of(
                 new HiveCatalogLock.HiveLockContext(
@@ -689,11 +684,7 @@ public class HiveCatalog extends AbstractCatalog {
         /** Hive catalog only support hive lock. */
         if (options.getOptional(LOCK_ENABLED).orElse(false)) {
             Optional<String> lockType = options.getOptional(LOCK_TYPE);
-            if (lockType.isPresent()) {
-                checkArgument(
-                        LOCK_IDENTIFIER.equals(lockType.get()),
-                        "Hive catalog only support hive lock type");
-            } else {
+            if (!lockType.isPresent()) {
                 options.set(LOCK_TYPE, LOCK_IDENTIFIER);
             }
         }
