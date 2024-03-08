@@ -42,10 +42,10 @@ public class JdbcCatalogTest extends CatalogTestBase {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        catalog = initCatalog("test-jdbc-catalog", Maps.newHashMap());
+        catalog = initCatalog(Maps.newHashMap());
     }
 
-    private JdbcCatalog initCatalog(String storeKey, Map<String, String> props) {
+    private JdbcCatalog initCatalog(Map<String, String> props) {
         Map<String, String> properties = Maps.newHashMap();
         properties.put(
                 CatalogOptions.URI.key(),
@@ -56,8 +56,9 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
         properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
         properties.putAll(props);
-        JdbcCatalog jdbcCatalog = new JdbcCatalog(fileIO, storeKey, properties, warehouse);
-        return jdbcCatalog;
+        JdbcCatalog catalog = new JdbcCatalog(fileIO, "test-jdbc-catalog", properties, warehouse);
+        assertThat(catalog.warehouse()).isEqualTo(warehouse);
+        return catalog;
     }
 
     @Test
