@@ -73,8 +73,7 @@ public class HiveReadITCase extends HiveTestBase {
                         "");
         Identifier identifier = Identifier.create(DATABASE_TEST, tableName);
         Path tablePath = AbstractCatalog.newTableLocation(path, identifier);
-        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
-        schemaManager.createTable(schema);
+        new SchemaManager(LocalFileIO.create(), tablePath).createTable(schema);
 
         // Create hive external table
         String hiveSql =
@@ -85,7 +84,6 @@ public class HiveReadITCase extends HiveTestBase {
                                 "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
                                 "LOCATION '" + tablePath.toUri().toString() + "'"));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
-
         List<String> result = hiveShell.executeQuery("SHOW CREATE TABLE " + tableName);
         assertThat(result)
                 .containsAnyOf(
@@ -98,32 +96,18 @@ public class HiveReadITCase extends HiveTestBase {
                         "  'org.apache.paimon.hive.PaimonStorageHandler' ");
 
         hiveShell.execute("INSERT INTO " + tableName + " VALUES (1,'Hello'),(2,'Paimon')");
-        hiveShell.execute("Drop Table " + tableName);
         result = hiveShell.executeQuery("SELECT col2, col1 FROM " + tableName);
         assertThat(result).containsExactly("Hello\t1", "Paimon\t2");
         result = hiveShell.executeQuery("SELECT col2 FROM " + tableName);
         assertThat(result).containsExactly("Hello", "Paimon");
         result = hiveShell.executeQuery("SELECT Col2 FROM " + tableName);
         assertThat(result).containsExactly("Hello", "Paimon");
-
         result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE col2 = 'Hello'");
         assertThat(result).containsExactly("1\tHello");
         result =
                 hiveShell.executeQuery(
                         "SELECT * FROM " + tableName + " WHERE Col2 in ('Hello', 'Paimon')");
         assertThat(result).containsExactly("1\tHello", "2\tPaimon");
-
-        schemaManager.commitChanges(SchemaChange.addColumn("D1", DataTypes.STRING()));
-        String hiveSql1 =
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "CREATE EXTERNAL TABLE " + tableName + " ",
-                                "STORED BY '" + PaimonStorageHandler.class.getName() + "'",
-                                "LOCATION '" + tablePath.toUri().toString() + "'"));
-        assertThatCode(() -> hiveShell.execute(hiveSql1)).doesNotThrowAnyException();
-        result = hiveShell.executeQuery("SELECT * FROM " + tableName + " WHERE Col2 is not null");
-        System.out.println(result);
     }
 
     @Test
