@@ -31,7 +31,6 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Preconditions;
-import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableMap;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
@@ -78,7 +77,7 @@ public class JdbcCatalog extends AbstractCatalog {
     protected JdbcCatalog(
             FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
         super(fileIO);
-        this.catalogKey = StringUtils.isBlank(catalogKey) ? "jdbc" : catalogKey;
+        this.catalogKey = catalogKey;
         this.options = config;
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");

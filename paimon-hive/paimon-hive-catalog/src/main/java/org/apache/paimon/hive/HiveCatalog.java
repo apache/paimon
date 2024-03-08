@@ -87,7 +87,6 @@ import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
@@ -349,6 +348,17 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             client.dropTable(
                     identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
+
+            // When drop a Hive external table, only the hive metadata is deleted and the data files
+            // are not deleted.
+            TableType tableType =
+                    OptionsUtils.convertToEnum(
+                            hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
+                            TableType.class);
+            if (TableType.EXTERNAL.equals(tableType)) {
+                return;
+            }
+
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
@@ -468,19 +478,6 @@ public class HiveCatalog extends AbstractCatalog {
         return warehouse;
     }
 
-    private void checkIdentifierUpperCase(Identifier identifier) {
-        checkState(
-                identifier.getDatabaseName().equals(identifier.getDatabaseName().toLowerCase()),
-                String.format(
-                        "Database name[%s] cannot contain upper case in hive catalog",
-                        identifier.getDatabaseName()));
-        checkState(
-                identifier.getObjectName().equals(identifier.getObjectName().toLowerCase()),
-                String.format(
-                        "Table name[%s] cannot contain upper case in hive catalog",
-                        identifier.getObjectName()));
-    }
-
     private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
         long currentTimeMillis = System.currentTimeMillis();
         TableType tableType =
@@ -509,6 +506,14 @@ public class HiveCatalog extends AbstractCatalog {
             table.getParameters().put("EXTERNAL", "TRUE");
         }
         return table;
+    }
+
+    private TableType hiveTableType() {
+        TableType tableType =
+                OptionsUtils.convertToEnum(
+                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
+                        TableType.class);
+        return tableType;
     }
 
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
@@ -585,10 +590,6 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.name(),
                 HiveTypeUtils.toTypeInfo(dataField.type()).getTypeName(),
                 dataField.description());
-    }
-
-    private boolean schemaFileExists(Identifier identifier) {
-        return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
     }
 
     private SchemaManager schemaManager(Identifier identifier) {
