@@ -80,7 +80,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
     private SparkCatalog sparkCatalog = null;
 
-    private boolean enableInnerSessionCatalog = false;
+    private boolean underlyingSessionCatalogEnabled = false;
 
     private CatalogPlugin sessionCatalog = null;
 
@@ -251,8 +251,9 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 autoFillConfigurations(options, sessionState.conf(), hadoopConf);
         sparkCatalog.initialize(name, newOptions);
 
-        if (options.getBoolean(SparkConnectorOptions.INNER_SESSION_CATALOG.key(), false)) {
-            this.enableInnerSessionCatalog = true;
+        if (options.getBoolean(
+                SparkConnectorOptions.CREATE_UNDERLYING_SESSION_CATALOG.key(), false)) {
+            this.underlyingSessionCatalogEnabled = false;
             for (Map.Entry<String, String> entry : options.entrySet()) {
                 sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
                 hadoopConf.set(entry.getKey(), entry.getValue());
@@ -298,7 +299,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
     @Override
     @SuppressWarnings("unchecked")
     public void setDelegateCatalog(CatalogPlugin delegate) {
-        if (!enableInnerSessionCatalog) {
+        if (!underlyingSessionCatalogEnabled) {
             this.sessionCatalog = delegate;
         }
     }
