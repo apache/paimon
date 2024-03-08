@@ -37,6 +37,6 @@ public class JdbcCatalogFactory implements CatalogFactory {
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
         String catalogKey = context.options().get(JdbcCatalogOptions.CATALOG_KEY);
-        return new JdbcCatalog(fileIO, catalogKey, context.options().toMap(), warehouse.getName());
+        return new JdbcCatalog(fileIO, catalogKey, context.options().toMap(), warehouse.toString());
     }
 }
