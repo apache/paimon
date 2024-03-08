@@ -85,8 +85,6 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
     @Override
     public ChangelogResult getResult() {
-        reusedResult.reset();
-
         // 1. Compute the latest high level record and containLevel0 of candidates
         LinkedList<KeyValue> candidates = mergeFunction.candidates();
         Iterator<KeyValue> descending = candidates.descendingIterator();
@@ -95,9 +93,8 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         while (descending.hasNext()) {
             KeyValue kv = descending.next();
             if (kv.level() > 0) {
-                if (highLevel != null) {
-                    descending.remove();
-                } else {
+                descending.remove();
+                if (highLevel == null) {
                     highLevel = kv;
                 }
             } else {
@@ -120,6 +117,7 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         KeyValue result = mergeFunction2.getResult();
 
         // 4. Set changelog when there's level-0 records
+        reusedResult.reset();
         if (containLevel0) {
             setChangelog(highLevel, result);
         }
