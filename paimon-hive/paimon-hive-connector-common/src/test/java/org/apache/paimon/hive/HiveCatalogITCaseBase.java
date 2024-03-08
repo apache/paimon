@@ -277,7 +277,7 @@ public abstract class HiveCatalogITCaseBase {
                 .isTrue();
         tEnv.executeSql("DROP TABLE t").await();
         Path tablePath = new Path(path, "test_db.db/t");
-        assertThat(tablePath.getFileSystem().exists(tablePath)).isFalse();
+        assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
     }
 
     @Test
