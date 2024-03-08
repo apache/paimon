@@ -1531,8 +1531,7 @@ public class PreAggregationITCase {
 
         @ParameterizedTest(name = "changelog-producer = {0}, merge-engine = {1}")
         @MethodSource("retractArguments")
-        public void testRetractWithAggregation(String changelogProducer, String mergeEngine)
-                throws Exception {
+        public void testRetract(String changelogProducer, String mergeEngine) throws Exception {
             String sequenceGroup = "";
             if (mergeEngine.equals("partial-update")) {
                 sequenceGroup = ", 'fields.f1.sequence-group' = 'f0'";
