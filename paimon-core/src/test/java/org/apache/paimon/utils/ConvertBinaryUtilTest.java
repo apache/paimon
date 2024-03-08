@@ -16,9 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark;
-
-import org.apache.paimon.spark.utils.ConvertBinaryUtil;
+package org.apache.paimon.utils;
 
 import org.junit.Assert;
 import org.junit.jupiter.api.Test;
@@ -26,8 +24,8 @@ import org.junit.jupiter.api.Test;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
-import static org.apache.paimon.spark.utils.ConvertBinaryUtil.convertBytesToLong;
-import static org.apache.paimon.spark.utils.ConvertBinaryUtil.convertStringToLong;
+import static org.apache.paimon.utils.ConvertBinaryUtil.convertBytesToLong;
+import static org.apache.paimon.utils.ConvertBinaryUtil.convertStringToLong;
 
 /** Test for {@link ConvertBinaryUtil}. */
 public class ConvertBinaryUtilTest {
