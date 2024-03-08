@@ -25,10 +25,7 @@ import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
-import java.util.Collections;
-import java.util.Iterator;
 import java.util.LinkedList;
-import java.util.List;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -42,9 +39,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     private final InternalRowSerializer keySerializer;
     private final InternalRowSerializer valueSerializer;
 
-    KeyValue highLevel;
-    boolean containLevel0;
-
     public LookupMergeFunction(
             MergeFunction<KeyValue> mergeFunction, RowType keyType, RowType valueType) {
         this.mergeFunction = mergeFunction;
@@ -55,8 +49,6 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
     @Override
     public void reset() {
         candidates.clear();
-        highLevel = null;
-        containLevel0 = false;
     }
 
     @Override
@@ -66,33 +58,13 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
 
     @Override
     public KeyValue getResult() {
-        // 1. Find the latest high level record
-        Iterator<KeyValue> descending = candidates.descendingIterator();
-        while (descending.hasNext()) {
-            KeyValue kv = descending.next();
-            if (kv.level() > 0) {
-                if (highLevel != null) {
-                    descending.remove();
-                } else {
-                    highLevel = kv;
-                }
-            } else {
-                containLevel0 = true;
-            }
-        }
-
-        // 2. Do the merge for inputs
         mergeFunction.reset();
         candidates.forEach(mergeFunction::add);
         return mergeFunction.getResult();
     }
 
-    boolean candidatesAllLevel0() {
-        return !candidates.isEmpty() && candidates.stream().allMatch(kv -> kv.level() == 0);
-    }
-
-    List<KeyValue> candidates() {
-        return Collections.unmodifiableList(candidates);
+    LinkedList<KeyValue> candidates() {
+        return candidates;
     }
 
     public static MergeFunctionFactory<KeyValue> wrap(

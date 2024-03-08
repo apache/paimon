@@ -23,7 +23,8 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
-import java.util.List;
+import java.util.Iterator;
+import java.util.LinkedList;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -86,68 +87,43 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     public ChangelogResult getResult() {
         reusedResult.reset();
 
-        if (mergeFunction.candidatesAllLevel0()) {
-            // in this case, we have to lookup high level record
-            return mergeWithLookupFirst();
-        } else {
-            return mergeWithLookupLater();
-        }
-    }
-
-    private ChangelogResult mergeWithLookupFirst() {
-        // try to find high level record by lookup
-        List<KeyValue> currentKeyValues = mergeFunction.candidates();
-        InternalRow lookupKey = currentKeyValues.get(0).key();
-        KeyValue highLevel = lookup.apply(lookupKey);
-
-        KeyValue result;
-        if (highLevel != null) {
-            mergeFunction2.reset();
-            mergeFunction2.add(highLevel);
-            currentKeyValues.forEach(mergeFunction2::add);
-            result = mergeFunction2.getResult();
-        } else {
-            result = mergeFunction.getResult();
-            if (result == null) {
-                return reusedResult;
+        // 1. Compute the latest high level record and containLevel0 of candidates
+        LinkedList<KeyValue> candidates = mergeFunction.candidates();
+        Iterator<KeyValue> descending = candidates.descendingIterator();
+        KeyValue highLevel = null;
+        boolean containLevel0 = false;
+        while (descending.hasNext()) {
+            KeyValue kv = descending.next();
+            if (kv.level() > 0) {
+                if (highLevel != null) {
+                    descending.remove();
+                } else {
+                    highLevel = kv;
+                }
+            } else {
+                containLevel0 = true;
             }
         }
 
-        setChangelog(highLevel, result);
-        return reusedResult.setResult(result);
-    }
-
-    private ChangelogResult mergeWithLookupLater() {
-        KeyValue result = mergeFunction.getResult();
-        if (result == null) {
-            return reusedResult;
+        // 2. Lookup if latest high level record is absent
+        if (highLevel == null) {
+            InternalRow lookupKey = candidates.get(0).key();
+            highLevel = lookup.apply(lookupKey);
         }
 
-        KeyValue highLevel = mergeFunction.highLevel;
-        boolean containLevel0 = mergeFunction.containLevel0;
-
-        // 1. No level 0, just return
-        if (!containLevel0) {
-            return reusedResult.setResult(result);
-        }
-
-        // 2. With level 0, with the latest high level, return changelog
+        // 3. Calculate result
+        mergeFunction2.reset();
         if (highLevel != null) {
-            setChangelog(highLevel, result);
-            return reusedResult.setResult(result);
-        }
-
-        // 3. Lookup to find the latest high level record
-        highLevel = lookup.apply(result.key());
-
-        if (highLevel != null) {
-            mergeFunction2.reset();
             mergeFunction2.add(highLevel);
-            mergeFunction2.add(result);
-            result = mergeFunction2.getResult();
+        }
+        candidates.forEach(mergeFunction2::add);
+        KeyValue result = mergeFunction2.getResult();
+
+        // 4. Set changelog when there's level-0 records
+        if (containLevel0) {
+            setChangelog(highLevel, result);
         }
 
-        setChangelog(highLevel, result);
         return reusedResult.setResult(result);
     }
 
