@@ -508,14 +508,6 @@ public class HiveCatalog extends AbstractCatalog {
         return table;
     }
 
-    private TableType hiveTableType() {
-        TableType tableType =
-                OptionsUtils.convertToEnum(
-                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
-                        TableType.class);
-        return tableType;
-    }
-
     private void updateHmsTable(Table table, Identifier identifier, TableSchema schema) {
         StorageDescriptor sd = new StorageDescriptor();
 
