@@ -107,7 +107,6 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
         return new InnerTableScanImpl(
                 coreOptions(),
                 newSnapshotReader(),
-                snapshotManager(),
                 DefaultValueAssigner.create(dataTable.schema()));
     }
 

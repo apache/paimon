@@ -131,7 +131,7 @@ public class SchemaManagerTest {
                                                                         "f4"),
                                                                 ""))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Nonexistent sequence field: 'f4'");
+                .hasMessageContaining("Nonexistent sequence fields: '[f4]'");
     }
 
     @Test

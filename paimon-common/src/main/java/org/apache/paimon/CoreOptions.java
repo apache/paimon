@@ -18,6 +18,7 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
@@ -190,6 +191,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The minimum number of completed snapshots to retain. Should be greater than or equal to 1.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
             key("snapshot.num-retained.max")
                     .intType()
@@ -484,26 +486,6 @@ public class CoreOptions implements Serializable {
                             "The field that generates the row kind for primary key table,"
                                     + " the row kind determines which data is '+I', '-U', '+U' or '-D'.");
 
-    public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
-            key("sequence.auto-padding")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
-                                    .list(
-                                            text("You can specific:"),
-                                            text(
-                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-                                            text(
-                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
-                                            text(
-                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
-                                            text(
-                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
-                                    .build());
-
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
                     .enumType(StartupMode.class)
@@ -723,6 +705,7 @@ public class CoreOptions implements Serializable {
                                     + " if there is a need for access, it will be re-read from the DFS to build"
                                     + " an index on the local disk.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_DISK_SIZE =
             key("lookup.cache-max-disk-size")
                     .memoryType()
@@ -1085,6 +1068,12 @@ public class CoreOptions implements Serializable {
                     .memoryType()
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
+
+    public static final ConfigOption<Boolean> COMMIT_FORCE_CREATE_SNAPSHOT =
+            key("commit.force-create-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force create snapshot on commit.");
 
     private final Options options;
 
@@ -1483,20 +1472,12 @@ public class CoreOptions implements Serializable {
         return options.get(DYNAMIC_BUCKET_ASSIGNER_PARALLELISM);
     }
 
-    public Optional<String> sequenceField() {
-        return options.getOptional(SEQUENCE_FIELD);
+    public Optional<List<String>> sequenceField() {
+        return options.getOptional(SEQUENCE_FIELD).map(s -> Arrays.asList(s.split(",")));
     }
 
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
-    }
-
-    public List<String> sequenceAutoPadding() {
-        String padding = options.get(SEQUENCE_AUTO_PADDING);
-        if (padding == null) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(padding.split(","));
     }
 
     public boolean writeOnly() {
@@ -1586,6 +1567,10 @@ public class CoreOptions implements Serializable {
 
     public String sinkWatermarkTimeZone() {
         return options.get(SINK_WATERMARK_TIME_ZONE);
+    }
+
+    public boolean forceCreatingSnapshot() {
+        return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
     }
 
     public Map<String, String> getFieldDefaultValues() {

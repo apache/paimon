@@ -27,7 +27,6 @@ import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.BoundedChecker;
 import org.apache.paimon.table.source.snapshot.CompactionChangelogFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.ContinuousAppendAndCompactFollowUpScanner;
-import org.apache.paimon.table.source.snapshot.ContinuousCompactorFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.DeltaFollowUpScanner;
 import org.apache.paimon.table.source.snapshot.FollowUpScanner;
 import org.apache.paimon.table.source.snapshot.InputChangelogFollowUpScanner;
@@ -169,13 +168,13 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                     && supportStreamingReadOverwrite) {
                 LOG.debug("Find overwrite snapshot id {}.", nextSnapshotId);
                 SnapshotReader.Plan overwritePlan =
-                        followUpScanner.getOverwriteChangesPlan(nextSnapshotId, snapshotReader);
+                        followUpScanner.getOverwriteChangesPlan(snapshot, snapshotReader);
                 currentWatermark = overwritePlan.watermark();
                 nextSnapshotId++;
                 return overwritePlan;
             } else if (followUpScanner.shouldScanSnapshot(snapshot)) {
                 LOG.debug("Find snapshot id {}.", nextSnapshotId);
-                SnapshotReader.Plan plan = followUpScanner.scan(nextSnapshotId, snapshotReader);
+                SnapshotReader.Plan plan = followUpScanner.scan(snapshot, snapshotReader);
                 currentWatermark = plan.watermark();
                 nextSnapshotId++;
                 return plan;
@@ -190,7 +189,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 options.toConfiguration().get(CoreOptions.STREAM_SCAN_MODE);
         switch (type) {
             case COMPACT_BUCKET_TABLE:
-                return new ContinuousCompactorFollowUpScanner();
+                return new DeltaFollowUpScanner();
             case COMPACT_APPEND_NO_BUCKET:
                 return new ContinuousAppendAndCompactFollowUpScanner();
             case FILE_MONITOR:

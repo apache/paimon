@@ -44,6 +44,10 @@ public class KeyProjectedRow implements InternalRow {
         return this;
     }
 
+    public int[] indexMapping() {
+        return indexMapping;
+    }
+
     @Override
     public int getFieldCount() {
         return indexMapping.length;

@@ -69,32 +69,9 @@ public class TagManager {
         return new Path(tablePath + "/tag/" + TAG_PREFIX + tagName);
     }
 
-    /** Return the path of tag directory in branch. */
-    public Path branchTagDirectory(String branchName) {
-        return new Path(getBranchPath(tablePath, branchName) + "/tag");
-    }
-
     /** Return the path of a tag in branch. */
     public Path branchTagPath(String branchName, String tagName) {
         return new Path(getBranchPath(tablePath, branchName) + "/tag/" + TAG_PREFIX + tagName);
-    }
-
-    public List<String> branchTags(String branchName) {
-        try {
-            List<Path> tagPaths =
-                    listVersionedFileStatus(
-                                    fileIO,
-                                    new Path(getBranchPath(tablePath, branchName) + "/tag/"),
-                                    TAG_PREFIX)
-                            .map(FileStatus::getPath)
-                            .collect(Collectors.toList());
-            checkArgument(tagPaths.size() > 0, "There should be at least one tag in the branch.");
-            return tagPaths.stream()
-                    .map(p -> p.getName().substring(TAG_PREFIX.length()))
-                    .collect(Collectors.toList());
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     /** Create a tag from given snapshot and save it in the storage. */

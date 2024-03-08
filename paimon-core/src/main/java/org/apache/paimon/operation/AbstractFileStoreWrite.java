@@ -22,7 +22,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.DataFileMeta;
@@ -31,12 +30,10 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
-import org.apache.paimon.operation.metrics.WriterMetrics;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.ExecutorThreadFactory;
-import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -77,10 +74,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private boolean closeCompactExecutorWhenLeaving = true;
     private boolean ignorePreviousFiles = false;
     protected boolean isStreamingMode = false;
-    private MetricRegistry metricRegistry = null;
 
+    protected CompactionMetrics compactionMetrics = null;
     protected final String tableName;
-    private final FileStorePathFactory pathFactory;
 
     protected AbstractFileStoreWrite(
             String commitUser,
@@ -88,7 +84,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             FileStoreScan scan,
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             String tableName,
-            FileStorePathFactory pathFactory,
             int writerNumberMax) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
@@ -97,7 +92,6 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
         this.writers = new HashMap<>();
         this.tableName = tableName;
-        this.pathFactory = pathFactory;
         this.writerNumberMax = writerNumberMax;
     }
 
@@ -211,7 +205,11 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
                 result.add(committable);
 
                 if (committable.isEmpty()) {
-                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier) {
+                    // Condition 1: There is no more record waiting to be committed.
+                    // Condition 2: No compaction is in progress. That is, no more changelog will be
+                    // produced.
+                    if (writerContainer.lastModifiedCommitIdentifier <= latestCommittedIdentifier
+                            && !writerContainer.writer.isCompacting()) {
                         // Clear writer if no update, and if its latest modification has committed.
                         //
                         // We need a mechanism to clear writers, otherwise there will be more and
@@ -254,6 +252,9 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         writers.clear();
         if (lazyCompactExecutor != null && closeCompactExecutorWhenLeaving) {
             lazyCompactExecutor.shutdownNow();
+        }
+        if (compactionMetrics != null) {
+            compactionMetrics.close();
         }
     }
 
@@ -372,35 +373,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public FileStoreWrite<T> withMetricRegistry(MetricRegistry metricRegistry) {
-        this.metricRegistry = metricRegistry;
+        this.compactionMetrics = new CompactionMetrics(metricRegistry, tableName);
         return this;
-    }
-
-    @Nullable
-    public CompactionMetrics getCompactionMetrics(BinaryRow partition, int bucket) {
-        if (metricRegistry != null) {
-            return new CompactionMetrics(
-                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
-        }
-        return null;
-    }
-
-    @Nullable
-    public WriterMetrics getWriterMetrics(BinaryRow partition, int bucket) {
-        if (this.metricRegistry != null) {
-            return new WriterMetrics(
-                    metricRegistry, tableName, getPartitionString(pathFactory, partition), bucket);
-        }
-        return null;
-    }
-
-    private String getPartitionString(FileStorePathFactory pathFactory, BinaryRow partition) {
-        String partitionStr =
-                pathFactory.getPartitionString(partition).replace(Path.SEPARATOR, "_");
-        if (partitionStr.length() > 0) {
-            return partitionStr.substring(0, partitionStr.length() - 1);
-        }
-        return "_";
     }
 
     private List<DataFileMeta> scanExistingFileMetas(

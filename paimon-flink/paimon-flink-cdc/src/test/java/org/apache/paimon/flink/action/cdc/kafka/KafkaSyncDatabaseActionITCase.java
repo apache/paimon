@@ -20,7 +20,6 @@ package org.apache.paimon.flink.action.cdc.kafka;
 
 import org.apache.paimon.catalog.FileSystemCatalogOptions;
 import org.apache.paimon.table.FileStoreTable;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
@@ -36,6 +35,7 @@ import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** IT cases for {@link KafkaSyncDatabaseAction}. */
@@ -216,7 +216,7 @@ public class KafkaSyncDatabaseActionITCase extends KafkaActionITCaseBase {
 
         assertThatThrownBy(action::run)
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 IllegalArgumentException.class,
                                 "kafka_conf must and can only set one of the following options: topic,topic-pattern."));
     }

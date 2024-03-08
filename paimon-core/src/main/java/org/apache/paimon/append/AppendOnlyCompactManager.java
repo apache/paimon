@@ -25,6 +25,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.compact.CompactTask;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.MetricUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -59,7 +60,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     private List<DataFileMeta> compacting;
 
-    @Nullable private final CompactionMetrics metrics;
+    @Nullable private final CompactionMetrics.Reporter metricsReporter;
 
     public AppendOnlyCompactManager(
             ExecutorService executor,
@@ -68,7 +69,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
             int maxFileNum,
             long targetFileSize,
             CompactRewriter rewriter,
-            @Nullable CompactionMetrics metrics) {
+            @Nullable CompactionMetrics.Reporter metricsReporter) {
         this.executor = executor;
         this.toCompact = new TreeSet<>(fileComparator(false));
         this.toCompact.addAll(restored);
@@ -76,7 +77,7 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         this.maxFileNum = maxFileNum;
         this.targetFileSize = targetFileSize;
         this.rewriter = rewriter;
-        this.metrics = metrics;
+        this.metricsReporter = metricsReporter;
     }
 
     @Override
@@ -98,7 +99,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         }
 
         taskFuture =
-                executor.submit(new FullCompactTask(toCompact, targetFileSize, rewriter, metrics));
+                executor.submit(
+                        new FullCompactTask(toCompact, targetFileSize, rewriter, metricsReporter));
         compacting = new ArrayList<>(toCompact);
         toCompact.clear();
     }
@@ -110,7 +112,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         Optional<List<DataFileMeta>> picked = pickCompactBefore();
         if (picked.isPresent()) {
             compacting = picked.get();
-            taskFuture = executor.submit(new AutoCompactTask(compacting, rewriter, metrics));
+            taskFuture =
+                    executor.submit(new AutoCompactTask(compacting, rewriter, metricsReporter));
         }
     }
 
@@ -196,8 +199,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
 
     @Override
     public void close() throws IOException {
-        if (metrics != null) {
-            metrics.close();
+        if (metricsReporter != null) {
+            MetricUtils.safeCall(metricsReporter::unregister, LOG);
         }
     }
 
@@ -212,8 +215,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
                 Collection<DataFileMeta> inputs,
                 long targetFileSize,
                 CompactRewriter rewriter,
-                @Nullable CompactionMetrics metrics) {
-            super(metrics);
+                @Nullable CompactionMetrics.Reporter metricsReporter) {
+            super(metricsReporter);
             this.inputs = new LinkedList<>(inputs);
             this.targetFileSize = targetFileSize;
             this.rewriter = rewriter;
@@ -268,8 +271,8 @@ public class AppendOnlyCompactManager extends CompactFutureManager {
         public AutoCompactTask(
                 List<DataFileMeta> toCompact,
                 CompactRewriter rewriter,
-                @Nullable CompactionMetrics metrics) {
-            super(metrics);
+                @Nullable CompactionMetrics.Reporter metricsReporter) {
+            super(metricsReporter);
             this.toCompact = toCompact;
             this.rewriter = rewriter;
         }

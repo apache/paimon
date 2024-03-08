@@ -38,7 +38,6 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.query.LocalTableQuery;
 import org.apache.paimon.table.sink.RowKindGenerator;
-import org.apache.paimon.table.sink.SequenceGenerator;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.KeyValueTableRead;
@@ -75,7 +74,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
     }
 
     @Override
-    protected FileStoreTable copy(TableSchema newTableSchema) {
+    public FileStoreTable copy(TableSchema newTableSchema) {
         return new PrimaryKeyFileStoreTable(fileIO, path, newTableSchema, catalogEnvironment);
     }
 
@@ -187,23 +186,18 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
             String commitUser, ManifestCacheFilter manifestFilter) {
         TableSchema schema = schema();
         CoreOptions options = store().options();
-        final SequenceGenerator sequenceGenerator = SequenceGenerator.create(schema, options);
-        final RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
-        final KeyValue kv = new KeyValue();
+        RowKindGenerator rowKindGenerator = RowKindGenerator.create(schema, options);
+        KeyValue kv = new KeyValue();
         return new TableWriteImpl<>(
                 store().newWrite(commitUser, manifestFilter),
                 createRowKeyExtractor(),
                 record -> {
                     InternalRow row = record.row();
-                    long sequenceNumber =
-                            sequenceGenerator == null
-                                    ? KeyValue.UNKNOWN_SEQUENCE
-                                    : sequenceGenerator.generate(row);
                     RowKind rowKind =
                             rowKindGenerator == null
                                     ? row.getRowKind()
                                     : rowKindGenerator.generate(row);
-                    return kv.replace(record.primaryKey(), sequenceNumber, rowKind, row);
+                    return kv.replace(record.primaryKey(), KeyValue.UNKNOWN_SEQUENCE, rowKind, row);
                 });
     }
 

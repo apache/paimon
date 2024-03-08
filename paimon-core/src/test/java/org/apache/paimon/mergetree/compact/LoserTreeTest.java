@@ -20,7 +20,6 @@ package org.apache.paimon.mergetree.compact;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.ReusingTestData;
 import org.apache.paimon.utils.TestReusingRecordReader;
 
@@ -37,6 +36,7 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -60,7 +60,7 @@ public class LoserTreeTest {
             checkLoserTree(
                     loserTree,
                     kv -> {
-                        assertThat(expectedIterator.hasNext());
+                        assertThat(expectedIterator.hasNext()).isTrue();
                         expectedIterator.next().assertEquals(kv);
                     });
             assertThat(expectedIterator.hasNext()).isFalse();
@@ -88,7 +88,7 @@ public class LoserTreeTest {
         LoserTree<KeyValue> loserTree =
                 new LoserTree<>(sortedTestReaders, KEY_COMPARATOR, SEQUENCE_COMPARATOR);
         assertThatThrownBy(() -> checkLoserTree(loserTree, kv -> {}))
-                .satisfies(AssertionUtils.anyCauseMatches(IOException.class));
+                .satisfies(anyCauseMatches(IOException.class));
         assertThatCode(loserTree::close).doesNotThrowAnyException();
     }
 

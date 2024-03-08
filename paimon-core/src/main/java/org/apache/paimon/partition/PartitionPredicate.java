@@ -30,6 +30,8 @@ import org.apache.paimon.statistics.FullFieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
+import javax.annotation.Nullable;
+
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -42,11 +44,21 @@ public interface PartitionPredicate {
     boolean test(
             long rowCount, InternalRow minValues, InternalRow maxValues, InternalArray nullCounts);
 
-    static PartitionPredicate fromPredicate(Predicate predicate) {
+    @Nullable
+    static PartitionPredicate fromPredicate(RowType partitionType, Predicate predicate) {
+        if (partitionType.getFieldCount() == 0 || predicate == null) {
+            return null;
+        }
+
         return new DefaultPartitionPredicate(predicate);
     }
 
+    @Nullable
     static PartitionPredicate fromMultiple(RowType partitionType, List<BinaryRow> partitions) {
+        if (partitionType.getFieldCount() == 0 || partitions.isEmpty()) {
+            return null;
+        }
+
         return new MultiplePartitionPredicate(
                 new RowDataToObjectArrayConverter(partitionType), new HashSet<>(partitions));
     }

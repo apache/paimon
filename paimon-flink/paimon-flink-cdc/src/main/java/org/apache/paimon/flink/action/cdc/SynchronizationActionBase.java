@@ -26,6 +26,7 @@ import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.common.functions.FlatMapFunction;
@@ -170,6 +171,12 @@ public abstract class SynchronizationActionBase extends ActionBase {
     protected abstract void buildSink(
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
+
+    protected FileStoreTable copyOptionsWithoutBucket(FileStoreTable table) {
+        Map<String, String> toCopy = new HashMap<>(tableConfig);
+        toCopy.remove(CoreOptions.BUCKET.key());
+        return table.copy(toCopy);
+    }
 
     @Override
     public void run() throws Exception {

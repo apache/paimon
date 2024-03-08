@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,6 @@ package org.apache.paimon.hive;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.hive.runner.PaimonEmbeddedHiveRunner;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 
 import com.klarna.hiverunner.annotations.HiveRunnerSetup;
 import com.klarna.hiverunner.config.HiveRunnerConfig;
@@ -38,6 +37,7 @@ import java.util.Arrays;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_IN_TEST;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_SUPPORT_CONCURRENCY;
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.HIVE_TXN_MANAGER;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -140,7 +140,7 @@ public class Hive31CatalogITCase extends HiveCatalogITCaseBase {
 
         assertThatThrownBy(() -> tEnv.executeSql("ALTER TABLE alter_failed_table SET ('aa'='bb')"))
                 .satisfies(
-                        AssertionUtils.anyCauseMatches(
+                        anyCauseMatches(
                                 TableException.class,
                                 "Could not execute AlterTable in path `my_alter_hive`.`test_db`.`alter_failed_table`"));
 

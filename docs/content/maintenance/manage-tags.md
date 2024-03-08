@@ -63,7 +63,7 @@ Example, configure table to create a tag at 0:10 every day, with a maximum reten
 
 ```sql
 -- Flink SQL
-CREATE TABLE T (
+CREATE TABLE t (
     k INT PRIMARY KEY NOT ENFORCED,
     f0 INT,
     ...
@@ -74,18 +74,18 @@ CREATE TABLE T (
     'tag.num-retained-max' = '90'
 );
 
-INSERT INTO T SELECT ...;
+INSERT INTO t SELECT ...;
 
 -- Spark SQL
 
 -- Read latest snapshot
-SELECT * FROM T;
+SELECT * FROM t;
 
 -- Read Tag snapshot
-SELECT * FROM T VERSION AS OF '2023-07-26';
+SELECT * FROM t VERSION AS OF '2023-07-26';
 
 -- Read Incremental between Tags
-SELECT * FROM paimon_incremental_query('T', '2023-07-25', '2023-07-26');
+SELECT * FROM paimon_incremental_query('t', '2023-07-25', '2023-07-26');
 ```
 
 See [Query Tables]({{< ref "how-to/querying-tables" >}}) to see more query for engines.
@@ -103,7 +103,7 @@ You can create a tag with given name and snapshot ID.
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    create-tag \
+    create_tag \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
@@ -135,12 +135,12 @@ public class CreateTag {
 {{< tab "Spark" >}}
 Run the following sql:
 ```sql
-CALL create_tag(table => 'test.T', tag => 'test_tag', snapshot => 2);
+CALL create_tag(table => 'test.t', tag => 'test_tag', snapshot => 2);
 ```
 
 To create a tag based on the latest snapshot id, run the following sql:
 ```sql
-CALL create_tag(table => 'test.T', tag => 'test_tag');
+CALL create_tag(table => 'test.t', tag => 'test_tag');
 ```
 
 {{< /tab >}}
@@ -160,7 +160,7 @@ Run the following command:
 ```bash
 <FLINK_HOME>/bin/flink run \
     /path/to/paimon-flink-action-{{< version >}}.jar \
-    delete-tag \
+    delete_tag \
     --warehouse <warehouse-path> \
     --database <database-name> \ 
     --table <table-name> \
@@ -190,7 +190,7 @@ public class DeleteTag {
 {{< tab "Spark" >}}
 Run the following sql:
 ```sql
-CALL delete_tag(table => 'test.T', tag => 'test_tag');
+CALL delete_tag(table => 'test.t', tag => 'test_tag');
 ```
 
 {{< /tab >}}
@@ -251,7 +251,7 @@ public class RollbackTo {
 Run the following sql:
 
 ```sql
-CALL rollback(table => 'test.T', version => '2');
+CALL rollback(table => 'test.t', version => '2');
 ```
 
 {{< /tab >}}

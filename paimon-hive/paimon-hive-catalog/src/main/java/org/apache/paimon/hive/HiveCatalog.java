@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -148,10 +148,15 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.Factory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(HiveCatalogLock.createFactory(hiveConf, clientClassName))
-                : Optional.empty();
+    public Optional<CatalogLock.LockFactory> lockFactory() {
+        return lockEnabled() ? Optional.of(HiveCatalogLock.createFactory()) : Optional.empty();
+    }
+
+    @Override
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(
+                new HiveCatalogLock.HiveLockContext(
+                        new SerializableHiveConf(hiveConf), clientClassName));
     }
 
     private boolean lockEnabled() {

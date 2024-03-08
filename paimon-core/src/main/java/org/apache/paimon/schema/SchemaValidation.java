@@ -164,13 +164,13 @@ public class SchemaValidation {
             }
         }
 
-        Optional<String> sequenceField = options.sequenceField();
+        Optional<List<String>> sequenceField = options.sequenceField();
         sequenceField.ifPresent(
-                field ->
+                fields ->
                         checkArgument(
-                                schema.fieldNames().contains(field),
-                                "Nonexistent sequence field: '%s'",
-                                field));
+                                schema.fieldNames().containsAll(fields),
+                                "Nonexistent sequence fields: '%s'",
+                                fields));
 
         Optional<String> rowkindField = options.rowkindField();
         rowkindField.ifPresent(
@@ -181,11 +181,13 @@ public class SchemaValidation {
                                 field));
 
         sequenceField.ifPresent(
-                field ->
-                        checkArgument(
-                                options.fieldAggFunc(field) == null,
-                                "Should not define aggregation on sequence field: '%s'",
-                                field));
+                fields ->
+                        fields.forEach(
+                                field ->
+                                        checkArgument(
+                                                options.fieldAggFunc(field) == null,
+                                                "Should not define aggregation on sequence field: '%s'",
+                                                field)));
 
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
         if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {

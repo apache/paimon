@@ -34,7 +34,7 @@ Currently, Flink, Spark and Trino supports querying system tables.
 
 In some cases, the table name needs to be enclosed with back quotes to avoid syntax parsing conflicts, for example triple access mode:
 ```sql
-SELECT * FROM my_catalog.my_db.`MyTable$snapshots`;
+SELECT * FROM my_catalog.my_db.`my_table$snapshots`;
 ```
 
 ### Snapshots Table
@@ -42,15 +42,15 @@ SELECT * FROM my_catalog.my_db.`MyTable$snapshots`;
 You can query the snapshot history information of the table through snapshots table, including the record count occurred in the snapshot.
 
 ```sql
-SELECT * FROM MyTable$snapshots;
+SELECT * FROM my_table$snapshots;
 
 /*
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+-------------------+--------------------+----------------+
-|  snapshot_id |  schema_id |     commit_user | commit_identifier |  commit_kind |             commit_time |             base_manifest_list |            delta_manifest_list |        changelog_manifest_list |  total_record_count |  delta_record_count |  changelog_record_count |  added_file_count |  delete_file_count |      watermark |
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+-------------------+--------------------+----------------+
-|            2 |          0 | 7ca4cd28-98e... |                 2 |       APPEND | 2022-10-26 11:44:15.600 | manifest-list-31323d5f-76e6... | manifest-list-31323d5f-76e6... | manifest-list-31323d5f-76e6... |                   2 |                   2 |                       0 |                 2 |                  0 |  1666755855600 |
-|            1 |          0 | 870062aa-3e9... |                 1 |       APPEND | 2022-10-26 11:44:15.148 | manifest-list-31593d5f-76e6... | manifest-list-31593d5f-76e6... | manifest-list-31593d5f-76e6... |                   1 |                   1 |                       0 |                 1 |                  0 |  1666755855148 |
-+--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+-------------------+--------------------+----------------+
++--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+----------------+
+|  snapshot_id |  schema_id |     commit_user | commit_identifier |  commit_kind |             commit_time |             base_manifest_list |            delta_manifest_list |        changelog_manifest_list |  total_record_count |  delta_record_count |  changelog_record_count |      watermark |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+----------------+
+|            2 |          0 | 7ca4cd28-98e... |                 2 |       APPEND | 2022-10-26 11:44:15.600 | manifest-list-31323d5f-76e6... | manifest-list-31323d5f-76e6... | manifest-list-31323d5f-76e6... |                   2 |                   2 |                       0 |  1666755855600 |
+|            1 |          0 | 870062aa-3e9... |                 1 |       APPEND | 2022-10-26 11:44:15.148 | manifest-list-31593d5f-76e6... | manifest-list-31593d5f-76e6... | manifest-list-31593d5f-76e6... |                   1 |                   1 |                       0 |  1666755855148 |
++--------------+------------+-----------------+-------------------+--------------+-------------------------+--------------------------------+------------------------------- +--------------------------------+---------------------+---------------------+-------------------------+----------------+
 2 rows in set
 */
 ```
@@ -62,7 +62,7 @@ By querying the snapshots table, you can know the commit and expiration informat
 You can query the historical schemas of the table through schemas table.
 
 ```sql
-SELECT * FROM MyTable$schemas;
+SELECT * FROM my_table$schemas;
 
 /*
 +-----------+--------------------------------+----------------+--------------+---------+---------+-------------------------+
@@ -80,7 +80,7 @@ You can join the snapshots table and schemas table to get the fields of given sn
 
 ```sql
 SELECT s.snapshot_id, t.schema_id, t.fields 
-    FROM MyTable$snapshots s JOIN MyTable$schemas t 
+    FROM my_table$snapshots s JOIN my_table$schemas t 
     ON s.schema_id=t.schema_id where s.snapshot_id=100;
 ```
 
@@ -89,7 +89,7 @@ SELECT s.snapshot_id, t.schema_id, t.fields
 You can query the table's option information which is specified from the DDL through options table. The options not shown will be the default value. You can take reference to [Configuration]({{< ref "maintenance/configurations#coreoptions" >}}).
 
 ```sql
-SELECT * FROM MyTable$options;
+SELECT * FROM my_table$options;
 
 /*
 +------------------------+--------------------+
@@ -114,7 +114,7 @@ There are four values for `rowkind`:
 - `-D`: Deletion operation.
 
 ```sql
-SELECT * FROM MyTable$audit_log;
+SELECT * FROM my_table$audit_log;
 
 /*
 +------------------+-----------------+-----------------+
@@ -150,7 +150,7 @@ For append tables, as all files can be read without merging,
 `ro` system table acts like the normal append table.
 
 ```sql
-SELECT * FROM MyTable$ro;
+SELECT * FROM my_table$ro;
 ```
 
 ### Files Table
@@ -158,7 +158,7 @@ You can query the files of the table with specific snapshot.
 
 ```sql
 -- Query the files of latest snapshot
-SELECT * FROM MyTable$files;
+SELECT * FROM my_table$files;
 
 /*
 +-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+------------------------+-------------------------+-------------------------+---------------------+---------------------+-----------------------+
@@ -175,7 +175,7 @@ SELECT * FROM MyTable$files;
 */
 
 -- You can also query the files with specific snapshot
-SELECT * FROM MyTable$files /*+ OPTIONS('scan.snapshot-id'='1') */;
+SELECT * FROM my_table$files /*+ OPTIONS('scan.snapshot-id'='1') */;
 
 /*
 +-----------+--------+--------------------------------+-------------+-----------+-------+--------------+--------------------+---------+---------+------------------------+-------------------------+-------------------------+---------------------+---------------------+-----------------------+
@@ -195,7 +195,7 @@ You can query the tag history information of the table through tags table, inclu
 and some historical information of the snapshots. You can also get all tag names and time travel to a specific tag data by name.
 
 ```sql
-SELECT * FROM MyTable$tags;
+SELECT * FROM my_table$tags;
 
 /*
 +----------+-------------+-----------+-------------------------+--------------+--------------+
@@ -213,7 +213,7 @@ SELECT * FROM MyTable$tags;
 You can query all consumers which contains next snapshot.
 
 ```sql
-SELECT * FROM MyTable$consumers;
+SELECT * FROM my_table$consumers;
 
 /*
 +-------------+------------------+
@@ -232,7 +232,7 @@ You can query all manifest files contained in the latest snapshot or the specifi
 
 ```sql
 -- Query the manifest of latest snapshot
-SELECT * FROM MyTable$manifests;
+SELECT * FROM my_table$manifests;
 
 /*
 +--------------------------------+-------------+------------------+-------------------+---------------+
@@ -245,7 +245,7 @@ SELECT * FROM MyTable$manifests;
 */
 
 -- You can also query the manifest with specified snapshot
-SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
+SELECT * FROM my_table$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 /*
 +--------------------------------+-------------+------------------+-------------------+---------------+
 |                      file_name |   file_size |  num_added_files | num_deleted_files |     schema_id |
@@ -261,7 +261,7 @@ SELECT * FROM MyTable$manifests /*+ OPTIONS('scan.snapshot-id'='1') */;
 You can query the historical aggregation of the table through aggregation fields table.
 
 ```sql
-SELECT * FROM MyTable$aggregation_fields;
+SELECT * FROM my_table$aggregation_fields;
 
 /*
 +------------+-----------------+--------------+--------------------------------+---------+
@@ -280,7 +280,7 @@ SELECT * FROM MyTable$aggregation_fields;
 You can query the partition files of the table.
 
 ```sql
-SELECT * FROM MyTable$partitions;
+SELECT * FROM my_table$partitions;
 
 /*
 +---------------+----------------+--------------------+

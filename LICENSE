@@ -237,6 +237,8 @@ paimon-service/paimon-service-client/src/main/java/org/apache/paimon/service/net
 paimon-service/paimon-service-client/src/main/java/org/apache/paimon/service/network/NetworkServer.java
 from http://flink.apache.org/ version 1.17.0
 
+paimon-common/src/main/java/org/apache/paimon/client/ClientPool.java
+paimon-core/src/main/java/org/apache/paimon/jdbc/JdbcCatalog.java
 paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
 paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java

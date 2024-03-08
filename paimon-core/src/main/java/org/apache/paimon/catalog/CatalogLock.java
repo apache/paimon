@@ -19,6 +19,7 @@
 package org.apache.paimon.catalog;
 
 import org.apache.paimon.annotation.Public;
+import org.apache.paimon.factories.Factory;
 
 import java.io.Closeable;
 import java.io.Serializable;
@@ -36,7 +37,10 @@ public interface CatalogLock extends Closeable {
     <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
 
     /** Factory to create {@link CatalogLock}. */
-    interface Factory extends Serializable {
-        CatalogLock create();
+    interface LockFactory extends Factory, Serializable {
+        CatalogLock create(LockContext context);
     }
+
+    /** Context for lock factory to create lock. */
+    interface LockContext extends Serializable {}
 }

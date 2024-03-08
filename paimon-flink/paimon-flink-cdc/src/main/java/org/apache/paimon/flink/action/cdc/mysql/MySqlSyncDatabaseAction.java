@@ -155,7 +155,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                table = table.copy(tableConfig);
+                table = copyOptionsWithoutBucket(table);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -174,7 +174,8 @@ public class PaimonRecordReader implements RecordReader<Void, RowDataContainer> 
     }
 
     public static RecordReader<Void, RowDataContainer> createRecordReader(
-            FileStoreTable table, PaimonInputSplit split, JobConf jobConf) throws IOException {
+            PaimonInputSplit split, JobConf jobConf) throws IOException {
+        FileStoreTable table = split.getTable();
         ReadBuilder readBuilder = table.newReadBuilder();
         createPredicate(table.schema(), jobConf, true).ifPresent(readBuilder::withFilter);
         List<String> paimonColumns = table.schema().fieldNames();

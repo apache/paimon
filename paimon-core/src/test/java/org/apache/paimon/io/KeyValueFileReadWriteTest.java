@@ -25,6 +25,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
@@ -33,7 +34,6 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
-import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataType;
@@ -60,6 +60,7 @@ import java.util.function.Function;
 import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
+import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -338,10 +339,6 @@ public class KeyValueFileReadWriteTest {
 
     private void checkRollingFiles(
             DataFileMeta expected, List<DataFileMeta> actual, long suggestedFileSize) {
-        FieldStatsArraySerializer keyStatsConverter = new FieldStatsArraySerializer(KEY_TYPE);
-        FieldStatsArraySerializer valueStatsConverter =
-                new FieldStatsArraySerializer(DEFAULT_ROW_TYPE);
-
         // all but last file should be no smaller than suggestedFileSize
         for (int i = 0; i + 1 < actual.size(); i++) {
             assertThat(actual.get(i).fileSize() >= suggestedFileSize).isTrue();
@@ -358,19 +355,20 @@ public class KeyValueFileReadWriteTest {
         assertThat(actual.get(actual.size() - 1).maxKey()).isEqualTo(expected.maxKey());
 
         // check stats
+        FieldStats[] keyStats = convertWithoutSchemaEvolution(expected.keyStats(), KEY_TYPE);
         for (int i = 0; i < KEY_TYPE.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    keyStatsConverter.fromBinary(expected.keyStats())[i],
+                    keyStats[i],
                     actual,
-                    m -> keyStatsConverter.fromBinary(m.keyStats())[idx]);
+                    m -> convertWithoutSchemaEvolution(m.keyStats(), KEY_TYPE)[idx]);
         }
         for (int i = 0; i < DEFAULT_ROW_TYPE.getFieldCount(); i++) {
             int idx = i;
             StatsTestUtils.checkRollingFileStats(
-                    valueStatsConverter.fromBinary(expected.valueStats())[i],
+                    convertWithoutSchemaEvolution(expected.valueStats(), DEFAULT_ROW_TYPE)[i],
                     actual,
-                    m -> valueStatsConverter.fromBinary(m.valueStats())[idx]);
+                    m -> convertWithoutSchemaEvolution(m.valueStats(), DEFAULT_ROW_TYPE)[idx]);
         }
 
         // expected.minSequenceNumber == min(minSequenceNumber)

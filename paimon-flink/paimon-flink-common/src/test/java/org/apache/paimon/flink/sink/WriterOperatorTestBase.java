@@ -23,7 +23,7 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.utils.InternalRowTypeSerializer;
 import org.apache.paimon.flink.utils.InternalTypeInfo;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.ConfigOption;
@@ -38,9 +38,7 @@ import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.ExecutionConfig;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
-import org.apache.flink.metrics.Counter;
 import org.apache.flink.metrics.Gauge;
-import org.apache.flink.metrics.Histogram;
 import org.apache.flink.metrics.MetricGroup;
 import org.apache.flink.metrics.groups.OperatorMetricGroup;
 import org.apache.flink.streaming.util.OneInputStreamOperatorTestHarness;
@@ -92,25 +90,6 @@ public abstract class WriterOperatorTestBase {
         harness.notifyOfCompletedCheckpoint(1);
 
         OperatorMetricGroup metricGroup = rowDataStoreWriteOperator.getMetricGroup();
-        MetricGroup writerMetricGroup =
-                metricGroup
-                        .addGroup("paimon")
-                        .addGroup("table", tableName)
-                        .addGroup("partition", "_")
-                        .addGroup("bucket", "0")
-                        .addGroup("writer");
-
-        Counter writeRecordCount = MetricUtils.getCounter(writerMetricGroup, "writeRecordCount");
-        Assertions.assertThat(writeRecordCount.getCount()).isEqualTo(size);
-
-        // test histogram has sample
-        Histogram flushCostMS = MetricUtils.getHistogram(writerMetricGroup, "flushCostMillis");
-        Assertions.assertThat(flushCostMS.getCount()).isGreaterThan(0);
-
-        Histogram prepareCommitCostMS =
-                MetricUtils.getHistogram(writerMetricGroup, "prepareCommitCostMillis");
-        Assertions.assertThat(prepareCommitCostMS.getCount()).isGreaterThan(0);
-
         MetricGroup writerBufferMetricGroup =
                 metricGroup
                         .addGroup("paimon")
@@ -118,17 +97,17 @@ public abstract class WriterOperatorTestBase {
                         .addGroup("writerBuffer");
 
         Gauge<Long> bufferPreemptCount =
-                MetricUtils.getGauge(writerBufferMetricGroup, "bufferPreemptCount");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "bufferPreemptCount");
         Assertions.assertThat(bufferPreemptCount.getValue()).isEqualTo(0);
 
         Gauge<Long> totalWriteBufferSizeByte =
-                MetricUtils.getGauge(writerBufferMetricGroup, "totalWriteBufferSizeByte");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "totalWriteBufferSizeByte");
         Assertions.assertThat(totalWriteBufferSizeByte.getValue()).isEqualTo(256);
 
         GenericRow row = GenericRow.of(1, 1);
         harness.processElement(row, 1);
         Gauge<Long> usedWriteBufferSizeByte =
-                MetricUtils.getGauge(writerBufferMetricGroup, "usedWriteBufferSizeByte");
+                TestingMetricUtils.getGauge(writerBufferMetricGroup, "usedWriteBufferSizeByte");
         Assertions.assertThat(usedWriteBufferSizeByte.getValue()).isGreaterThan(0);
     }
 

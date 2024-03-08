@@ -259,6 +259,9 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         /** The number of rows that have been reading, including the current in flight row group. */
         private long totalCountLoadedSoFar;
 
+        /** The current row's position in the file. */
+        private long currentRowPosition;
+
         /**
          * For each request column, the reader to read this column. This is NULL if this column is
          * missing from the file, in which case we populate the attribute with NULL.
@@ -277,6 +280,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             this.pool = pool;
             this.rowsReturned = 0;
             this.totalCountLoadedSoFar = 0;
+            this.currentRowPosition = 0;
         }
 
         @Nullable
@@ -284,12 +288,13 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         public RecordIterator<InternalRow> readBatch() throws IOException {
             final ParquetReaderBatch batch = getCachedEntry();
 
+            long rowNumber = currentRowPosition;
             if (!nextBatch(batch)) {
                 batch.recycle();
                 return null;
             }
 
-            return batch.convertAndGetIterator();
+            return batch.convertAndGetIterator(rowNumber);
         }
 
         /** Advances to the next batch of rows. Returns false if there are no more. */
@@ -315,6 +320,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
                 }
             }
             rowsReturned += num;
+            currentRowPosition += num;
             batch.columnarBatch.setNumRows(num);
             return true;
         }
@@ -392,8 +398,8 @@ public class ParquetReaderFactory implements FormatReaderFactory {
             recycler.recycle(this);
         }
 
-        public RecordIterator<InternalRow> convertAndGetIterator() {
-            result.set(columnarBatch.getNumRows());
+        public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
+            result.reset(columnarBatch.getNumRows(), rowNumber);
             return result;
         }
     }

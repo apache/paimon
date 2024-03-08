@@ -81,6 +81,12 @@ under the License.
             <td>Whether to force a compaction before commit.</td>
         </tr>
         <tr>
+            <td><h5>commit.force-create-snapshot</h5></td>
+            <td style="word-wrap: break-word;">false</td>
+            <td>Boolean</td>
+            <td>Whether to force create snapshot on commit.</td>
+        </tr>
+        <tr>
             <td><h5>compaction.max-size-amplification-percent</h5></td>
             <td style="word-wrap: break-word;">200</td>
             <td>Integer</td>
@@ -263,7 +269,7 @@ Mainly to resolve data skew on primary keys. We recommend starting with 64 mb wh
         </tr>
         <tr>
             <td><h5>lookup.cache-max-disk-size</h5></td>
-            <td style="word-wrap: break-word;">9223372036854775807 bytes</td>
+            <td style="word-wrap: break-word;">infinite</td>
             <td>MemorySize</td>
             <td>Max disk size for lookup cache, you can use this option to limit the use of local disks.</td>
         </tr>
@@ -528,12 +534,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Optional timestamp used in case of "from-timestamp" scan mode. If there is no snapshot earlier than this time, the earliest snapshot will be chosen.</td>
         </tr>
         <tr>
-            <td><h5>sequence.auto-padding</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>Specify the way of padding precision, if the provided sequence field is used to indicate "time" but doesn't meet the precise.<ul><li>You can specific:</li><li>1. "row-kind-flag": Pads a bit flag to indicate whether it is retract (0) or add (1) message.</li><li>2. "second-to-micro": Pads the sequence field that indicates time with precision of seconds to micro-second.</li><li>3. "millis-to-micro": Pads the sequence field that indicates time with precision of milli-second to micro-second.</li><li>4. Composite pattern: for example, "second-to-micro,row-kind-flag".</li></ul></td>
-        </tr>
-        <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>
@@ -565,7 +565,7 @@ This config option does not affect the default filesystem metastore.</td>
         </tr>
         <tr>
             <td><h5>snapshot.num-retained.max</h5></td>
-            <td style="word-wrap: break-word;">2147483647</td>
+            <td style="word-wrap: break-word;">infinite</td>
             <td>Integer</td>
             <td>The maximum number of completed snapshots to retain. Should be greater than or equal to the minimum number.</td>
         </tr>

@@ -16,10 +16,6 @@
  * limitations under the License.
  */
 
-/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
- * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
- * additional information regarding copyright ownership. */
-
 package org.apache.paimon.data;
 
 import org.apache.paimon.annotation.Public;
@@ -34,6 +30,10 @@ import java.io.Serializable;
 
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.apache.paimon.types.DataTypeChecks.getScale;
+
+/* This file is based on source code of Apache Flink Project (https://flink.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 
 /**
  * Base interface for an internal data structure representing data of {@link RowType}.

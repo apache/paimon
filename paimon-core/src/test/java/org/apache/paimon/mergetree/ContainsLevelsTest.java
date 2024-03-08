@@ -64,7 +64,7 @@ import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Test {@link ContainsLevels}. */
+/** Test {@link LookupLevels} for contains. */
 public class ContainsLevelsTest {
 
     private static final String LOOKUP_FILE_PREFIX = "lookup-";
@@ -88,22 +88,23 @@ public class ContainsLevelsTest {
                                 newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
                                 newFile(2, kv(2, 22), kv(5, 55))),
                         3);
-        ContainsLevels containsLevels = createContainsLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<Boolean> containsLevels =
+                createContainsLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
-        assertThat(containsLevels.contains(row(1), 1)).isTrue();
+        assertThat(containsLevels.lookup(row(1), 1)).isTrue();
 
         // only in level 2
-        assertThat(containsLevels.contains(row(2), 1)).isTrue();
+        assertThat(containsLevels.lookup(row(2), 1)).isTrue();
 
         // both in level 1 and level 2
-        assertThat(containsLevels.contains(row(5), 1)).isTrue();
+        assertThat(containsLevels.lookup(row(5), 1)).isTrue();
 
         // no exists
-        assertThat(containsLevels.contains(row(4), 1)).isFalse();
+        assertThat(containsLevels.lookup(row(4), 1)).isNull();
 
         containsLevels.close();
-        assertThat(containsLevels.containsFiles().estimatedSize()).isEqualTo(0);
+        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -117,7 +118,8 @@ public class ContainsLevelsTest {
                                 newFile(1, kv(7, 77), kv(8, 88)),
                                 newFile(1, kv(10, 1010), kv(11, 1111))),
                         1);
-        ContainsLevels containsLevels = createContainsLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<Boolean> containsLevels =
+                createContainsLevels(levels, MemorySize.ofMebiBytes(10));
 
         Map<Integer, Integer> contains =
                 new HashMap<Integer, Integer>() {
@@ -133,16 +135,16 @@ public class ContainsLevelsTest {
                     }
                 };
         for (Map.Entry<Integer, Integer> entry : contains.entrySet()) {
-            assertThat(containsLevels.contains(row(entry.getKey()), 1)).isTrue();
+            assertThat(containsLevels.lookup(row(entry.getKey()), 1)).isTrue();
         }
 
         int[] notContains = new int[] {0, 3, 6, 9, 12};
         for (int key : notContains) {
-            assertThat(containsLevels.contains(row(key), 1)).isFalse();
+            assertThat(containsLevels.lookup(row(key), 1)).isNull();
         }
 
         containsLevels.close();
-        assertThat(containsLevels.containsFiles().estimatedSize()).isEqualTo(0);
+        assertThat(containsLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
     @Test
@@ -159,28 +161,30 @@ public class ContainsLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        ContainsLevels lookupLevels = createContainsLevels(levels, MemorySize.ofKibiBytes(60));
+        LookupLevels<Boolean> lookupLevels =
+                createContainsLevels(levels, MemorySize.ofKibiBytes(60));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
-            assertThat(lookupLevels.contains(row(i), 1)).isTrue();
+            assertThat(lookupLevels.lookup(row(i), 1)).isTrue();
         }
 
         // some files are invalided
-        long fileNumber = lookupLevels.containsFiles().estimatedSize();
+        long fileNumber = lookupLevels.lookupFiles().estimatedSize();
         String[] lookupFiles =
                 tempDir.toFile().list((dir, name) -> name.startsWith(LOOKUP_FILE_PREFIX));
         assertThat(lookupFiles).isNotNull();
         assertThat(fileNumber).isNotEqualTo(fileNum).isEqualTo(lookupFiles.length);
 
         lookupLevels.close();
-        assertThat(lookupLevels.containsFiles().estimatedSize()).isEqualTo(0);
+        assertThat(lookupLevels.lookupFiles().estimatedSize()).isEqualTo(0);
     }
 
-    private ContainsLevels createContainsLevels(Levels levels, MemorySize maxDiskSize) {
-        return new ContainsLevels(
+    private LookupLevels<Boolean> createContainsLevels(Levels levels, MemorySize maxDiskSize) {
+        return new LookupLevels<>(
                 levels,
                 comparator,
                 keyType,
+                new LookupLevels.ContainsValueProcessor(),
                 file ->
                         createReaderFactory()
                                 .createRecordReader(

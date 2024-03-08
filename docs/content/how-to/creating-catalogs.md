@@ -30,6 +30,7 @@ Paimon catalogs currently support two types of metastores:
 
 * `filesystem` metastore (default), which stores both metadata and table files in filesystems.
 * `hive` metastore, which additionally stores metadata in Hive metastore. Users can directly access the tables from Hive.
+* `jdbc` metastore, which additionally stores metadata in relational databases such as MySQL, Postgres, etc.
 
 See [CatalogOptions]({{< ref "maintenance/configurations#catalogoptions" >}}) for detailed options when creating a catalog.
 
@@ -175,3 +176,42 @@ Using the table option facilitates the convenient definition of Hive table param
 Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table. 
 For instance, using the option `hive.table.owner=Jon` will automatically add the parameter `table.owner=Jon` to the table properties during the creation process.
 
+## Creating a Catalog with JDBC Metastore
+
+By using the Paimon JDBC catalog, changes to the catalog will be directly stored in relational databases such as SQLite, MySQL, postgres, etc.
+
+Currently, lock configuration is only supported for MySQL and SQLite. If you are using a different type of database for catalog storage, please do not configure `lock.enabled`.
+
+{{< tabs "jdbc-metastore-example" >}}
+
+{{< tab "Flink" >}}
+
+Paimon JDBC Catalog in Flink needs to correctly add the corresponding jar package for connecting to the database. You should first download JDBC  connector bundled jar and add it to classpath. such as MySQL, postgres
+
+| database type | Bundle Name          | SQL Client JAR                                                             |
+|:--------------|:---------------------|:---------------------------------------------------------------------------|
+| mysql         | mysql-connector-java | [Download](https://mvnrepository.com/artifact/mysql/mysql-connector-java)  |
+| postgres      | postgresql           | [Download](https://mvnrepository.com/artifact/org.postgresql/postgresql)   |
+
+```sql
+CREATE CATALOG my_jdbc WITH (
+    'type' = 'paimon',
+    'metastore' = 'jdbc',
+    'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>',
+    'jdbc.user' = '...', 
+    'jdbc.password' = '...', 
+    'catalog-key'='jdbc',
+    'warehouse' = 'hdfs:///path/to/warehouse'
+);
+
+USE CATALOG my_jdbc;
+```
+You can configure any connection parameters that have been declared by JDBC through "jdbc.", the connection parameters may be different between different databases, please configure according to the actual situation.
+
+You can also perform logical isolation for databases under multiple catalogs by specifying "catalog-key".
+
+You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
+{{< /tab >}}
+
+{{< /tabs >}}
