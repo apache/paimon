@@ -31,6 +31,14 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 /** Spark base catalog. */
 public abstract class SparkBaseCatalog
         implements TableCatalog, SupportsNamespaces, ProcedureCatalog, WithPaimonCatalog {
+
+    protected String catalogName;
+
+    @Override
+    public String name() {
+        return catalogName;
+    }
+
     @Override
     public Procedure loadProcedure(Identifier identifier) throws NoSuchProcedureException {
         if (Catalog.SYSTEM_DATABASE_NAME.equals(identifier.namespace()[0])) {
