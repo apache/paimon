@@ -67,7 +67,7 @@ public class InternalArraySerializer implements Serializer<InternalArray> {
         } else if (from instanceof BinaryArray) {
             return ((BinaryArray) from).copy();
         } else {
-            return toBinaryArray(from);
+            return toBinaryArray(from).copy();
         }
     }
 

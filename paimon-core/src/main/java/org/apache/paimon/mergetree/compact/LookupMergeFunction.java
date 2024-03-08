@@ -25,8 +25,10 @@ import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
+import java.util.Collections;
 import java.util.Iterator;
 import java.util.LinkedList;
+import java.util.List;
 
 /**
  * A {@link MergeFunction} for lookup, this wrapper only considers the latest high level record,
@@ -83,6 +85,14 @@ public class LookupMergeFunction implements MergeFunction<KeyValue> {
         mergeFunction.reset();
         candidates.forEach(mergeFunction::add);
         return mergeFunction.getResult();
+    }
+
+    boolean candidatesAllLevel0() {
+        return !candidates.isEmpty() && candidates.stream().allMatch(kv -> kv.level() == 0);
+    }
+
+    List<KeyValue> candidates() {
+        return Collections.unmodifiableList(candidates);
     }
 
     public static MergeFunctionFactory<KeyValue> wrap(

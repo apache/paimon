@@ -23,6 +23,7 @@ import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.RowKind;
 
+import java.util.List;
 import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -85,6 +86,38 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
     public ChangelogResult getResult() {
         reusedResult.reset();
 
+        if (mergeFunction.candidatesAllLevel0()) {
+            // in this case, we have to lookup high level record
+            return mergeWithLookupFirst();
+        } else {
+            return mergeWithLookupLater();
+        }
+    }
+
+    private ChangelogResult mergeWithLookupFirst() {
+        // try to find high level record by lookup
+        List<KeyValue> currentKeyValues = mergeFunction.candidates();
+        InternalRow lookupKey = currentKeyValues.get(0).key();
+        KeyValue highLevel = lookup.apply(lookupKey);
+
+        KeyValue result;
+        if (highLevel != null) {
+            mergeFunction2.reset();
+            mergeFunction2.add(highLevel);
+            currentKeyValues.forEach(mergeFunction2::add);
+            result = mergeFunction2.getResult();
+        } else {
+            result = mergeFunction.getResult();
+            if (result == null) {
+                return reusedResult;
+            }
+        }
+
+        setChangelog(highLevel, result);
+        return reusedResult.setResult(result);
+    }
+
+    private ChangelogResult mergeWithLookupLater() {
         KeyValue result = mergeFunction.getResult();
         if (result == null) {
             return reusedResult;
@@ -112,10 +145,9 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
             mergeFunction2.add(highLevel);
             mergeFunction2.add(result);
             result = mergeFunction2.getResult();
-            setChangelog(highLevel, result);
-        } else {
-            setChangelog(null, result);
         }
+
+        setChangelog(highLevel, result);
         return reusedResult.setResult(result);
     }
 
