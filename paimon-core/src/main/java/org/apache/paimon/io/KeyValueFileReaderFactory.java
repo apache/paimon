@@ -21,6 +21,8 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
@@ -42,6 +44,8 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
@@ -60,6 +64,9 @@ public class KeyValueFileReaderFactory {
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final BinaryRow partition;
 
+    // FileName to its corresponding deletion vector
+    private final @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier;
+
     private KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
@@ -69,7 +76,8 @@ public class KeyValueFileReaderFactory {
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
             DataFilePathFactory pathFactory,
             long asyncThreshold,
-            BinaryRow partition) {
+            BinaryRow partition,
+            @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -80,6 +88,7 @@ public class KeyValueFileReaderFactory {
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
         this.bulkFormatMappings = new HashMap<>();
+        this.deletionVectorSupplier = deletionVectorSupplier;
     }
 
     public RecordReader<KeyValue> createRecordReader(
@@ -113,17 +122,27 @@ public class KeyValueFileReaderFactory {
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
-        return new KeyValueDataFileRecordReader(
-                fileIO,
-                bulkFormatMapping.getReaderFactory(),
-                pathFactory.toPath(fileName),
-                keyType,
-                valueType,
-                level,
-                poolSize,
-                bulkFormatMapping.getIndexMapping(),
-                bulkFormatMapping.getCastMapping(),
-                PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+        RecordReader<KeyValue> recordReader =
+                new KeyValueDataFileRecordReader(
+                        fileIO,
+                        bulkFormatMapping.getReaderFactory(),
+                        pathFactory.toPath(fileName),
+                        keyType,
+                        valueType,
+                        level,
+                        poolSize,
+                        bulkFormatMapping.getIndexMapping(),
+                        bulkFormatMapping.getCastMapping(),
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+        if (deletionVectorSupplier != null) {
+            Optional<DeletionVector> optionalDeletionVector =
+                    deletionVectorSupplier.apply(fileName);
+            if (optionalDeletionVector.isPresent() && !optionalDeletionVector.get().isEmpty()) {
+                recordReader =
+                        new ApplyDeletionVectorReader<>(recordReader, optionalDeletionVector.get());
+            }
+        }
+        return recordReader;
     }
 
     public static Builder builder(
@@ -166,6 +185,7 @@ public class KeyValueFileReaderFactory {
         private int[][] valueProjection;
         private RowType projectedKeyType;
         private RowType projectedValueType;
+        private @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier;
 
         private Builder(
                 FileIO fileIO,
@@ -218,6 +238,12 @@ public class KeyValueFileReaderFactory {
             return this;
         }
 
+        public Builder withDeletionVectorSupplier(
+                Function<String, Optional<DeletionVector>> deletionVectorSupplier) {
+            this.deletionVectorSupplier = deletionVectorSupplier;
+            return this;
+        }
+
         public RowType keyType() {
             return keyType;
         }
@@ -248,7 +274,8 @@ public class KeyValueFileReaderFactory {
                             formatDiscover, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
-                    partition);
+                    partition,
+                    deletionVectorSupplier);
         }
 
         private void applyProjection() {

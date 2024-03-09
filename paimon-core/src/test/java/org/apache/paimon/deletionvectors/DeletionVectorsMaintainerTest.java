@@ -42,8 +42,8 @@ public class DeletionVectorsMaintainerTest extends PrimaryKeyTableTestBase {
 
     @Test
     public void test0() {
-        DeletionVectorsMaintainer.DeletionVectorsMaintainerFactory factory =
-                new DeletionVectorsMaintainer.DeletionVectorsMaintainerFactory(fileHandler);
+        DeletionVectorsMaintainer.Factory factory =
+                new DeletionVectorsMaintainer.Factory(fileHandler);
         DeletionVectorsMaintainer dvMaintainer =
                 factory.createOrRestore(null, BinaryRow.EMPTY_ROW, 0);
 

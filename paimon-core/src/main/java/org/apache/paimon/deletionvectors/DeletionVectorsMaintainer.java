@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -56,7 +57,7 @@ public class DeletionVectorsMaintainer {
         this.deletionVectors =
                 indexFile == null
                         ? new HashMap<>()
-                        : indexFileHandler.readAllDeletionVectors(indexFile);
+                        : new HashMap<>(indexFileHandler.readAllDeletionVectors(indexFile));
         this.modified = false;
     }
 
@@ -115,12 +116,17 @@ public class DeletionVectorsMaintainer {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
+    @VisibleForTesting
+    public Map<String, DeletionVector> deletionVectors() {
+        return deletionVectors;
+    }
+
     /** Factory to restore {@link DeletionVectorsMaintainer}. */
-    public static class DeletionVectorsMaintainerFactory {
+    public static class Factory {
 
         private final IndexFileHandler handler;
 
-        public DeletionVectorsMaintainerFactory(IndexFileHandler handler) {
+        public Factory(IndexFileHandler handler) {
             this.handler = handler;
         }
 

@@ -21,7 +21,12 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
+import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.mergetree.LookupLevels.PositionedKeyValue;
 import org.apache.paimon.types.RowKind;
+
+import javax.annotation.Nullable;
 
 import java.util.Iterator;
 import java.util.LinkedList;
@@ -44,33 +49,45 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
  *       level as BEFORE.
  * </ul>
  */
-public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper<ChangelogResult> {
+public class LookupChangelogMergeFunctionWrapper<T>
+        implements MergeFunctionWrapper<ChangelogResult> {
 
     private final LookupMergeFunction mergeFunction;
     private final MergeFunction<KeyValue> mergeFunction2;
-    private final Function<InternalRow, KeyValue> lookup;
+    private final Function<InternalRow, T> lookup;
 
     private final ChangelogResult reusedResult = new ChangelogResult();
     private final KeyValue reusedBefore = new KeyValue();
     private final KeyValue reusedAfter = new KeyValue();
     private final RecordEqualiser valueEqualiser;
     private final boolean changelogRowDeduplicate;
+    private final LookupStrategy lookupStrategy;
+    private final @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer;
 
     public LookupChangelogMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory,
-            Function<InternalRow, KeyValue> lookup,
+            Function<InternalRow, T> lookup,
             RecordEqualiser valueEqualiser,
-            boolean changelogRowDeduplicate) {
+            boolean changelogRowDeduplicate,
+            LookupStrategy lookupStrategy,
+            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();
         checkArgument(
                 mergeFunction instanceof LookupMergeFunction,
                 "Merge function should be a LookupMergeFunction, but is %s, there is a bug.",
                 mergeFunction.getClass().getName());
+        if (lookupStrategy.deletionVector) {
+            checkArgument(
+                    deletionVectorsMaintainer != null,
+                    "deletionVectorsMaintainer should not be null, there is a bug.");
+        }
         this.mergeFunction = (LookupMergeFunction) mergeFunction;
         this.mergeFunction2 = mergeFunctionFactory.create();
         this.lookup = lookup;
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
+        this.lookupStrategy = lookupStrategy;
+        this.deletionVectorsMaintainer = deletionVectorsMaintainer;
     }
 
     @Override
@@ -105,7 +122,17 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
         // 2. Lookup if latest high level record is absent
         if (highLevel == null) {
             InternalRow lookupKey = candidates.get(0).key();
-            highLevel = lookup.apply(lookupKey);
+            T lookupResult = lookup.apply(lookupKey);
+            if (lookupResult != null) {
+                if (lookupStrategy.deletionVector) {
+                    PositionedKeyValue positionedKeyValue = (PositionedKeyValue) lookupResult;
+                    highLevel = positionedKeyValue.keyValue();
+                    deletionVectorsMaintainer.notifyNewDeletion(
+                            positionedKeyValue.fileName(), positionedKeyValue.rowPosition());
+                } else {
+                    highLevel = (KeyValue) lookupResult;
+                }
+            }
         }
 
         // 3. Calculate result
@@ -118,14 +145,14 @@ public class LookupChangelogMergeFunctionWrapper implements MergeFunctionWrapper
 
         // 4. Set changelog when there's level-0 records
         reusedResult.reset();
-        if (containLevel0) {
+        if (containLevel0 && lookupStrategy.produceChangelog) {
             setChangelog(highLevel, result);
         }
 
         return reusedResult.setResult(result);
     }
 
-    private void setChangelog(KeyValue before, KeyValue after) {
+    private void setChangelog(@Nullable KeyValue before, KeyValue after) {
         if (before == null || !before.isAdd()) {
             if (after.isAdd()) {
                 reusedResult.addChangelog(replaceAfter(RowKind.INSERT, after));

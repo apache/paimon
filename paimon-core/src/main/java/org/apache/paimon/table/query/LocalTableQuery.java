@@ -86,7 +86,7 @@ public class LocalTableQuery implements TableQuery {
                         options.toConfiguration().get(CoreOptions.LOOKUP_HASH_LOAD_FACTOR),
                         options.toConfiguration().get(CoreOptions.LOOKUP_CACHE_SPILL_COMPRESSION));
 
-        if (options.changelogProducer() == CoreOptions.ChangelogProducer.LOOKUP) {
+        if (options.needLookup()) {
             startLevel = 1;
         } else {
             if (options.sequenceField().isPresent()) {

@@ -140,9 +140,9 @@ public class DeletionVectorsIndexFile extends IndexFile {
         int version = in.read();
         if (version != VERSION_ID_V1) {
             throw new RuntimeException(
-                    "Version not match, actual size: "
+                    "Version not match, actual version: "
                             + version
-                            + ", expert size: "
+                            + ", expert version: "
                             + VERSION_ID_V1);
         }
     }
