@@ -576,6 +576,48 @@ s
       </td>
       <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
     </tr>
+    <tr>
+      <td>create_tag</td>
+      <td>
+         To create a tag based on given snapshot. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+      </td>
+      <td>CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10)</td>
+    </tr>
+    <tr>
+      <td>delete_tag</td>
+      <td>
+         To delete a tag. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the tag to be deleted.</li>
+      </td>
+      <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
+    </tr>
+    <tr>
+      <td>rollback</td>
+      <td>
+         To rollback to a specific version of target table. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>version: id of the snapshot or name of tag that will roll back to.</li>
+      </td>
+      <td>
+          CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/>
+          CALL sys.rollback(table => 'default.T', version => 10)
+      </td>
+    </tr>
+    <tr>
+      <td>remove_orphan_files</td>
+      <td>
+         To remove the orphan data files and metadata files. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>older_than: to avoid deleting newly written files, this procedure only deletes orphan files older than 1 day by default. This argument can modify the interval.</li>
+      </td>
+      <td>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')
+      </td>
+    </tr>
     </tbody>
 </table>
 
