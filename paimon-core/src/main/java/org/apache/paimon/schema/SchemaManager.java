@@ -58,7 +58,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -79,12 +78,12 @@ public class SchemaManager implements Serializable {
     private final FileIO fileIO;
     private final Path tableRoot;
 
-    private transient Lock lock;
+    @Nullable private transient Lock lock;
 
     private final Map<Long, TableSchema> cache;
 
     public SchemaManager(FileIO fileIO, Path tableRoot) {
-        this(fileIO, tableRoot, new ConcurrentHashMap<>());
+        this(fileIO, tableRoot, null);
     }
 
     public SchemaManager(FileIO fileIO, Path tableRoot, Map<Long, TableSchema> cache) {
@@ -133,7 +132,7 @@ public class SchemaManager implements Serializable {
     }
 
     @VisibleForTesting
-    Map<Long, TableSchema> getCachedSchema() {
+    public Map<Long, TableSchema> getCachedSchema() {
         return cache;
     }
 
@@ -483,14 +482,15 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        return cache.computeIfAbsent(id, this::loadSchemaFromFile);
+        if (cache != null) {
+            return cache.computeIfAbsent(id, this::loadSchemaFromFile);
+        }
+        return loadSchemaFromFile(id);
     }
 
     private TableSchema loadSchemaFromFile(Long id) {
         try {
-            Path schemaPath = toSchemaPath(id);
-            String schemaJson = fileIO.readFileUtf8(schemaPath);
-            return JsonSerdeUtil.fromJson(schemaJson, TableSchema.class);
+            return JsonSerdeUtil.fromJson(fileIO.readFileUtf8(toSchemaPath(id)), TableSchema.class);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }

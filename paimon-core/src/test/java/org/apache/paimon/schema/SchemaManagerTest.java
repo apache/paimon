@@ -47,6 +47,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -97,8 +98,8 @@ public class SchemaManagerTest {
     @Test
     public void testCache() throws Exception {
         Path path = new Path(tempDir.toString());
-        SchemaManager manager = new SchemaManager(FileIOFinder.find(path), path);
-
+        SchemaManager manager =
+                new SchemaManager(FileIOFinder.find(path), path, new ConcurrentHashMap<>());
         // schema-0
         manager.createTable(schema);
         // schema-1

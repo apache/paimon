@@ -1510,13 +1510,16 @@ public abstract class FileStoreTableTestBase {
 
     @Test
     public void testSerAndDer() throws Exception {
-        FileStoreTable originFileStoreTable = createFileStoreTable();
-
+        AbstractFileStoreTable originFileStoreTable =
+                (AbstractFileStoreTable) createFileStoreTable();
+        originFileStoreTable.schemaManager().latest();
         byte[] bytes = InstantiationUtil.serializeObject(originFileStoreTable);
         AbstractFileStoreTable serializedFileStoreTable =
                 InstantiationUtil.deserializeObject(
                         bytes, Thread.currentThread().getContextClassLoader());
-        assertThat(serializedFileStoreTable.schemaCache.size()).isEqualTo(1);
-        assertThat(serializedFileStoreTable.schemaCache).containsOnlyKeys(0L);
+        assertThat(serializedFileStoreTable.tableSchemaManager.getCachedSchema().size())
+                .isEqualTo(1);
+        assertThat(serializedFileStoreTable.tableSchemaManager.getCachedSchema())
+                .containsOnlyKeys(0L);
     }
 }
