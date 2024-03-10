@@ -184,6 +184,10 @@ public class IndexFileHandler {
     }
 
     public IndexFileMeta writeDeletionVectorsIndex(Map<String, DeletionVector> deletionVectors) {
+        if (deletionVectors.isEmpty()) {
+            return IndexFileMeta.EMPTY_DV_INDEX;
+        }
+
         Pair<String, Map<String, Pair<Integer, Integer>>> pair =
                 deletionVectorsIndex.write(deletionVectors);
         return new IndexFileMeta(

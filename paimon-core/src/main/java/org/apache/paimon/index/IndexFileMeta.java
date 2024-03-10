@@ -33,10 +33,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** Metadata of index file. */
 public class IndexFileMeta {
+
+    public static final IndexFileMeta EMPTY_DV_INDEX =
+            new IndexFileMeta(DELETION_VECTORS_INDEX, "", 0, 0);
 
     private final String indexType;
     private final String fileName;
@@ -81,6 +85,10 @@ public class IndexFileMeta {
 
     public @Nullable Map<String, Pair<Integer, Integer>> deletionVectorsRanges() {
         return deletionVectorsRanges;
+    }
+
+    public boolean isDeleted() {
+        return this.equals(EMPTY_DV_INDEX);
     }
 
     @Override

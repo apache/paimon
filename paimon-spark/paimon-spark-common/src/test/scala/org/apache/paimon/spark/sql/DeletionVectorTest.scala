@@ -20,6 +20,8 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.data.BinaryRow
 import org.apache.paimon.deletionvectors.{DeletionVector, DeletionVectorsMaintainer}
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX
+import org.apache.paimon.manifest.IndexManifestEntry
 import org.apache.paimon.spark.PaimonSparkTestBase
 
 import org.apache.spark.sql.Row
@@ -60,6 +62,10 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           .deletionVectors()
       }
 
+      def deletionVectorsIndexFiles(): java.util.List[IndexManifestEntry] = {
+        table.store().newIndexFileHandler().scan(DELETION_VECTORS_INDEX, BinaryRow.EMPTY_ROW)
+      }
+
       val deletionVectors1 = restoreDeletionVectors()
       // 1, 3 deleted, their row positions are 0, 2
       Assertions.assertEquals(1, deletionVectors1.size())
@@ -70,6 +76,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
             Assertions.assertTrue(e.getValue.isDeleted(0))
             Assertions.assertTrue(e.getValue.isDeleted(2))
           })
+      Assertions.assertEquals(1, deletionVectorsIndexFiles().size())
 
       // Compact
       // f3 (1, 2, 3), no deletion
@@ -77,6 +84,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
       val deletionVectors2 = restoreDeletionVectors()
       // After compaction, deletionVectors should be empty
       Assertions.assertTrue(deletionVectors2.isEmpty)
+      Assertions.assertEquals(0, deletionVectorsIndexFiles().size())
 
       // Insert2
       // f3 (1, 2, 3), row with position 1 in f3 is marked deleted
@@ -95,6 +103,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
           e => {
             Assertions.assertTrue(e.getValue.isDeleted(1))
           })
+      Assertions.assertEquals(1, deletionVectorsIndexFiles().size())
     }
   }
 

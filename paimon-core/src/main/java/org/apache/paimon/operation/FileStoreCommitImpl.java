@@ -589,7 +589,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                             f ->
                                     appendIndexFiles.add(
                                             new IndexManifestEntry(
-                                                    FileKind.ADD,
+                                                    f.isDeleted() ? FileKind.DELETE : FileKind.ADD,
                                                     commitMessage.partition(),
                                                     commitMessage.bucket(),
                                                     f)));
