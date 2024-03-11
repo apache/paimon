@@ -19,6 +19,7 @@
 package org.apache.paimon.spark;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CacheCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
@@ -54,6 +55,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.options.CatalogOptions.CACHE_CATALOG;
+import static org.apache.paimon.options.CatalogOptions.CACHE_CATALOG_EXPIRATION_MS;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -66,13 +69,24 @@ public class SparkCatalog extends SparkBaseCatalog {
     protected Catalog catalog = null;
 
     @Override
-    public void initialize(String name, CaseInsensitiveStringMap options) {
+    public void initialize(String name, CaseInsensitiveStringMap optionsMap) {
         this.catalogName = name;
+        Options options = Options.fromMap(optionsMap);
         CatalogContext catalogContext =
                 CatalogContext.create(
-                        Options.fromMap(options),
-                        SparkSession.active().sessionState().newHadoopConf());
-        this.catalog = CatalogFactory.createCatalog(catalogContext);
+                        options, SparkSession.active().sessionState().newHadoopConf());
+
+        boolean cacheEnabled = options.get(CACHE_CATALOG);
+        long cacheExpirationIntervalMs = options.get(CACHE_CATALOG_EXPIRATION_MS);
+        if (cacheEnabled) {
+            this.catalog =
+                    CacheCatalog.wrap(
+                            CatalogFactory.createCatalog(catalogContext),
+                            cacheExpirationIntervalMs);
+        } else {
+            this.catalog = CatalogFactory.createCatalog(catalogContext);
+        }
+
         if (!catalog.databaseExists(defaultNamespace()[0])) {
             try {
                 createNamespace(defaultNamespace(), new HashMap<>());

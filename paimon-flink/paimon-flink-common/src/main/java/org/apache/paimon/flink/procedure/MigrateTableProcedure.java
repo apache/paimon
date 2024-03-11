@@ -18,6 +18,8 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.catalog.CacheCatalog;
+import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.hive.HiveCatalog;
@@ -51,7 +53,12 @@ public class MigrateTableProcedure extends ProcedureBase {
             String sourceTablePath,
             String properties)
             throws Exception {
-        if (!(catalog instanceof HiveCatalog)) {
+        if (catalog instanceof CacheCatalog) {
+            Catalog cacheCatalog = ((CacheCatalog) catalog).catalog();
+            if (!(cacheCatalog instanceof HiveCatalog)) {
+                throw new IllegalArgumentException("Only support Hive Catalog");
+            }
+        } else if (!(catalog instanceof HiveCatalog)) {
             throw new IllegalArgumentException("Only support Hive Catalog");
         }
 
@@ -60,9 +67,16 @@ public class MigrateTableProcedure extends ProcedureBase {
         Identifier sourceTableId = Identifier.fromString(sourceTablePath);
         Identifier targetTableId = Identifier.fromString(targetPaimonTablePath);
 
+        HiveCatalog hiveCatalog;
+        if (catalog instanceof CacheCatalog) {
+            hiveCatalog = (HiveCatalog) ((CacheCatalog) catalog).catalog();
+        } else {
+            hiveCatalog = (HiveCatalog) catalog;
+        }
+
         TableMigrationUtils.getImporter(
                         connector,
-                        (HiveCatalog) catalog,
+                        hiveCatalog,
                         sourceTableId.getDatabaseName(),
                         sourceTableId.getObjectName(),
                         targetTableId.getDatabaseName(),

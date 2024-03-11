@@ -104,4 +104,19 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    public static final ConfigOption<Boolean> CACHE_CATALOG =
+            key("cache.catalog")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription(
+                            "Whether to enable the catalog cache. If user update the table schema by methods outside of catalog (for example enable `write.merge-schema`), "
+                                    + "this option needs to be set to false, otherwise it will result in incorrect result.");
+
+    public static final ConfigOption<Long> CACHE_CATALOG_EXPIRATION_MS =
+            key("cache.catalog.expiration.ms")
+                    .longType()
+                    .defaultValue(10 * 60 * 1000L)
+                    .withDescription(
+                            "Specify the expiration time when the catalog cache is enabled.");
 }

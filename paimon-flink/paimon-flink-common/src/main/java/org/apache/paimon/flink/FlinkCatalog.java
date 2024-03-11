@@ -19,6 +19,7 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.catalog.CacheCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryRow;
@@ -123,6 +124,8 @@ import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deseriali
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.deserializeWatermarkSpec;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.nonPhysicalColumnsCount;
 import static org.apache.paimon.flink.utils.FlinkCatalogPropertiesUtil.serializeNewWatermarkSpec;
+import static org.apache.paimon.options.CatalogOptions.CACHE_CATALOG;
+import static org.apache.paimon.options.CatalogOptions.CACHE_CATALOG_EXPIRATION_MS;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Catalog for paimon. */
@@ -144,7 +147,13 @@ public class FlinkCatalog extends AbstractCatalog {
             ClassLoader classLoader,
             Options options) {
         super(name, defaultDatabase);
-        this.catalog = catalog;
+        boolean cacheEnabled = options.get(CACHE_CATALOG);
+        long cacheExpirationIntervalMs = options.get(CACHE_CATALOG_EXPIRATION_MS);
+        if (cacheEnabled) {
+            this.catalog = CacheCatalog.wrap(catalog, cacheExpirationIntervalMs);
+        } else {
+            this.catalog = catalog;
+        }
         this.name = name;
         this.classLoader = classLoader;
         this.logStoreAutoRegister = options.get(LOG_SYSTEM_AUTO_REGISTER);

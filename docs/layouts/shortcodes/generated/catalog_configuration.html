@@ -86,5 +86,17 @@ under the License.
             <td>String</td>
             <td>The warehouse root path of catalog.</td>
         </tr>
+        <tr>
+            <td><h5>cache.catalog</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether to enable the catalog cache. If user update the table schema by methods outside of catalog (for example enable `write.merge-schema`), this option needs to be set to false, otherwise it will result in incorrect result.</td>
+        </tr>
+        <tr>
+            <td><h5>cache.catalog.expiration.ms</h5></td>
+            <td style="word-wrap: break-word;">600000</td>
+            <td>Long</td>
+            <td>Specify the expiration time when the catalog cache is enabled.</td>
+        </tr>
     </tbody>
 </table>

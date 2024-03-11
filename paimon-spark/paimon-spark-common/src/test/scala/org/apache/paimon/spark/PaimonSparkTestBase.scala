@@ -52,6 +52,7 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
+      .set("spark.sql.catalog.paimon.cache.catalog", "false")
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
   }
 
@@ -92,9 +93,10 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   private def initCatalog(): Catalog = {
     val currentCatalog = spark.sessionState.catalogManager.currentCatalog.name()
-    val options = Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf)
+    val options = Options.fromMap(Catalogs.catalogOptions(currentCatalog, spark.sessionState.conf))
+    options.set(org.apache.paimon.options.CatalogOptions.CACHE_CATALOG.key(), "false")
     val catalogContext =
-      CatalogContext.create(Options.fromMap(options), spark.sessionState.newHadoopConf())
+      CatalogContext.create(options, spark.sessionState.newHadoopConf())
     CatalogFactory.createCatalog(catalogContext)
   }
 
