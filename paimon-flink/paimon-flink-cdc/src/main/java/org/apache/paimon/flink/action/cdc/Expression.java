@@ -398,7 +398,7 @@ public interface Expression extends Serializable {
         }
     }
 
-    /** Format a time (int or long value) to string by formatter. */
+    /** Convert the epoch time to desired formatted string. */
     final class TimeFormat implements Expression {
 
         private static final long serialVersionUID = 1L;
@@ -462,7 +462,10 @@ public interface Expression extends Serializable {
                     nanosOfMillisecond = numericValue % 1_000_000;
                     break;
                 default:
-                    throw new RuntimeException();
+                    throw new RuntimeException(
+                            String.format(
+                                    "Unsupported time unit '%s' for time_format. Supported: %s",
+                                    timeUnit, String.join(", ", SUPPORTED_TIME_UNIT)));
             }
             return Timestamp.fromEpochMillis(milliseconds, (int) nanosOfMillisecond)
                     .toLocalDateTime();
