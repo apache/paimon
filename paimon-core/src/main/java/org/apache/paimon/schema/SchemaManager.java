@@ -47,7 +47,6 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
-
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -58,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.stream.Collectors;
@@ -83,13 +83,15 @@ public class SchemaManager implements Serializable {
     private final Map<Long, TableSchema> cache;
 
     public SchemaManager(FileIO fileIO, Path tableRoot) {
-        this(fileIO, tableRoot, null);
+        this(fileIO, tableRoot, new ConcurrentHashMap<>());
     }
 
     public SchemaManager(FileIO fileIO, Path tableRoot, Map<Long, TableSchema> cache) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
         this.cache = cache;
+        //cache
+        listAll();
     }
 
     public SchemaManager withLock(@Nullable Lock lock) {

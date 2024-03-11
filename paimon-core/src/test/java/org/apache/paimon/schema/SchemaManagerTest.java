@@ -30,7 +30,6 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FailingFileIO;
-
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -47,7 +46,6 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
@@ -99,7 +97,7 @@ public class SchemaManagerTest {
     public void testCache() throws Exception {
         Path path = new Path(tempDir.toString());
         SchemaManager manager =
-                new SchemaManager(FileIOFinder.find(path), path, new ConcurrentHashMap<>());
+                new SchemaManager(FileIOFinder.find(path), path);
         // schema-0
         manager.createTable(schema);
         // schema-1
@@ -107,13 +105,11 @@ public class SchemaManagerTest {
         // schema-2
         manager.commitChanges(SchemaChange.setOption("ccc", "ddd"));
 
-        Map<Long, TableSchema> cachedSchema = manager.getCachedSchema();
-        assertThat(cachedSchema).hasSize(3);
+        SchemaManager newSchemaManager = new SchemaManager(FileIOFinder.find(path), path);
+        Optional<TableSchema> schemaOpt1  = newSchemaManager.latest();
+        Optional<TableSchema> schemaOpt2 = newSchemaManager.latest();
+        assertThat(schemaOpt1.get()).isSameAs(schemaOpt2.get());
 
-        manager.deleteSchema(1L);
-        assertThat(cachedSchema).hasSize(2);
-        TableSchema tableSchema = cachedSchema.get(2L);
-        assertThat(tableSchema.options()).containsKey("ccc");
     }
 
     @Test
