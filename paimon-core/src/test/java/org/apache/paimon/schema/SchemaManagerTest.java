@@ -30,6 +30,7 @@ import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.FailingFileIO;
+
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -96,8 +97,7 @@ public class SchemaManagerTest {
     @Test
     public void testCache() throws Exception {
         Path path = new Path(tempDir.toString());
-        SchemaManager manager =
-                new SchemaManager(FileIOFinder.find(path), path);
+        SchemaManager manager = new SchemaManager(FileIOFinder.find(path), path);
         // schema-0
         manager.createTable(schema);
         // schema-1
@@ -106,10 +106,9 @@ public class SchemaManagerTest {
         manager.commitChanges(SchemaChange.setOption("ccc", "ddd"));
 
         SchemaManager newSchemaManager = new SchemaManager(FileIOFinder.find(path), path);
-        Optional<TableSchema> schemaOpt1  = newSchemaManager.latest();
+        Optional<TableSchema> schemaOpt1 = newSchemaManager.latest();
         Optional<TableSchema> schemaOpt2 = newSchemaManager.latest();
         assertThat(schemaOpt1.get()).isSameAs(schemaOpt2.get());
-
     }
 
     @Test

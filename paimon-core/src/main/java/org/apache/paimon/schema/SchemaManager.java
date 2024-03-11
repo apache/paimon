@@ -47,6 +47,7 @@ import org.apache.paimon.utils.Preconditions;
 
 import javax.annotation.Nullable;
 import javax.annotation.concurrent.ThreadSafe;
+
 import java.io.IOException;
 import java.io.Serializable;
 import java.io.UncheckedIOException;
@@ -90,7 +91,7 @@ public class SchemaManager implements Serializable {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
         this.cache = cache;
-        //cache
+        // cache
         listAll();
     }
 
