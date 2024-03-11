@@ -282,5 +282,9 @@ public class KeyValueFileReaderFactory {
             projectedKeyType = Projection.of(keyProjection).project(keyType);
             projectedValueType = Projection.of(valueProjection).project(valueType);
         }
+
+        public FileIO fileIO() {
+            return fileIO;
+        }
     }
 }

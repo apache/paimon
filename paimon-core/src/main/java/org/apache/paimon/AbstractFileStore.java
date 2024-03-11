@@ -143,6 +143,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public IndexFileHandler newIndexFileHandler() {
         return new IndexFileHandler(
                 snapshotManager(),
+                pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
                 new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
                 new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));

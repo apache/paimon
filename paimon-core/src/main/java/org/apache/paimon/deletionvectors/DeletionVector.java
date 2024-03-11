@@ -18,6 +18,11 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.table.source.DeletionFile;
+
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
@@ -89,6 +94,28 @@ public interface DeletionVector {
             }
         } catch (IOException e) {
             throw new RuntimeException("Unable to deserialize deletion vector", e);
+        }
+    }
+
+    static DeletionVector read(FileIO fileIO, DeletionFile deletionFile) throws IOException {
+        Path path = new Path(deletionFile.path());
+        try (SeekableInputStream input = fileIO.newInputStream(path)) {
+            input.seek(deletionFile.offset());
+            DataInputStream dis = new DataInputStream(input);
+            int actualLength = dis.readInt();
+            if (actualLength != deletionFile.length()) {
+                throw new RuntimeException(
+                        "Size not match, actual size: "
+                                + actualLength
+                                + ", expert size: "
+                                + deletionFile.length());
+            }
+            int magicNum = dis.readInt();
+            if (magicNum == BitmapDeletionVector.MAGIC_NUMBER) {
+                return BitmapDeletionVector.deserializeFromDataInput(dis);
+            } else {
+                throw new RuntimeException("Invalid magic number: " + magicNum);
+            }
         }
     }
 }

@@ -138,9 +138,7 @@ public class TestChangelogDataReadWrite {
                                 ignore -> avro,
                                 pathFactory,
                                 EXTRACTOR,
-                                new CoreOptions(new HashMap<>())),
-                        new CoreOptions(new HashMap<>()),
-                        null);
+                                new CoreOptions(new HashMap<>())));
         return new KeyValueTableRead(read, null) {
 
             @Override

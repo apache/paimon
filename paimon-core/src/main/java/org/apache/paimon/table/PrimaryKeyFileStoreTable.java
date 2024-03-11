@@ -119,7 +119,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
         return new MergeTreeSplitGenerator(
                 store().newKeyComparator(),
                 store().options().splitTargetSize(),
-                store().options().splitOpenFileCost());
+                store().options().splitOpenFileCost(),
+                store().options().deletionVectorsEnabled());
     }
 
     @Override

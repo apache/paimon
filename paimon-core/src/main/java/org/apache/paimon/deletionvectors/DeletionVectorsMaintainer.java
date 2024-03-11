@@ -31,6 +31,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+
 /** Maintainer of deletionVectors index. */
 public class DeletionVectorsMaintainer {
 
@@ -48,11 +50,7 @@ public class DeletionVectorsMaintainer {
                 snapshotId == null
                         ? null
                         : fileHandler
-                                .scan(
-                                        snapshotId,
-                                        DeletionVectorsIndexFile.DELETION_VECTORS_INDEX,
-                                        partition,
-                                        bucket)
+                                .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
                                 .orElse(null);
         this.deletionVectors =
                 indexFile == null

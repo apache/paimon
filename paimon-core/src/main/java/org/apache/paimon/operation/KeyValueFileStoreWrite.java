@@ -252,10 +252,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
-        if (deletionVectorsMaintainer != null) {
-            readerFactoryBuilder.withDeletionVectorSupplier(
-                    deletionVectorsMaintainer::deletionVectorOf);
+            @Nullable DeletionVectorsMaintainer dvMaintainer) {
+        KeyValueFileReaderFactory.Builder readerFactoryBuilder =
+                this.readerFactoryBuilder.copyWithoutProjection();
+        if (dvMaintainer != null) {
+            readerFactoryBuilder.withDeletionVectorSupplier(dvMaintainer::deletionVectorOf);
         }
         KeyValueFileReaderFactory readerFactory = readerFactoryBuilder.build(partition, bucket);
         KeyValueFileWriterFactory writerFactory =
@@ -288,7 +289,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 }
                 lookupReaderFactory =
                         readerFactoryBuilder
-                                .copyWithoutProjection()
                                 .withValueProjection(new int[0][])
                                 .build(partition, bucket);
                 processor = new ContainsValueProcessor();
@@ -317,7 +317,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     mergeSorter,
                     wrapperFactory,
                     lookupStrategy.produceChangelog,
-                    deletionVectorsMaintainer);
+                    dvMaintainer);
         } else {
             return new MergeTreeCompactRewriter(
                     readerFactory,

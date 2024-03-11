@@ -40,15 +40,27 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     private final long openFileCost;
 
+    private final boolean deletionVectorsEnabled;
+
     public MergeTreeSplitGenerator(
-            Comparator<InternalRow> keyComparator, long targetSplitSize, long openFileCost) {
+            Comparator<InternalRow> keyComparator,
+            long targetSplitSize,
+            long openFileCost,
+            boolean deletionVectorsEnabled) {
         this.keyComparator = keyComparator;
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     @Override
     public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files) {
+        if (deletionVectorsEnabled) {
+            Function<DataFileMeta, Long> weightFunc =
+                    file -> Math.max(file.fileSize(), openFileCost);
+            return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
+        }
+
         /*
          * The generator aims to parallel the scan execution by slicing the files of each bucket
          * into multiple splits. The generation has one constraint: files with intersected key
