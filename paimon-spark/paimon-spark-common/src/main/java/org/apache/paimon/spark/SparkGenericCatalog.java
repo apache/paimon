@@ -253,7 +253,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
 
         if (options.getBoolean(
                 SparkConnectorOptions.CREATE_UNDERLYING_SESSION_CATALOG.key(), false)) {
-            this.underlyingSessionCatalogEnabled = false;
+            this.underlyingSessionCatalogEnabled = true;
             for (Map.Entry<String, String> entry : options.entrySet()) {
                 sparkConf.set("spark.hadoop." + entry.getKey(), entry.getValue());
                 hadoopConf.set(entry.getKey(), entry.getValue());
