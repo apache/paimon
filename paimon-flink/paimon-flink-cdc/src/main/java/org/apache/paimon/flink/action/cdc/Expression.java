@@ -142,7 +142,7 @@ public interface Expression extends Serializable {
         private static final long serialVersionUID = 1L;
 
         private final String fieldReference;
-        private final LocalDateTimeExtractor extractor;
+        @Nullable private final String timeUnit;
 
         private transient Function<LocalDateTime, T> converter;
 
@@ -155,7 +155,7 @@ public interface Expression extends Serializable {
                     && timeUnit == null) {
                 timeUnit = "second";
             }
-            this.extractor = new LocalDateTimeExtractor(timeUnit);
+            this.timeUnit = timeUnit;
         }
 
         @Override
@@ -175,36 +175,11 @@ public interface Expression extends Serializable {
                 this.converter = createConverter();
             }
 
-            T result = converter.apply(extractor.extract(input));
+            T result = converter.apply(toLocalDateTime(input));
             return String.valueOf(result);
         }
 
-        protected abstract Function<LocalDateTime, T> createConverter();
-    }
-
-    class LocalDateTimeExtractor implements Serializable {
-
-        private static final long serialVersionUID = 1L;
-
-        private static final List<String> SUPPORTED_TIME_UNIT =
-                Arrays.asList("second", "millis", "micros", "nanos");
-
-        @Nullable private final String timeUnit;
-
-        private LocalDateTimeExtractor(@Nullable String timeUnit) {
-            if (timeUnit == null) {
-                this.timeUnit = null;
-            } else {
-                this.timeUnit = timeUnit.toLowerCase();
-                checkArgument(
-                        SUPPORTED_TIME_UNIT.contains(this.timeUnit),
-                        "Unsupported time unit '%s'. Supported: %s",
-                        this.timeUnit,
-                        String.join(", ", SUPPORTED_TIME_UNIT));
-            }
-        }
-
-        private LocalDateTime extract(String input) {
+        private LocalDateTime toLocalDateTime(String input) {
             if (timeUnit == null) {
                 return DateTimeUtils.toLocalDateTime(input, 9);
             } else {
@@ -231,6 +206,8 @@ public interface Expression extends Serializable {
                         .toLocalDateTime();
             }
         }
+
+        protected abstract Function<LocalDateTime, T> createConverter();
     }
 
     /** Convert the time to an integer. */
