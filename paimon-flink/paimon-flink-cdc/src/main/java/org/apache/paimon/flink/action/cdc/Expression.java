@@ -137,6 +137,7 @@ public interface Expression extends Serializable {
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
+    /** Expression to handle time. */
     abstract class TimeExpressionBase<T> implements Expression {
 
         private static final long serialVersionUID = 1L;
