@@ -84,7 +84,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
 
     @Override
     protected void notifyCompactBefore(List<DataFileMeta> files) {
-        super.notifyCompactBefore(files);
+        if (dvMaintainer != null) {
+            files.forEach(file -> dvMaintainer.removeDeletionVectorOf(file.fileName()));
+        }
     }
 
     @Override
