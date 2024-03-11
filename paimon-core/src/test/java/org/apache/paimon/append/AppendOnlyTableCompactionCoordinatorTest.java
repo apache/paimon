@@ -178,6 +178,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 UUID.randomUUID().toString(),
                 fileSize,
                 1,
+                DataFileMeta.EMPTY_FILTER,
                 row(0),
                 row(0),
                 newTableStats(0, 1),

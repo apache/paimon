@@ -602,7 +602,10 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        Collections.emptyList(),
+                        "",
+                        400L);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());
@@ -640,8 +643,10 @@ public class AppendOnlyWriterTest {
                                     0),
                             initStats(PART, PART, 0)
                         }),
+                BinaryRow.EMPTY_ROW,
                 minSeq,
                 maxSeq,
-                toCompact.get(0).schemaId());
+                toCompact.get(0).schemaId(),
+                Collections.emptyList());
     }
 }

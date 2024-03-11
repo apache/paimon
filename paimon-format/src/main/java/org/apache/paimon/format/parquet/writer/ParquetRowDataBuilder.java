@@ -77,5 +77,10 @@ public class ParquetRowDataBuilder
                 throw new RuntimeException(e);
             }
         }
+
+        @Override
+        public FinalizedWriteContext finalizeWrite() {
+            return super.finalizeWrite();
+        }
     }
 }

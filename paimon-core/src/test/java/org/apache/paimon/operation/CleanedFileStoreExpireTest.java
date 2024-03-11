@@ -78,6 +78,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
                         1,
                         EMPTY_ROW,
                         EMPTY_ROW,
+                        EMPTY_ROW,
                         null,
                         null,
                         0,

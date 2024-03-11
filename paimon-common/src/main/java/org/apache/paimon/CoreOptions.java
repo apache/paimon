@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.filter.bloomfilter.BloomFilter;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -485,6 +486,44 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The field that generates the row kind for primary key table,"
                                     + " the row kind determines which data is '+I', '-U', '+U' or '-D'.");
+
+    public static final ConfigOption<String> INDEX_COLUMNS =
+            key("index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The secondary index columns.");
+
+    public static final ConfigOption<String> INDEX_TYPE =
+            key("index.type")
+                    .stringType()
+                    .defaultValue(BloomFilter.BLOOM_FILTER)
+                    .withDescription("The secondary index type.");
+
+    public static final ConfigOption<MemorySize> INDEX_SIZE_IN_META =
+            key("index.size-in-meta")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("500 B"))
+                    .withDescription("Max memory size for lookup cache.");
+
+    public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
+            key("sequence.auto-padding")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
+                                    .list(
+                                            text("You can specific:"),
+                                            text(
+                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
+                                            text(
+                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
+                                            text(
+                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
+                                            text(
+                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
+                                    .build());
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
@@ -1669,6 +1708,21 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public List<String> indexColumns() {
+        String columns = options.get(INDEX_COLUMNS);
+        return columns == null || StringUtils.isBlank(columns)
+                ? Collections.emptyList()
+                : Arrays.asList(columns.split(","));
+    }
+
+    public String indexType() {
+        return options.get(INDEX_TYPE);
+    }
+
+    public long indexSizeInMeta() {
+        return options.get(INDEX_SIZE_IN_META).getBytes();
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -39,6 +39,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 
 import static org.apache.paimon.CoreOptions.FileFormatType;
@@ -69,13 +70,10 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                        new Path(tempDir.toString()),
-                                                        "",
-                                                        0,
-                                                        CoreOptions.FILE_FORMAT
-                                                                .defaultValue()
-                                                                .toString())
-                                                .newPath(),
+                                                new Path(tempDir.toString()),
+                                                "",
+                                                0,
+                                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
                                         SCHEMA,
                                         fileFormat
                                                 .createStatsExtractor(
@@ -89,7 +87,10 @@ public class RollingFileWriterTest {
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                                         StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
-                                                SCHEMA.getFieldNames())),
+                                                SCHEMA.getFieldNames()),
+                                        Collections.emptyList(),
+                                        "",
+                                        400L),
                         TARGET_FILE_SIZE);
     }
 

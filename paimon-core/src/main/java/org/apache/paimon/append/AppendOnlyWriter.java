@@ -74,6 +74,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
+    private final List<String> indexColumns;
+    private final String indexType;
+    private final long indexSizeInMeta;
+
     private MemorySegmentPool memorySegmentPool;
 
     public AppendOnlyWriter(
@@ -91,7 +95,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors,
+            List<String> indexColumn,
+            String indexType,
+            long indexSizeInMeta) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -116,6 +123,9 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
+        this.indexColumns = indexColumn;
+        this.indexType = indexType;
+        this.indexSizeInMeta = indexSizeInMeta;
     }
 
     @Override
@@ -217,7 +227,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                indexColumns,
+                indexType,
+                indexSizeInMeta);
     }
 
     private void trySyncLatestCompaction(boolean blocking)
