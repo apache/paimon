@@ -163,7 +163,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             List<DataFileMeta> restoreFiles,
             @Nullable CommitIncrement restoreIncrement,
             ExecutorService compactExecutor,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer) {
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Creating merge tree writer for partition {} bucket {} from restored files {}",
@@ -188,12 +188,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                         : universalCompaction;
         CompactManager compactManager =
                 createCompactManager(
-                        partition,
-                        bucket,
-                        compactStrategy,
-                        compactExecutor,
-                        levels,
-                        deletionVectorsMaintainer);
+                        partition, bucket, compactStrategy, compactExecutor, levels, dvMaintainer);
 
         return new MergeTreeWriter(
                 bufferSpillable(),
@@ -222,7 +217,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             CompactStrategy compactStrategy,
             ExecutorService compactExecutor,
             Levels levels,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            @Nullable DeletionVectorsMaintainer dvMaintainer) {
         if (options.writeOnly()) {
             return new NoopCompactManager();
         } else {
@@ -235,7 +230,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                             keyComparator,
                             userDefinedSeqComparator,
                             levels,
-                            deletionVectorsMaintainer);
+                            dvMaintainer);
             return new MergeTreeCompactManager(
                     compactExecutor,
                     levels,
@@ -321,7 +316,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     mfFactory,
                     mergeSorter,
                     wrapperFactory,
-                    lookupStrategy,
+                    lookupStrategy.produceChangelog,
                     deletionVectorsMaintainer);
         } else {
             return new MergeTreeCompactRewriter(
@@ -330,8 +325,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                     keyComparator,
                     userDefinedSeqComparator,
                     mfFactory,
-                    mergeSorter,
-                    deletionVectorsMaintainer);
+                    mergeSorter);
         }
     }
 
