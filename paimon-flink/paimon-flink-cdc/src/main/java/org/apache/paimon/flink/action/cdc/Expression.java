@@ -18,8 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 
 import javax.annotation.Nullable;
@@ -46,6 +50,7 @@ public interface Expression extends Serializable {
                     "minute",
                     "second",
                     "date_format",
+                    "time_format",
                     "substring",
                     "truncate");
 
@@ -74,7 +79,9 @@ public interface Expression extends Serializable {
             case "second":
                 return second(fieldReference);
             case "date_format":
-                return dateFormat(fieldReference, literals);
+                return dateFormat(fieldReference, fieldType, literals);
+            case "time_format":
+                return timeFormat(fieldReference, fieldType, literals);
             case "substring":
                 return substring(fieldReference, literals);
             case "truncate":
@@ -112,13 +119,42 @@ public interface Expression extends Serializable {
         return new SecondComputer(fieldReference);
     }
 
-    static Expression dateFormat(String fieldReference, String... literals) {
+    static Expression dateFormat(String fieldReference, DataType fieldType, String... literals) {
+        String errMsg =
+                "'date_format' only supports to convert DATE, DATETIME OR TIMESTAMP data now.";
+        if (!(fieldType instanceof DateType || fieldType instanceof TimestampType)) {
+            if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)) {
+                errMsg += " Perhaps you want to use 'time_format'?";
+            }
+            throw new IllegalArgumentException(errMsg);
+        }
+
         checkArgument(
                 literals.length == 1,
                 String.format(
                         "'date_format' expression supports one argument, but found '%s'.",
                         literals.length));
         return new DateFormat(fieldReference, literals[0]);
+    }
+
+    static Expression timeFormat(String fieldReference, DataType fieldType, String... literals) {
+        String errMsg = "'time_format' only supports to convert integer numeric data now.";
+        if (!fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)) {
+            if (fieldType instanceof DateType || fieldType instanceof TimestampType) {
+                errMsg += " Perhaps you want to use 'date_format'?";
+            }
+            throw new IllegalArgumentException(errMsg);
+        }
+
+        checkArgument(
+                literals.length == 1 || literals.length == 2,
+                String.format(
+                        "'time_format' expression supports one or two arguments, but found '%s'.",
+                        literals.length));
+
+        String timeunit = literals.length == 1 ? "second" : literals[1];
+
+        return new TimeFormat(fieldReference, literals[0], timeunit);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -359,6 +395,77 @@ public interface Expression extends Serializable {
             }
             LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
             return localDateTime.format(formatter);
+        }
+    }
+
+    /** Format a time (int or long value) to string by formatter. */
+    final class TimeFormat implements Expression {
+
+        private static final long serialVersionUID = 1L;
+        private static final List<String> SUPPORTED_TIME_UNIT =
+                Arrays.asList("second", "millis", "micros", "nanos");
+
+        private final String fieldReference;
+        private final String pattern;
+        private final String timeUnit;
+
+        private transient DateTimeFormatter formatter;
+
+        private TimeFormat(String fieldReference, String pattern, String timeUnit) {
+            this.fieldReference = fieldReference;
+            this.pattern = pattern;
+            this.timeUnit = timeUnit.toLowerCase();
+            checkArgument(
+                    SUPPORTED_TIME_UNIT.contains(this.timeUnit),
+                    "Unsupported time unit '%s' for time_format. Supported: %s",
+                    timeUnit,
+                    String.join(", ", SUPPORTED_TIME_UNIT));
+        }
+
+        @Override
+        public String fieldReference() {
+            return fieldReference;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.STRING();
+        }
+
+        @Override
+        public String eval(String input) {
+            if (formatter == null) {
+                formatter = DateTimeFormatter.ofPattern(pattern);
+            }
+            return toLocalDateTime(input).format(formatter);
+        }
+
+        private LocalDateTime toLocalDateTime(String input) {
+            long numericValue = Long.parseLong(input);
+            long milliseconds;
+            long nanosOfMillisecond;
+            switch (timeUnit) {
+                case "second":
+                    milliseconds = numericValue * 1000L;
+                    nanosOfMillisecond = 0;
+                    break;
+                case "millis":
+                    milliseconds = numericValue;
+                    nanosOfMillisecond = 0;
+                    break;
+                case "micros":
+                    milliseconds = numericValue / 1000;
+                    nanosOfMillisecond = numericValue % 1000 * 1000;
+                    break;
+                case "nanos":
+                    milliseconds = numericValue / 1_000_000;
+                    nanosOfMillisecond = numericValue % 1_000_000;
+                    break;
+                default:
+                    throw new RuntimeException();
+            }
+            return Timestamp.fromEpochMillis(milliseconds, (int) nanosOfMillisecond)
+                    .toLocalDateTime();
         }
     }
 

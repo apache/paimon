@@ -56,6 +56,19 @@ under the License.
         </td>
     </tr>
     <tr>
+        <td><h5>time_format(time-column,format,[time-unit])</h5></td>
+        <td>Convert date format from an integer numeric value (such as INT, BIGINT). The value will be considered as the epoch time of 1970-01-01T00:00:00Z.
+            You can control the time unit of the integer value by time-unit:
+                <ul>
+                    <li>second: The time unit is second. This is the default time unit.</li>
+                    <li>millis: The time unit is millisecond.</li>
+                    <li>micros: The time unit is microsecond.</li>
+                    <li>nanos: The time unit is nanosecond.</li>
+                </ul>
+            'format' is compatible with Java's DateTimeFormatter String (for example, 'yyyy-MM-dd'). Output is a string value in converted date format.
+        </td>
+    </tr>
+    <tr>
         <td><h5>substring(column,beginInclusive)</h5></td>
         <td>Get column.substring(beginInclusive). Output is a STRING.</td>
     </tr>
