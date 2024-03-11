@@ -42,7 +42,6 @@ import java.util.List;
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /**
  * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
@@ -52,6 +51,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
 
     private final LookupLevels<T> lookupLevels;
     private final MergeFunctionWrapperFactory<T> wrapperFactory;
+    @Nullable private final DeletionVectorsMaintainer dvMaintainer;
 
     public LookupMergeTreeCompactRewriter(
             int maxLevel,
@@ -64,8 +64,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             MergeFunctionWrapperFactory<T> wrapperFactory,
-            LookupStrategy lookupStrategy,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            boolean produceChangelog,
+            @Nullable DeletionVectorsMaintainer dvMaintainer) {
         super(
                 maxLevel,
                 mergeEngine,
@@ -75,15 +75,16 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 userDefinedSeqComparator,
                 mfFactory,
                 mergeSorter,
-                lookupStrategy,
-                deletionVectorsMaintainer);
-        if (lookupStrategy.deletionVector) {
-            checkArgument(
-                    deletionVectorsMaintainer != null,
-                    "deletionVectorsMaintainer should not be null, there is a bug.");
-        }
+                produceChangelog,
+                dvMaintainer != null);
+        this.dvMaintainer = dvMaintainer;
         this.lookupLevels = lookupLevels;
         this.wrapperFactory = wrapperFactory;
+    }
+
+    @Override
+    protected void notifyCompactBefore(List<DataFileMeta> files) {
+        super.notifyCompactBefore(files);
     }
 
     @Override
@@ -99,7 +100,8 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
         }
 
         // In deletionVector mode, since drop delete is required, rewrite is always required.
-        if (lookupStrategy.deletionVector) {
+        // TODO wait https://github.com/apache/incubator-paimon/pull/2962
+        if (dvMaintainer != null) {
             return CHANGELOG_WITH_REWRITE;
         }
 
@@ -121,8 +123,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
 
     @Override
     protected MergeFunctionWrapper<ChangelogResult> createMergeWrapper(int outputLevel) {
-        return wrapperFactory.create(
-                mfFactory, outputLevel, lookupLevels, deletionVectorsMaintainer);
+        return wrapperFactory.create(mfFactory, outputLevel, lookupLevels, dvMaintainer);
     }
 
     @Override

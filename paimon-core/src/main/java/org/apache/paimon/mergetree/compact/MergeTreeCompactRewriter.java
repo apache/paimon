@@ -21,7 +21,6 @@ package org.apache.paimon.mergetree.compact;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
@@ -47,7 +46,6 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final MergeFunctionFactory<KeyValue> mfFactory;
     protected final MergeSorter mergeSorter;
-    @Nullable protected final DeletionVectorsMaintainer deletionVectorsMaintainer;
 
     public MergeTreeCompactRewriter(
             KeyValueFileReaderFactory readerFactory,
@@ -55,15 +53,13 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             Comparator<InternalRow> keyComparator,
             @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
-            MergeSorter mergeSorter,
-            @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
+            MergeSorter mergeSorter) {
         this.readerFactory = readerFactory;
         this.writerFactory = writerFactory;
         this.keyComparator = keyComparator;
         this.userDefinedSeqComparator = userDefinedSeqComparator;
         this.mfFactory = mfFactory;
         this.mergeSorter = mergeSorter;
-        this.deletionVectorsMaintainer = deletionVectorsMaintainer;
     }
 
     @Override
@@ -88,11 +84,9 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
         writer.write(new RecordReaderIterator<>(sectionsReader));
         writer.close();
         List<DataFileMeta> before = extractFilesFromSections(sections);
-        if (deletionVectorsMaintainer != null) {
-            for (DataFileMeta dataFileMeta : before) {
-                deletionVectorsMaintainer.removeDeletionVectorOf(dataFileMeta.fileName());
-            }
-        }
+        notifyCompactBefore(before);
         return new CompactResult(before, writer.result());
     }
+
+    protected void notifyCompactBefore(List<DataFileMeta> files) {}
 }
