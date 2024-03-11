@@ -18,9 +18,12 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeFamily;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
+import org.apache.paimon.utils.SerializableSupplier;
 
 import javax.annotation.Nullable;
 
@@ -31,6 +34,7 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
+import java.util.function.Function;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -62,19 +66,25 @@ public interface Expression extends Serializable {
             String exprName, String fieldReference, DataType fieldType, String... literals) {
         switch (exprName.toLowerCase()) {
             case "year":
-                return year(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getYear, literals);
             case "month":
-                return month(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getMonthValue, literals);
             case "day":
-                return day(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getDayOfMonth, literals);
             case "hour":
-                return hour(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getHour, literals);
             case "minute":
-                return minute(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getMinute, literals);
             case "second":
-                return second(fieldReference);
+                return TimeToIntConverter.create(
+                        fieldReference, fieldType, () -> LocalDateTime::getSecond, literals);
             case "date_format":
-                return dateFormat(fieldReference, literals);
+                return DateFormat.create(fieldReference, fieldType, literals);
             case "substring":
                 return substring(fieldReference, literals);
             case "truncate":
@@ -86,39 +96,6 @@ public interface Expression extends Serializable {
                                 "Unsupported expression: %s. Supported expressions are: %s",
                                 exprName, String.join(",", SUPPORTED_EXPRESSION)));
         }
-    }
-
-    static Expression year(String fieldReference) {
-        return new YearComputer(fieldReference);
-    }
-
-    static Expression month(String fieldReference) {
-        return new MonthComputer(fieldReference);
-    }
-
-    static Expression day(String fieldReference) {
-        return new DayComputer(fieldReference);
-    }
-
-    static Expression hour(String fieldReference) {
-        return new HourComputer(fieldReference);
-    }
-
-    static Expression minute(String fieldReference) {
-        return new MinuteComputer(fieldReference);
-    }
-
-    static Expression second(String fieldReference) {
-        return new SecondComputer(fieldReference);
-    }
-
-    static Expression dateFormat(String fieldReference, String... literals) {
-        checkArgument(
-                literals.length == 1,
-                String.format(
-                        "'date_format' expression supports one argument, but found '%s'.",
-                        literals.length));
-        return new DateFormat(fieldReference, literals[0]);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -160,15 +137,25 @@ public interface Expression extends Serializable {
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
-    /** Compute year from a time input. */
-    final class YearComputer implements Expression {
+    abstract class TimeExpressionBase<T> implements Expression {
 
         private static final long serialVersionUID = 1L;
 
         private final String fieldReference;
+        private final LocalDateTimeExtractor extractor;
 
-        private YearComputer(String fieldReference) {
+        private transient Function<LocalDateTime, T> converter;
+
+        private TimeExpressionBase(
+                String fieldReference, DataType fieldType, @Nullable String timeUnit) {
             this.fieldReference = fieldReference;
+
+            // when the input is INTEGER_NUMERIC, the time unit must be set
+            if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
+                    && timeUnit == null) {
+                timeUnit = "second";
+            }
+            this.extractor = new LocalDateTimeExtractor(timeUnit);
         }
 
         @Override
@@ -176,6 +163,7 @@ public interface Expression extends Serializable {
             return fieldReference;
         }
 
+        /** If not, this must be overridden! */
         @Override
         public DataType outputType() {
             return DataTypes.INT();
@@ -183,168 +171,121 @@ public interface Expression extends Serializable {
 
         @Override
         public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getYear());
+            if (converter == null) {
+                this.converter = createConverter();
+            }
+
+            T result = converter.apply(extractor.extract(input));
+            return String.valueOf(result);
         }
+
+        protected abstract Function<LocalDateTime, T> createConverter();
     }
 
-    /** Compute month from a time input. */
-    final class MonthComputer implements Expression {
+    class LocalDateTimeExtractor implements Serializable {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldReference;
+        private static final List<String> SUPPORTED_TIME_UNIT =
+                Arrays.asList("second", "millis", "micros", "nanos");
 
-        private MonthComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
+        @Nullable private final String timeUnit;
+
+        private LocalDateTimeExtractor(@Nullable String timeUnit) {
+            if (timeUnit == null) {
+                this.timeUnit = null;
+            } else {
+                this.timeUnit = timeUnit.toLowerCase();
+                checkArgument(
+                        SUPPORTED_TIME_UNIT.contains(this.timeUnit),
+                        "Unsupported time unit '%s'. Supported: %s",
+                        this.timeUnit,
+                        String.join(", ", SUPPORTED_TIME_UNIT));
+            }
         }
 
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getMonthValue());
-        }
-    }
-
-    /** Compute day from a time input. */
-    final class DayComputer implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
-
-        private DayComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getDayOfMonth());
+        private LocalDateTime extract(String input) {
+            if (timeUnit == null) {
+                return DateTimeUtils.toLocalDateTime(input, 9);
+            } else {
+                long numericValue = Long.parseLong(input);
+                long milliseconds = 0;
+                int nanosOfMillisecond = 0;
+                switch (timeUnit) {
+                    case "second":
+                        milliseconds = numericValue * 1000L;
+                        break;
+                    case "millis":
+                        milliseconds = numericValue;
+                        break;
+                    case "micros":
+                        milliseconds = numericValue / 1000;
+                        nanosOfMillisecond = (int) (numericValue % 1000 * 1000);
+                        break;
+                    case "nanos":
+                        milliseconds = numericValue / 1_000_000;
+                        nanosOfMillisecond = (int) (numericValue % 1_000_000);
+                        break;
+                }
+                return Timestamp.fromEpochMillis(milliseconds, nanosOfMillisecond)
+                        .toLocalDateTime();
+            }
         }
     }
 
-    /** Compute hour from a time input. */
-    final class HourComputer implements Expression {
+    /** Convert the time to an integer. */
+    final class TimeToIntConverter extends TimeExpressionBase<Integer> {
 
         private static final long serialVersionUID = 1L;
 
-        private final String fieldReference;
+        private final SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier;
 
-        private HourComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
+        private TimeToIntConverter(
+                String fieldReference,
+                DataType fieldType,
+                @Nullable String timeUnit,
+                SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier) {
+            super(fieldReference, fieldType, timeUnit);
+            this.converterSupplier = converterSupplier;
         }
 
         @Override
-        public String fieldReference() {
-            return fieldReference;
+        protected Function<LocalDateTime, Integer> createConverter() {
+            return converterSupplier.get();
         }
 
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
+        private static TimeToIntConverter create(
+                String fieldReference,
+                DataType fieldType,
+                SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier,
+                String... literals) {
+            checkArgument(
+                    literals.length == 0 || literals.length == 1,
+                    "TimeToIntConverter supports 0 or 1 argument, but found '%s'.",
+                    literals.length);
 
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getHour());
+            return new TimeToIntConverter(
+                    fieldReference,
+                    fieldType,
+                    literals.length == 0 ? null : literals[0],
+                    converterSupplier);
         }
     }
 
-    /** Compute minute from a time input. */
-    final class MinuteComputer implements Expression {
+    /** Convert the time to desired formatted string. */
+    final class DateFormat extends TimeExpressionBase<String> {
 
-        private static final long serialVersionUID = 1L;
+        private static final long serialVersionUID = 2L;
 
-        private final String fieldReference;
-
-        private MinuteComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getMinute());
-        }
-    }
-
-    /** Compute second from a time input. */
-    final class SecondComputer implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
-
-        private SecondComputer(String fieldReference) {
-            this.fieldReference = fieldReference;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
-        }
-
-        @Override
-        public DataType outputType() {
-            return DataTypes.INT();
-        }
-
-        @Override
-        public String eval(String input) {
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return String.valueOf(localDateTime.getSecond());
-        }
-    }
-
-    /** date format from a time input. */
-    final class DateFormat implements Expression {
-
-        private static final long serialVersionUID = 1L;
-
-        private final String fieldReference;
         private final String pattern;
-        private transient DateTimeFormatter formatter;
 
-        private DateFormat(String fieldReference, String pattern) {
-            this.fieldReference = fieldReference;
+        private DateFormat(
+                String fieldReference,
+                DataType fieldType,
+                String pattern,
+                @Nullable String timeUnit) {
+            super(fieldReference, fieldType, timeUnit);
             this.pattern = pattern;
-        }
-
-        @Override
-        public String fieldReference() {
-            return fieldReference;
         }
 
         @Override
@@ -353,12 +294,23 @@ public interface Expression extends Serializable {
         }
 
         @Override
-        public String eval(String input) {
-            if (formatter == null) {
-                formatter = DateTimeFormatter.ofPattern(pattern);
-            }
-            LocalDateTime localDateTime = DateTimeUtils.toLocalDateTime(input, 0);
-            return localDateTime.format(formatter);
+        protected Function<LocalDateTime, String> createConverter() {
+            DateTimeFormatter formatter = DateTimeFormatter.ofPattern(pattern);
+            return localDateTime -> localDateTime.format(formatter);
+        }
+
+        private static DateFormat create(
+                String fieldReference, DataType fieldType, String... literals) {
+            checkArgument(
+                    literals.length == 1 || literals.length == 2,
+                    "'date_format' supports 1 or 2 arguments, but found '%s'.",
+                    literals.length);
+
+            return new DateFormat(
+                    fieldReference,
+                    fieldType,
+                    literals[0],
+                    literals.length == 1 ? null : literals[1]);
         }
     }
 
