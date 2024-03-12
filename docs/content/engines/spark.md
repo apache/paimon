@@ -584,7 +584,12 @@ s
             <li>tag: name of the new tag. Cannot be empty.</li>
             <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
       </td>
-      <td>CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10)</td>
+      <td>
+         -- based on snapshot 10 <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10) <br/>
+         -- based on the latest snapshot <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
+      </td>
     </tr>
     <tr>
       <td>delete_tag</td>

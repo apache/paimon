@@ -392,7 +392,10 @@ table options syntax: we use string to represent table options. The format is 'k
    <tr>
       <td>create_tag</td>
       <td>
-         CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId)
+         -- based on the specified snapshot <br/>
+         CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId) <br/>
+         -- based on the latest snapshot <br/>
+         CALL [catalog.]sys.create_tag('identifier', 'tagName')
       </td>
       <td>
          To create a tag based on given snapshot. Arguments:
