@@ -65,7 +65,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -100,7 +99,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         }
         this.tableSchema = tableSchema;
         this.catalogEnvironment = catalogEnvironment;
-        tableSchemaManager = new SchemaManager(fileIO, path, new ConcurrentHashMap<>());
+        tableSchemaManager = new SchemaManager(fileIO, path);
     }
 
     @Override

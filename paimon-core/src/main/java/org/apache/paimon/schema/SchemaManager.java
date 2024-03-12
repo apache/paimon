@@ -84,15 +84,9 @@ public class SchemaManager implements Serializable {
     private final Map<Long, TableSchema> cache;
 
     public SchemaManager(FileIO fileIO, Path tableRoot) {
-        this(fileIO, tableRoot, new ConcurrentHashMap<>());
-    }
-
-    public SchemaManager(FileIO fileIO, Path tableRoot, Map<Long, TableSchema> cache) {
         this.fileIO = fileIO;
         this.tableRoot = tableRoot;
-        this.cache = cache;
-        // cache
-        listAll();
+        this.cache = new ConcurrentHashMap<>();
     }
 
     public SchemaManager withLock(@Nullable Lock lock) {
@@ -132,11 +126,6 @@ public class SchemaManager implements Serializable {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
-    }
-
-    @VisibleForTesting
-    public Map<Long, TableSchema> getCachedSchema() {
-        return cache;
     }
 
     /** Create a new schema from {@link Schema}. */
@@ -378,9 +367,7 @@ public class SchemaManager implements Serializable {
             try {
                 boolean success = commit(newSchema);
                 if (success) {
-                    if (cache != null) {
-                        cache.put(newSchema.id(), newSchema);
-                    }
+                    cache.put(newSchema.id(), newSchema);
                     return newSchema;
                 }
             } catch (Exception e) {
@@ -485,10 +472,7 @@ public class SchemaManager implements Serializable {
 
     /** Read schema for schema id. */
     public TableSchema schema(long id) {
-        if (cache != null) {
-            return cache.computeIfAbsent(id, this::loadSchemaFromFile);
-        }
-        return loadSchemaFromFile(id);
+        return cache.computeIfAbsent(id, this::loadSchemaFromFile);
     }
 
     private TableSchema loadSchemaFromFile(Long id) {
@@ -532,9 +516,7 @@ public class SchemaManager implements Serializable {
      */
     public void deleteSchema(long schemaId) {
         fileIO.deleteQuietly(toSchemaPath(schemaId));
-        if (cache != null) {
-            this.cache.remove(schemaId);
-        }
+        this.cache.remove(schemaId);
     }
 
     public static void checkAlterTableOption(String key) {
