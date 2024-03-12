@@ -386,6 +386,10 @@ public interface FileIO extends Serializable {
 
         if (loader == null) {
             String fallbackMsg = "";
+            String preMsg = "";
+            if (preIO != null) {
+                preMsg = " " + preIO.getClass().getSimpleName() + " also cannot access this path.";
+            }
             if (fallbackIO != null) {
                 fallbackMsg =
                         " "
@@ -396,8 +400,8 @@ public interface FileIO extends Serializable {
                     new UnsupportedSchemeException(
                             String.format(
                                     "Could not find a file io implementation for scheme '%s' in the classpath."
-                                            + "%s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), fallbackMsg, path));
+                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
+                                    uri.getScheme(), preMsg, fallbackMsg, path));
             for (IOException ioException : ioExceptionList) {
                 ex.addSuppressed(ioException);
             }
