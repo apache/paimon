@@ -26,6 +26,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.data.serializer.InternalSerializers;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
@@ -123,7 +124,9 @@ public class LocalTableQuery implements TableQuery {
 
     private void newLookupLevels(BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         Levels levels = new Levels(keyComparatorSupplier.get(), dataFiles, options.numLevels());
-        KeyValueFileReaderFactory factory = readerFactoryBuilder.build(partition, bucket);
+        // TODO pass DeletionVector factory
+        KeyValueFileReaderFactory factory =
+                readerFactoryBuilder.build(partition, bucket, DeletionVector.emptyFactory());
         Options options = this.options.toConfiguration();
         LookupLevels<KeyValue> lookupLevels =
                 new LookupLevels<>(

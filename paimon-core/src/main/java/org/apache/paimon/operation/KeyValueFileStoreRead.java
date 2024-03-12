@@ -23,7 +23,6 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
@@ -247,9 +246,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
         KeyValueFileReaderFactory overlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, false, filtersForKeys);
+                readerFactoryBuilder.build(
+                        partition, bucket, DeletionVector.emptyFactory(), false, filtersForKeys);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(partition, bucket, false, filtersForAll);
+                readerFactoryBuilder.build(
+                        partition, bucket, DeletionVector.emptyFactory(), false, filtersForAll);
 
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
@@ -284,27 +285,23 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             @Nullable List<DeletionFile> deletionFiles,
             boolean onlyFilterKey)
             throws IOException {
+        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory readerFactory =
                 readerFactoryBuilder.build(
-                        partition, bucket, true, onlyFilterKey ? filtersForKeys : filtersForAll);
+                        partition,
+                        bucket,
+                        dvFactory,
+                        true,
+                        onlyFilterKey ? filtersForKeys : filtersForAll);
         List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();
-        for (int i = 0; i < files.size(); i++) {
-            DataFileMeta file = files.get(i);
-            DeletionFile deletionFile = deletionFiles == null ? null : deletionFiles.get(i);
+        for (DataFileMeta file : files) {
             suppliers.add(
                     () -> {
                         // We need to check extraFiles to be compatible with Paimon 0.2.
                         // See comments on DataFileMeta#extraFiles.
                         String fileName = changelogFile(file).orElse(file.fileName());
-                        RecordReader<KeyValue> reader =
-                                readerFactory.createRecordReader(
-                                        file.schemaId(), fileName, file.fileSize(), file.level());
-                        if (deletionFile != null) {
-                            DeletionVector deletionVector =
-                                    DeletionVector.read(fileIO, deletionFile);
-                            reader = ApplyDeletionVectorReader.create(reader, deletionVector);
-                        }
-                        return reader;
+                        return readerFactory.createRecordReader(
+                                file.schemaId(), fileName, file.fileSize(), file.level());
                     });
         }
         return ConcatRecordReader.create(suppliers);

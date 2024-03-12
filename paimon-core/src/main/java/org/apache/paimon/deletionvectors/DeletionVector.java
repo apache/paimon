@@ -21,11 +21,18 @@ package org.apache.paimon.deletionvectors;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DeletionFile;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayInputStream;
 import java.io.DataInputStream;
 import java.io.IOException;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 
 /**
  * The DeletionVector can efficiently record the positions of rows that are deleted in a file, which
@@ -117,5 +124,43 @@ public interface DeletionVector {
                 throw new RuntimeException("Invalid magic number: " + magicNum);
             }
         }
+    }
+
+    static Factory emptyFactory() {
+        return fileName -> Optional.empty();
+    }
+
+    static Factory factory(@Nullable DeletionVectorsMaintainer dvMaintainer) {
+        if (dvMaintainer == null) {
+            return emptyFactory();
+        }
+        return dvMaintainer::deletionVectorOf;
+    }
+
+    static Factory factory(
+            FileIO fileIO, List<DataFileMeta> files, @Nullable List<DeletionFile> deletionFiles) {
+        if (deletionFiles == null) {
+            return emptyFactory();
+        }
+        Map<String, DeletionFile> fileToDeletion = new HashMap<>();
+        for (int i = 0; i < files.size(); i++) {
+            DeletionFile deletionFile = deletionFiles.get(i);
+            if (deletionFile != null) {
+                fileToDeletion.put(files.get(i).fileName(), deletionFile);
+            }
+        }
+        return fileName -> {
+            DeletionFile deletionFile = fileToDeletion.get(fileName);
+            if (deletionFile == null) {
+                return Optional.empty();
+            }
+
+            return Optional.of(DeletionVector.read(fileIO, deletionFile));
+        };
+    }
+
+    /** Interface to create {@link DeletionVector}. */
+    interface Factory {
+        Optional<DeletionVector> create(String fileName) throws IOException;
     }
 }

@@ -25,6 +25,7 @@ import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FieldStats;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIO;
@@ -294,7 +295,7 @@ public class KeyValueFileReadWriteTest {
         if (valueProjection != null) {
             builder.withValueProjection(valueProjection);
         }
-        return builder.build(BinaryRow.EMPTY_ROW, 0);
+        return builder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
     }
 
     private void assertData(
