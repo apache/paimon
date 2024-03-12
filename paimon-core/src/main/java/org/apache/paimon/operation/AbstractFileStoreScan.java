@@ -286,6 +286,9 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
         Collection<ManifestEntry> mergedEntries = ManifestEntry.mergeEntries(entries);
         long skippedByPartitionAndStats = startDataFiles - cntEntries.get();
         for (ManifestEntry file : mergedEntries) {
+            // cache the data schema
+            schemaManager.schema(file.file().schemaId());
+
             if (checkNumOfBuckets && file.totalBuckets() != numOfBuckets) {
                 String partInfo =
                         partitionType.getFieldCount() > 0
