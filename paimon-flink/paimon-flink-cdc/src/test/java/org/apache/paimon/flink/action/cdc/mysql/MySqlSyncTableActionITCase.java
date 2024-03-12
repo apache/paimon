@@ -37,13 +37,18 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
+import java.sql.SQLException;
 import java.sql.Statement;
+import java.time.DayOfWeek;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.temporal.WeekFields;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
@@ -817,6 +822,178 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         "+I[1, 19439, 2022-01-01T14:30, 2021-09-15T15:00:10, 2023, 2022, 2021, 3, 1, 9, 23, 1, 15, 0, 14, 15, 0, 30, 0, 0, 0, 10, 2023, 2022-01-01, 20210915, 23-03-23, 09-15, 0]",
                         "+I[2, 19439, NULL, NULL, 2023, NULL, NULL, 3, NULL, NULL, 23, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 0, NULL, NULL, 2023, NULL, NULL, 23-03-23, NULL, 2]");
         waitForResult(expected, table, rowType, Arrays.asList("pk", "_year_date"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testTemporalToIntWithEpochTime() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_time_to_int_epoch");
+
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        // pick field reference & time unit
+        int fieldRefIndex = random.nextInt(5);
+        String fieldReference =
+                Arrays.asList(
+                                "_second_val0",
+                                "_second_val1",
+                                "_millis_val",
+                                "_micros_val",
+                                "_nanos_val")
+                        .get(fieldRefIndex);
+        String precision = Arrays.asList("", ",0", ",3", ",6", ",9").get(fieldRefIndex);
+
+        // pick test expression
+        int expIndex = random.nextInt(6);
+        String expression =
+                Arrays.asList("year", "month", "day", "hour", "minute", "second").get(expIndex);
+
+        String computedColumnDef =
+                String.format("_time_to_int=%s(%s%s)", expression, fieldReference, precision);
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withComputedColumnArgs(computedColumnDef)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + DATABASE_NAME);
+            insertEpochTime(
+                    "test_time_to_int_epoch", 1, "2024-01-01T00:01:02.123456789Z", statement);
+            insertEpochTime(
+                    "test_time_to_int_epoch", 2, "2024-12-31T12:59:59.123456789Z", statement);
+        }
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.INT()
+                        },
+                        new String[] {
+                            "pk",
+                            "_second_val0",
+                            "_second_val1",
+                            "_millis_val",
+                            "_micros_val",
+                            "_nanos_val",
+                            "_time_to_int"
+                        });
+
+        int result1 = Arrays.asList(2024, 1, 1, 0, 1, 2).get(expIndex);
+        int result2 = Arrays.asList(2024, 12, 31, 12, 59, 59).get(expIndex);
+        List<String> expected =
+                Arrays.asList(
+                        "+I[1, 1704067262, 1704067262, 1704067262123, 1704067262123456, 1704067262123456789, "
+                                + result1
+                                + "]",
+                        "+I[2, 1735649999, 1735649999, 1735649999123, 1735649999123456, 1735649999123456789, "
+                                + result2
+                                + "]");
+        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
+    }
+
+    @Test
+    @Timeout(60)
+    public void testDateFormatWithEpochTime() throws Exception {
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_date_format_epoch");
+
+        List<String> computedColumnDefs =
+                Arrays.asList(
+                        "_from_second0_default=date_format(_second_val0, yyyy-MM-dd HH:mm:ss)",
+                        "_from_second0=date_format(_second_val0, yyyy-MM-dd HH:mm:ss, 0)",
+                        "_from_second1=date_format(_second_val1, yyyy-MM-dd HH:mm:ss, 0)",
+                        // test week format
+                        "_from_second1_week=date_format(_second_val1, yyyy-ww, 0)",
+                        "_from_millisecond=date_format(_millis_val, yyyy-MM-dd HH:mm:ss.SSS, 3)",
+                        "_from_microsecond=date_format(_micros_val, yyyy-MM-dd HH:mm:ss.SSSSSS, 6)",
+                        "_from_nanoseconds=date_format(_nanos_val, yyyy-MM-dd HH:mm:ss.SSSSSSSSS, 9)");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withComputedColumnArgs(computedColumnDefs)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        try (Statement statement = getStatement()) {
+            statement.execute("USE " + DATABASE_NAME);
+            insertEpochTime(
+                    "test_date_format_epoch", 1, "2024-01-07T00:01:02.123456789Z", statement);
+        }
+
+        FileStoreTable table = getFileStoreTable();
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(),
+                            DataTypes.INT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.BIGINT(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING(),
+                            DataTypes.STRING()
+                        },
+                        new String[] {
+                            "pk",
+                            "_second_val0",
+                            "_second_val1",
+                            "_millis_val",
+                            "_micros_val",
+                            "_nanos_val",
+                            "_from_second0_default",
+                            "_from_second0",
+                            "_from_second1",
+                            "_from_second1_week",
+                            "_from_millisecond",
+                            "_from_microsecond",
+                            "_from_nanoseconds"
+                        });
+
+        // depends on the Locale setting
+        WeekFields weekFields = WeekFields.of(Locale.getDefault());
+        int week = weekFields.getFirstDayOfWeek() == DayOfWeek.MONDAY ? 1 : 2;
+
+        List<String> expected =
+                Collections.singletonList(
+                        "+I[1, 1704585662, 1704585662, 1704585662123, 1704585662123456, 1704585662123456789, "
+                                + "2024-01-07 00:01:02, 2024-01-07 00:01:02, 2024-01-07 00:01:02, "
+                                + String.format("2024-0%s, ", week)
+                                + "2024-01-07 00:01:02.123, 2024-01-07 00:01:02.123456, 2024-01-07 00:01:02.123456789]");
+        waitForResult(expected, table, rowType, Collections.singletonList("pk"));
+    }
+
+    private void insertEpochTime(String table, int pk, String dateStr, Statement statement)
+            throws SQLException {
+        Instant instant = Instant.parse(dateStr);
+        long epochSecond = instant.getEpochSecond();
+        int nano = instant.getNano();
+
+        statement.executeUpdate(
+                String.format(
+                        "INSERT INTO %s VALUES (%d, %d, %d, %d, %d, %d)",
+                        table,
+                        pk,
+                        epochSecond,
+                        epochSecond,
+                        epochSecond * 1000 + nano / 1_000_000,
+                        epochSecond * 1000_000 + nano / 1_000,
+                        epochSecond * 1_000_000_000 + nano));
     }
 
     @Test
