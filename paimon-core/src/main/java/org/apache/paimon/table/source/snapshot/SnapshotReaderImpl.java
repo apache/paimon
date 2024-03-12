@@ -40,7 +40,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.SimplePlan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -48,8 +48,6 @@ import org.apache.paimon.utils.Filter;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TypeUtils;
-
-import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -252,24 +250,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         scanMode != ScanMode.ALL,
                         splitGenerator,
                         files);
-        return new Plan() {
-            @Nullable
-            @Override
-            public Long watermark() {
-                return plan.watermark();
-            }
-
-            @Nullable
-            @Override
-            public Long snapshotId() {
-                return plan.snapshotId();
-            }
-
-            @Override
-            public List<Split> splits() {
-                return (List) splits;
-            }
-        };
+        return new SimplePlan(plan.watermark(), plan.snapshotId(), (List) splits);
     }
 
     private List<DataSplit> generateSplits(
@@ -401,24 +382,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
 
-        return new Plan() {
-            @Nullable
-            @Override
-            public Long watermark() {
-                return plan.watermark();
-            }
-
-            @Nullable
-            @Override
-            public Long snapshotId() {
-                return plan.snapshotId();
-            }
-
-            @Override
-            public List<Split> splits() {
-                return (List) splits;
-            }
-        };
+        return new SimplePlan(plan.watermark(), plan.snapshotId(), (List) splits);
     }
 
     @Override

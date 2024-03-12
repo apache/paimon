@@ -18,30 +18,39 @@
 
 package org.apache.paimon.table.source;
 
-import org.apache.paimon.table.source.snapshot.StartingScanner;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+
+import org.jetbrains.annotations.Nullable;
 
 import java.io.Serializable;
-import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
-/** Scanning plan containing snapshot ID and input splits. */
-public class DataFilePlan implements TableScan.Plan, Serializable {
+public class SimplePlan implements SnapshotReader.Plan, Serializable {
 
-    private final List<DataSplit> splits;
+    private final Long watermark;
+    private final Long snapshotId;
+    private final List<Split> splits;
 
-    public DataFilePlan(List<DataSplit> splits) {
+    public SimplePlan(Long watermark, Long snapshotId, List<Split> splits) {
+        this.watermark = watermark;
+        this.snapshotId = snapshotId;
         this.splits = splits;
+    }
+
+    @Nullable
+    @Override
+    public Long watermark() {
+        return watermark;
+    }
+
+    @Nullable
+    @Override
+    public Long snapshotId() {
+        return snapshotId;
     }
 
     @Override
     public List<Split> splits() {
-        return new ArrayList<>(splits);
-    }
-
-    public static TableScan.Plan fromResult(StartingScanner.Result result) {
-        return result instanceof StartingScanner.ScannedResult
-                ? ((StartingScanner.ScannedResult) result).plan()
-                : new DataFilePlan(Collections.emptyList());
+        return splits;
     }
 }
