@@ -80,26 +80,27 @@ behaviors of `RENAME TABLE` and `DROP COLUMN` will be ignored, `RENAME COLUMN` w
 
 `--computed_column` are the definitions of computed columns. The argument field is from source table field name. 
 
-### Time Functions
+### Temporal Functions
 
-Time functions can convert time to another form. A common use case is to generate partition values.
+Temporal functions can convert date and time to another form. A common use case is to generate partition values.
 
-{{< generated/time_functions >}}
+{{< generated/temporal_functions >}}
 
-The data type of time-column can be one of the following cases:
+The data type of temporal-column can be one of the following cases:
 1. DATE, DATETIME or TIMESTAMP.
-2. Any integer numeric type. In this case, the data will be considered as epoch time of `1970-01-01 00:00:00`. You should 
-set time unit of the value (default is second). There are four time units: `second`, `millis` (for millisecond), `micros` 
-(for microsecond) and `nanos` (for nanosecond).
-3. STRING. In this case, if you didn't set the time unit, the data will be considered as a formatted string of a DATE, 
-DATETIME or TIMESTAMP value. Otherwise, it will be considered as the string value of a epoch time. So you must set time 
+2. Any integer numeric type (such as INT and BIGINT). In this case, the data will be considered as epoch time 
+of `1970-01-01 00:00:00`. You should set time unit of the value (default is second). There are four time units: 
+`second`, `millis` (for millisecond), `micros`(for microsecond) and `nanos` (for nanosecond).
+3. STRING. In this case, if you didn't set the time unit, the data will be considered as formatted string of DATE, 
+DATETIME or TIMESTAMP value. Otherwise, the data will be considered as string value of epoch time. So you must set time 
 unit in the latter case.
 
-`date_format` is a flexible function which is able to convert time to various format with different format string. A most 
-common format string is `yyyy-MM-dd HH:mm:ss.SSS`. Another example is `yyyy-ww` which can extract the year and the week-of-the-year
-from the input. Note that the output is affected by locale. For example, in some regions the first day of a week is Monday 
-while others is Sunday, so if you use `date_format(date_col, yyyy-ww)` and the input of date_col is 2024/01/07 (Sunday), 
-the output maybe `2024-01` (if the first day of a week is Monday) or `2024-02` (if the first day of a week is Sunday).
+`date_format` is a flexible function which is able to convert the temporal value to various formats with different format 
+strings. A most common format string is `yyyy-MM-dd HH:mm:ss.SSS`. Another example is `yyyy-ww` which can extract the year 
+and the week-of-the-year from the input. Note that the output is affected by the locale. For example, in some regions the 
+first day of a week is Monday while in others is Sunday, so if you use `date_format(date_col, yyyy-ww)` and the input of 
+date_col is 2024/01/07 (Sunday), the output maybe `2024-01` (if the first day of a week is Monday) or `2024-02` (if the 
+first day of a week is Sunday).
 
 ### Other Functions
 
