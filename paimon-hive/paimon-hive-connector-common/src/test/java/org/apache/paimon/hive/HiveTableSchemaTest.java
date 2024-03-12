@@ -37,7 +37,7 @@ import java.util.HashMap;
 import java.util.Optional;
 import java.util.Properties;
 
-import static org.apache.paimon.hive.PaimonStorageHandler.PAIMON_SCHEMA;
+import static org.apache.paimon.hive.PaimonStorageHandler.PAIMON_HIVE_SCHEMA;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -355,7 +355,7 @@ public class HiveTableSchemaTest {
         assertThat(existingSchema).isPresent();
         Properties properties = new Properties();
         TableSchema tableSchema = existingSchema.get();
-        properties.put(PAIMON_SCHEMA, tableSchema.toString());
+        properties.put(PAIMON_HIVE_SCHEMA, tableSchema.toString());
 
         // get the TableSchema from properties
         Optional<TableSchema> tableSchemaFromCache = HiveSchema.getTableSchemaFromCache(properties);

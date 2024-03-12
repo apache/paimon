@@ -19,6 +19,7 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -53,11 +54,18 @@ public class PaimonSerDe extends AbstractSerDe {
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
-        HiveSchema schema = HiveSchema.extract(configuration, properties);
-        this.tableSchema = schema;
+        String hiveSchemaStr = properties.getProperty(PaimonStorageHandler.PAIMON_HIVE_SCHEMA);
+        if (hiveSchemaStr != null) {
+            this.tableSchema = JsonSerdeUtil.fromJson(hiveSchemaStr, HiveSchema.class);
+        } else {
+            this.tableSchema = HiveSchema.extract(configuration, properties);
+        }
+
         inspector =
                 new PaimonInternalRowObjectInspector(
-                        schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
+                        tableSchema.fieldNames(),
+                        tableSchema.fieldTypes(),
+                        tableSchema.fieldComments());
     }
 
     @Override

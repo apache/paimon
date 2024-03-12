@@ -200,7 +200,7 @@ public class HiveSchema {
 
     @VisibleForTesting
     static Optional<TableSchema> getTableSchemaFromCache(Properties properties) {
-        String paimonSchemaStr = properties.getProperty(PaimonStorageHandler.PAIMON_SCHEMA);
+        String paimonSchemaStr = properties.getProperty(PaimonStorageHandler.PAIMON_HIVE_SCHEMA);
         if (paimonSchemaStr != null) {
             return Optional.of(JsonSerdeUtil.fromJson(paimonSchemaStr, TableSchema.class));
         }
