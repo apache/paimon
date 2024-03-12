@@ -316,13 +316,25 @@ public interface FileIO extends Serializable {
                             + "')");
         }
 
-        Map<String, FileIOLoader> loaders = discoverLoaders();
-        FileIOLoader loader = loaders.get(uri.getScheme());
+        FileIOLoader loader = null;
+
+        List<IOException> ioExceptionList = new ArrayList<>();
+
+        // load preIO
+        FileIOLoader preIO = config.preIO();
+        try {
+            loader = checkAccess(preIO, path, config);
+        } catch (IOException ioException) {
+            ioExceptionList.add(ioException);
+        }
+
+        if (loader == null) {
+            Map<String, FileIOLoader> loaders = discoverLoaders();
+            loader = loaders.get(uri.getScheme());
+        }
 
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
-
-        List<IOException> ioExceptionList = new ArrayList<>();
 
         if (loader != null) {
             Set<String> options =

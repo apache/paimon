@@ -129,24 +129,26 @@ public class TagsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new TagsSplit(fileIO, location));
+            return () ->
+                    Collections.singletonList(
+                            new TagsSplit(new TagManager(fileIO, location).tagCount(), location));
         }
     }
 
     private static class TagsSplit implements Split {
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private TagsSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private TagsSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return new TagManager(fileIO, location).tagCount();
+            return rowCount;
         }
 
         @Override

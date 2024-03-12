@@ -110,7 +110,7 @@ public class PartitionsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new PartitionsRead();
+        return new PartitionsRead(storeTable);
     }
 
     @Override
@@ -134,7 +134,8 @@ public class PartitionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new PartitionsSplit(storeTable));
+            return () ->
+                    Collections.singletonList(new PartitionsSplit(storeTable.newScan().plan()));
         }
     }
 
@@ -142,15 +143,14 @@ public class PartitionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileStoreTable storeTable;
+        private final TableScan.Plan plan;
 
-        private PartitionsSplit(FileStoreTable storeTable) {
-            this.storeTable = storeTable;
+        private PartitionsSplit(TableScan.Plan plan) {
+            this.plan = plan;
         }
 
         @Override
         public long rowCount() {
-            TableScan.Plan plan = plan();
             return plan.splits().stream()
                     .map(s -> ((DataSplit) s).partition())
                     .collect(Collectors.toSet())
@@ -158,7 +158,7 @@ public class PartitionsTable implements ReadonlyTable {
         }
 
         private TableScan.Plan plan() {
-            return storeTable.newScan().plan();
+            return plan;
         }
 
         @Override
@@ -170,18 +170,24 @@ public class PartitionsTable implements ReadonlyTable {
                 return false;
             }
             PartitionsSplit that = (PartitionsSplit) o;
-            return Objects.equals(storeTable, that.storeTable);
+            return Objects.equals(plan, that.plan);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(storeTable);
+            return Objects.hash(plan);
         }
     }
 
     private static class PartitionsRead implements InnerTableRead {
 
+        private final FileStoreTable fileStoreTable;
+
         private int[][] projection;
+
+        public PartitionsRead(FileStoreTable table) {
+            this.fileStoreTable = table;
+        }
 
         @Override
         public InnerTableRead withFilter(Predicate predicate) {
@@ -206,14 +212,14 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             PartitionsSplit filesSplit = (PartitionsSplit) split;
-            FileStoreTable table = filesSplit.storeTable;
             TableScan.Plan plan = filesSplit.plan();
             if (plan.splits().isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
             RowDataToObjectArrayConverter partitionConverter =
-                    new RowDataToObjectArrayConverter(table.schema().logicalPartitionType());
+                    new RowDataToObjectArrayConverter(
+                            fileStoreTable.schema().logicalPartitionType());
 
             for (Split dataSplit : plan.splits()) {
                 iteratorList.add(

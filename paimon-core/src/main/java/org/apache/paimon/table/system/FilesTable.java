@@ -139,7 +139,8 @@ public class FilesTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new FilesRead(new SchemaManager(storeTable.fileIO(), storeTable.location()));
+        return new FilesRead(
+                new SchemaManager(storeTable.fileIO(), storeTable.location()), storeTable);
     }
 
     @Override
@@ -185,47 +186,12 @@ public class FilesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () ->
-                    Collections.singletonList(
-                            new FilesSplit(
-                                    storeTable,
-                                    partitionPredicate,
-                                    bucketPredicate,
-                                    levelPredicate));
-        }
-    }
-
-    private static class FilesSplit implements Split {
-
-        private static final long serialVersionUID = 1L;
-
-        private final FileStoreTable storeTable;
-
-        @Nullable private final LeafPredicate partitionPredicate;
-        @Nullable private final LeafPredicate bucketPredicate;
-        @Nullable private final LeafPredicate levelPredicate;
-
-        private FilesSplit(
-                FileStoreTable storeTable,
-                @Nullable LeafPredicate partitionPredicate,
-                @Nullable LeafPredicate bucketPredicate,
-                @Nullable LeafPredicate levelPredicate) {
-            this.storeTable = storeTable;
-            this.partitionPredicate = partitionPredicate;
-            this.bucketPredicate = bucketPredicate;
-            this.levelPredicate = levelPredicate;
-        }
-
-        @Override
-        public long rowCount() {
+            // plan here, just set the result of plan to split
             TableScan.Plan plan = plan();
-            return plan.splits().stream()
-                    .map(s -> (DataSplit) s)
-                    .mapToLong(s -> s.dataFiles().size())
-                    .sum();
+            return () -> Collections.singletonList(new FilesSplit(plan));
         }
 
-        private TableScan.Plan plan() {
+        private TableScan.Plan tablePlan() {
             InnerTableScan scan = storeTable.newScan();
             if (partitionPredicate != null) {
                 if (partitionPredicate.function() instanceof Equal) {
@@ -263,6 +229,29 @@ public class FilesTable implements ReadonlyTable {
             }
             return scan.plan();
         }
+    }
+
+    private static class FilesSplit implements Split {
+
+        private static final long serialVersionUID = 1L;
+
+        private final TableScan.Plan plan;
+
+        private FilesSplit(TableScan.Plan plan) {
+            this.plan = plan;
+        }
+
+        @Override
+        public long rowCount() {
+            return plan.splits().stream()
+                    .map(s -> (DataSplit) s)
+                    .mapToLong(s -> s.dataFiles().size())
+                    .sum();
+        }
+
+        public TableScan.Plan plan() {
+            return plan;
+        }
 
         @Override
         public boolean equals(Object o) {
@@ -273,12 +262,12 @@ public class FilesTable implements ReadonlyTable {
                 return false;
             }
             FilesSplit that = (FilesSplit) o;
-            return Objects.equals(storeTable, that.storeTable);
+            return Objects.equals(plan, that.plan);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(storeTable);
+            return Objects.hash(plan);
         }
     }
 
@@ -286,10 +275,13 @@ public class FilesTable implements ReadonlyTable {
 
         private final SchemaManager schemaManager;
 
+        private final FileStoreTable storeTable;
+
         private int[][] projection;
 
-        private FilesRead(SchemaManager schemaManager) {
+        private FilesRead(SchemaManager schemaManager, FileStoreTable fileStoreTable) {
             this.schemaManager = schemaManager;
+            this.storeTable = fileStoreTable;
         }
 
         @Override
@@ -315,7 +307,6 @@ public class FilesTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             FilesSplit filesSplit = (FilesSplit) split;
-            FileStoreTable table = filesSplit.storeTable;
             TableScan.Plan plan = filesSplit.plan();
             if (plan.splits().isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
@@ -326,10 +317,10 @@ public class FilesTable implements ReadonlyTable {
             // schema id directly
             FieldStatsConverters fieldStatsConverters =
                     new FieldStatsConverters(
-                            sid -> schemaManager.schema(sid).fields(), table.schema().id());
+                            sid -> schemaManager.schema(sid).fields(), storeTable.schema().id());
 
             RowDataToObjectArrayConverter partitionConverter =
-                    new RowDataToObjectArrayConverter(table.schema().logicalPartitionType());
+                    new RowDataToObjectArrayConverter(storeTable.schema().logicalPartitionType());
 
             Function<Long, RowDataToObjectArrayConverter> keyConverters =
                     new Function<Long, RowDataToObjectArrayConverter>() {
@@ -362,7 +353,7 @@ public class FilesTable implements ReadonlyTable {
                                                 partitionConverter,
                                                 keyConverters,
                                                 file,
-                                                table.getSchemaFieldStats(file),
+                                                storeTable.getSchemaFieldStats(file),
                                                 fieldStatsConverters)));
             }
             Iterator<InternalRow> rows = Iterators.concat(iteratorList.iterator());

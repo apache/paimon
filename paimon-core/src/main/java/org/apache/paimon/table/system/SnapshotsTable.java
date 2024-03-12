@@ -146,7 +146,13 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SnapshotsSplit(fileIO, location));
+            long rowCount;
+            try {
+                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return () -> Collections.singletonList(new SnapshotsSplit(rowCount, location));
         }
     }
 
@@ -154,21 +160,17 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private SnapshotsSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private SnapshotsSplit(long rowCount, Path location) {
             this.location = location;
+            this.rowCount = rowCount;
         }
 
         @Override
         public long rowCount() {
-            try {
-                return new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            return rowCount;
         }
 
         @Override
