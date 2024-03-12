@@ -317,7 +317,6 @@ public interface FileIO extends Serializable {
         }
 
         FileIOLoader loader = null;
-
         List<IOException> ioExceptionList = new ArrayList<>();
 
         // load preIO
