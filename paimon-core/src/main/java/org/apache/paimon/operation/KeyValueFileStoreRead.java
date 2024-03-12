@@ -188,13 +188,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                         split.deletionFiles().orElse(null),
                         split.isStreaming());
             } else {
-                return mergeRead(
-                        split.partition(),
-                        split.bucket(),
-                        split.dataFiles(),
-                        split.deletionFiles().orElse(null),
-                        forceKeepDelete,
-                        true);
+                return projectKey(
+                        mergeRead(
+                                split.partition(),
+                                split.bucket(),
+                                split.dataFiles(),
+                                null,
+                                forceKeepDelete));
             }
         } else if (split.isStreaming()) {
             // streaming concat read
@@ -215,25 +215,24 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                     true));
         } else {
             // batch diff read
-            return DiffReader.readDiff(
-                    mergeRead(
-                            split.partition(),
-                            split.bucket(),
-                            split.beforeFiles(),
-                            split.beforeDeletionFiles().orElse(null),
-                            false,
-                            false),
-                    mergeRead(
-                            split.partition(),
-                            split.bucket(),
-                            split.dataFiles(),
-                            split.deletionFiles().orElse(null),
-                            false,
-                            false),
-                    keyComparator,
-                    userDefinedSeqComparator,
-                    mergeSorter,
-                    forceKeepDelete);
+            return projectKey(
+                    DiffReader.readDiff(
+                            mergeRead(
+                                    split.partition(),
+                                    split.bucket(),
+                                    split.beforeFiles(),
+                                    split.beforeDeletionFiles().orElse(null),
+                                    false),
+                            mergeRead(
+                                    split.partition(),
+                                    split.bucket(),
+                                    split.dataFiles(),
+                                    split.deletionFiles().orElse(null),
+                                    false),
+                            keyComparator,
+                            userDefinedSeqComparator,
+                            mergeSorter,
+                            forceKeepDelete));
         }
     }
 
@@ -242,8 +241,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             int bucket,
             List<DataFileMeta> files,
             @Nullable List<DeletionFile> deletionFiles,
-            boolean keepDelete,
-            boolean projectKeys)
+            boolean keepDelete)
             throws IOException {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
@@ -273,11 +271,6 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
         if (!keepDelete) {
             reader = new DropDeleteReader(reader);
-        }
-
-        if (projectKeys) {
-            // Project results from SortMergeReader using ProjectKeyRecordReader.
-            reader = keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
         }
 
         return reader;
@@ -320,8 +313,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         return Optional.empty();
     }
 
-    private RecordReader<KeyValue> projectKey(
-            RecordReader<KeyValue> reader, int[][] keyProjectedFields) {
+    private RecordReader<KeyValue> projectKey(RecordReader<KeyValue> reader) {
+        if (keyProjectedFields == null) {
+            return reader;
+        }
+
         ProjectedRow projectedRow = ProjectedRow.from(keyProjectedFields);
         return reader.transform(kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
     }
