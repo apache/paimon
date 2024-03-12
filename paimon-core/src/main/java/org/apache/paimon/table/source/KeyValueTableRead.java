@@ -39,7 +39,9 @@ public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> 
 
     protected KeyValueTableRead(KeyValueFileStoreRead read, TableSchema schema) {
         super(read, schema);
-        this.read = read;
+        // We don't need any key fields, the columns that need to be read are already included in
+        // the value
+        this.read = read.withKeyProjection(new int[0][]);
     }
 
     @Override
@@ -51,10 +53,6 @@ public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> 
     @Override
     public final RecordReader<InternalRow> reader(Split split) throws IOException {
         return new RowDataRecordReader(read.createReader((DataSplit) split));
-    }
-
-    public final RecordReader<KeyValue> kvReader(Split split) throws IOException {
-        return read.createReader((DataSplit) split);
     }
 
     protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(
