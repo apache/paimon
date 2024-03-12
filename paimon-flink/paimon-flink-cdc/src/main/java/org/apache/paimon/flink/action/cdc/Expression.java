@@ -66,22 +66,22 @@ public interface Expression extends Serializable {
             String exprName, String fieldReference, DataType fieldType, String... literals) {
         switch (exprName.toLowerCase()) {
             case "year":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getYear, literals);
             case "month":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getMonthValue, literals);
             case "day":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getDayOfMonth, literals);
             case "hour":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getHour, literals);
             case "minute":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getMinute, literals);
             case "second":
-                return TimeToIntConverter.create(
+                return TemporalToIntConverter.create(
                         fieldReference, fieldType, () -> LocalDateTime::getSecond, literals);
             case "date_format":
                 return DateFormat.create(fieldReference, fieldType, literals);
@@ -137,26 +137,35 @@ public interface Expression extends Serializable {
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
-    /** Expression to handle time. */
-    abstract class TimeExpressionBase<T> implements Expression {
+    /** Expression to handle temporal value. */
+    abstract class TemporalExpressionBase<T> implements Expression {
 
         private static final long serialVersionUID = 1L;
 
+        private static final List<Integer> SUPPORTED_PRECISION = Arrays.asList(0, 3, 6, 9);
+
         private final String fieldReference;
-        @Nullable private final String timeUnit;
+        @Nullable private final Integer precision;
 
         private transient Function<LocalDateTime, T> converter;
 
-        private TimeExpressionBase(
-                String fieldReference, DataType fieldType, @Nullable String timeUnit) {
+        private TemporalExpressionBase(
+                String fieldReference, DataType fieldType, @Nullable Integer precision) {
             this.fieldReference = fieldReference;
 
             // when the input is INTEGER_NUMERIC, the time unit must be set
             if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
-                    && timeUnit == null) {
-                timeUnit = "second";
+                    && precision == null) {
+                precision = 0;
             }
-            this.timeUnit = timeUnit;
+
+            checkArgument(
+                    precision == null || SUPPORTED_PRECISION.contains(precision),
+                    "Unsupported precision of temporal function: %d. Supported precisions are: "
+                            + "0 (epoch seconds), 3 (epoch milliseconds), 6 (epoch microseconds) and 9 (epoch nanoseconds).",
+                    precision);
+
+            this.precision = precision;
         }
 
         @Override
@@ -181,27 +190,28 @@ public interface Expression extends Serializable {
         }
 
         private LocalDateTime toLocalDateTime(String input) {
-            if (timeUnit == null) {
+            if (precision == null) {
                 return DateTimeUtils.toLocalDateTime(input, 9);
             } else {
                 long numericValue = Long.parseLong(input);
                 long milliseconds = 0;
                 int nanosOfMillisecond = 0;
-                switch (timeUnit) {
-                    case "second":
+                switch (precision) {
+                    case 0:
                         milliseconds = numericValue * 1000L;
                         break;
-                    case "millis":
+                    case 3:
                         milliseconds = numericValue;
                         break;
-                    case "micros":
+                    case 6:
                         milliseconds = numericValue / 1000;
                         nanosOfMillisecond = (int) (numericValue % 1000 * 1000);
                         break;
-                    case "nanos":
+                    case 9:
                         milliseconds = numericValue / 1_000_000;
                         nanosOfMillisecond = (int) (numericValue % 1_000_000);
                         break;
+                        // no error case because precision is validated
                 }
                 return Timestamp.fromEpochMillis(milliseconds, nanosOfMillisecond)
                         .toLocalDateTime();
@@ -211,19 +221,19 @@ public interface Expression extends Serializable {
         protected abstract Function<LocalDateTime, T> createConverter();
     }
 
-    /** Convert the time to an integer. */
-    final class TimeToIntConverter extends TimeExpressionBase<Integer> {
+    /** Convert the temporal value to an integer. */
+    final class TemporalToIntConverter extends TemporalExpressionBase<Integer> {
 
         private static final long serialVersionUID = 1L;
 
         private final SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier;
 
-        private TimeToIntConverter(
+        private TemporalToIntConverter(
                 String fieldReference,
                 DataType fieldType,
-                @Nullable String timeUnit,
+                @Nullable Integer precision,
                 SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier) {
-            super(fieldReference, fieldType, timeUnit);
+            super(fieldReference, fieldType, precision);
             this.converterSupplier = converterSupplier;
         }
 
@@ -232,26 +242,26 @@ public interface Expression extends Serializable {
             return converterSupplier.get();
         }
 
-        private static TimeToIntConverter create(
+        private static TemporalToIntConverter create(
                 String fieldReference,
                 DataType fieldType,
                 SerializableSupplier<Function<LocalDateTime, Integer>> converterSupplier,
                 String... literals) {
             checkArgument(
                     literals.length == 0 || literals.length == 1,
-                    "TimeToIntConverter supports 0 or 1 argument, but found '%s'.",
+                    "TemporalToIntConverter supports 0 or 1 argument, but found '%s'.",
                     literals.length);
 
-            return new TimeToIntConverter(
+            return new TemporalToIntConverter(
                     fieldReference,
                     fieldType,
-                    literals.length == 0 ? null : literals[0],
+                    literals.length == 0 ? null : Integer.valueOf(literals[0]),
                     converterSupplier);
         }
     }
 
-    /** Convert the time to desired formatted string. */
-    final class DateFormat extends TimeExpressionBase<String> {
+    /** Convert the temporal value to desired formatted string. */
+    final class DateFormat extends TemporalExpressionBase<String> {
 
         private static final long serialVersionUID = 2L;
 
@@ -261,8 +271,8 @@ public interface Expression extends Serializable {
                 String fieldReference,
                 DataType fieldType,
                 String pattern,
-                @Nullable String timeUnit) {
-            super(fieldReference, fieldType, timeUnit);
+                @Nullable Integer precision) {
+            super(fieldReference, fieldType, precision);
             this.pattern = pattern;
         }
 
@@ -288,7 +298,7 @@ public interface Expression extends Serializable {
                     fieldReference,
                     fieldType,
                     literals[0],
-                    literals.length == 1 ? null : literals[1]);
+                    literals.length == 1 ? null : Integer.valueOf(literals[1]));
         }
     }
 

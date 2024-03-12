@@ -826,7 +826,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
     @Test
     @Timeout(60)
-    public void testTimeToIntWithEpochTime() throws Exception {
+    public void testTemporalToIntWithEpochTime() throws Exception {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", DATABASE_NAME);
         mySqlConfig.put("table-name", "test_time_to_int_epoch");
@@ -842,8 +842,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                                 "_micros_val",
                                 "_nanos_val")
                         .get(fieldRefIndex);
-        String timeUnit =
-                Arrays.asList("", ",second", ",millis", ",micros", ",nanos").get(fieldRefIndex);
+        String precision = Arrays.asList("", ",0", ",3", ",6", ",9").get(fieldRefIndex);
 
         // pick test expression
         int expIndex = random.nextInt(6);
@@ -851,7 +850,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                 Arrays.asList("year", "month", "day", "hour", "minute", "second").get(expIndex);
 
         String computedColumnDef =
-                String.format("_time_to_int=%s(%s%s)", expression, fieldReference, timeUnit);
+                String.format("_time_to_int=%s(%s%s)", expression, fieldReference, precision);
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
@@ -911,14 +910,14 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         List<String> computedColumnDefs =
                 Arrays.asList(
-                        "_from_second0_nounit=date_format(_second_val0, yyyy-MM-dd HH:mm:ss)",
-                        "_from_second0=date_format(_second_val0, yyyy-MM-dd HH:mm:ss, second)",
-                        "_from_second1=date_format(_second_val1, yyyy-MM-dd HH:mm:ss, second)",
+                        "_from_second0_default=date_format(_second_val0, yyyy-MM-dd HH:mm:ss)",
+                        "_from_second0=date_format(_second_val0, yyyy-MM-dd HH:mm:ss, 0)",
+                        "_from_second1=date_format(_second_val1, yyyy-MM-dd HH:mm:ss, 0)",
                         // test week format
-                        "_from_second1_week=date_format(_second_val1, yyyy-ww, second)",
-                        "_from_millisecond=date_format(_millis_val, yyyy-MM-dd HH:mm:ss.SSS, millis)",
-                        "_from_microsecond=date_format(_micros_val, yyyy-MM-dd HH:mm:ss.SSSSSS, micros)",
-                        "_from_nanoseconds=date_format(_nanos_val, yyyy-MM-dd HH:mm:ss.SSSSSSSSS, nanos)");
+                        "_from_second1_week=date_format(_second_val1, yyyy-ww, 0)",
+                        "_from_millisecond=date_format(_millis_val, yyyy-MM-dd HH:mm:ss.SSS, 3)",
+                        "_from_microsecond=date_format(_micros_val, yyyy-MM-dd HH:mm:ss.SSSSSS, 6)",
+                        "_from_nanoseconds=date_format(_nanos_val, yyyy-MM-dd HH:mm:ss.SSSSSSSSS, 9)");
 
         MySqlSyncTableAction action =
                 syncTableActionBuilder(mySqlConfig)
@@ -957,7 +956,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                             "_millis_val",
                             "_micros_val",
                             "_nanos_val",
-                            "_from_second0_nounit",
+                            "_from_second0_default",
                             "_from_second0",
                             "_from_second1",
                             "_from_second1_week",
