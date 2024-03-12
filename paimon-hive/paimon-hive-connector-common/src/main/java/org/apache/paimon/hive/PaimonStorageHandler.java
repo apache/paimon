@@ -47,7 +47,7 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
     private static final String MAPRED_OUTPUT_COMMITTER = "mapred.output.committer.class";
     private static final String PAIMON_WRITE = "paimon.write";
 
-    public static final String PAIMON_HIVE_SCHEMA = "paimon.hive.schema";
+    public static final String PAIMON_TABLE_FIELDS = "paimon.table.fields";
 
     private Configuration conf;
 
@@ -81,8 +81,13 @@ public class PaimonStorageHandler implements HiveStoragePredicateHandler, HiveSt
         Properties properties = tableDesc.getProperties();
         String paimonLocation = LocationKeyExtractor.getPaimonLocation(conf, properties);
         map.put(LocationKeyExtractor.INTERNAL_LOCATION, paimonLocation);
+        String dataFieldJsonStr = getDataFieldsJsonStr(properties);
+        tableDesc.getProperties().put(PAIMON_TABLE_FIELDS, dataFieldJsonStr);
+    }
+
+    static String getDataFieldsJsonStr(Properties properties) {
         HiveSchema hiveSchema = HiveSchema.extract(null, properties);
-        tableDesc.getProperties().put(PAIMON_HIVE_SCHEMA, JsonSerdeUtil.toJson(hiveSchema));
+        return JsonSerdeUtil.toJson(hiveSchema.fields());
     }
 
     public void configureInputJobCredentials(TableDesc tableDesc, Map<String, String> map) {}

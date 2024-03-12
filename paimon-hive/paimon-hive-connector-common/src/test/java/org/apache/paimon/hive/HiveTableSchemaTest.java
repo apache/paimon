@@ -22,11 +22,14 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
-import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
+
+import org.apache.hadoop.hive.metastore.api.hive_metastoreConstants;
 import org.apache.hadoop.hive.serde2.typeinfo.TypeInfoFactory;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -34,10 +37,9 @@ import org.junit.jupiter.api.io.TempDir;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.Optional;
+import java.util.List;
 import java.util.Properties;
 
-import static org.apache.paimon.hive.PaimonStorageHandler.PAIMON_HIVE_SCHEMA;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatExceptionOfType;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -350,16 +352,16 @@ public class HiveTableSchemaTest {
     public void testReadSchemaFromProperties() throws Exception {
         createSchema();
         // cache the TableSchema to properties
-        Optional<TableSchema> existingSchema =
-                HiveSchema.getExistingSchema(null, tempDir.toString());
-        assertThat(existingSchema).isPresent();
         Properties properties = new Properties();
-        TableSchema tableSchema = existingSchema.get();
-        properties.put(PAIMON_HIVE_SCHEMA, tableSchema.toString());
+        properties.put(hive_metastoreConstants.META_TABLE_LOCATION, tempDir.toString());
 
-        // get the TableSchema from properties
-        Optional<TableSchema> tableSchemaFromCache = HiveSchema.getTableSchemaFromCache(properties);
-        assertThat(tableSchemaFromCache).isPresent();
-        assertThat(tableSchemaFromCache.get()).isEqualTo(tableSchema);
+        HiveSchema hiveSchema = HiveSchema.extract(null, properties);
+
+        List<DataField> dataFields = hiveSchema.fields();
+        String dataFieldStr = JsonSerdeUtil.toJson(dataFields);
+
+        List<DataField> dataFieldsDeserialized =
+                JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
+        assertThat(dataFields).isEqualTo(dataFieldsDeserialized);
     }
 }

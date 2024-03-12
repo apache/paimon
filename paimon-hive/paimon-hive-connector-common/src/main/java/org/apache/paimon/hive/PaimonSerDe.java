@@ -19,9 +19,12 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
@@ -33,6 +36,7 @@ import org.apache.hadoop.io.Writable;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -54,9 +58,11 @@ public class PaimonSerDe extends AbstractSerDe {
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
-        String hiveSchemaStr = properties.getProperty(PaimonStorageHandler.PAIMON_HIVE_SCHEMA);
-        if (hiveSchemaStr != null) {
-            this.tableSchema = JsonSerdeUtil.fromJson(hiveSchemaStr, HiveSchema.class);
+        String dataFieldStr = properties.getProperty(PaimonStorageHandler.PAIMON_TABLE_FIELDS);
+        if (dataFieldStr != null) {
+            List<DataField> dataFields =
+                    JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
+            this.tableSchema = new HiveSchema(new RowType(dataFields));
         } else {
             this.tableSchema = HiveSchema.extract(configuration, properties);
         }

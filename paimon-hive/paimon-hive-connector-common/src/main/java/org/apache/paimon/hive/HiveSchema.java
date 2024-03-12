@@ -19,7 +19,6 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -30,7 +29,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.base.Splitter;
@@ -69,7 +67,7 @@ public class HiveSchema {
     private static final Logger LOG = LoggerFactory.getLogger(HiveSchema.class);
     private final RowType rowType;
 
-    private HiveSchema(RowType rowType) {
+    HiveSchema(RowType rowType) {
         this.rowType = rowType;
     }
 
@@ -98,11 +96,7 @@ public class HiveSchema {
     /** Extract {@link HiveSchema} from Hive serde properties. */
     public static HiveSchema extract(@Nullable Configuration configuration, Properties properties) {
         String location = LocationKeyExtractor.getPaimonLocation(configuration, properties);
-        Optional<TableSchema> tableSchema = getTableSchemaFromCache(properties);
-        tableSchema =
-                tableSchema.isPresent()
-                        ? tableSchema
-                        : HiveSchema.getExistingSchema(configuration, location);
+        Optional<TableSchema> tableSchema = getExistingSchema(configuration, location);
         String columnProperty = properties.getProperty(hive_metastoreConstants.META_TABLE_COLUMNS);
 
         // Create hive external table with empty ddl
@@ -198,16 +192,7 @@ public class HiveSchema {
         return new HiveSchema(builder.build());
     }
 
-    @VisibleForTesting
-    static Optional<TableSchema> getTableSchemaFromCache(Properties properties) {
-        String paimonSchemaStr = properties.getProperty(PaimonStorageHandler.PAIMON_HIVE_SCHEMA);
-        if (paimonSchemaStr != null) {
-            return Optional.of(JsonSerdeUtil.fromJson(paimonSchemaStr, TableSchema.class));
-        }
-        return Optional.empty();
-    }
-
-    public static Optional<TableSchema> getExistingSchema(
+    private static Optional<TableSchema> getExistingSchema(
             @Nullable Configuration configuration, @Nullable String location) {
         if (location == null) {
             return Optional.empty();
