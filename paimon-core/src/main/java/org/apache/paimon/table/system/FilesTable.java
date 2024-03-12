@@ -187,7 +187,7 @@ public class FilesTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             // plan here, just set the result of plan to split
-            TableScan.Plan plan = plan();
+            TableScan.Plan plan = tablePlan();
             return () -> Collections.singletonList(new FilesSplit(plan));
         }
 
