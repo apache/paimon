@@ -88,9 +88,14 @@ Temporal functions can convert date and time to another form. A common use case 
 
 The data type of temporal-column can be one of the following cases:
 1. DATE, DATETIME or TIMESTAMP.
-2. Any integer numeric type (such as INT and BIGINT). In this case, the data will be considered as epoch time 
-of `1970-01-01 00:00:00`. You should set time unit of the value (default is second). There are four time units: 
-`second`, `millis` (for millisecond), `micros`(for microsecond) and `nanos` (for nanosecond).
+
+2. Any integer numeric type (such as INT and BIGINT). In this case, the data will be considered as epoch time of `1970-01-01 00:00:00`. 
+You should set precision of the value (default is 0). Currently, There are four valid precisions: `0` (for epoch seconds), 
+`3` (for epoch milliseconds), `6`(for epoch microseconds) and `9` (for epoch nanoseconds). 
+Take the time point `1970-01-01 00:00:00.123456789` as an example, the epoch seconds are 0, the epoch milliseconds are 123, 
+the epoch microseconds are 123456, and the epoch nanoseconds are 123456789. The precision should match the input values.
+You can set precision in this way: `date_format(epoch_col, yyyy-MM-dd, 0)`.
+
 3. STRING. In this case, if you didn't set the time unit, the data will be considered as formatted string of DATE, 
 DATETIME or TIMESTAMP value. Otherwise, the data will be considered as string value of epoch time. So you must set time 
 unit in the latter case.
