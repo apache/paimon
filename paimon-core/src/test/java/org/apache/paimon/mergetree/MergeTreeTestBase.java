@@ -26,6 +26,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileStatus;
@@ -170,8 +171,10 @@ public abstract class MergeTreeTestBase {
                             }
                         },
                         new CoreOptions(new HashMap<>()));
-        readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
-        compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+        readerFactory =
+                readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
+        compactReaderFactory =
+                readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
 
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         pathFactoryMap.put(identifier, pathFactory);

@@ -105,11 +105,17 @@ public class SplitGeneratorTest {
                         fromMinMax("5", 82, 85),
                         fromMinMax("6", 100, 200));
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
-        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 2).splitForBatch(files)))
+        assertThat(
+                        toNames(
+                                new MergeTreeSplitGenerator(comparator, 100, 2, false)
+                                        .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3", "5"), Collections.singletonList("6"));
 
-        assertThat(toNames(new MergeTreeSplitGenerator(comparator, 100, 30).splitForBatch(files)))
+        assertThat(
+                        toNames(
+                                new MergeTreeSplitGenerator(comparator, 100, 30, false)
+                                        .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3"),
                         Collections.singletonList("5"),

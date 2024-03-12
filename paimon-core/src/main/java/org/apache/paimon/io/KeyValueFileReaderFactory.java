@@ -45,7 +45,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.Function;
 import java.util.function.Supplier;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
@@ -63,9 +62,7 @@ public class KeyValueFileReaderFactory {
 
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final BinaryRow partition;
-
-    // FileName to its corresponding deletion vector
-    private final @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier;
+    private final DeletionVector.Factory dvFactory;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
@@ -77,7 +74,7 @@ public class KeyValueFileReaderFactory {
             DataFilePathFactory pathFactory,
             long asyncThreshold,
             BinaryRow partition,
-            @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier) {
+            DeletionVector.Factory dvFactory) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schemaId = schemaId;
@@ -88,7 +85,7 @@ public class KeyValueFileReaderFactory {
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
         this.bulkFormatMappings = new HashMap<>();
-        this.deletionVectorSupplier = deletionVectorSupplier;
+        this.dvFactory = dvFactory;
     }
 
     public RecordReader<KeyValue> createRecordReader(
@@ -134,13 +131,9 @@ public class KeyValueFileReaderFactory {
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
-        if (deletionVectorSupplier != null) {
-            Optional<DeletionVector> optionalDeletionVector =
-                    deletionVectorSupplier.apply(fileName);
-            if (optionalDeletionVector.isPresent() && !optionalDeletionVector.get().isEmpty()) {
-                recordReader =
-                        new ApplyDeletionVectorReader<>(recordReader, optionalDeletionVector.get());
-            }
+        Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());
         }
         return recordReader;
     }
@@ -185,7 +178,6 @@ public class KeyValueFileReaderFactory {
         private int[][] valueProjection;
         private RowType projectedKeyType;
         private RowType projectedValueType;
-        private @Nullable Function<String, Optional<DeletionVector>> deletionVectorSupplier;
 
         private Builder(
                 FileIO fileIO,
@@ -238,12 +230,6 @@ public class KeyValueFileReaderFactory {
             return this;
         }
 
-        public Builder withDeletionVectorSupplier(
-                Function<String, Optional<DeletionVector>> deletionVectorSupplier) {
-            this.deletionVectorSupplier = deletionVectorSupplier;
-            return this;
-        }
-
         public RowType keyType() {
             return keyType;
         }
@@ -252,13 +238,15 @@ public class KeyValueFileReaderFactory {
             return projectedValueType;
         }
 
-        public KeyValueFileReaderFactory build(BinaryRow partition, int bucket) {
-            return build(partition, bucket, true, Collections.emptyList());
+        public KeyValueFileReaderFactory build(
+                BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
+            return build(partition, bucket, dvFactory, true, Collections.emptyList());
         }
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition,
                 int bucket,
+                DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters) {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
@@ -275,12 +263,16 @@ public class KeyValueFileReaderFactory {
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
                     partition,
-                    deletionVectorSupplier);
+                    dvFactory);
         }
 
         private void applyProjection() {
             projectedKeyType = Projection.of(keyProjection).project(keyType);
             projectedValueType = Projection.of(valueProjection).project(valueType);
+        }
+
+        public FileIO fileIO() {
+            return fileIO;
         }
     }
 }

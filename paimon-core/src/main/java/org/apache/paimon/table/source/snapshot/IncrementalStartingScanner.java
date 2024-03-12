@@ -67,6 +67,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             int bucket = entry.getKey().getRight();
             for (List<DataFileMeta> files :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
+                // TODO pass deletion files
                 result.add(
                         DataSplit.builder()
                                 .withSnapshot(endingSnapshotId)

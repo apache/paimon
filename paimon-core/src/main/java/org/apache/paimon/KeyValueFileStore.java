@@ -130,9 +130,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newKeyComparator(),
                 userDefinedSeqComparator(),
                 mfFactory,
-                newReaderFactoryBuilder(),
-                options,
-                newIndexFileHandler());
+                newReaderFactoryBuilder());
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {

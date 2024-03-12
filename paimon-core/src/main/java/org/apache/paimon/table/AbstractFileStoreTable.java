@@ -149,7 +149,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 nonPartitionFilterConsumer(),
                 DefaultValueAssigner.create(tableSchema),
                 store().pathFactory(),
-                name());
+                name(),
+                store().newIndexFileHandler());
     }
 
     @Override
