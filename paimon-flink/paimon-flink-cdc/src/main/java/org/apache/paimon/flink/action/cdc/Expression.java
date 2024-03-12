@@ -153,7 +153,7 @@ public interface Expression extends Serializable {
                 String fieldReference, DataType fieldType, @Nullable Integer precision) {
             this.fieldReference = fieldReference;
 
-            // when the input is INTEGER_NUMERIC, the time unit must be set
+            // when the input is INTEGER_NUMERIC, the precision must be set
             if (fieldType.getTypeRoot().getFamilies().contains(DataTypeFamily.INTEGER_NUMERIC)
                     && precision == null) {
                 precision = 0;
@@ -162,7 +162,7 @@ public interface Expression extends Serializable {
             checkArgument(
                     precision == null || SUPPORTED_PRECISION.contains(precision),
                     "Unsupported precision of temporal function: %d. Supported precisions are: "
-                            + "0 (epoch seconds), 3 (epoch milliseconds), 6 (epoch microseconds) and 9 (epoch nanoseconds).",
+                            + "0 (for epoch seconds), 3 (for epoch milliseconds), 6 (for epoch microseconds) and 9 (for epoch nanoseconds).",
                     precision);
 
             this.precision = precision;
