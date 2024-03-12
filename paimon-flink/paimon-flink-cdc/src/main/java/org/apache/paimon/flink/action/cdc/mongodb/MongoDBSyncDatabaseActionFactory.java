@@ -18,20 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.mongodb;
 
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
+import org.apache.paimon.flink.action.cdc.SyncDatabaseActionFactoryBase;
 
-import java.util.Optional;
-
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MONGODB_CONF;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
 
 /** Factory to create {@link MongoDBSyncDatabaseAction}. */
-public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
+public class MongoDBSyncDatabaseActionFactory
+        extends SyncDatabaseActionFactoryBase<MongoDBSyncDatabaseAction> {
 
     public static final String IDENTIFIER = "mongodb_sync_database";
 
@@ -40,23 +33,14 @@ public class MongoDBSyncDatabaseActionFactory implements ActionFactory {
         return IDENTIFIER;
     }
 
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, MONGODB_CONF);
+    @Override
+    protected String cdcConfigIdentifier() {
+        return MONGODB_CONF;
+    }
 
-        MongoDBSyncDatabaseAction action =
-                new MongoDBSyncDatabaseAction(
-                        getRequiredValue(params, WAREHOUSE),
-                        getRequiredValue(params, DATABASE),
-                        optionalConfigMap(params, CATALOG_CONF),
-                        optionalConfigMap(params, MONGODB_CONF));
-
-        action.withTablePrefix(params.get(TABLE_PREFIX))
-                .withTableSuffix(params.get(TABLE_SUFFIX))
-                .includingTables(params.get(INCLUDING_TABLES))
-                .excludingTables(params.get(EXCLUDING_TABLES))
-                .withTableConfig(optionalConfigMap(params, TABLE_CONF));
-
-        return Optional.of(action);
+    @Override
+    public MongoDBSyncDatabaseAction createAction() {
+        return new MongoDBSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
     }
 
     @Override
