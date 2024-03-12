@@ -200,12 +200,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             // streaming concat read
             return ConcatRecordReader.create(
                     () ->
-                            noMergeRead(
-                                    split.partition(),
-                                    split.bucket(),
-                                    split.beforeFiles(),
-                                    split.beforeDeletionFiles().orElse(null),
-                                    true),
+                            new ReverseReader(
+                                    noMergeRead(
+                                            split.partition(),
+                                            split.bucket(),
+                                            split.beforeFiles(),
+                                            split.beforeDeletionFiles().orElse(null),
+                                            true)),
                     () ->
                             noMergeRead(
                                     split.partition(),
