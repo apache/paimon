@@ -27,7 +27,7 @@ public final class JdbcCatalogOptions {
     public static final ConfigOption<String> CATALOG_KEY =
             ConfigOptions.key("catalog-key")
                     .stringType()
-                    .defaultValue(null)
+                    .defaultValue("jdbc")
                     .withDescription("Custom jdbc catalog store key.");
 
     private JdbcCatalogOptions() {}
