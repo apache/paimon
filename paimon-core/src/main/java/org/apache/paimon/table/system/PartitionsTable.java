@@ -24,9 +24,11 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.LazyGenericRow;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -67,7 +69,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing partitions info. */
-public class PartitionsTable implements ReadonlyTable {
+public class PartitionsTable implements ReadonlyTable, FileIOTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -101,6 +103,11 @@ public class PartitionsTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("partition");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return storeTable.fileIO();
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -53,7 +54,7 @@ import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 import static org.apache.paimon.utils.SerializationUtils.newStringType;
 
 /** A {@link Table} for showing options of table. */
-public class OptionsTable implements ReadonlyTable {
+public class OptionsTable implements ReadonlyTable, FileIOTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -101,6 +102,11 @@ public class OptionsTable implements ReadonlyTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new OptionsTable(fileIO, location);
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     private class OptionsScan extends ReadOnceTableScan {

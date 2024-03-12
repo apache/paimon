@@ -18,27 +18,10 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.CoreOptions;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.table.source.snapshot.SnapshotReader;
-import org.apache.paimon.utils.BranchManager;
-import org.apache.paimon.utils.SnapshotManager;
-import org.apache.paimon.utils.TagManager;
+import org.apache.paimon.fs.FileIO;
 
-/** A {@link Table} for data. */
-public interface DataTable extends InnerTable, FileIOTable {
+/** Tables that need file io. */
+public interface FileIOTable extends Table {
 
-    SnapshotReader newSnapshotReader();
-
-    SnapshotReader newSnapshotReader(String branchName);
-
-    CoreOptions coreOptions();
-
-    SnapshotManager snapshotManager();
-
-    TagManager tagManager();
-
-    BranchManager branchManager();
-
-    Path location();
+    FileIO fileIO();
 }

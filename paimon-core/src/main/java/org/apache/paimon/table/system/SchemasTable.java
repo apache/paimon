@@ -29,6 +29,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -61,7 +62,7 @@ import java.util.Objects;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing schemas of table. */
-public class SchemasTable implements ReadonlyTable {
+public class SchemasTable implements ReadonlyTable, FileIOTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -101,6 +102,11 @@ public class SchemasTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("schema_id");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     @Override

@@ -27,6 +27,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -64,7 +65,7 @@ import java.util.Objects;
  *     We can write sql to fetch the information we need.
  * </pre>
  */
-public class AllTableOptionsTable implements ReadonlyTable {
+public class AllTableOptionsTable implements ReadonlyTable, FileIOTable {
 
     public static final String ALL_TABLE_OPTIONS = "all_table_options";
 
@@ -95,6 +96,11 @@ public class AllTableOptionsTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("table_name");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     @Override

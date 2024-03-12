@@ -67,16 +67,6 @@ public interface CatalogFactory extends Factory {
     }
 
     static Catalog createCatalog(CatalogContext context, ClassLoader classLoader) {
-        Options options = context.options();
-        String metastore = options.get(METASTORE);
-        CatalogFactory catalogFactory =
-                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
-
-        try {
-            return catalogFactory.create(context);
-        } catch (UnsupportedOperationException ignore) {
-        }
-
         // manual validation
         // because different catalog types may have different options
         // we can't list them all in the optionalOptions() method
@@ -90,6 +80,30 @@ public interface CatalogFactory extends Factory {
             fileIO.checkOrMkdirs(warehousePath);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
+        }
+
+        return createCatalog(context, classLoader, warehousePath, fileIO);
+    }
+
+    static Catalog createCatalog(CatalogContext context, FileIO fileIO) {
+        return createCatalog(context, CatalogFactory.class.getClassLoader(), fileIO);
+    }
+
+    static Catalog createCatalog(CatalogContext context, ClassLoader classLoader, FileIO fileIO) {
+        String warehouse = warehouse(context).toUri().toString();
+        return createCatalog(context, classLoader, new Path(warehouse), fileIO);
+    }
+
+    static Catalog createCatalog(
+            CatalogContext context, ClassLoader classLoader, Path warehousePath, FileIO fileIO) {
+        Options options = context.options();
+        String metastore = options.get(METASTORE);
+        CatalogFactory catalogFactory =
+                FactoryUtil.discoverFactory(classLoader, CatalogFactory.class, metastore);
+
+        try {
+            return catalogFactory.create(context);
+        } catch (UnsupportedOperationException ignore) {
         }
 
         return catalogFactory.create(fileIO, warehousePath, context);

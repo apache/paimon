@@ -31,6 +31,7 @@ import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -60,7 +61,7 @@ import java.util.Objects;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
-public class ManifestsTable implements ReadonlyTable {
+public class ManifestsTable implements ReadonlyTable, FileIOTable {
     private static final long serialVersionUID = 1L;
 
     public static final String MANIFESTS = "manifests";
@@ -112,6 +113,11 @@ public class ManifestsTable implements ReadonlyTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new ManifestsTable(fileIO, location, dataTable.copy(dynamicOptions));
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     private class ManifestsScan extends ReadOnceTableScan {

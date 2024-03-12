@@ -27,6 +27,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -54,7 +55,7 @@ import java.util.Objects;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing consumers of table. */
-public class ConsumersTable implements ReadonlyTable {
+public class ConsumersTable implements ReadonlyTable, FileIOTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -88,6 +89,11 @@ public class ConsumersTable implements ReadonlyTable {
     @Override
     public List<String> primaryKeys() {
         return Collections.singletonList("consumer_id");
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     @Override

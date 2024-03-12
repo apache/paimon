@@ -28,6 +28,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileIOTable;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
@@ -61,7 +62,7 @@ import java.util.Objects;
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
 /** A {@link Table} for showing committing snapshots of table. */
-public class SnapshotsTable implements ReadonlyTable {
+public class SnapshotsTable implements ReadonlyTable, FileIOTable {
 
     private static final long serialVersionUID = 1L;
 
@@ -134,6 +135,11 @@ public class SnapshotsTable implements ReadonlyTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new SnapshotsTable(fileIO, location, dataTable.copy(dynamicOptions));
+    }
+
+    @Override
+    public FileIO fileIO() {
+        return fileIO;
     }
 
     private class SnapshotsScan extends ReadOnceTableScan {
