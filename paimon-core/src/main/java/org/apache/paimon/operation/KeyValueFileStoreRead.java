@@ -53,7 +53,6 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -180,77 +179,79 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private RecordReader<KeyValue> createReaderWithoutOuterProjection(DataSplit split)
             throws IOException {
-        ReaderSupplier<KeyValue> beforeSupplier = null;
-        if (split.beforeFiles().size() > 0) {
-            if (split.isStreaming() || split.beforeDeletionFiles().isPresent()) {
-                beforeSupplier =
-                        () ->
-                                new ReverseReader(
-                                        noMergeRead(
-                                                split.partition(),
-                                                split.bucket(),
-                                                split.beforeFiles(),
-                                                split.beforeDeletionFiles().orElse(null),
-                                                split.isStreaming()));
+        if (split.beforeFiles().isEmpty()) {
+            if (split.isStreaming() || split.deletionFiles().isPresent()) {
+                return noMergeRead(
+                        split.partition(),
+                        split.bucket(),
+                        split.dataFiles(),
+                        split.deletionFiles().orElse(null),
+                        split.isStreaming());
             } else {
-                beforeSupplier =
-                        () ->
-                                mergeRead(
-                                        split.partition(),
-                                        split.bucket(),
-                                        split.beforeFiles(),
-                                        false);
+                return mergeRead(
+                        split.partition(),
+                        split.bucket(),
+                        split.dataFiles(),
+                        split.deletionFiles().orElse(null),
+                        forceKeepDelete,
+                        true);
             }
-        }
-
-        ReaderSupplier<KeyValue> dataSupplier;
-        if (split.isStreaming() || split.deletionFiles().isPresent()) {
-            dataSupplier =
+        } else if (split.isStreaming()) {
+            // streaming concat read
+            return ConcatRecordReader.create(
+                    () ->
+                            noMergeRead(
+                                    split.partition(),
+                                    split.bucket(),
+                                    split.beforeFiles(),
+                                    split.beforeDeletionFiles().orElse(null),
+                                    true),
                     () ->
                             noMergeRead(
                                     split.partition(),
                                     split.bucket(),
                                     split.dataFiles(),
                                     split.deletionFiles().orElse(null),
-                                    split.isStreaming());
+                                    true));
         } else {
-            dataSupplier =
-                    () ->
-                            mergeRead(
-                                    split.partition(),
-                                    split.bucket(),
-                                    split.dataFiles(),
-                                    split.beforeFiles().isEmpty() && forceKeepDelete);
-        }
-
-        if (split.isStreaming()) {
-            return beforeSupplier == null
-                    ? dataSupplier.get()
-                    : ConcatRecordReader.create(Arrays.asList(beforeSupplier, dataSupplier));
-        } else {
-            return beforeSupplier == null
-                    ? dataSupplier.get()
-                    : DiffReader.readDiff(
-                            beforeSupplier.get(),
-                            dataSupplier.get(),
-                            keyComparator,
-                            userDefinedSeqComparator,
-                            mergeSorter,
-                            forceKeepDelete);
+            // batch diff read
+            return DiffReader.readDiff(
+                    mergeRead(
+                            split.partition(),
+                            split.bucket(),
+                            split.beforeFiles(),
+                            split.beforeDeletionFiles().orElse(null),
+                            false,
+                            false),
+                    mergeRead(
+                            split.partition(),
+                            split.bucket(),
+                            split.dataFiles(),
+                            split.deletionFiles().orElse(null),
+                            false,
+                            false),
+                    keyComparator,
+                    userDefinedSeqComparator,
+                    mergeSorter,
+                    forceKeepDelete);
         }
     }
 
     private RecordReader<KeyValue> mergeRead(
-            BinaryRow partition, int bucket, List<DataFileMeta> files, boolean keepDelete)
+            BinaryRow partition,
+            int bucket,
+            List<DataFileMeta> files,
+            @Nullable List<DeletionFile> deletionFiles,
+            boolean keepDelete,
+            boolean projectKeys)
             throws IOException {
         // Sections are read by SortMergeReader, which sorts and merges records by keys.
         // So we cannot project keys or else the sorting will be incorrect.
+        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory overlappedSectionFactory =
-                readerFactoryBuilder.build(
-                        partition, bucket, DeletionVector.emptyFactory(), false, filtersForKeys);
+                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForKeys);
         KeyValueFileReaderFactory nonOverlappedSectionFactory =
-                readerFactoryBuilder.build(
-                        partition, bucket, DeletionVector.emptyFactory(), false, filtersForAll);
+                readerFactoryBuilder.build(partition, bucket, dvFactory, false, filtersForAll);
 
         List<ReaderSupplier<KeyValue>> sectionReaders = new ArrayList<>();
         MergeFunctionWrapper<KeyValue> mergeFuncWrapper =
@@ -274,8 +275,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             reader = new DropDeleteReader(reader);
         }
 
-        // Project results from SortMergeReader using ProjectKeyRecordReader.
-        return keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
+        if (projectKeys) {
+            // Project results from SortMergeReader using ProjectKeyRecordReader.
+            reader = keyProjectedFields == null ? reader : projectKey(reader, keyProjectedFields);
+        }
+
+        return reader;
     }
 
     private RecordReader<KeyValue> noMergeRead(
@@ -285,12 +290,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
             @Nullable List<DeletionFile> deletionFiles,
             boolean onlyFilterKey)
             throws IOException {
-        DeletionVector.Factory dvFactory = DeletionVector.factory(fileIO, files, deletionFiles);
         KeyValueFileReaderFactory readerFactory =
                 readerFactoryBuilder.build(
                         partition,
                         bucket,
-                        dvFactory,
+                        DeletionVector.factory(fileIO, files, deletionFiles),
                         true,
                         onlyFilterKey ? filtersForKeys : filtersForAll);
         List<ReaderSupplier<KeyValue>> suppliers = new ArrayList<>();

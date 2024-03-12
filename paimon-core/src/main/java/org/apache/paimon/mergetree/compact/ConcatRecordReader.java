@@ -24,6 +24,7 @@ import org.apache.paimon.utils.Preconditions;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.Arrays;
 import java.util.LinkedList;
 import java.util.List;
 import java.util.Queue;
@@ -48,6 +49,11 @@ public class ConcatRecordReader<T> implements RecordReader<T> {
 
     public static <R> RecordReader<R> create(List<ReaderSupplier<R>> readers) throws IOException {
         return readers.size() == 1 ? readers.get(0).get() : new ConcatRecordReader<>(readers);
+    }
+
+    public static <R> RecordReader<R> create(ReaderSupplier<R> reader1, ReaderSupplier<R> reader2)
+            throws IOException {
+        return create(Arrays.asList(reader1, reader2));
     }
 
     @Nullable
