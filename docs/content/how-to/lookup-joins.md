@@ -30,6 +30,10 @@ under the License.
 
 Paimon supports lookup joins on tables with primary keys and append tables in Flink. The following example illustrates this feature.
 
+{{< hint warning >}}
+Release Version 0.7.0-incubating has a relatively serious bug, please alway set `lookup.cache` = `full`.
+{{< /hint >}}
+
 ## Prepare
 
 First, let's create a Paimon table and update it in real-time.
