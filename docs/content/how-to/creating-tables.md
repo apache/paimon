@@ -620,16 +620,6 @@ val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")
 
 {{< /tab >}}
 
-{{< tab "Spark2" >}}
-
-Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs:///path/to/table` into a `DataSet`.
-
-```scala
-val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")
-```
-
-{{< /tab >}}
-
 {{< tab "Hive" >}}
 
 To access existing paimon table, you can also register them as external tables in Hive. The following SQL creates an

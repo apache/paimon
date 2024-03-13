@@ -304,16 +304,5 @@ under the License.
                 <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
             </properties>
         </profile>
-
-        <profile>
-            <id>flink-1.14</id>
-            <properties>
-                <test.flink.main.version>1.14</test.flink.main.version>
-                <test.flink.version>1.14.6</test.flink.version>
-                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
-                <flink.sql.connector.kafka>flink-sql-connector-kafka_${scala.binary.version}</flink.sql.connector.kafka>
-                <flink.sql.connector.hive>flink-sql-connector-hive-2.3.6_${scala.binary.version}</flink.sql.connector.hive>
-            </properties>
-        </profile>
     </profiles>
 </project>
