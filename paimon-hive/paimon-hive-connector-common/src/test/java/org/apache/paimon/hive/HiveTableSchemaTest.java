@@ -349,7 +349,7 @@ public class HiveTableSchemaTest {
     }
 
     @Test
-    public void testReadSchemaFromProperties() throws Exception {
+    public void testReadHiveSchemaFromProperties() throws Exception {
         createSchema();
         // cache the TableSchema to properties
         Properties properties = new Properties();
@@ -362,6 +362,7 @@ public class HiveTableSchemaTest {
 
         List<DataField> dataFieldsDeserialized =
                 JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
-        assertThat(dataFields).isEqualTo(dataFieldsDeserialized);
+        HiveSchema newHiveSchema = new HiveSchema(new RowType(dataFieldsDeserialized));
+        assertThat(newHiveSchema).usingRecursiveComparison().isEqualTo(hiveSchema);
     }
 }
