@@ -24,7 +24,7 @@ import org.apache.paimon.spark.catalyst.analysis.Delete
 
 import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
-class DeleteFromTableTest extends PaimonSparkTestBase {
+abstract class DeleteFromTableTestBase extends PaimonSparkTestBase {
 
   test(s"test delete from append only table") {
     spark.sql(s"""
@@ -184,3 +184,5 @@ class DeleteFromTableTest extends PaimonSparkTestBase {
     assertThat(rows4.toString).isEqualTo("[]")
   }
 }
+
+class DeleteFromTableTest extends DeleteFromTableTestBase {}
