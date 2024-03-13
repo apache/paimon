@@ -20,7 +20,6 @@ package org.apache.paimon.flink.procedure;
 
 import org.apache.paimon.catalog.CacheCatalog;
 import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.TableMigrationUtils;
 import org.apache.paimon.hive.HiveCatalog;
 import org.apache.paimon.migrate.Migrator;
