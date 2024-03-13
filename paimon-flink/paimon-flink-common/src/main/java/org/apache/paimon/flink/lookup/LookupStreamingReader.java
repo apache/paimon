@@ -19,9 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.ConfigOption;
@@ -31,11 +29,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
@@ -147,26 +143,5 @@ public class LookupStreamingReader {
             reader = reader.filter(projectedPredicate::test);
         }
         return reader;
-    }
-
-    private FunctionWithIOException<Split, RecordReader<InternalRow>>
-            createReaderWithSequenceSupplier() {
-        return split -> {
-            TableRead read = readBuilder.newRead();
-            if (!(read instanceof KeyValueTableRead)) {
-                throw new IllegalArgumentException(
-                        "Only KeyValueTableRead supports sequence read, but it is: " + read);
-            }
-
-            KeyValueTableRead kvRead = (KeyValueTableRead) read;
-            JoinedRow reused = new JoinedRow();
-            return kvRead.kvReader(split)
-                    .transform(
-                            kv -> {
-                                reused.replace(kv.value(), GenericRow.of(kv.sequenceNumber()));
-                                reused.setRowKind(kv.valueKind());
-                                return reused;
-                            });
-        };
     }
 }
