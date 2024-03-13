@@ -27,14 +27,12 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.mergetree.MergeSorter;
-import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
-import org.apache.paimon.reader.RecordReaderIterator;
+import org.apache.paimon.utils.CloseableIterator;
 import org.apache.paimon.utils.FieldsComparator;
 
 import javax.annotation.Nullable;
 
-import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.List;
@@ -120,25 +118,15 @@ public abstract class ChangelogMergeTreeRewriter extends MergeTreeCompactRewrite
             boolean dropDelete,
             boolean rewriteCompactFile)
             throws Exception {
-        List<ConcatRecordReader.ReaderSupplier<ChangelogResult>> sectionReaders = new ArrayList<>();
-        for (List<SortedRun> section : sections) {
-            sectionReaders.add(
-                    () ->
-                            MergeTreeReaders.readerForSection(
-                                    section,
-                                    readerFactory,
-                                    keyComparator,
-                                    userDefinedSeqComparator,
-                                    createMergeWrapper(outputLevel),
-                                    mergeSorter));
-        }
 
-        RecordReaderIterator<ChangelogResult> iterator = null;
+        CloseableIterator<ChangelogResult> iterator = null;
         RollingFileWriter<KeyValue, DataFileMeta> compactFileWriter = null;
         RollingFileWriter<KeyValue, DataFileMeta> changelogFileWriter = null;
 
         try {
-            iterator = new RecordReaderIterator<>(ConcatRecordReader.create(sectionReaders));
+            iterator =
+                    readerForMergeTree(sections, createMergeWrapper(outputLevel))
+                            .toCloseableIterator();
             if (rewriteCompactFile) {
                 compactFileWriter = writerFactory.createRollingMergeTreeFileWriter(outputLevel);
             }

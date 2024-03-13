@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.mergetree.DropDeleteReader;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.MergeTreeReaders;
 import org.apache.paimon.mergetree.SortedRun;
@@ -34,6 +35,7 @@ import org.apache.paimon.utils.FieldsComparator;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 
@@ -72,20 +74,28 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
             int outputLevel, boolean dropDelete, List<List<SortedRun>> sections) throws Exception {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
                 writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-        RecordReader<KeyValue> sectionsReader =
-                MergeTreeReaders.readerForMergeTree(
-                        sections,
-                        dropDelete,
-                        readerFactory,
-                        keyComparator,
-                        userDefinedSeqComparator,
-                        mfFactory.create(),
-                        mergeSorter);
-        writer.write(new RecordReaderIterator<>(sectionsReader));
+        RecordReader<KeyValue> reader =
+                readerForMergeTree(sections, new ReducerMergeFunctionWrapper(mfFactory.create()));
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
+        writer.write(new RecordReaderIterator<>(reader));
         writer.close();
         List<DataFileMeta> before = extractFilesFromSections(sections);
         notifyCompactBefore(before);
         return new CompactResult(before, writer.result());
+    }
+
+    protected <T> RecordReader<T> readerForMergeTree(
+            List<List<SortedRun>> sections, MergeFunctionWrapper<T> mergeFunctionWrapper)
+            throws IOException {
+        return MergeTreeReaders.readerForMergeTree(
+                sections,
+                readerFactory,
+                keyComparator,
+                userDefinedSeqComparator,
+                mergeFunctionWrapper,
+                mergeSorter);
     }
 
     protected void notifyCompactBefore(List<DataFileMeta> files) {}
