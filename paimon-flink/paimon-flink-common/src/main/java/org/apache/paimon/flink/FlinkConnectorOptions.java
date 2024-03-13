@@ -350,8 +350,8 @@ public class FlinkConnectorOptions {
     public static boolean prepareCommitWaitCompaction(Options options) {
         if (options.get(DELETION_VECTORS_ENABLED)) {
             // DeletionVector (DV) is maintained in the compaction thread, but it needs to be
-            // read into a file during prepareCommit to submit it.
-            // We must set waitComparison to true so that there are no multiple threads
+            // read into a file during prepareCommit (write thread) to commit it.
+            // We must set waitCompaction to true so that there are no multiple threads
             // operating DV simultaneously.
             return true;
         }
