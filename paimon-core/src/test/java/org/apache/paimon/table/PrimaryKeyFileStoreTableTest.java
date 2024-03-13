@@ -86,6 +86,7 @@ import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
 import static org.apache.paimon.io.DataFileTestUtils.row;
 import static org.apache.paimon.predicate.PredicateBuilder.and;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link PrimaryKeyFileStoreTable}. */
@@ -321,6 +322,34 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                                 "-2|20|200|binary|varbinary|mapKey:mapVal|multiset",
                                 "+2|21|20001|binary|varbinary|mapKey:mapVal|multiset",
                                 "+2|22|202|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testCompactOnBranch() throws Exception {
+        FileStoreTable table = createFileStoreTable(conf -> conf.set(CHANGELOG_PRODUCER, LOOKUP));
+        IOManager ioManager = IOManager.create(tablePath.toString());
+        try (StreamTableWrite write = table.newWrite(commitUser).withIOManager(ioManager);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // Commit multiple snapshots
+            write.write(rowData(0, 0, 0L));
+            commit.commit(0, write.prepareCommit(false, 0));
+
+            write.write(rowData(1, 10, 1000L));
+            write.write(rowData(2, 21, 201L));
+            write.write(rowData(2, 21, 2001L));
+            commit.commit(1, write.prepareCommit(false, 1));
+
+            write.write(rowData(1, 11, 1001L));
+            write.write(rowData(2, 22, 202L));
+            write.write(rowData(2, 22, 2002L));
+            commit.commit(2, write.prepareCommit(false, 2));
+        }
+
+        // create branch from a historical tag, not the latest
+        table.createTag("tag1", 1);
+        table.createBranch(BRANCH_NAME, "tag1");
+
+        assertThatCode(() -> writeBranchData(table)).doesNotThrowAnyException();
     }
 
     @Test
@@ -621,7 +650,9 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     private void writeBranchData(FileStoreTable table) throws Exception {
-        StreamTableWrite write = table.newWrite(commitUser);
+        IOManager ioManager = IOManager.create(tablePath.toString());
+        StreamTableWrite write =
+                table.newWrite(commitUser, null, BRANCH_NAME).withIOManager(ioManager);
         StreamTableCommit commit = table.newCommit(commitUser, BRANCH_NAME);
 
         write.write(rowData(1, 10, 100L));
