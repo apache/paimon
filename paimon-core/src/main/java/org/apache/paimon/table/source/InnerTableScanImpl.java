@@ -25,8 +25,6 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 
-import javax.annotation.Nullable;
-
 import java.util.ArrayList;
 import java.util.List;
 
@@ -93,24 +91,7 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
             }
 
             SnapshotReader.Plan newPlan =
-                    new SnapshotReader.Plan() {
-                        @Nullable
-                        @Override
-                        public Long watermark() {
-                            return plan.watermark();
-                        }
-
-                        @Nullable
-                        @Override
-                        public Long snapshotId() {
-                            return plan.snapshotId();
-                        }
-
-                        @Override
-                        public List<Split> splits() {
-                            return limitedSplits;
-                        }
-                    };
+                    new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
             return new ScannedResult(newPlan);
         } else {
             return result;

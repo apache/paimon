@@ -122,25 +122,26 @@ public class BranchesTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new BranchesSplit(fileIO, location));
+            FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
+            long rowCount = table.branchManager().branchCount();
+            return () -> Collections.singletonList(new BranchesSplit(rowCount, location));
         }
     }
 
     private static class BranchesSplit implements Split {
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private BranchesSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private BranchesSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            FileStoreTable table = FileStoreTableFactory.create(fileIO, location);
-            return table.branchManager().branchCount();
+            return rowCount;
         }
 
         @Override
