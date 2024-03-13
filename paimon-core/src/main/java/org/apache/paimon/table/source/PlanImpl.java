@@ -22,11 +22,10 @@ import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
 import org.jetbrains.annotations.Nullable;
 
-import java.io.Serializable;
 import java.util.List;
 
 /** An implementation of {@link SnapshotReader.Plan}. */
-public class PlanImpl implements SnapshotReader.Plan, Serializable {
+public class PlanImpl implements SnapshotReader.Plan {
 
     private final Long watermark;
     private final Long snapshotId;

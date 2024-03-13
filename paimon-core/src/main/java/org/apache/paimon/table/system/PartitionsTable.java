@@ -36,7 +36,6 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
@@ -135,7 +134,8 @@ public class PartitionsTable implements ReadonlyTable {
         @Override
         public Plan innerPlan() {
             return () ->
-                    Collections.singletonList(new PartitionsSplit(storeTable.newScan().plan()));
+                    Collections.singletonList(
+                            new PartitionsSplit(storeTable.newScan().plan().splits()));
         }
     }
 
@@ -143,22 +143,22 @@ public class PartitionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final TableScan.Plan plan;
+        private final List<Split> splits;
 
-        private PartitionsSplit(TableScan.Plan plan) {
-            this.plan = plan;
+        private PartitionsSplit(List<Split> splits) {
+            this.splits = splits;
         }
 
         @Override
         public long rowCount() {
-            return plan.splits().stream()
+            return splits.stream()
                     .map(s -> ((DataSplit) s).partition())
                     .collect(Collectors.toSet())
                     .size();
         }
 
-        private TableScan.Plan plan() {
-            return plan;
+        private List<Split> splits() {
+            return splits;
         }
 
         @Override
@@ -170,12 +170,12 @@ public class PartitionsTable implements ReadonlyTable {
                 return false;
             }
             PartitionsSplit that = (PartitionsSplit) o;
-            return Objects.equals(plan, that.plan);
+            return Objects.equals(splits, that.splits);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(plan);
+            return Objects.hash(splits);
         }
     }
 
@@ -212,8 +212,7 @@ public class PartitionsTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             PartitionsSplit filesSplit = (PartitionsSplit) split;
-            TableScan.Plan plan = filesSplit.plan();
-            if (plan.splits().isEmpty()) {
+            if (filesSplit.splits().isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
             List<Iterator<InternalRow>> iteratorList = new ArrayList<>();
@@ -221,7 +220,7 @@ public class PartitionsTable implements ReadonlyTable {
                     new RowDataToObjectArrayConverter(
                             fileStoreTable.schema().logicalPartitionType());
 
-            for (Split dataSplit : plan.splits()) {
+            for (Split dataSplit : filesSplit.splits()) {
                 iteratorList.add(
                         Iterators.transform(
                                 ((DataSplit) dataSplit).dataFiles().iterator(),

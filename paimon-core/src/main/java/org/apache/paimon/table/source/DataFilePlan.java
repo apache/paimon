@@ -20,13 +20,12 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 
-import java.io.Serializable;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
 /** Scanning plan containing snapshot ID and input splits. */
-public class DataFilePlan implements TableScan.Plan, Serializable {
+public class DataFilePlan implements TableScan.Plan {
 
     private final List<DataSplit> splits;
 

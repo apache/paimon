@@ -188,7 +188,7 @@ public class FilesTable implements ReadonlyTable {
         public Plan innerPlan() {
             // plan here, just set the result of plan to split
             TableScan.Plan plan = tablePlan();
-            return () -> Collections.singletonList(new FilesSplit(plan));
+            return () -> Collections.singletonList(new FilesSplit(plan.splits()));
         }
 
         private TableScan.Plan tablePlan() {
@@ -235,22 +235,22 @@ public class FilesTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final TableScan.Plan plan;
+        private final List<Split> splits;
 
-        private FilesSplit(TableScan.Plan plan) {
-            this.plan = plan;
+        private FilesSplit(List<Split> splits) {
+            this.splits = splits;
         }
 
         @Override
         public long rowCount() {
-            return plan.splits().stream()
+            return splits.stream()
                     .map(s -> (DataSplit) s)
                     .mapToLong(s -> s.dataFiles().size())
                     .sum();
         }
 
-        public TableScan.Plan plan() {
-            return plan;
+        public List<Split> splits() {
+            return splits;
         }
 
         @Override
@@ -262,12 +262,12 @@ public class FilesTable implements ReadonlyTable {
                 return false;
             }
             FilesSplit that = (FilesSplit) o;
-            return Objects.equals(plan, that.plan);
+            return Objects.equals(splits, that.splits);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(plan);
+            return Objects.hash(splits);
         }
     }
 
@@ -307,8 +307,7 @@ public class FilesTable implements ReadonlyTable {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
             FilesSplit filesSplit = (FilesSplit) split;
-            TableScan.Plan plan = filesSplit.plan();
-            if (plan.splits().isEmpty()) {
+            if (filesSplit.splits().isEmpty()) {
                 return new IteratorRecordReader<>(Collections.emptyIterator());
             }
 
@@ -343,7 +342,7 @@ public class FilesTable implements ReadonlyTable {
                                     });
                         }
                     };
-            for (Split dataSplit : plan.splits()) {
+            for (Split dataSplit : filesSplit.splits()) {
                 iteratorList.add(
                         Iterators.transform(
                                 ((DataSplit) dataSplit).dataFiles().iterator(),
