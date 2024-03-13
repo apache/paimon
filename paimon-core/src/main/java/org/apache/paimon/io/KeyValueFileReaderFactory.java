@@ -92,9 +92,9 @@ public class KeyValueFileReaderFactory {
             long schemaId, String fileName, long fileSize, int level) throws IOException {
         if (fileSize >= asyncThreshold && fileName.endsWith("orc")) {
             return new AsyncRecordReader<>(
-                    () -> createRecordReader(schemaId, fileName, level, false, 2));
+                    () -> createRecordReader(schemaId, fileName, level, false, 2, fileSize));
         }
-        return createRecordReader(schemaId, fileName, level, true, null);
+        return createRecordReader(schemaId, fileName, level, true, null, fileSize);
     }
 
     private RecordReader<KeyValue> createRecordReader(
@@ -102,7 +102,8 @@ public class KeyValueFileReaderFactory {
             String fileName,
             int level,
             boolean reuseFormat,
-            @Nullable Integer poolSize)
+            @Nullable Integer poolSize,
+            long fileSize)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
 
@@ -130,7 +131,7 @@ public class KeyValueFileReaderFactory {
                         poolSize,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),fileSize);
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());

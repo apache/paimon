@@ -88,8 +88,14 @@ public class ParquetReaderFactory implements FormatReaderFactory {
 
     @Override
     public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
+        return createReader(fileIO, filePath, null);
+    }
+
+    @Override
+    public ParquetReader createReader(FileIO fileIO, Path filePath, Long fileSize)
+            throws IOException {
         final long splitOffset = 0;
-        final long splitLength = fileIO.getFileSize(filePath);
+        final long splitLength = fileSize == null ? fileIO.getFileSize(filePath) : fileSize;
 
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
@@ -106,12 +112,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
 
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException {
-        throw new UnsupportedOperationException();
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {

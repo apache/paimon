@@ -31,6 +31,11 @@ public interface FormatReaderFactory extends Serializable {
 
     RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException;
 
-    RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+    RecordReader<InternalRow> createReader(FileIO fileIO, Path file, Long fileSize)
             throws IOException;
+
+    default RecordReader<InternalRow> createReader(
+            FileIO fileIO, Path file, int poolSize, Long fileSize) throws IOException {
+        throw new UnsupportedOperationException();
+    }
 }

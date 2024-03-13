@@ -48,6 +48,8 @@ import org.apache.paimon.utils.FileStorePathFactory;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -384,5 +386,31 @@ public class KeyValueFileReadWriteTest {
         for (DataFileMeta meta : actual) {
             assertThat(meta.level()).isEqualTo(expected.level());
         }
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"parquet", "orc", "avro"})
+    public void testReaderUseFileSizeFromMetadata(String format) throws Exception {
+        testWriteAndReadDataFileImpl(format);
+        DataFileTestDataGenerator.Data data = gen.next();
+        KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
+        DataFileMetaSerializer serializer = new DataFileMetaSerializer();
+
+        RollingFileWriter<KeyValue, DataFileMeta> writer =
+                writerFactory.createRollingMergeTreeFileWriter(0);
+        writer.write(CloseableIterator.fromList(data.content, kv -> {}));
+        writer.close();
+        List<DataFileMeta> actualMetas = writer.result();
+
+        KeyValueFileReaderFactory readerFactory =
+                createReaderFactory(tempDir.toString(), format, null, null);
+        assertData(
+                data,
+                actualMetas,
+                TestKeyValueGenerator.KEY_SERIALIZER,
+                TestKeyValueGenerator.DEFAULT_ROW_SERIALIZER,
+                serializer,
+                readerFactory,
+                kv -> kv);
     }
 }

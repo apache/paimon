@@ -179,8 +179,9 @@ class OrcReaderFactoryTest {
 
         AtomicBoolean isFirst = new AtomicBoolean(true);
 
+        LocalFileIO localFileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
-                format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
+                format.createReader(localFileIO, flatFile, randomPooSize,localFileIO.getFileSize(flatFile))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         // check filter: _col0 > randomStart
@@ -202,8 +203,9 @@ class OrcReaderFactoryTest {
         int randomPooSize = new Random().nextInt(3) + 1;
         OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1});
 
+        LocalFileIO localFileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
-                format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
+                format.createReader(localFileIO, flatFile, randomPooSize,localFileIO.getFileSize(flatFile))) {
             reader.transform(row -> row)
                     .filter(row -> row.getInt(1) % 123 == 0)
                     .forEachRemainingWithPosition(

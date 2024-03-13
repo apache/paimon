@@ -46,12 +46,14 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     public RowDataFileRecordReader(
             FileIO fileIO,
             Path path,
+            long fileSize,
             FormatReaderFactory readerFactory,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
-        this.reader = FileUtils.createFormatReader(fileIO, readerFactory, path);
+        FileUtils.checkExists(fileIO, path);
+        this.reader = readerFactory.createReader(fileIO, path, fileSize);
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;

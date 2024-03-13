@@ -58,13 +58,14 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             @Nullable Integer poolSize,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            long fileSize)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
         this.reader =
                 poolSize == null
-                        ? readerFactory.createReader(fileIO, path)
-                        : readerFactory.createReader(fileIO, path, poolSize);
+                        ? readerFactory.createReader(fileIO, path, fileSize)
+                        : readerFactory.createReader(fileIO, path, poolSize, fileSize);
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
         this.indexMapping = indexMapping;
