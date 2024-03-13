@@ -120,7 +120,15 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             KeyValueFieldsExtractor extractor,
             String tableName,
             String branchName) {
-        super(commitUser, snapshotManager, scan, options, indexFactory, deletionVectorsMaintainerFactory, tableName, branchName);
+        super(
+                commitUser,
+                snapshotManager,
+                scan,
+                options,
+                indexFactory,
+                deletionVectorsMaintainerFactory,
+                tableName,
+                branchName);
         this.fileIO = fileIO;
         this.keyType = keyType;
         this.valueType = valueType;

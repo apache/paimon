@@ -177,7 +177,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         } else {
             latestCommittedIdentifier =
                     snapshotManager
-                            .latestSnapshotOfUser(commitUser)
+                            .latestSnapshotOfUser(commitUser, branchName)
                             .map(Snapshot::commitIdentifier)
                             .orElse(Long.MIN_VALUE);
         }

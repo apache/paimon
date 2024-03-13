@@ -299,7 +299,11 @@ public class SnapshotManager implements Serializable {
     }
 
     public Optional<Snapshot> latestSnapshotOfUser(String user) {
-        Long latestId = latestSnapshotId();
+        return latestSnapshotOfUser(user, DEFAULT_MAIN_BRANCH);
+    }
+
+    public Optional<Snapshot> latestSnapshotOfUser(String user, String branchName) {
+        Long latestId = latestSnapshotId(branchName);
         if (latestId == null) {
             return Optional.empty();
         }
@@ -310,7 +314,7 @@ public class SnapshotManager implements Serializable {
                         "Latest snapshot id is not null, but earliest snapshot id is null. "
                                 + "This is unexpected.");
         for (long id = latestId; id >= earliestId; id--) {
-            Snapshot snapshot = snapshot(id);
+            Snapshot snapshot = snapshot(branchName, id);
             if (user.equals(snapshot.commitUser())) {
                 return Optional.of(snapshot);
             }
