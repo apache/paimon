@@ -101,8 +101,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             return NO_CHANGELOG;
         }
 
-        // In deletionVector mode, since drop delete is required, rewrite is always required.
+        // TODO In deletionVector mode, since drop delete is required, rewrite is always required.
         // TODO wait https://github.com/apache/incubator-paimon/pull/2962
+        // TODO but should be careful to not be deleted by DeletionVectorsMaintainer!
         if (dvMaintainer != null) {
             return CHANGELOG_WITH_REWRITE;
         }
