@@ -25,6 +25,7 @@ import org.jetbrains.annotations.Nullable;
 import java.io.Serializable;
 import java.util.List;
 
+/** A simple implementation of {@link SnapshotReader.Plan}. */
 public class SimplePlan implements SnapshotReader.Plan, Serializable {
 
     private final Long watermark;
