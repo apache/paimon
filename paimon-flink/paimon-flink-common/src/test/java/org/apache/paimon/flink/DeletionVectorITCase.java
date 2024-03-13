@@ -81,4 +81,36 @@ public class DeletionVectorITCase extends CatalogITCaseBase {
                             Row.ofKind(RowKind.UPDATE_AFTER, 4, "4_1"));
         }
     }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"none", "lookup"})
+    public void testBatchReadDVTable(String changelogProducer) {
+        sql(
+                String.format(
+                        "CREATE TABLE T (id INT PRIMARY KEY NOT ENFORCED, name STRING) "
+                                + "WITH ('deletion-vectors.enabled' = 'true', 'changelog-producer' = '%s')",
+                        changelogProducer));
+
+        sql("INSERT INTO T VALUES (1, '111111111'), (2, '2'), (3, '3'), (4, '4')");
+
+        sql("INSERT INTO T VALUES (2, '2_1'), (3, '3_1')");
+
+        sql("INSERT INTO T VALUES (2, '2_2'), (4, '4_1')");
+
+        assertThat(batchSql("SELECT * FROM T"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "111111111"),
+                        Row.of(2, "2_2"),
+                        Row.of(3, "3_1"),
+                        Row.of(4, "4_1"));
+
+        // batch read dv table will filter level 0 and there will be data delay
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='3') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "111111111"), Row.of(2, "2"), Row.of(3, "3"), Row.of(4, "4"));
+
+        assertThat(batchSql("SELECT * FROM T /*+ OPTIONS('scan.snapshot-id'='4') */"))
+                .containsExactlyInAnyOrder(
+                        Row.of(1, "111111111"), Row.of(2, "2_1"), Row.of(3, "3_1"), Row.of(4, "4"));
+    }
 }

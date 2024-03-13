@@ -47,6 +47,9 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
         super(options, snapshotReader);
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
+        if (options.deletionVectorsEnabled()) {
+            snapshotReader.withLevelFilter(level -> level > 0);
+        }
     }
 
     @Override
