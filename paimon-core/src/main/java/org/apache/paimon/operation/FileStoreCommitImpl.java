@@ -72,6 +72,8 @@ import java.util.Set;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
 
 /**
@@ -218,20 +220,22 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> appendChangelog = new ArrayList<>();
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
-        List<IndexManifestEntry> appendIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> appendHashIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> appendDvIndexFiles = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
                 appendTableFiles,
                 appendChangelog,
                 compactTableFiles,
                 compactChangelog,
-                appendIndexFiles);
+                appendHashIndexFiles,
+                appendDvIndexFiles);
         try {
             List<SimpleFileEntry> appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
             if (!ignoreEmptyCommit
                     || !appendTableFiles.isEmpty()
                     || !appendChangelog.isEmpty()
-                    || !appendIndexFiles.isEmpty()) {
+                    || !appendHashIndexFiles.isEmpty()) {
                 // Optimization for common path.
                 // Step 1:
                 // Read manifest entries from changed partitions here and check for conflicts.
@@ -255,7 +259,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommit(
                                 appendTableFiles,
                                 appendChangelog,
-                                appendIndexFiles,
+                                appendHashIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -266,7 +270,9 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 generatedSnapshot += 1;
             }
 
-            if (!compactTableFiles.isEmpty() || !compactChangelog.isEmpty()) {
+            if (!compactTableFiles.isEmpty()
+                    || !compactChangelog.isEmpty()
+                    || !appendDvIndexFiles.isEmpty()) {
                 // Optimization for common path.
                 // Step 2:
                 // Add appendChanges to the manifest entries read above and check for conflicts.
@@ -288,7 +294,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommit(
                                 compactTableFiles,
                                 compactChangelog,
-                                Collections.emptyList(),
+                                appendDvIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -353,14 +359,16 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> appendChangelog = new ArrayList<>();
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
-        List<IndexManifestEntry> appendIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> appendHashIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> appendDvIndexFiles = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
                 appendTableFiles,
                 appendChangelog,
                 compactTableFiles,
                 compactChangelog,
-                appendIndexFiles);
+                appendHashIndexFiles,
+                appendDvIndexFiles);
 
         if (!appendChangelog.isEmpty() || !compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -422,19 +430,19 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryOverwrite(
                                 partitionFilter,
                                 appendTableFiles,
-                                appendIndexFiles,
+                                appendHashIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets());
                 generatedSnapshot += 1;
             }
 
-            if (!compactTableFiles.isEmpty()) {
+            if (!compactTableFiles.isEmpty() || !appendDvIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
                                 compactTableFiles,
                                 Collections.emptyList(),
-                                Collections.emptyList(),
+                                appendDvIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -556,7 +564,8 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> appendChangelog,
             List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog,
-            List<IndexManifestEntry> appendIndexFiles) {
+            List<IndexManifestEntry> appendHashIndexFiles,
+            List<IndexManifestEntry> appendDvIndexFiles) {
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             commitMessage
@@ -586,13 +595,29 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .indexIncrement()
                     .newIndexFiles()
                     .forEach(
-                            f ->
-                                    appendIndexFiles.add(
-                                            new IndexManifestEntry(
-                                                    FileKind.ADD,
-                                                    commitMessage.partition(),
-                                                    commitMessage.bucket(),
-                                                    f)));
+                            f -> {
+                                switch (f.indexType()) {
+                                    case HASH_INDEX:
+                                        appendHashIndexFiles.add(
+                                                new IndexManifestEntry(
+                                                        FileKind.ADD,
+                                                        commitMessage.partition(),
+                                                        commitMessage.bucket(),
+                                                        f));
+                                        break;
+                                    case DELETION_VECTORS_INDEX:
+                                        appendDvIndexFiles.add(
+                                                new IndexManifestEntry(
+                                                        FileKind.ADD,
+                                                        commitMessage.partition(),
+                                                        commitMessage.bucket(),
+                                                        f));
+                                        break;
+                                    default:
+                                        throw new RuntimeException(
+                                                "Unknown index type: " + f.indexType());
+                                }
+                            });
         }
     }
 
