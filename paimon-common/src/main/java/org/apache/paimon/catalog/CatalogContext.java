@@ -96,7 +96,7 @@ public class CatalogContext {
     }
 
     @Nullable
-    public FileIOLoader preIO() {
+    public FileIOLoader preferIO() {
         return preferIOLoader;
     }
 

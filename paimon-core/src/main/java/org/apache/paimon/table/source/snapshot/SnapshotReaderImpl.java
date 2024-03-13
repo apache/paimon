@@ -38,9 +38,9 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.table.source.SimplePlan;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
@@ -252,7 +252,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                         scanMode != ScanMode.ALL,
                         splitGenerator,
                         files);
-        return new SimplePlan(plan.watermark(), plan.snapshotId(), (List) splits);
+        return new PlanImpl(plan.watermark(), plan.snapshotId(), (List) splits);
     }
 
     private List<DataSplit> generateSplits(
@@ -384,7 +384,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
             }
         }
 
-        return new SimplePlan(plan.watermark(), plan.snapshotId(), (List) splits);
+        return new PlanImpl(plan.watermark(), plan.snapshotId(), (List) splits);
     }
 
     @Override

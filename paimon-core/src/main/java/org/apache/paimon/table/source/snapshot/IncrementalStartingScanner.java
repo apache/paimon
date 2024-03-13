@@ -23,8 +23,8 @@ import org.apache.paimon.Snapshot.CommitKind;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
-import org.apache.paimon.table.source.SimplePlan;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -78,7 +78,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        return StartingScanner.fromPlan(new SimplePlan(null, endingSnapshotId, (List) result));
+        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, (List) result));
     }
 
     private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {

@@ -319,10 +319,10 @@ public interface FileIO extends Serializable {
         FileIOLoader loader = null;
         List<IOException> ioExceptionList = new ArrayList<>();
 
-        // load preIO
-        FileIOLoader preIO = config.preIO();
+        // load preferIO
+        FileIOLoader perferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(preIO, path, config);
+            loader = checkAccess(perferIOLoader, path, config);
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -385,9 +385,12 @@ public interface FileIO extends Serializable {
 
         if (loader == null) {
             String fallbackMsg = "";
-            String preMsg = "";
-            if (preIO != null) {
-                preMsg = " " + preIO.getClass().getSimpleName() + " also cannot access this path.";
+            String preferMsg = "";
+            if (perferIOLoader != null) {
+                preferMsg =
+                        " "
+                                + perferIOLoader.getClass().getSimpleName()
+                                + " also cannot access this path.";
             }
             if (fallbackIO != null) {
                 fallbackMsg =
@@ -400,7 +403,7 @@ public interface FileIO extends Serializable {
                             String.format(
                                     "Could not find a file io implementation for scheme '%s' in the classpath."
                                             + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), preMsg, fallbackMsg, path));
+                                    uri.getScheme(), preferMsg, fallbackMsg, path));
             for (IOException ioException : ioExceptionList) {
                 ex.addSuppressed(ioException);
             }

@@ -25,14 +25,14 @@ import org.jetbrains.annotations.Nullable;
 import java.io.Serializable;
 import java.util.List;
 
-/** A simple implementation of {@link SnapshotReader.Plan}. */
-public class SimplePlan implements SnapshotReader.Plan, Serializable {
+/** An implementation of {@link SnapshotReader.Plan}. */
+public class PlanImpl implements SnapshotReader.Plan, Serializable {
 
     private final Long watermark;
     private final Long snapshotId;
     private final List<Split> splits;
 
-    public SimplePlan(Long watermark, Long snapshotId, List<Split> splits) {
+    public PlanImpl(Long watermark, Long snapshotId, List<Split> splits) {
         this.watermark = watermark;
         this.snapshotId = snapshotId;
         this.splits = splits;

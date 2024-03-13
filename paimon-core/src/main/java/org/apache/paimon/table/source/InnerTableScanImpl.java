@@ -91,7 +91,7 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
             }
 
             SnapshotReader.Plan newPlan =
-                    new SimplePlan(plan.watermark(), plan.snapshotId(), limitedSplits);
+                    new PlanImpl(plan.watermark(), plan.snapshotId(), limitedSplits);
             return new ScannedResult(newPlan);
         } else {
             return result;
