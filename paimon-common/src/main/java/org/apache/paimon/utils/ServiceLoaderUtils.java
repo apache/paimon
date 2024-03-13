@@ -25,6 +25,7 @@ import java.util.ServiceLoader;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
+/** Utils for ServiceLoader. Mainly for caching ServiceLoader. */
 public final class ServiceLoaderUtils {
 
     private static final ConcurrentMap<Pair<Class<?>, ClassLoader>, List<?>> SERVICELOADERS =
