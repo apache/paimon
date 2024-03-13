@@ -26,6 +26,10 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 
@@ -57,6 +61,39 @@ public class FileIOTest {
                         new Path("require-options://" + tempDir.toString()),
                         CatalogContext.create(options));
         assertThat(fileIO).isInstanceOf(RequireOptionsFileIOLoader.MyFileIO.class);
+    }
+
+    @Test
+    public void testDiscoverLoaders() throws InterruptedException {
+        List<Map<String, FileIOLoader>> synchronizedList =
+                Collections.synchronizedList(new ArrayList<>());
+        AtomicReference<Exception> exception = new AtomicReference<>();
+        final int max = 10;
+
+        Runnable runnable =
+                () -> {
+                    for (int i = 0; i < max; i++) {
+                        try {
+                            synchronizedList.add(FileIO.discoverLoaders());
+                            Thread.sleep(100);
+                        } catch (Exception e) {
+                            exception.set(e);
+                            return;
+                        }
+                    }
+                };
+
+        Thread thread1 = new Thread(runnable);
+        Thread thread2 = new Thread(runnable);
+
+        thread1.start();
+        thread2.start();
+
+        thread1.join();
+        thread2.join();
+
+        assertThat(exception.get()).isNull();
+        assertThat(synchronizedList).isNotEmpty().containsOnly(FileIO.discoverLoaders());
     }
 
     public static void testOverwriteFileUtf8(Path file, FileIO fileIO) throws InterruptedException {

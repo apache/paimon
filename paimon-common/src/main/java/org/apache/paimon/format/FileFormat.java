@@ -25,13 +25,13 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.ServiceLoaderUtils;
 
 import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
-import java.util.ServiceLoader;
 
 /**
  * Factory class which creates reader and writer factories for specific file format.
@@ -92,9 +92,8 @@ public abstract class FileFormat {
 
     private static Optional<FileFormat> fromIdentifier(
             String formatIdentifier, FormatContext context, ClassLoader classLoader) {
-        ServiceLoader<FileFormatFactory> serviceLoader =
-                ServiceLoader.load(FileFormatFactory.class, classLoader);
-        for (FileFormatFactory factory : serviceLoader) {
+        for (FileFormatFactory factory :
+                ServiceLoaderUtils.getImplements(FileFormatFactory.class, classLoader)) {
             if (factory.identifier().equals(formatIdentifier.toLowerCase())) {
                 return Optional.of(factory.create(context));
             }

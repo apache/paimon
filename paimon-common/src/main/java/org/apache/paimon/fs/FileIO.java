@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Public;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.fs.hadoop.HadoopFileIOLoader;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.utils.ServiceLoaderUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -37,14 +38,15 @@ import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.ServiceLoader;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.fs.FileIOUtils.checkAccess;
@@ -60,6 +62,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 public interface FileIO extends Serializable {
 
     Logger LOG = LoggerFactory.getLogger(FileIO.class);
+
+    AtomicReference<Map<String, FileIOLoader>> FILEIOLOADERS = new AtomicReference<>();
 
     boolean isObjectStore();
 
@@ -320,9 +324,9 @@ public interface FileIO extends Serializable {
         List<IOException> ioExceptionList = new ArrayList<>();
 
         // load preferIO
-        FileIOLoader perferIOLoader = config.preferIO();
+        FileIOLoader preferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(perferIOLoader, path, config);
+            loader = checkAccess(preferIOLoader, path, config);
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -386,10 +390,10 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             String fallbackMsg = "";
             String preferMsg = "";
-            if (perferIOLoader != null) {
+            if (preferIOLoader != null) {
                 preferMsg =
                         " "
-                                + perferIOLoader.getClass().getSimpleName()
+                                + preferIOLoader.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
             if (fallbackIO != null) {
@@ -418,24 +422,33 @@ public interface FileIO extends Serializable {
 
     /** Discovers all {@link FileIOLoader} by service loader. */
     static Map<String, FileIOLoader> discoverLoaders() {
-        Map<String, FileIOLoader> results = new HashMap<>();
-        Iterator<FileIOLoader> iterator =
-                ServiceLoader.load(FileIOLoader.class, FileIOLoader.class.getClassLoader())
-                        .iterator();
-        iterator.forEachRemaining(
-                fileIO -> {
-                    FileIOLoader previous = results.put(fileIO.getScheme(), fileIO);
-                    if (previous != null) {
-                        throw new RuntimeException(
-                                String.format(
-                                        "Multiple FileIO for scheme '%s' found in the classpath.\n"
-                                                + "Ambiguous FileIO classes are:\n"
-                                                + "%s\n%s",
-                                        fileIO.getScheme(),
-                                        previous.getClass().getName(),
-                                        fileIO.getClass().getName()));
-                    }
-                });
-        return results;
+        if (FILEIOLOADERS.get() == null) {
+            synchronized (FileIO.class) {
+                if (FILEIOLOADERS.get() == null) {
+                    Map<String, FileIOLoader> results = new HashMap<>();
+                    Iterator<FileIOLoader> iterator =
+                            ServiceLoaderUtils.getImplements(
+                                            FileIOLoader.class, FileIOLoader.class.getClassLoader())
+                                    .iterator();
+                    iterator.forEachRemaining(
+                            fileIO -> {
+                                FileIOLoader previous = results.put(fileIO.getScheme(), fileIO);
+                                if (previous != null) {
+                                    throw new RuntimeException(
+                                            String.format(
+                                                    "Multiple FileIO for scheme '%s' found in the classpath.\n"
+                                                            + "Ambiguous FileIO classes are:\n"
+                                                            + "%s\n%s",
+                                                    fileIO.getScheme(),
+                                                    previous.getClass().getName(),
+                                                    fileIO.getClass().getName()));
+                                }
+                            });
+                    FILEIOLOADERS.set(Collections.unmodifiableMap(results));
+                }
+            }
+        }
+
+        return FILEIOLOADERS.get();
     }
 }
