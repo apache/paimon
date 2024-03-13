@@ -43,6 +43,7 @@ import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
+import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -556,12 +557,15 @@ public abstract class MergeTreeTestBase {
         RecordReader<KeyValue> reader =
                 MergeTreeReaders.readerForMergeTree(
                         new IntervalPartition(files, comparator).partition(),
-                        dropDelete,
                         readerFactory,
                         comparator,
                         null,
-                        DeduplicateMergeFunction.factory().create(),
+                        new ReducerMergeFunctionWrapper(
+                                DeduplicateMergeFunction.factory().create()),
                         new MergeSorter(options, null, null, null));
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -600,16 +604,19 @@ public abstract class MergeTreeTestBase {
                 throws Exception {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
                     writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-            RecordReader<KeyValue> sectionsReader =
+            RecordReader<KeyValue> reader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,
-                            dropDelete,
                             compactReaderFactory,
                             comparator,
                             null,
-                            DeduplicateMergeFunction.factory().create(),
+                            new ReducerMergeFunctionWrapper(
+                                    DeduplicateMergeFunction.factory().create()),
                             new MergeSorter(options, null, null, null));
-            writer.write(new RecordReaderIterator<>(sectionsReader));
+            if (dropDelete) {
+                reader = new DropDeleteReader(reader);
+            }
+            writer.write(new RecordReaderIterator<>(reader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());
         }
