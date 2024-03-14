@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.append.AppendOnlyCompactionTask;
 import org.apache.paimon.append.AppendOnlyTableCompactionCoordinator;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.Options;
@@ -38,6 +37,7 @@ import org.apache.paimon.table.sink.BatchTableCommit;
 import org.apache.paimon.table.sink.BatchTableWrite;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.CommitMessage;
+import org.apache.paimon.table.sink.CommitMessageSerializer;
 import org.apache.paimon.table.sink.CompactionTaskSerializer;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.source.DataSplit;
@@ -45,6 +45,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ParameterUtils;
 import org.apache.paimon.utils.Preconditions;
+import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.StringUtils;
 
 import org.apache.spark.api.java.JavaRDD;
@@ -201,11 +202,16 @@ public class CompactProcedure extends BaseProcedure {
             scan.withFilter(filter);
         }
 
-        List<Pair<BinaryRow, Integer>> partitionBuckets =
+        List<Pair<byte[], Integer>> partitionBuckets =
                 scan.plan().splits().stream()
                         .map(split -> (DataSplit) split)
                         .map(dataSplit -> Pair.of(dataSplit.partition(), dataSplit.bucket()))
                         .distinct()
+                        .map(
+                                p ->
+                                        Pair.of(
+                                                SerializationUtils.serializeBinaryRow(p.getLeft()),
+                                                p.getRight()))
                         .collect(Collectors.toList());
 
         if (partitionBuckets.isEmpty()) {
@@ -213,23 +219,36 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         BatchWriteBuilder writeBuilder = table.newBatchWriteBuilder();
-        JavaRDD<CommitMessage> commitMessageJavaRDD =
+        JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(partitionBuckets)
                         .mapPartitions(
-                                (FlatMapFunction<Iterator<Pair<BinaryRow, Integer>>, CommitMessage>)
+                                (FlatMapFunction<Iterator<Pair<byte[], Integer>>, byte[]>)
                                         pairIterator -> {
                                             IOManager ioManager = SparkUtils.createIOManager();
                                             BatchTableWrite write = writeBuilder.newWrite();
                                             write.withIOManager(ioManager);
                                             try {
                                                 while (pairIterator.hasNext()) {
-                                                    Pair<BinaryRow, Integer> pair =
+                                                    Pair<byte[], Integer> pair =
                                                             pairIterator.next();
                                                     write.compact(
-                                                            pair.getLeft(), pair.getRight(), true);
+                                                            SerializationUtils.deserializeBinaryRow(
+                                                                    pair.getLeft()),
+                                                            pair.getRight(),
+                                                            true);
                                                 }
-                                                return write.prepareCommit().iterator();
+                                                CommitMessageSerializer serializer =
+                                                        new CommitMessageSerializer();
+                                                List<CommitMessage> messages =
+                                                        write.prepareCommit();
+                                                List<byte[]> serializedMessages =
+                                                        new ArrayList<>(messages.size());
+                                                for (CommitMessage commitMessage : messages) {
+                                                    serializedMessages.add(
+                                                            serializer.serialize(commitMessage));
+                                                }
+                                                return serializedMessages.iterator();
                                             } finally {
                                                 write.close();
                                                 ioManager.close();
@@ -237,7 +256,13 @@ public class CompactProcedure extends BaseProcedure {
                                         });
 
         try (BatchTableCommit commit = writeBuilder.newCommit()) {
-            commit.commit(commitMessageJavaRDD.collect());
+            CommitMessageSerializer serializer = new CommitMessageSerializer();
+            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+            for (byte[] serializedMessage : serializedMessages) {
+                messages.add(serializer.deserialize(serializer.getVersion(), serializedMessage));
+            }
+            commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
@@ -262,25 +287,29 @@ public class CompactProcedure extends BaseProcedure {
         }
 
         String commitUser = UUID.randomUUID().toString();
-        JavaRDD<CommitMessage> commitMessageJavaRDD =
+        JavaRDD<byte[]> commitMessageJavaRDD =
                 javaSparkContext
                         .parallelize(serializedTasks)
                         .mapPartitions(
-                                (FlatMapFunction<Iterator<byte[]>, CommitMessage>)
+                                (FlatMapFunction<Iterator<byte[]>, byte[]>)
                                         taskIterator -> {
                                             AppendOnlyFileStoreWrite write =
                                                     (AppendOnlyFileStoreWrite)
                                                             table.store().newWrite(commitUser);
                                             CompactionTaskSerializer ser =
                                                     new CompactionTaskSerializer();
-                                            ArrayList<CommitMessage> messages = new ArrayList<>();
+                                            List<byte[]> messages = new ArrayList<>();
                                             try {
+                                                CommitMessageSerializer messageSer =
+                                                        new CommitMessageSerializer();
                                                 while (taskIterator.hasNext()) {
                                                     AppendOnlyCompactionTask task =
                                                             ser.deserialize(
                                                                     ser.getVersion(),
                                                                     taskIterator.next());
-                                                    messages.add(task.doCompact(write));
+                                                    messages.add(
+                                                            messageSer.serialize(
+                                                                    task.doCompact(write)));
                                                 }
                                                 return messages.iterator();
                                             } finally {
@@ -289,7 +318,15 @@ public class CompactProcedure extends BaseProcedure {
                                         });
 
         try (TableCommitImpl commit = table.newCommit(commitUser)) {
-            commit.commit(commitMessageJavaRDD.collect());
+            CommitMessageSerializer messageSerializerser = new CommitMessageSerializer();
+            List<byte[]> serializedMessages = commitMessageJavaRDD.collect();
+            List<CommitMessage> messages = new ArrayList<>(serializedMessages.size());
+            for (byte[] serializedMessage : serializedMessages) {
+                messages.add(
+                        messageSerializerser.deserialize(
+                                serializer.getVersion(), serializedMessage));
+            }
+            commit.commit(messages);
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
