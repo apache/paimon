@@ -120,14 +120,15 @@ public class TestChangelogDataReadWrite {
                     rowDataIteratorCreator) {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
         long schemaId = 0;
+        CoreOptions options = new CoreOptions(new HashMap<>());
         KeyValueFileStoreRead read =
                 new KeyValueFileStoreRead(
+                        options,
                         schemaManager,
                         schemaId,
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
-                        null,
                         DeduplicateMergeFunction.factory(),
                         KeyValueFileReaderFactory.builder(
                                 LocalFileIO.create(),
@@ -138,7 +139,7 @@ public class TestChangelogDataReadWrite {
                                 ignore -> avro,
                                 pathFactory,
                                 EXTRACTOR,
-                                new CoreOptions(new HashMap<>())));
+                                options));
         return new KeyValueTableRead(read, null) {
 
             @Override

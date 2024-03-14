@@ -72,7 +72,7 @@ public abstract class FullCacheLookupTable implements LookupTable {
         FileStoreTable table = context.table;
         List<String> sequenceFields = new ArrayList<>();
         if (table.primaryKeys().size() > 0) {
-            new CoreOptions(table.options()).sequenceField().ifPresent(sequenceFields::addAll);
+            sequenceFields = new CoreOptions(table.options()).sequenceField();
         }
         RowType projectedType = TypeUtils.project(table.rowType(), context.projection);
         if (sequenceFields.size() > 0) {

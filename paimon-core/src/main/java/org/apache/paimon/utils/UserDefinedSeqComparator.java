@@ -27,7 +27,6 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.util.List;
-import java.util.Optional;
 
 /** A {@link FieldsComparator} for user defined sequence fields. */
 public class UserDefinedSeqComparator implements FieldsComparator {
@@ -52,17 +51,7 @@ public class UserDefinedSeqComparator implements FieldsComparator {
 
     @Nullable
     public static UserDefinedSeqComparator create(RowType rowType, CoreOptions options) {
-        Optional<List<String>> sequenceField = options.sequenceField();
-        if (!sequenceField.isPresent()) {
-            return null;
-        }
-
-        List<String> fieldNames = rowType.getFieldNames();
-        int[] fields = sequenceField.get().stream().mapToInt(fieldNames::indexOf).toArray();
-        RecordComparator comparator =
-                CodeGenUtils.newRecordComparator(
-                        rowType.getFieldTypes(), fields, "UserDefinedSeqComparator");
-        return new UserDefinedSeqComparator(fields, comparator);
+        return create(rowType, options.sequenceField());
     }
 
     @Nullable

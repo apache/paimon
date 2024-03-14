@@ -1492,8 +1492,10 @@ public class CoreOptions implements Serializable {
         return options.get(DYNAMIC_BUCKET_ASSIGNER_PARALLELISM);
     }
 
-    public Optional<List<String>> sequenceField() {
-        return options.getOptional(SEQUENCE_FIELD).map(s -> Arrays.asList(s.split(",")));
+    public List<String> sequenceField() {
+        return options.getOptional(SEQUENCE_FIELD)
+                .map(s -> Arrays.asList(s.split(",")))
+                .orElse(Collections.emptyList());
     }
 
     public Optional<String> rowkindField() {

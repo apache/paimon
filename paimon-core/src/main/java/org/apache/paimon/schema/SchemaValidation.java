@@ -167,13 +167,13 @@ public class SchemaValidation {
             }
         }
 
-        Optional<List<String>> sequenceField = options.sequenceField();
-        sequenceField.ifPresent(
-                fields ->
-                        checkArgument(
-                                schema.fieldNames().containsAll(fields),
-                                "Nonexistent sequence fields: '%s'",
-                                fields));
+        List<String> sequenceField = options.sequenceField();
+        if (sequenceField.size() > 0) {
+            checkArgument(
+                    schema.fieldNames().containsAll(sequenceField),
+                    "Nonexistent sequence fields: '%s'",
+                    sequenceField);
+        }
 
         Optional<String> rowkindField = options.rowkindField();
         rowkindField.ifPresent(
@@ -183,18 +183,18 @@ public class SchemaValidation {
                                 "Nonexistent rowkind field: '%s'",
                                 field));
 
-        sequenceField.ifPresent(
-                fields ->
-                        fields.forEach(
-                                field ->
-                                        checkArgument(
-                                                options.fieldAggFunc(field) == null,
-                                                "Should not define aggregation on sequence field: '%s'",
-                                                field)));
+        if (sequenceField.size() > 0) {
+            sequenceField.forEach(
+                    field ->
+                            checkArgument(
+                                    options.fieldAggFunc(field) == null,
+                                    "Should not define aggregation on sequence field: '%s'",
+                                    field));
+        }
 
         CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
         if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
-            if (sequenceField.isPresent()) {
+            if (sequenceField.size() > 0) {
                 throw new IllegalArgumentException(
                         "Do not support use sequence field on FIRST_MERGE merge engine");
             }
@@ -214,7 +214,7 @@ public class SchemaValidation {
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
 
-            if (sequenceField.isPresent()) {
+            if (sequenceField.size() > 0) {
                 throw new IllegalArgumentException(
                         String.format(
                                 "You can not use sequence.field in cross partition update case "
