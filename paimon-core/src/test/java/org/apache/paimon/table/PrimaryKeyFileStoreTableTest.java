@@ -186,7 +186,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
-    public void testSequenceNumber() throws Exception {
+    public void testSequenceField() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(conf -> conf.set(CoreOptions.SEQUENCE_FIELD, "b"));
         StreamTableWrite write = table.newWrite(commitUser);
@@ -200,13 +200,28 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.close();
         commit.close();
 
-        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
-        TableRead read = table.newRead();
-        assertThat(getResult(read, splits, binaryRow(1), 0, BATCH_ROW_TO_STRING))
+        List<Split> splits = table.newSnapshotReader().read().splits();
+        InnerTableRead read = table.newRead();
+        Function<InternalRow, String> toString = BATCH_ROW_TO_STRING;
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString))
                 .isEqualTo(
                         Arrays.asList(
                                 "1|10|200|binary|varbinary|mapKey:mapVal|multiset",
                                 "1|11|101|binary|varbinary|mapKey:mapVal|multiset"));
+
+        // verify projection with sequence field
+
+        // read with sequence field
+        read = read.withProjection(new int[] {2, 1});
+        toString = r -> r.getLong(0) + "|" + r.getInt(1);
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString))
+                .isEqualTo(Arrays.asList("200|10", "101|11"));
+
+        // read without sequence field
+        read = read.withProjection(new int[] {1, 0});
+        toString = r -> r.getInt(0) + "|" + r.getInt(1);
+        assertThat(getResult(read, splits, binaryRow(1), 0, toString))
+                .isEqualTo(Arrays.asList("10|1", "11|1"));
     }
 
     @Test

@@ -46,13 +46,15 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.Projection;
+import org.apache.paimon.utils.UserDefinedSeqComparator;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -72,7 +74,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private final Comparator<InternalRow> keyComparator;
     private final MergeFunctionFactory<KeyValue> mfFactory;
     private final MergeSorter mergeSorter;
-    @Nullable private final FieldsComparator userDefinedSeqComparator;
+    private final List<String> sequenceFields;
 
     @Nullable private int[][] keyProjectedFields;
 
@@ -86,12 +88,12 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private boolean forceKeepDelete = false;
 
     public KeyValueFileStoreRead(
+            CoreOptions options,
             SchemaManager schemaManager,
             long schemaId,
             RowType keyType,
             RowType valueType,
             Comparator<InternalRow> keyComparator,
-            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
         this.tableSchema = schemaManager.schema(schemaId);
@@ -99,26 +101,59 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
         this.mfFactory = mfFactory;
-        this.userDefinedSeqComparator = userDefinedSeqComparator;
         this.mergeSorter =
                 new MergeSorter(
                         CoreOptions.fromMap(tableSchema.options()), keyType, valueType, null);
+        this.sequenceFields = options.sequenceField();
     }
 
-    public KeyValueFileStoreRead withKeyProjection(int[][] projectedFields) {
+    public KeyValueFileStoreRead withKeyProjection(@Nullable int[][] projectedFields) {
         readerFactoryBuilder.withKeyProjection(projectedFields);
         this.keyProjectedFields = projectedFields;
         return this;
     }
 
-    public KeyValueFileStoreRead withValueProjection(int[][] projectedFields) {
-        AdjustedProjection projection = mfFactory.adjustProjection(projectedFields);
+    public KeyValueFileStoreRead withValueProjection(@Nullable int[][] projectedFields) {
+        if (projectedFields == null) {
+            return this;
+        }
+
+        int[][] newProjectedFields = projectedFields;
+        if (sequenceFields.size() > 0) {
+            // make sure projection contains sequence fields
+            List<String> fieldNames = tableSchema.fieldNames();
+            List<String> projectedNames = Projection.of(projectedFields).project(fieldNames);
+            int[] lackFields =
+                    sequenceFields.stream()
+                            .filter(f -> !projectedNames.contains(f))
+                            .mapToInt(fieldNames::indexOf)
+                            .toArray();
+            if (lackFields.length > 0) {
+                newProjectedFields =
+                        Arrays.copyOf(projectedFields, projectedFields.length + lackFields.length);
+                for (int i = 0; i < lackFields.length; i++) {
+                    newProjectedFields[projectedFields.length + i] = new int[] {lackFields[i]};
+                }
+            }
+        }
+
+        AdjustedProjection projection = mfFactory.adjustProjection(newProjectedFields);
         this.pushdownProjection = projection.pushdownProjection;
         this.outerProjection = projection.outerProjection;
         if (pushdownProjection != null) {
             readerFactoryBuilder.withValueProjection(pushdownProjection);
             mergeSorter.setProjectedValueType(readerFactoryBuilder.projectedValueType());
         }
+
+        if (newProjectedFields != projectedFields) {
+            // Discard the completed sequence fields
+            if (outerProjection == null) {
+                outerProjection = Projection.range(0, projectedFields.length).toNestedIndexes();
+            } else {
+                outerProjection = Arrays.copyOf(outerProjection, projectedFields.length);
+            }
+        }
+
         return this;
     }
 
@@ -231,7 +266,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                     split.deletionFiles().orElse(null),
                                     false),
                             keyComparator,
-                            userDefinedSeqComparator,
+                            createUdsComparator(),
                             mergeSorter,
                             forceKeepDelete));
         }
@@ -264,7 +299,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
                                             ? overlappedSectionFactory
                                             : nonOverlappedSectionFactory,
                                     keyComparator,
-                                    userDefinedSeqComparator,
+                                    createUdsComparator(),
                                     mergeFuncWrapper,
                                     mergeSorter));
         }
@@ -321,5 +356,11 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
         ProjectedRow projectedRow = ProjectedRow.from(keyProjectedFields);
         return reader.transform(kv -> kv.replaceKey(projectedRow.replaceRow(kv.key())));
+    }
+
+    @Nullable
+    private UserDefinedSeqComparator createUdsComparator() {
+        return UserDefinedSeqComparator.create(
+                readerFactoryBuilder.projectedValueType(), sequenceFields);
     }
 }

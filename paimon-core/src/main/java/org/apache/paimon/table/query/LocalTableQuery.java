@@ -90,10 +90,10 @@ public class LocalTableQuery implements TableQuery {
         if (options.needLookup()) {
             startLevel = 1;
         } else {
-            if (options.sequenceField().isPresent()) {
+            if (options.sequenceField().size() > 0) {
                 throw new UnsupportedOperationException(
                         "Not support sequence field definition, but is: "
-                                + options.sequenceField().get());
+                                + options.sequenceField());
             }
 
             if (options.mergeEngine() != DEDUPLICATE) {
