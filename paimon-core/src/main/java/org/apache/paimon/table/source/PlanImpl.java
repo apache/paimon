@@ -20,7 +20,7 @@ package org.apache.paimon.table.source;
 
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 
-import org.jetbrains.annotations.Nullable;
+import javax.annotation.Nullable;
 
 import java.util.List;
 
