@@ -20,8 +20,9 @@ package org.apache.paimon.utils;
 
 import org.apache.paimon.reader.RecordReader;
 
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;

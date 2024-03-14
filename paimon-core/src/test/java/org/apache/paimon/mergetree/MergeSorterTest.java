@@ -36,12 +36,13 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.IteratorRecordReader;
 
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.TestTemplate;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.io.TempDir;
+
+import javax.annotation.Nullable;
 
 import java.io.File;
 import java.nio.file.Files;
