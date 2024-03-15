@@ -78,9 +78,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         innerTestRandomCdcEvents(() -> -1, false);
     }
 
-    @Disabled
     @Test
-    @Timeout(180)
+    @Timeout(120)
     public void testRandomCdcEventsUnawareBucket() throws Exception {
         innerTestRandomCdcEvents(() -> -1, true);
     }
@@ -177,12 +176,7 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
 
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 2, 10000);
-        if (unawareBucketMode) {
-            // there's a compact operator which won't terminate
-            env.executeAsync();
-        } else {
-            env.execute();
-        }
+        env.execute();
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
@@ -204,6 +198,8 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         conf.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 100L);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        // disable compaction for unaware bucket mode to avoid unstable test
+        conf.set(CoreOptions.WRITE_ONLY, true);
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(
