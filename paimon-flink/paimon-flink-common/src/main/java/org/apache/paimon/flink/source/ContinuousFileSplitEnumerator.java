@@ -192,7 +192,7 @@ public class ContinuousFileSplitEnumerator
     // context.callAsync will invoke this. This method runs in workerExecutorThreadPool in
     // parallelism.
     protected synchronized Optional<PlanWithNextSnapshotId> scanNextSnapshot() {
-        if (splitAssigner.remainingSplits().size() >= splitMaxNum) {
+        if (splitAssigner.numberOfRemainingSplits() >= splitMaxNum) {
             return Optional.empty();
         }
         TableScan.Plan plan = scan.plan();

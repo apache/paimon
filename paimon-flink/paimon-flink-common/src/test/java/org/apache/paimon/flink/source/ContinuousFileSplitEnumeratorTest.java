@@ -792,6 +792,13 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         context.triggerAllActions();
 
         Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
+        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(16 * 2);
+
+        enumerator.handleSplitRequest(0, "test");
+        enumerator.handleSplitRequest(1, "test");
+
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(15 * 2);
+        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(15 * 2);
     }
 
     private void triggerCheckpointAndComplete(
