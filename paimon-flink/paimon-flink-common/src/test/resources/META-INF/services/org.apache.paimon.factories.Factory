@@ -17,3 +17,6 @@ org.apache.paimon.flink.FlinkCatalogTest$TestingLogSoreRegisterFactory
 
 # Lineage meta factory
 org.apache.paimon.flink.FlinkLineageITCase$TestingMemoryLineageMetaFactory
+
+# Catalog lock factory
+org.apache.paimon.flink.FileSystemCatalogITCase$FileSystemCatalogDummyLockFactory
