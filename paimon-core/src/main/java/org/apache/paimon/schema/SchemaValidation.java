@@ -190,7 +190,7 @@ public class SchemaValidation {
                         field ->
                                 checkArgument(
                                         schema.fieldNames().contains(field),
-                                        "Nonexistent rowkind field: '%s'",
+                                        "Rowkind field: '%s' can not be found in table schema.",
                                         field));
 
         if (options.deletionVectorsEnabled()) {
