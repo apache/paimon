@@ -43,6 +43,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate keyFilter;
     private Predicate valueFilter;
+    private final boolean deletionVectorsEnabled;
 
     public KeyValueFileStoreScan(
             RowType partitionType,
@@ -56,7 +57,8 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName) {
+            String branchName,
+            boolean deletionVectorsEnabled) {
         super(
                 partitionType,
                 bucketFilter,
@@ -74,6 +76,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
         this.fieldValueStatsConverters =
                 new FieldStatsConverters(
                         sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)), schemaId);
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 
     public KeyValueFileStoreScan withKeyFilter(Predicate predicate) {
@@ -90,14 +93,26 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
     /** Note: Keep this thread-safe. */
     @Override
     protected boolean filterByStats(ManifestEntry entry) {
-        if (keyFilter == null) {
+        Predicate filter = null;
+        FieldStatsArraySerializer serializer = null;
+        BinaryTableStats stats = null;
+        if (deletionVectorsEnabled && entry.level() > 0 && valueFilter != null) {
+            filter = valueFilter;
+            serializer = fieldValueStatsConverters.getOrCreate(entry.file().schemaId());
+            stats = entry.file().valueStats();
+        }
+
+        if (filter == null && keyFilter != null) {
+            filter = keyFilter;
+            serializer = fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
+            stats = entry.file().keyStats();
+        }
+
+        if (filter == null) {
             return true;
         }
 
-        FieldStatsArraySerializer serializer =
-                fieldKeyStatsConverters.getOrCreate(entry.file().schemaId());
-        BinaryTableStats stats = entry.file().keyStats();
-        return keyFilter.test(
+        return filter.test(
                 entry.file().rowCount(),
                 serializer.evolution(stats.minValues()),
                 serializer.evolution(stats.maxValues()),
