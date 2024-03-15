@@ -96,10 +96,9 @@ public class SortBufferWriteBuffer implements WriteBuffer {
         fieldTypes.addAll(valueType.getFieldTypes());
 
         NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(
-                        fieldTypes, sortFieldArray, "MemTableKeyComputer");
+                CodeGenUtils.newNormalizedKeyComputer(fieldTypes, sortFieldArray);
         RecordComparator keyComparator =
-                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray, "MemTableComparator");
+                CodeGenUtils.newRecordComparator(fieldTypes, sortFieldArray);
 
         if (memoryPool.freePages() < 3) {
             throw new IllegalArgumentException(

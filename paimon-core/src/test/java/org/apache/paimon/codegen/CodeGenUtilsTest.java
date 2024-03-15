@@ -18,190 +18,93 @@
 
 package org.apache.paimon.codegen;
 
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.DoubleType;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.types.VarCharType;
-import org.apache.paimon.utils.Pair;
 
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
-import java.util.List;
-import java.util.stream.IntStream;
+import java.util.function.Supplier;
 
-import static org.apache.paimon.codegen.CodeGenUtils.ClassKey;
+import static org.apache.paimon.codegen.CodeGenUtils.newNormalizedKeyComputer;
+import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordComparator;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
+import static org.apache.paimon.types.DataTypes.DOUBLE;
+import static org.apache.paimon.types.DataTypes.INT;
+import static org.apache.paimon.types.DataTypes.STRING;
 import static org.assertj.core.api.Assertions.assertThat;
 
 class CodeGenUtilsTest {
 
-    @BeforeAll
-    public static void before() {
-        // cleanup cached class before tests
-        CodeGenUtils.COMPILED_CLASS_CACHE.invalidateAll();
-    }
-
     @Test
     public void testProjectionCodegenCache() {
-        String name = "Projection";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 = Arrays.asList(new VarCharType(1), new IntType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1};
-
-        Projection projection =
-                CodeGenUtils.newProjection(
-                        RowType.builder().fields(dataTypes1).build(), fieldIndexes1);
-
-        ClassKey classKey = new ClassKey(Projection.class, name, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNotNull();
-        assertThat(projection.getClass()).isEqualTo(classPair.getLeft());
+        assertClassEquals(
+                () ->
+                        newProjection(
+                                RowType.builder().fields(STRING(), INT()).build(),
+                                new int[] {0, 1}));
     }
 
     @Test
     public void testProjectionCodegenCacheMiss() {
-        String name = "Projection";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 =
-                Arrays.asList(new VarCharType(1), new IntType(), new DoubleType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1, 2};
-
-        CodeGenUtils.newProjection(RowType.builder().fields(dataTypes1).build(), fieldIndexes1);
-
-        ClassKey classKey = new ClassKey(Projection.class, name, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNull();
+        assertClassNotEquals(
+                newProjection(RowType.builder().fields(STRING(), INT()).build(), new int[] {0, 1}),
+                newProjection(
+                        RowType.builder().fields(STRING(), INT(), DOUBLE()).build(),
+                        new int[] {0, 1, 2}));
     }
 
     @Test
     public void testNormalizedKeyComputerCodegenCache() {
-        String name1 = "NormalizedKeyComputer";
-        String name2 = "NormalizedKeyComputer";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 = Arrays.asList(new VarCharType(1), new IntType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1};
-
-        NormalizedKeyComputer normalizedKeyComputer =
-                CodeGenUtils.newNormalizedKeyComputer(dataTypes1, fieldIndexes1, name1);
-
-        ClassKey classKey =
-                new ClassKey(NormalizedKeyComputer.class, name2, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNotNull();
-        assertThat(normalizedKeyComputer.getClass()).isEqualTo(classPair.getLeft());
+        assertClassEquals(
+                () -> newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 
     @Test
     public void testNormalizedKeyComputerCodegenCacheMiss() {
-        String name1 = "NormalizedKeyComputer";
-        String name2 = "NormalizedKeyComputer";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 =
-                Arrays.asList(new VarCharType(1), new IntType(), new DoubleType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1, 2};
-
-        CodeGenUtils.newNormalizedKeyComputer(dataTypes1, fieldIndexes1, name1);
-
-        ClassKey classKey =
-                new ClassKey(NormalizedKeyComputer.class, name2, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNull();
+        assertClassNotEquals(
+                newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
+                newNormalizedKeyComputer(
+                        Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}));
     }
 
     @Test
     public void testRecordComparatorCodegenCache() {
-        String name1 = "RecordComparator";
-        String name2 = "RecordComparator";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 = Arrays.asList(new VarCharType(1), new IntType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1};
-
-        RecordComparator recordComparator =
-                CodeGenUtils.newRecordComparator(dataTypes1, fieldIndexes1, name1);
-
-        ClassKey classKey = new ClassKey(RecordComparator.class, name2, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNotNull();
-        assertThat(recordComparator.getClass()).isEqualTo(classPair.getLeft());
+        assertClassEquals(
+                () -> newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
     }
 
     @Test
     public void testRecordComparatorCodegenCacheMiss() {
-        String name1 = "RecordComparator";
-        String name2 = "RecordComparator";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 =
-                Arrays.asList(new VarCharType(1), new IntType(), new DoubleType());
-        int[] fieldIndexes1 = new int[] {0, 1};
-        int[] fieldIndexes2 = new int[] {0, 1, 2};
-
-        CodeGenUtils.newRecordComparator(dataTypes1, fieldIndexes1, name1);
-
-        ClassKey classKey = new ClassKey(RecordComparator.class, name2, dataTypes2, fieldIndexes2);
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNull();
+        assertClassNotEquals(
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
+                newRecordComparator(Arrays.asList(STRING(), INT(), DOUBLE()), new int[] {0, 1, 2}));
     }
 
     @Test
     public void testRecordEqualiserCodegenCache() {
-        String name1 = "RecordEqualiser";
-        String name2 = "RecordEqualiser";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 = Arrays.asList(new VarCharType(1), new IntType());
-
-        RecordEqualiser recordEqualiser = CodeGenUtils.newRecordEqualiser(dataTypes1, name1);
-
-        ClassKey classKey =
-                new ClassKey(
-                        RecordEqualiser.class,
-                        name2,
-                        dataTypes2,
-                        IntStream.range(0, dataTypes2.size()).toArray());
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
-
-        assertThat(classPair).isNotNull();
-        assertThat(recordEqualiser.getClass()).isEqualTo(classPair.getLeft());
+        assertClassEquals(() -> newRecordEqualiser(Arrays.asList(STRING(), INT())));
     }
 
     @Test
     public void testRecordEqualiserCodegenCacheMiss() {
-        String name1 = "RecordEqualiser";
-        String name2 = "RecordEqualiser";
-        List<DataType> dataTypes1 = Arrays.asList(new VarCharType(1), new IntType());
-        List<DataType> dataTypes2 =
-                Arrays.asList(new VarCharType(1), new IntType(), new DoubleType());
+        assertClassNotEquals(
+                newRecordEqualiser(Arrays.asList(STRING(), INT())),
+                newRecordEqualiser(Arrays.asList(STRING(), INT(), DOUBLE())));
+    }
 
-        CodeGenUtils.newRecordEqualiser(dataTypes1, name1);
+    @Test
+    public void testHybridNotEqual() {
+        assertClassNotEquals(
+                newRecordComparator(Arrays.asList(STRING(), INT()), new int[] {0, 1}),
+                newNormalizedKeyComputer(Arrays.asList(STRING(), INT()), new int[] {0, 1}));
+    }
 
-        ClassKey classKey =
-                new ClassKey(
-                        RecordEqualiser.class,
-                        name2,
-                        dataTypes2,
-                        IntStream.range(0, dataTypes2.size()).toArray());
-        Pair<Class<?>, Object[]> classPair =
-                CodeGenUtils.COMPILED_CLASS_CACHE.getIfPresent(classKey);
+    private void assertClassEquals(Supplier<?> supplier) {
+        assertThat(supplier.get().getClass()).isEqualTo(supplier.get().getClass());
+    }
 
-        assertThat(classPair).isNull();
+    private void assertClassNotEquals(Object o1, Object o2) {
+        assertThat(o1.getClass()).isNotEqualTo(o2.getClass());
     }
 }

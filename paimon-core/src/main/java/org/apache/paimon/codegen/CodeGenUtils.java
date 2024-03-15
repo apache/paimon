@@ -30,12 +30,15 @@ import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Objects;
+import java.util.function.Supplier;
 import java.util.stream.IntStream;
+
+import static org.apache.paimon.codegen.CodeGenLoader.getCodeGenerator;
 
 /** Utils for code generations. */
 public class CodeGenUtils {
 
-    static final Cache<ClassKey, Pair<Class<?>, Object[]>> COMPILED_CLASS_CACHE =
+    private static final Cache<ClassKey, Pair<Class<?>, Object[]>> COMPILED_CLASS_CACHE =
             CacheBuilder.newBuilder()
                     // assume the table schema will stay the same for a period of time
                     .expireAfterAccess(Duration.ofMinutes(30))
@@ -56,167 +59,82 @@ public class CodeGenUtils {
         if (mapping.length == 0) {
             return EMPTY_PROJECTION;
         }
-        String className = "Projection";
-        ClassKey classKey =
-                new ClassKey(Projection.class, className, inputType.getFieldTypes(), mapping);
 
-        try {
-            Pair<Class<?>, Object[]> classPair =
-                    COMPILED_CLASS_CACHE.get(
-                            classKey,
-                            () -> {
-                                GeneratedClass<Projection> generatedClass =
-                                        CodeGenLoader.getCodeGenerator()
-                                                .generateProjection(className, inputType, mapping);
-                                return Pair.of(
-                                        generatedClass.compile(CodeGenUtils.class.getClassLoader()),
-                                        generatedClass.getReferences());
-                            });
-
-            return (Projection)
-                    classPair
-                            .getLeft()
-                            .getConstructor(Object[].class)
-                            .newInstance(new Object[] {classPair.getRight()});
-        } catch (Exception e) {
-            throw new RuntimeException(
-                    "Could not instantiate generated class '" + className + "'", e);
-        }
+        return generate(
+                Projection.class,
+                inputType.getFieldTypes(),
+                mapping,
+                () -> getCodeGenerator().generateProjection(inputType, mapping));
     }
 
     public static NormalizedKeyComputer newNormalizedKeyComputer(
-            List<DataType> inputTypes, int[] sortFields, String name) {
-        ClassKey classKey = new ClassKey(NormalizedKeyComputer.class, name, inputTypes, sortFields);
-
-        try {
-            Pair<Class<?>, Object[]> classPair =
-                    COMPILED_CLASS_CACHE.get(
-                            classKey,
-                            () -> {
-                                GeneratedClass<NormalizedKeyComputer> generatedClass =
-                                        CodeGenLoader.getCodeGenerator()
-                                                .generateNormalizedKeyComputer(
-                                                        inputTypes, sortFields, name);
-                                return Pair.of(
-                                        generatedClass.compile(CodeGenUtils.class.getClassLoader()),
-                                        generatedClass.getReferences());
-                            });
-
-            return (NormalizedKeyComputer)
-                    classPair
-                            .getLeft()
-                            .getConstructor(Object[].class)
-                            .newInstance(new Object[] {classPair.getRight()});
-        } catch (Exception e) {
-            throw new RuntimeException("Could not instantiate generated class '" + name + "'", e);
-        }
+            List<DataType> inputTypes, int[] sortFields) {
+        return generate(
+                NormalizedKeyComputer.class,
+                inputTypes,
+                sortFields,
+                () -> getCodeGenerator().generateNormalizedKeyComputer(inputTypes, sortFields));
     }
 
-    public static RecordEqualiser newRecordEqualiser(List<DataType> inputTypes, String name) {
-        ClassKey classKey =
-                new ClassKey(
-                        RecordEqualiser.class,
-                        name,
-                        inputTypes,
-                        IntStream.range(0, inputTypes.size()).toArray());
-
-        try {
-            Pair<Class<?>, Object[]> classPair =
-                    COMPILED_CLASS_CACHE.get(
-                            classKey,
-                            () -> {
-                                GeneratedClass<RecordEqualiser> generatedClass =
-                                        generateRecordEqualiser(inputTypes, name);
-                                return Pair.of(
-                                        generatedClass.compile(CodeGenUtils.class.getClassLoader()),
-                                        generatedClass.getReferences());
-                            });
-
-            return (RecordEqualiser)
-                    classPair
-                            .getLeft()
-                            .getConstructor(Object[].class)
-                            .newInstance(new Object[] {classPair.getRight()});
-        } catch (Exception e) {
-            throw new RuntimeException("Could not instantiate generated class '" + name + "'", e);
-        }
-    }
-
-    public static RecordComparator newRecordComparator(List<DataType> inputTypes, String name) {
-        return newRecordComparator(
-                inputTypes, IntStream.range(0, inputTypes.size()).toArray(), name);
+    public static RecordComparator newRecordComparator(List<DataType> inputTypes) {
+        return newRecordComparator(inputTypes, IntStream.range(0, inputTypes.size()).toArray());
     }
 
     public static RecordComparator newRecordComparator(
-            List<DataType> inputTypes, int[] sortFields, String name) {
-        ClassKey classKey = new ClassKey(RecordComparator.class, name, inputTypes, sortFields);
+            List<DataType> inputTypes, int[] sortFields) {
+        return generate(
+                RecordComparator.class,
+                inputTypes,
+                sortFields,
+                () -> getCodeGenerator().generateRecordComparator(inputTypes, sortFields));
+    }
+
+    public static RecordEqualiser newRecordEqualiser(List<DataType> fieldTypes) {
+        return generate(
+                RecordEqualiser.class,
+                fieldTypes,
+                IntStream.range(0, fieldTypes.size()).toArray(),
+                () -> getCodeGenerator().generateRecordEqualiser(fieldTypes));
+    }
+
+    private static <T> T generate(
+            Class<?> classType,
+            List<DataType> fields,
+            int[] fieldsIndex,
+            Supplier<GeneratedClass<T>> supplier) {
+        ClassKey classKey = new ClassKey(classType, fields, fieldsIndex);
 
         try {
-            Pair<Class<?>, Object[]> classPair =
+            Pair<Class<?>, Object[]> result =
                     COMPILED_CLASS_CACHE.get(
                             classKey,
                             () -> {
-                                GeneratedClass<RecordComparator> generatedClass =
-                                        generateRecordComparator(inputTypes, sortFields, name);
+                                GeneratedClass<T> generatedClass = supplier.get();
                                 return Pair.of(
                                         generatedClass.compile(CodeGenUtils.class.getClassLoader()),
                                         generatedClass.getReferences());
                             });
 
-            return (RecordComparator)
-                    classPair
-                            .getLeft()
-                            .getConstructor(Object[].class)
-                            .newInstance(new Object[] {classPair.getRight()});
+            //noinspection unchecked
+            return (T) GeneratedClass.newInstance(result.getLeft(), result.getRight());
         } catch (Exception e) {
-            throw new RuntimeException("Could not instantiate generated class '" + name + "'", e);
+            throw new RuntimeException(
+                    "Could not instantiate generated class '" + classType + "'", e);
         }
     }
 
-    public static GeneratedClass<RecordComparator> generateRecordComparator(
-            List<DataType> inputTypes, int[] sortFields, String name) {
-        return CodeGenLoader.getCodeGenerator()
-                .generateRecordComparator(inputTypes, sortFields, name);
-    }
-
-    public static GeneratedClass<RecordEqualiser> generateRecordEqualiser(
-            List<DataType> fieldTypes, String name) {
-        return CodeGenLoader.getCodeGenerator().generateRecordEqualiser(fieldTypes, name);
-    }
-
-    /** Class to use as key for the {@link #COMPILED_CLASS_CACHE}. */
-    public static class ClassKey {
+    private static class ClassKey {
 
         private final Class<?> classType;
-
-        private final String className;
 
         private final List<DataType> fields;
 
         private final int[] fieldsIndex;
 
-        public ClassKey(
-                Class<?> classType, String className, List<DataType> fields, int[] fieldsIndex) {
+        public ClassKey(Class<?> classType, List<DataType> fields, int[] fieldsIndex) {
             this.classType = classType;
-            this.className = className;
             this.fields = fields;
             this.fieldsIndex = fieldsIndex;
-        }
-
-        public Class<?> getClassType() {
-            return classType;
-        }
-
-        public String getClassName() {
-            return className;
-        }
-
-        public List<DataType> getFields() {
-            return fields;
-        }
-
-        public int[] getFieldsIndex() {
-            return fieldsIndex;
         }
 
         @Override
@@ -229,14 +147,13 @@ public class CodeGenUtils {
             }
             ClassKey classKey = (ClassKey) o;
             return Objects.equals(classType, classKey.classType)
-                    && Objects.equals(className, classKey.className)
                     && Objects.equals(fields, classKey.fields)
                     && Arrays.equals(fieldsIndex, classKey.fieldsIndex);
         }
 
         @Override
         public int hashCode() {
-            int result = Objects.hash(classType, className, fields);
+            int result = Objects.hash(classType, fields);
             result = 31 * result + Arrays.hashCode(fieldsIndex);
             return result;
         }

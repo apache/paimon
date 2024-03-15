@@ -402,8 +402,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         if (lazyPartitionComparator == null) {
             lazyPartitionComparator =
                     CodeGenUtils.newRecordComparator(
-                            tableSchema.logicalPartitionType().getFieldTypes(),
-                            "PartitionComparator");
+                            tableSchema.logicalPartitionType().getFieldTypes());
         }
         return lazyPartitionComparator;
     }

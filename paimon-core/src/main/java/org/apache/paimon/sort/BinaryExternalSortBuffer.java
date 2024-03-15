@@ -113,12 +113,10 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             MemorySegmentPool pool,
             int maxNumFileHandles,
             String compression) {
-        RecordComparator comparator =
-                newRecordComparator(rowType.getFieldTypes(), keyFields, "ExternalSort_comparator");
+        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
-                        newNormalizedKeyComputer(
-                                rowType.getFieldTypes(), keyFields, "ExternalSort_normalized_key"),
+                        newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),
                         new InternalRowSerializer(rowType),
                         comparator,
                         pool);
