@@ -77,7 +77,7 @@ class AppendOnlyFileStoreTable extends AbstractFileStoreTable {
                     new AppendOnlyFileStore(
                             fileIO,
                             schemaManager(),
-                            tableSchema.id(),
+                            tableSchema,
                             new CoreOptions(tableSchema.options()),
                             tableSchema.logicalPartitionType(),
                             tableSchema.logicalBucketKeyType(),

@@ -147,7 +147,7 @@ public abstract class MergeTreeTestBase {
                 KeyValueFileReaderFactory.builder(
                         LocalFileIO.create(),
                         createTestingSchemaManager(path),
-                        0,
+                        createTestingSchemaManager(path).schema(0),
                         keyType,
                         valueType,
                         ignore -> flushingAvro,

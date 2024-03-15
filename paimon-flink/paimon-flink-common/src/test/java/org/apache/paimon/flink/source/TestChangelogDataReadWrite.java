@@ -119,13 +119,11 @@ public class TestChangelogDataReadWrite {
                             RecordReader.RecordIterator<InternalRow>>
                     rowDataIteratorCreator) {
         SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), tablePath);
-        long schemaId = 0;
         CoreOptions options = new CoreOptions(new HashMap<>());
         KeyValueFileStoreRead read =
                 new KeyValueFileStoreRead(
                         options,
-                        schemaManager,
-                        schemaId,
+                        schemaManager.schema(0),
                         KEY_TYPE,
                         VALUE_TYPE,
                         COMPARATOR,
@@ -133,7 +131,7 @@ public class TestChangelogDataReadWrite {
                         KeyValueFileReaderFactory.builder(
                                 LocalFileIO.create(),
                                 schemaManager,
-                                schemaId,
+                                0,
                                 KEY_TYPE,
                                 VALUE_TYPE,
                                 ignore -> avro,

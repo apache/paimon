@@ -106,8 +106,8 @@ public class TestFileStore extends KeyValueFileStore {
             MergeFunctionFactory<KeyValue> mfFactory) {
         super(
                 FileIOFinder.find(new Path(root)),
-                new SchemaManager(FileIOFinder.find(new Path(root)), options.path()),
-                0L,
+                schemaManager(root, options),
+                schemaManager(root, options).schema(0),
                 false,
                 options,
                 partitionType,
@@ -125,6 +125,10 @@ public class TestFileStore extends KeyValueFileStore {
         this.commitUser = UUID.randomUUID().toString();
 
         this.commitIdentifier = 0L;
+    }
+
+    private static SchemaManager schemaManager(String root, CoreOptions options) {
+        return new SchemaManager(FileIOFinder.find(new Path(root)), options.path());
     }
 
     public AbstractFileStoreWrite<KeyValue> newWrite() {
