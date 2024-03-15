@@ -104,18 +104,21 @@ public class TestFileStore extends KeyValueFileStore {
             RowType keyType,
             RowType valueType,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
-            MergeFunctionFactory<KeyValue> mfFactory) {
+            MergeFunctionFactory<KeyValue> mfFactory,
+            TableSchema tableSchema) {
         super(
                 FileIOFinder.find(new Path(root)),
                 schemaManager(root, options),
-                new TableSchema(
-                        0L,
-                        valueType.getFields(),
-                        valueType.getFieldCount(),
-                        partitionType.getFieldNames(),
-                        keyType.getFieldNames(),
-                        Collections.emptyMap(),
-                        null),
+                tableSchema != null
+                        ? tableSchema
+                        : new TableSchema(
+                                0L,
+                                valueType.getFields(),
+                                valueType.getFieldCount(),
+                                partitionType.getFieldNames(),
+                                keyType.getFieldNames(),
+                                Collections.emptyMap(),
+                                null),
                 false,
                 options,
                 partitionType,
@@ -575,6 +578,7 @@ public class TestFileStore extends KeyValueFileStore {
         private final RowType valueType;
         private final KeyValueFieldsExtractor keyValueFieldsExtractor;
         private final MergeFunctionFactory<KeyValue> mfFactory;
+        private final TableSchema tableSchema;
 
         private CoreOptions.ChangelogProducer changelogProducer;
 
@@ -586,7 +590,8 @@ public class TestFileStore extends KeyValueFileStore {
                 RowType keyType,
                 RowType valueType,
                 KeyValueFieldsExtractor keyValueFieldsExtractor,
-                MergeFunctionFactory<KeyValue> mfFactory) {
+                MergeFunctionFactory<KeyValue> mfFactory,
+                TableSchema tableSchema) {
             this.format = format;
             this.root = root;
             this.numBuckets = numBuckets;
@@ -595,6 +600,7 @@ public class TestFileStore extends KeyValueFileStore {
             this.valueType = valueType;
             this.keyValueFieldsExtractor = keyValueFieldsExtractor;
             this.mfFactory = mfFactory;
+            this.tableSchema = tableSchema;
 
             this.changelogProducer = CoreOptions.ChangelogProducer.NONE;
         }
@@ -632,7 +638,8 @@ public class TestFileStore extends KeyValueFileStore {
                     keyType,
                     valueType,
                     keyValueFieldsExtractor,
-                    mfFactory);
+                    mfFactory,
+                    tableSchema);
         }
     }
 }
