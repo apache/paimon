@@ -25,23 +25,23 @@ import java.util.List;
 import java.util.Optional;
 
 /**
- * A {@link NullFalseLeafBinaryFunction} to evaluate {@code filter like 'abc%' or filter like
+ * A {@link NullFalseLeafOneLiteralFunction} to evaluate {@code filter like 'abc%' or filter like
  * 'abc_'}.
  */
-public class StartsWith extends NullFalseLeafBinaryFunction {
+public class StartsWith extends NullFalseLeafOneLiteralFunction {
 
     public static final StartsWith INSTANCE = new StartsWith();
 
     private StartsWith() {}
 
     @Override
-    public boolean test(DataType type, Object field, Object patternLiteral) {
+    public boolean test0(DataType type, Object field, Object patternLiteral) {
         BinaryString fieldString = (BinaryString) field;
         return fieldString.startsWith((BinaryString) patternLiteral);
     }
 
     @Override
-    public boolean test(
+    public boolean test0(
             DataType type,
             long rowCount,
             Object min,

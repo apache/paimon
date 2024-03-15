@@ -26,7 +26,7 @@ import java.util.Optional;
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
 /** A {@link LeafFunction} to eval in. */
-public class In extends LeafFunction {
+public class In extends NullFalseLeafFunction {
 
     private static final long serialVersionUID = 1L;
 
@@ -35,10 +35,7 @@ public class In extends LeafFunction {
     private In() {}
 
     @Override
-    public boolean test(DataType type, Object field, List<Object> literals) {
-        if (field == null) {
-            return false;
-        }
+    public boolean test0(DataType type, Object field, List<Object> literals) {
         for (Object literal : literals) {
             if (literal != null && compareLiteral(type, literal, field) == 0) {
                 return true;
@@ -48,16 +45,13 @@ public class In extends LeafFunction {
     }
 
     @Override
-    public boolean test(
+    public boolean test0(
             DataType type,
             long rowCount,
             Object min,
             Object max,
             Long nullCount,
             List<Object> literals) {
-        if (nullCount != null && rowCount == nullCount) {
-            return false;
-        }
         for (Object literal : literals) {
             if (literal != null
                     && compareLiteral(type, literal, min) >= 0

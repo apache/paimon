@@ -109,7 +109,7 @@ public class PredicateBuilder {
         return leaf(StartsWith.INSTANCE, idx, patternLiteral);
     }
 
-    public Predicate leaf(NullFalseLeafBinaryFunction function, int idx, Object literal) {
+    public Predicate leaf(NullFalseLeafOneLiteralFunction function, int idx, Object literal) {
         DataField field = rowType.getFields().get(idx);
         return new LeafPredicate(function, field.type(), idx, field.name(), singletonList(literal));
     }

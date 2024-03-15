@@ -22,22 +22,32 @@ import org.apache.paimon.types.DataType;
 
 import java.util.List;
 
-/** Function to test a field with a literal. */
-public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
-
+/** Field and literals in this function can't be null. */
+public abstract class NullFalseLeafFunction extends LeafFunction {
     private static final long serialVersionUID = 1L;
 
-    public abstract boolean test(DataType type, Object field, Object literal);
+    public abstract boolean test0(DataType type, Object field, List<Object> literals);
 
-    public abstract boolean test(
-            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal);
+    public abstract boolean test0(
+            DataType type,
+            long rowCount,
+            Object min,
+            Object max,
+            Long nullCount,
+            List<Object> literals);
 
     @Override
     public boolean test(DataType type, Object field, List<Object> literals) {
-        if (field == null || literals.get(0) == null) {
+        if (field == null) {
             return false;
         }
-        return test(type, field, literals.get(0));
+
+        // Only when the count of literals is one we can return quickly checking for null
+        if (literals.size() == 1 && literals.get(0) == null) {
+            return false;
+        }
+
+        return test0(type, field, literals);
     }
 
     @Override
@@ -48,11 +58,21 @@ public abstract class NullFalseLeafBinaryFunction extends LeafFunction {
             Object max,
             Long nullCount,
             List<Object> literals) {
-        if (nullCount != null) {
-            if (rowCount == nullCount || literals.get(0) == null) {
-                return false;
-            }
+        // All null
+        if (nullCount != null && rowCount == nullCount) {
+            return false;
         }
-        return test(type, rowCount, min, max, nullCount, literals.get(0));
+
+        // Only when the count of literals is one we can quickly check for null
+        if (literals.size() == 1 && literals.get(0) == null) {
+            return false;
+        }
+
+        // todo: support one of min and max is not null
+        if (min == null || max == null) {
+            return true;
+        }
+
+        return test0(type, rowCount, min, max, nullCount, literals);
     }
 }

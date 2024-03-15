@@ -66,6 +66,8 @@ public class PredicateTest {
                 .isEqualTo(false);
         assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, 1L)}))
                 .isEqualTo(false);
+        assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, null)}))
+                .isEqualTo(false);
     }
 
     @Test
@@ -560,8 +562,15 @@ public class PredicateTest {
                 .isEqualTo(false);
 
         // unknown stats, we don't know, likely to hit
-        assertThat(test(predicate, 3, new FieldStats[] {new FieldStats(null, null, 4L)}))
+        assertThat(test(predicate, 3, new FieldStats[] {new FieldStats(null, null, 2L)}))
                 .isEqualTo(true);
+
+        assertThat(test(predicate, 3, new FieldStats[] {new FieldStats(null, null, null)}))
+                .isEqualTo(true);
+
+        // row count = 0 always false
+        assertThat(test(predicate, 0, new FieldStats[] {new FieldStats(null, null, null)}))
+                .isEqualTo(false);
     }
 
     @Test

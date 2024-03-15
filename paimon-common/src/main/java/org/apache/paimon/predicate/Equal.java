@@ -25,20 +25,20 @@ import java.util.Optional;
 
 import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval equal. */
-public class Equal extends NullFalseLeafBinaryFunction {
+/** A {@link NullFalseLeafOneLiteralFunction} to eval equal. */
+public class Equal extends NullFalseLeafOneLiteralFunction {
 
     public static final Equal INSTANCE = new Equal();
 
     private Equal() {}
 
     @Override
-    public boolean test(DataType type, Object field, Object literal) {
+    public boolean test0(DataType type, Object field, Object literal) {
         return compareLiteral(type, literal, field) == 0;
     }
 
     @Override
-    public boolean test(
+    public boolean test0(
             DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal) {
         return compareLiteral(type, literal, min) >= 0 && compareLiteral(type, literal, max) <= 0;
     }

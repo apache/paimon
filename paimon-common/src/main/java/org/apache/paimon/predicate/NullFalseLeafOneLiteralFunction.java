@@ -21,27 +21,23 @@ package org.apache.paimon.predicate;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
-import java.util.Optional;
 
-import static org.apache.paimon.predicate.CompareUtils.compareLiteral;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** A {@link LeafFunction} to eval not in. */
-public class NotIn extends NullFalseLeafFunction {
+/** Function to test a field with a literal and this literal is not null. */
+public abstract class NullFalseLeafOneLiteralFunction extends NullFalseLeafFunction {
 
     private static final long serialVersionUID = 1L;
 
-    public static final NotIn INSTANCE = new NotIn();
+    public abstract boolean test0(DataType type, Object field, Object literal);
 
-    private NotIn() {}
+    public abstract boolean test0(
+            DataType type, long rowCount, Object min, Object max, Long nullCount, Object literal);
 
     @Override
     public boolean test0(DataType type, Object field, List<Object> literals) {
-        for (Object literal : literals) {
-            if (literal == null || compareLiteral(type, literal, field) == 0) {
-                return false;
-            }
-        }
-        return true;
+        checkArgument(literals.size() == 1);
+        return test0(type, field, literals.get(0));
     }
 
     @Override
@@ -52,23 +48,7 @@ public class NotIn extends NullFalseLeafFunction {
             Object max,
             Long nullCount,
             List<Object> literals) {
-        for (Object literal : literals) {
-            if (literal == null
-                    || (compareLiteral(type, literal, min) == 0
-                            && compareLiteral(type, literal, max) == 0)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    @Override
-    public Optional<LeafFunction> negate() {
-        return Optional.of(In.INSTANCE);
-    }
-
-    @Override
-    public <T> T visit(FunctionVisitor<T> visitor, FieldRef fieldRef, List<Object> literals) {
-        return visitor.visitNotIn(fieldRef, literals);
+        checkArgument(literals.size() == 1);
+        return test0(type, rowCount, min, max, nullCount, literals.get(0));
     }
 }

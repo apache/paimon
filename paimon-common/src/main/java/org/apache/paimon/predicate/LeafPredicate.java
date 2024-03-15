@@ -35,6 +35,7 @@ import java.util.Objects;
 import java.util.Optional;
 
 import static org.apache.paimon.utils.InternalRowUtils.get;
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Leaf node of a {@link Predicate} tree. Compares a field in the row with literals. */
 public class LeafPredicate implements Predicate {
@@ -100,14 +101,16 @@ public class LeafPredicate implements Predicate {
         Object min = get(minValues, fieldIndex, type);
         Object max = get(maxValues, fieldIndex, type);
         Long nullCount = nullCounts.isNullAt(fieldIndex) ? null : nullCounts.getLong(fieldIndex);
-        if (nullCount == null || rowCount != nullCount) {
-            // not all null
-            // min or max is null
-            // unknown stats
-            if (min == null || max == null) {
-                return true;
-            }
+
+        checkArgument(rowCount >= 0, "rowCount must >= 0");
+        checkArgument(
+                nullCount == null || (nullCount >= 0 && nullCount <= rowCount),
+                "nullCount must >= 0 and <= rowCount");
+
+        if (rowCount == 0) {
+            return false;
         }
+
         return function.test(type, rowCount, min, max, nullCount, literals);
     }
 

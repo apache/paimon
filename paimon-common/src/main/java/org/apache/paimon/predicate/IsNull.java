@@ -23,7 +23,7 @@ import org.apache.paimon.types.DataType;
 import java.util.List;
 import java.util.Optional;
 
-/** A {@link NullFalseLeafBinaryFunction} to eval is null. */
+/** A {@link LeafUnaryFunction} to eval is null. */
 public class IsNull extends LeafUnaryFunction {
 
     public static final IsNull INSTANCE = new IsNull();
