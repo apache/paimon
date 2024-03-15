@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -55,7 +56,6 @@ import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -76,7 +76,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
     protected JdbcCatalog(
             FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
-        super(fileIO);
+        super(fileIO, Options.fromMap(config));
         this.catalogKey = catalogKey;
         this.options = config;
         this.warehouse = warehouse;
@@ -348,15 +348,8 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockFactory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, options))
-                : Optional.empty();
-    }
-
-    private boolean lockEnabled() {
-        return Boolean.parseBoolean(
-                options.getOrDefault(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(new JdbcCatalogLock.JdbcLockContext(connections, catalogKey, options));
     }
 
     private Lock lock(Identifier identifier) {

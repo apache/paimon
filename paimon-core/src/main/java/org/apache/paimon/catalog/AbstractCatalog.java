@@ -46,10 +46,13 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
+import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -80,6 +83,30 @@ public abstract class AbstractCatalog implements Catalog {
         this.tableDefaultOptions =
                 convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
+
+        if (lockEnabled()) {
+            checkArgument(options.contains(LOCK_TYPE), "No lock type when lock is enabled.");
+        }
+    }
+
+    @Override
+    public Optional<CatalogLock.LockFactory> lockFactory() {
+        return lockEnabled()
+                ? Optional.of(
+                        FactoryUtil.discoverFactory(
+                                AbstractCatalog.class.getClassLoader(),
+                                CatalogLock.LockFactory.class,
+                                catalogOptions.get(LOCK_TYPE)))
+                : Optional.empty();
+    }
+
+    @Override
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(new OptionLockContext(catalogOptions));
+    }
+
+    protected boolean lockEnabled() {
+        return catalogOptions.get(LOCK_ENABLED);
     }
 
     @Override
@@ -470,5 +497,13 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
+    }
+
+    static class OptionLockContext implements CatalogLock.LockContext {
+        private final Options catalogOptions;
+
+        public OptionLockContext(Options catalogOptions) {
+            this.catalogOptions = catalogOptions;
+        }
     }
 }

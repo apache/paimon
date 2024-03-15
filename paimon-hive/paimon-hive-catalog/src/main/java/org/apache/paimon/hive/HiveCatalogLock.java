@@ -44,6 +44,8 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Hive {@link CatalogLock}. */
 public class HiveCatalogLock implements CatalogLock {
 
+    static final String LOCK_IDENTIFIER = "hive";
+
     private final IMetaStoreClient client;
     private final long checkMaxSleep;
     private final long acquireTimeout;
@@ -112,16 +114,10 @@ public class HiveCatalogLock implements CatalogLock {
         this.client.close();
     }
 
-    /** Create a hive lock factory. */
-    public static LockFactory createFactory() {
-        return new HiveCatalogLockFactory();
-    }
-
-    private static class HiveCatalogLockFactory implements LockFactory {
+    /** Catalog lock factory for hive. */
+    public static class HiveCatalogLockFactory implements LockFactory {
 
         private static final long serialVersionUID = 1L;
-
-        private static final String IDENTIFIER = "hive";
 
         @Override
         public CatalogLock create(LockContext context) {
@@ -136,7 +132,7 @@ public class HiveCatalogLock implements CatalogLock {
 
         @Override
         public String identifier() {
-            return IDENTIFIER;
+            return LOCK_IDENTIFIER;
         }
     }
 
