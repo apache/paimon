@@ -1309,7 +1309,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                         .sum();
         assertThat(files).isEqualTo(3);
 
-        // with key filter pt = 2 and value filter idx2 = 110L
+        // with key filter pt = 1 and value filter idx2 = 110L
         filter = and(filter, builder.equal(2, 110L));
         files =
                 table.newScan().withFilter(filter).plan().splits().stream()
