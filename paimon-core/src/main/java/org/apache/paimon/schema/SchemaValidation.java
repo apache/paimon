@@ -42,7 +42,6 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -90,6 +89,8 @@ public class SchemaValidation {
         validateDefaultValues(schema);
 
         validateStartupMode(options);
+
+        validateSequenceField(schema, options);
 
         validateSequenceGroup(schema, options);
 
@@ -167,44 +168,6 @@ public class SchemaValidation {
             }
         }
 
-        List<String> sequenceField = options.sequenceField();
-        if (sequenceField.size() > 0) {
-            checkArgument(
-                    schema.fieldNames().containsAll(sequenceField),
-                    "Nonexistent sequence fields: '%s'",
-                    sequenceField);
-        }
-
-        Optional<String> rowkindField = options.rowkindField();
-        rowkindField.ifPresent(
-                field ->
-                        checkArgument(
-                                schema.fieldNames().contains(field),
-                                "Nonexistent rowkind field: '%s'",
-                                field));
-
-        if (sequenceField.size() > 0) {
-            sequenceField.forEach(
-                    field ->
-                            checkArgument(
-                                    options.fieldAggFunc(field) == null,
-                                    "Should not define aggregation on sequence field: '%s'",
-                                    field));
-        }
-
-        CoreOptions.MergeEngine mergeEngine = options.mergeEngine();
-        if (mergeEngine == CoreOptions.MergeEngine.FIRST_ROW) {
-            if (sequenceField.size() > 0) {
-                throw new IllegalArgumentException(
-                        "Do not support use sequence field on FIRST_MERGE merge engine");
-            }
-
-            if (changelogProducer != ChangelogProducer.LOOKUP) {
-                throw new IllegalArgumentException(
-                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
-            }
-        }
-
         if (schema.crossPartitionUpdate()) {
             if (options.bucket() != -1) {
                 throw new IllegalArgumentException(
@@ -213,15 +176,22 @@ public class SchemaValidation {
                                         + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
+        }
 
-            if (sequenceField.size() > 0) {
+        if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+            if (options.changelogProducer() != ChangelogProducer.LOOKUP) {
                 throw new IllegalArgumentException(
-                        String.format(
-                                "You can not use sequence.field in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
+                        "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
             }
         }
+
+        options.rowkindField()
+                .ifPresent(
+                        field ->
+                                checkArgument(
+                                        schema.fieldNames().contains(field),
+                                        "Nonexistent rowkind field: '%s'",
+                                        field));
 
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(schema, options);
@@ -497,5 +467,45 @@ public class SchemaValidation {
         checkArgument(
                 !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
                 "Deletion vectors mode is not supported for first row merge engine now.");
+    }
+
+    private static void validateSequenceField(TableSchema schema, CoreOptions options) {
+        List<String> sequenceField = options.sequenceField();
+        if (sequenceField.size() > 0) {
+            Map<String, Integer> fieldCount =
+                    sequenceField.stream()
+                            .collect(Collectors.toMap(field -> field, field -> 1, Integer::sum));
+
+            sequenceField.forEach(
+                    field -> {
+                        checkArgument(
+                                schema.fieldNames().contains(field),
+                                "Sequence field: '%s' can not be found in table schema.",
+                                field);
+
+                        checkArgument(
+                                options.fieldAggFunc(field) == null,
+                                "Should not define aggregation on sequence field: '%s'.",
+                                field);
+
+                        checkArgument(
+                                fieldCount.get(field) == 1,
+                                "Sequence field '%s' is defined repeatedly.",
+                                field);
+                    });
+
+            if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+                throw new IllegalArgumentException(
+                        "Do not support use sequence field on FIRST_MERGE merge engine.");
+            }
+
+            if (schema.crossPartitionUpdate()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You can not use sequence.field in cross partition update case "
+                                        + "(Primary key constraint '%s' not include all partition fields '%s').",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+        }
     }
 }
