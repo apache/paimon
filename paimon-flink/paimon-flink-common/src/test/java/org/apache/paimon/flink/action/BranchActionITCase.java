@@ -37,7 +37,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /** IT cases for branch management actions. */
 class BranchActionITCase extends ActionITCaseBase {
     @Test
-    void testCreateAndDeleteBranch() throws Exception {
+    void testBranch() throws Exception {
 
         init(warehouse);
 
@@ -67,12 +67,19 @@ class BranchActionITCase extends ActionITCaseBase {
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         BranchManager branchManager = table.branchManager();
+        // test create
         callProcedure(
                 String.format(
                         "CALL sys.create_branch('%s.%s', 'branch_name', 'tag2')",
                         database, tableName));
         assertThat(branchManager.branchExists("branch_name")).isTrue();
-
+        // test merge
+        callProcedure(
+                String.format(
+                        "CALL sys.merge_branch('%s.%s', 'branch_name')",
+                        database, tableName));
+        assertThat(table.tagManager().tagExists("tag2")).isTrue();
+        // test delete
         callProcedure(
                 String.format(
                         "CALL sys.delete_branch('%s.%s', 'branch_name')", database, tableName));
