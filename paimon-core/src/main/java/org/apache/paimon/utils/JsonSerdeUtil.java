@@ -120,6 +120,14 @@ public class JsonSerdeUtil {
                         fieldName, clazz.getName(), node.getClass().getName()));
     }
 
+    public static <T> T fromJson(String json, TypeReference<T> typeReference) {
+        try {
+            return OBJECT_MAPPER_INSTANCE.readValue(json, typeReference);
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
+    }
+
     public static <T> T fromJson(String json, Class<T> clazz) {
         try {
             return OBJECT_MAPPER_INSTANCE.reader().readValue(json, clazz);
