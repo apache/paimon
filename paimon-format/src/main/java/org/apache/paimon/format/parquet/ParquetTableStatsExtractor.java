@@ -84,7 +84,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                                     DataField field = rowType.getFields().get(i);
                                     return toFieldStats(
                                             field,
-                                            statsPair.getLeft(),
+                                            statsPair.getLeft().get(field.name()),
                                             collectors[i]);
                                 })
                         .toArray(FieldStats[]::new),
@@ -92,15 +92,7 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
     }
 
     private FieldStats toFieldStats(
-            DataField field, Map<String, Statistics<?>> fieldPathAndStats, FieldStatsCollector collector) {
-        Statistics<?> stats;
-        switch (field.type().getTypeRoot()) {
-            case ARRAY:
-                stats = fieldPathAndStats.get(field.name() + ".list.element");
-                break;
-            default:
-                stats = fieldPathAndStats.get(field.name());
-        }
+            DataField field, Statistics<?> stats, FieldStatsCollector collector) {
         if (stats == null) {
             return new FieldStats(null, null, null);
         }
@@ -185,7 +177,6 @@ public class ParquetTableStatsExtractor implements TableStatsExtractor {
                         toTimestampStats(
                                 stats, ((LocalZonedTimestampType) field.type()).getPrecision());
                 break;
-            case ARRAY:
             default:
                 fieldStats = new FieldStats(null, null, nullCount);
         }

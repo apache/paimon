@@ -88,7 +88,6 @@ public class ParquetTableStatsExtractorTest extends TableFieldStatsExtractorTest
                 }
                 break;
             case ARRAY:
-                return new FieldStats(null, null, stats.nullCount());
             case MAP:
             case MULTISET:
             case ROW:
