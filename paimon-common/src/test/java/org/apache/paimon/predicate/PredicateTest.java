@@ -102,6 +102,8 @@ public class PredicateTest {
                 .isEqualTo(false);
         assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, 1L)}))
                 .isEqualTo(false);
+        assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, null)}))
+                .isEqualTo(false);
     }
 
     @Test
@@ -355,6 +357,8 @@ public class PredicateTest {
         assertThat(test(predicate, 3, new FieldStats[] {new FieldStats(6, 7, 0L)}))
                 .isEqualTo(false);
         assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, 1L)}))
+                .isEqualTo(false);
+        assertThat(test(predicate, 1, new FieldStats[] {new FieldStats(null, null, null)}))
                 .isEqualTo(false);
     }
 
