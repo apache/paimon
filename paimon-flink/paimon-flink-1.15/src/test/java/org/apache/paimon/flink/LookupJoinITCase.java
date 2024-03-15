@@ -21,7 +21,7 @@ package org.apache.paimon.flink;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.types.Row;
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Arrays;
 import java.util.List;
