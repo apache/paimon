@@ -35,7 +35,7 @@ import java.util.stream.IntStream;
 import static org.apache.paimon.codegen.CodeGenUtils.ClassKey;
 import static org.assertj.core.api.Assertions.assertThat;
 
-public class CodeGenUtilsTest {
+class CodeGenUtilsTest {
 
     @BeforeAll
     public static void before() {
