@@ -25,14 +25,19 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
 
+import org.apache.flink.api.java.tuple.Tuple2;
+import org.apache.flink.shaded.guava31.com.google.common.collect.Lists;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
+import java.nio.BufferOverflowException;
+import java.util.function.Consumer;
 
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomCompactIncrement;
 import static org.apache.paimon.manifest.ManifestCommittableSerializerTest.randomNewFilesIncrement;
 import static org.apache.paimon.mergetree.compact.MergeTreeCompactManagerTest.row;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.junit.Assert.assertNotNull;
 
 class MultiTableCommittableSerializerTest {
     private final CommitMessageSerializer fileSerializer = new CommitMessageSerializer();
@@ -41,23 +46,76 @@ class MultiTableCommittableSerializerTest {
             new MultiTableCommittableSerializer(fileSerializer);
 
     @Test
-    public void testFileMetadata() throws IOException {
+    public void testDeserialize() throws IOException {
         DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
                 new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement);
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
-        String database = "database";
-        String table = "table";
-        MultiTableCommittable multiTableCommittable =
-                MultiTableCommittable.fromCommittable(
-                        Identifier.create(database, table), committable);
-        MultiTableCommittable deserializeCommittable =
-                serializer.deserialize(2, serializer.serialize(multiTableCommittable));
 
-        assertThat(deserializeCommittable).isInstanceOf(MultiTableCommittable.class);
+        Lists.newArrayList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table")).stream()
+                .forEach(
+                        new Consumer<Tuple2<String, String>>() {
+                            @Override
+                            public void accept(Tuple2<String, String> stringStringTuple2) {
+                                String database = stringStringTuple2.f0;
+                                String table = stringStringTuple2.f1;
+                                MultiTableCommittable multiTableCommittable =
+                                        MultiTableCommittable.fromCommittable(
+                                                Identifier.create(database, table), committable);
+                                MultiTableCommittable deserializeCommittable = null;
+                                try {
+                                    deserializeCommittable =
+                                            serializer.deserialize(
+                                                    2, serializer.serialize(multiTableCommittable));
+                                } catch (IOException e) {
+                                    throw new RuntimeException(e);
+                                }
 
-        assertThat(deserializeCommittable.getDatabase()).isEqualTo(database);
-        assertThat(deserializeCommittable.getTable()).isEqualTo(table);
+                                assertThat(deserializeCommittable)
+                                        .isInstanceOf(MultiTableCommittable.class);
+
+                                assertThat(deserializeCommittable.getDatabase())
+                                        .isEqualTo(database);
+                                assertThat(deserializeCommittable.getTable()).isEqualTo(table);
+                            }
+                        });
+    }
+
+    @Test
+    public void testSerialize() throws IOException {
+        DataIncrement newFilesIncrement = randomNewFilesIncrement();
+        CompactIncrement compactIncrement = randomCompactIncrement();
+        CommitMessage commitMessage =
+                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+        Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
+
+        Lists.newArrayList(Tuple2.of("测试数据库", "用户信息表"), Tuple2.of("database", "table")).stream()
+                .forEach(
+                        new Consumer<Tuple2<String, String>>() {
+                            @Override
+                            public void accept(Tuple2<String, String> stringStringTuple2) {
+                                String database = stringStringTuple2.f0;
+                                String table = stringStringTuple2.f1;
+
+                                MultiTableCommittable multiTableCommittable =
+                                        MultiTableCommittable.fromCommittable(
+                                                Identifier.create(database, table), committable);
+
+                                byte[] serializedData = null;
+                                try {
+                                    serializedData = serializer.serialize(multiTableCommittable);
+                                } catch (BufferOverflowException e) {
+                                    e.printStackTrace();
+                                    assert false : "Should not throw BufferOverflowException";
+                                } catch (IOException e) {
+                                    e.printStackTrace();
+                                    assert false : "IOException occurred";
+                                }
+
+                                assertNotNull(
+                                        "The serialized data should not be null.", serializedData);
+                            }
+                        });
     }
 }
