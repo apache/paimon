@@ -173,6 +173,12 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
+        dropTable(identifier, ignoreIfNotExists, false);
+    }
+
+    @Override
+    public void dropTable(Identifier identifier, boolean ignoreIfNotExists, boolean ifPurge)
+            throws TableNotExistException {
         checkNotSystemTable(identifier, "dropTable");
         if (!tableExists(identifier)) {
             if (ignoreIfNotExists) {
@@ -181,10 +187,10 @@ public abstract class AbstractCatalog implements Catalog {
             throw new TableNotExistException(identifier);
         }
 
-        dropTableImpl(identifier);
+        dropTableImpl(identifier, ifPurge);
     }
 
-    protected abstract void dropTableImpl(Identifier identifier);
+    protected abstract void dropTableImpl(Identifier identifier, boolean ifPurge);
 
     @Override
     public void createTable(Identifier identifier, Schema schema, boolean ignoreIfExists)

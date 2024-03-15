@@ -36,6 +36,8 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -103,6 +105,42 @@ public class SparkGenericCatalogTest {
         List<Row> rows = spark.sql("SELECT * FROM CT").collectAsList();
         assertThat(rows.stream().map(Object::toString))
                 .containsExactlyInAnyOrder("[1,2,3]", "[4,5,6]");
+    }
+
+    @Test
+    public void testDropTable() throws Exception {
+        spark.sql(
+                "CREATE TABLE CT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+        writeTable(
+                "CT",
+                GenericRow.of(1, 2, BinaryString.fromString("3")),
+                GenericRow.of(4, 5, BinaryString.fromString("6")));
+        spark.sql("DROP TABLE CT").collect();
+        assertThat(spark.sql("SHOW TABLES like 'CT'").collectAsList()).isEmpty();
+        assertThat(tableInTrash("CT")).isTrue();
+    }
+
+    @Test
+    public void testPurgeTable() throws Exception {
+        spark.sql(
+                "CREATE TABLE CT (a INT, b INT, c STRING) USING paimon TBLPROPERTIES"
+                        + " ('file.format'='avro')");
+        writeTable(
+                "CT",
+                GenericRow.of(1, 2, BinaryString.fromString("3")),
+                GenericRow.of(4, 5, BinaryString.fromString("6")));
+        spark.sql("DROP TABLE CT PURGE").collect();
+        assertThat(spark.sql("SHOW TABLES like 'CT'").collectAsList()).isEmpty();
+        assertThat(tableInTrash("CT")).isFalse();
+    }
+
+    private static boolean tableInTrash(String table) {
+        return Files.exists(
+                Paths.get(
+                        new Path(warehousePath, String.format(".Trash/default.db/%s", table))
+                                .toUri()
+                                .getPath()));
     }
 
     private static void writeTable(String tableName, GenericRow... rows) throws Exception {

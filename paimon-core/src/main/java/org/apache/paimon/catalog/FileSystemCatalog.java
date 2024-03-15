@@ -135,9 +135,21 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, boolean ifPurge) {
         Path path = getDataTableLocation(identifier);
-        uncheck(() -> fileIO.delete(path, true));
+        if (ifPurge) {
+            uncheck(() -> fileIO.delete(path, true));
+        } else {
+            uncheck(
+                    () ->
+                            fileIO.rename(
+                                    path,
+                                    new Path(
+                                            trash(),
+                                            identifier.getDatabaseName()
+                                                    + ".db/"
+                                                    + identifier.getObjectName())));
+        }
     }
 
     @Override
@@ -187,5 +199,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public boolean caseSensitive() {
         return catalogOptions.get(CASE_SENSITIVE);
+    }
+
+    public String trash() {
+        return warehouse + "/.Trash";
     }
 }

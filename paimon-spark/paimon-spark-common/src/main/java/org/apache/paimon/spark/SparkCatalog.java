@@ -294,7 +294,17 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public boolean dropTable(Identifier ident) {
         try {
-            catalog.dropTable(toIdentifier(ident), false);
+            catalog.dropTable(toIdentifier(ident), false, false);
+            return true;
+        } catch (Catalog.TableNotExistException | NoSuchTableException e) {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean purgeTable(Identifier ident) throws UnsupportedOperationException {
+        try {
+            catalog.dropTable(toIdentifier(ident), true, true);
             return true;
         } catch (Catalog.TableNotExistException | NoSuchTableException e) {
             return false;

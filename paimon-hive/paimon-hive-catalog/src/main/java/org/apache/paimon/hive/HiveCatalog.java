@@ -344,10 +344,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    protected void dropTableImpl(Identifier identifier) {
+    protected void dropTableImpl(Identifier identifier, boolean ifPurge) {
         try {
             client.dropTable(
-                    identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
+                    identifier.getDatabaseName(), identifier.getObjectName(), true, false, ifPurge);
 
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.

@@ -170,6 +170,13 @@ public interface Catalog extends AutoCloseable {
     void dropTable(Identifier identifier, boolean ignoreIfNotExists) throws TableNotExistException;
 
     /**
+     * @param ifPurge completely purge the table (skipping trash) while removing data from warehouse
+     * @see #dropTable(Identifier, boolean)
+     */
+    void dropTable(Identifier identifier, boolean ignoreIfNotExists, boolean ifPurge)
+            throws TableNotExistException;
+
+    /**
      * Create a new table.
      *
      * <p>NOTE: System tables can not be created.
