@@ -702,7 +702,6 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         waitForResult(expected, table, rowType, primaryKeys);
     }
 
-    // TODO some types are different from mysql cdc; maybe need to fix
     public void testAllTypesWithSchemaImpl(String format) throws Exception {
         String topic = "schema_include_all_type";
         createTestTopic(topic, 1, 1);
@@ -805,7 +804,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                             DataTypes.STRING(), // _multiline
                             DataTypes.STRING(), // _multipolygon
                             DataTypes.STRING(), // _geometrycollection
-                            DataTypes.STRING() // _set different from mysql cdc
+                            DataTypes.ARRAY(DataTypes.STRING()) // _set different from mysql cdc
                         },
                         new String[] {
                             "_id",
@@ -907,9 +906,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                                 + "1.000011, 2.000022, 3.000033, "
                                 + "1.000111, 2.000222, 3.000333, "
                                 + "12345.110, 12345.220, 12345.330, "
-                                // TODO fix FIXED
-                                + "1.2345678987654322E32, 1.2345678987654322E32, 1.2345678987654322E32, "
-                                // TODO fix BIG DECIMAL
+                                + "123456789876543212345678987654321.110, 123456789876543212345678987654321.220, 123456789876543212345678987654321.330, "
                                 + "11111, 22222, 33333, 2222222222222222400000000000.0000000000, "
                                 + "19439, "
                                 // display value of datetime is not affected by timezone
@@ -940,8 +937,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                                 + "{\"coordinates\":[[[1,1],[2,2],[3,3]],[[4,4],[5,5]]],\"type\":\"MultiLineString\",\"srid\":0}, "
                                 + "{\"coordinates\":[[[[0,0],[10,0],[10,10],[0,10],[0,0]]],[[[5,5],[7,5],[7,7],[5,7],[5,5]]]],\"type\":\"MultiPolygon\",\"srid\":0}, "
                                 + "{\"geometries\":[{\"type\":\"Point\",\"coordinates\":[10,10]},{\"type\":\"Point\",\"coordinates\":[30,30]},{\"type\":\"LineString\",\"coordinates\":[[15,15],[20,20]]}],\"type\":\"GeometryCollection\",\"srid\":0}, "
-                                // TODO fix set
-                                + "a,b"
+                                + "[a, b]"
                                 + "]");
 
         List<String> primaryKeys = Arrays.asList("pt", "_id");

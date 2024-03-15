@@ -198,7 +198,12 @@ public class DebeziumRecordParser extends RecordParser {
 
             String transformed =
                     DebeziumSchemaUtils.transformRawValue(
-                            rawValue, debeziumType, className, typeMapping, record.get(fieldName));
+                            rawValue,
+                            debeziumType,
+                            className,
+                            typeMapping,
+                            record.get(fieldName),
+                            parameters.get(fieldName));
             resultMap.put(fieldName, transformed);
 
             paimonFieldTypes.put(
