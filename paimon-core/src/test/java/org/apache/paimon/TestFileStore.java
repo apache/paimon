@@ -44,6 +44,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
@@ -107,7 +108,14 @@ public class TestFileStore extends KeyValueFileStore {
         super(
                 FileIOFinder.find(new Path(root)),
                 schemaManager(root, options),
-                schemaManager(root, options).schema(0),
+                new TableSchema(
+                        0L,
+                        valueType.getFields(),
+                        valueType.getFieldCount(),
+                        partitionType.getFieldNames(),
+                        keyType.getFieldNames(),
+                        Collections.emptyMap(),
+                        null),
                 false,
                 options,
                 partitionType,
