@@ -20,8 +20,8 @@ package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.data.serializer.InternalMapSerializer
-import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, isCompositeType}
 import org.apache.paimon.types._
+import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, isCompositeType}
 import org.apache.paimon.utils.InternalRowUtils
 import org.apache.paimon.utils.TypeCheckUtils._
 import org.apache.paimon.utils.TypeUtils.isInteroperable

@@ -20,9 +20,9 @@ package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.codegen.ScalarOperatorGens.{generateEquals, generateRowEqualiser}
+import org.apache.paimon.types.{BooleanType, DataType, RowType}
 import org.apache.paimon.types.DataTypeChecks.isCompositeType
 import org.apache.paimon.types.DataTypeRoot._
-import org.apache.paimon.types.{BooleanType, DataType, RowType}
 import org.apache.paimon.utils.TypeUtils.isPrimitive
 
 import scala.collection.JavaConverters._
