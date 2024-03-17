@@ -345,7 +345,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 segment.put(bytes.length - 1, kv.valueKind().toByteValue());
                 return bytes;
             } else {
-                byte[] bytes = new byte[8];
+                // len: min 1 - max 9
+                byte[] bytes = new byte[9];
                 int len = encodeLong(bytes, rowPosition);
                 return Arrays.copyOf(bytes, len);
             }
