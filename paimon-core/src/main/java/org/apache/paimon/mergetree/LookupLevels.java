@@ -48,6 +48,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -55,6 +56,8 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
@@ -343,9 +346,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 return bytes;
             } else {
                 byte[] bytes = new byte[8];
-                MemorySegment segment = MemorySegment.wrap(bytes);
-                segment.putLong(0, rowPosition);
-                return bytes;
+                int len = encodeLong(bytes, rowPosition);
+                return Arrays.copyOf(bytes, len);
             }
         }
 
@@ -363,8 +365,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                         fileName,
                         rowPosition);
             } else {
-                MemorySegment segment = MemorySegment.wrap(bytes);
-                return new PositionedKeyValue(null, fileName, segment.getLong(0));
+                long rowPosition = decodeLong(bytes, 0);
+                return new PositionedKeyValue(null, fileName, rowPosition);
             }
         }
     }
