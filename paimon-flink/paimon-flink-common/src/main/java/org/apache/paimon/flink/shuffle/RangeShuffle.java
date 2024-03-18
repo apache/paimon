@@ -172,8 +172,8 @@ public class RangeShuffle {
     /** KeyAndSizeExtractor is responsible for extracting the sort key and row size. */
     public static class KeyAndSizeExtractor<T>
             extends RichMapFunction<Tuple2<T, RowData>, Tuple2<T, Integer>> {
-        private RowType rowType;
-        private boolean isSortBySize;
+        private final RowType rowType;
+        private final boolean isSortBySize;
         private transient List<BiFunction<DataGetters, Integer, Integer>> fieldSizeCalculator;
 
         public KeyAndSizeExtractor(RowType rowType, boolean isSortBySize) {
