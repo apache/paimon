@@ -340,10 +340,11 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     private void hilbert(List<String> columns) throws Exception {
+        String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
         if (RANDOM.nextBoolean()) {
-            createAction("hilbert", columns).run();
+            createAction("hilbert", rangeStrategy, columns).run();
         } else {
-            callProcedure("hilbert", columns);
+            callProcedure("hilbert", rangeStrategy, columns);
         }
     }
 
