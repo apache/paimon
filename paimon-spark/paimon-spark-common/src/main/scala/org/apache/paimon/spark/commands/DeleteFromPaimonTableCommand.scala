@@ -64,7 +64,7 @@ trait DeleteFromPaimonTableCommandBase extends PaimonLeafRunnableCommand with Pa
     if (forceDeleteByRows) {
       deleteRowsByCondition(sparkSession)
     } else if (deletePredicate.isEmpty) {
-      commit.purgeTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
+      commit.truncateTable(BatchWriteBuilder.COMMIT_IDENTIFIER)
     } else {
       val visitor = new OnlyPartitionKeyEqualVisitor(table.partitionKeys)
       if (deletePredicate.get.visit(visitor)) {

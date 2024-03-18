@@ -50,4 +50,10 @@ public interface BatchTableCommit extends TableCommit {
      * @param commitMessages commit messages from table write
      */
     void commit(List<CommitMessage> commitMessages);
+
+    /**
+     * Truncate table, like normal {@link #commit}, files are not immediately deleted, they are only
+     * logically deleted and will be deleted after the snapshot expires.
+     */
+    void truncateTable();
 }

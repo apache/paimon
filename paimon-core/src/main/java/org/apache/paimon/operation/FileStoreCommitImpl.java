@@ -493,7 +493,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
     }
 
     @Override
-    public void purgeTable(long commitIdentifier) {
+    public void truncateTable(long commitIdentifier) {
         tryOverwrite(
                 null,
                 Collections.emptyList(),
