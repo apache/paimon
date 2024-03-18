@@ -35,22 +35,22 @@ public class JdbcCatalogLock implements CatalogLock {
     private final JdbcClientPool connections;
     private final long checkMaxSleep;
     private final long acquireTimeout;
-    private final String catalogName;
+    private final String catalogKey;
 
     public JdbcCatalogLock(
             JdbcClientPool connections,
-            String catalogName,
+            String catalogKey,
             long checkMaxSleep,
             long acquireTimeout) {
         this.connections = connections;
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
-        this.catalogName = catalogName;
+        this.catalogKey = catalogKey;
     }
 
     @Override
     public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        String lockUniqueName = String.format("%s.%s.%s", catalogName, database, table);
+        String lockUniqueName = String.format("%s.%s.%s", catalogKey, database, table);
         lock(lockUniqueName);
         try {
             return callable.call();
@@ -102,7 +102,7 @@ public class JdbcCatalogLock implements CatalogLock {
             JdbcLockContext lockContext = (JdbcLockContext) context;
             return new JdbcCatalogLock(
                     lockContext.connections,
-                    lockContext.catalogName,
+                    lockContext.catalogKey,
                     checkMaxSleep(lockContext.conf),
                     acquireTimeout(lockContext.conf));
         }
@@ -110,13 +110,13 @@ public class JdbcCatalogLock implements CatalogLock {
 
     static class JdbcLockContext implements LockContext {
         private final JdbcClientPool connections;
-        private final String catalogName;
+        private final String catalogKey;
         private final Map<String, String> conf;
 
         public JdbcLockContext(
-                JdbcClientPool connections, String catalogName, Map<String, String> conf) {
+                JdbcClientPool connections, String catalogKey, Map<String, String> conf) {
             this.connections = connections;
-            this.catalogName = catalogName;
+            this.catalogKey = catalogKey;
             this.conf = conf;
         }
     }
