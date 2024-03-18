@@ -80,6 +80,7 @@ import java.util.function.Function;
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
@@ -1252,6 +1253,69 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         splits = roTable.newScan().withFilter(filter).plan().splits();
         assertThat(splits).hasSize(1);
         assertThat(splits.get(0).convertToRawFiles().get()).hasSize(1);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testReadDeletionVectorTable() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options -> {
+                            // let level has many files
+                            options.set(TARGET_FILE_SIZE, new MemorySize(1));
+                            options.set(DELETION_VECTORS_ENABLED, true);
+                        });
+        StreamTableWrite write = table.newWrite(commitUser);
+        IOManager ioManager = IOManager.create(tablePath.toString());
+        write.withIOManager(ioManager);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 100L));
+        write.write(rowDataWithKind(RowKind.INSERT, 2, 20, 100L));
+        commit.commit(0, write.prepareCommit(true, 0));
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 20, 200L));
+        commit.commit(1, write.prepareCommit(true, 1));
+        write.write(rowDataWithKind(RowKind.INSERT, 1, 10, 110L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        // test result
+        Function<InternalRow, String> rowDataToString =
+                row ->
+                        internalRowToString(
+                                row,
+                                DataTypes.ROW(
+                                        DataTypes.INT(), DataTypes.INT(), DataTypes.BIGINT()));
+        List<String> result =
+                getResult(table.newRead(), table.newScan().plan().splits(), rowDataToString);
+        assertThat(result)
+                .containsExactlyInAnyOrder("+I[1, 10, 110]", "+I[1, 20, 200]", "+I[2, 20, 100]");
+
+        // file layout
+        // pt 1
+        // level 4 (1, 10, 110L)
+        // level 5 (1, 10, 100L), (1, 20, 200L)
+        // pt 2
+        // level 5 (2, 20, 100L)
+
+        // test filter on dv table
+        // with key filter pt = 1
+        PredicateBuilder builder = new PredicateBuilder(ROW_TYPE);
+        Predicate filter = builder.equal(0, 1);
+        int files =
+                table.newScan().withFilter(filter).plan().splits().stream()
+                        .mapToInt(split -> ((DataSplit) split).dataFiles().size())
+                        .sum();
+        assertThat(files).isEqualTo(3);
+
+        // with key filter pt = 1 and value filter idx2 = 110L
+        filter = and(filter, builder.equal(2, 110L));
+        files =
+                table.newScan().withFilter(filter).plan().splits().stream()
+                        .mapToInt(split -> ((DataSplit) split).dataFiles().size())
+                        .sum();
+        assertThat(files).isEqualTo(1);
 
         write.close();
         commit.close();
