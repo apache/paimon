@@ -28,10 +28,11 @@ import org.apache.hadoop.mapreduce.JobID;
 
 import java.util.Objects;
 
-/**
- * Utility class to enrich the JobContext and TaskAttemptContext with the vertex id. copied form
- * iceberg.
- */
+/* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
+/** Utility class to enrich the JobContext and TaskAttemptContext with the vertex id. */
 public class TezUtil {
 
     private static final String TASK_ATTEMPT_ID_KEY = "mapred.task.id";
@@ -96,7 +97,7 @@ public class TezUtil {
     /**
      * Subclasses {@link TaskAttemptID}. It has two main purposes: 1. Provide a way to append an
      * optional vertex id to the Job ID. This is needed because there is a discrepancy between how
-     * the attempt ID is constructed in the {@link org.apache.tez.mapreduce.output.MROutput} (with
+     * the attempt ID is constructed in the {@code org.apache.tez.mapreduce.output.MROutput} (with
      * vertex ID appended to the end of the Job ID) and how it's available in the mapper (without
      * vertex ID) which creates and caches the HiveIcebergRecordWriter object. 2. Redefine the
      * equals/hashcode provided by TaskAttemptID so that task type (map or reduce) does not count,

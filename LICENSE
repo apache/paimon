@@ -242,6 +242,7 @@ paimon-core/src/main/java/org/apache/paimon/jdbc/JdbcCatalog.java
 paimon-core/src/main/java/org/apache/paimon/utils/ZOrderByteUtils.java
 paimon-core/src/test/java/org/apache/paimon/utils/TestZOrderByteUtil.java
 paimon-hive/paimon-hive-common/src/test/java/org/apache/paimon/hive/TestHiveMetastore.java
+paimon-hive/paimon-hive-connector-common/src/main/java/org/apache/paimon/hive/mapred/TezUtil.java
 paimon-spark/paimon-spark-common/src/main/antlr4/org.apache.spark.sql.catalyst.parser.extensions/PaimonSqlExtensions.g4
 paimon-spark/paimon-spark-common/src/main/java/org/apache/paimon/spark/SparkGenericCatalog.java
 paimon-spark/paimon-spark-common/src/main/scala/org/apache/spark/sql/catalyst/analysis/CoerceArguments.scala
