@@ -30,14 +30,14 @@ under the License.
 
 Tables created in Paimon [catalogs]({{< ref "how-to/creating-catalogs" >}}) are managed by the catalog. When the table is dropped from catalog, its table files will also be deleted.
 
-The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named `MyTable` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named `my_table` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "primary-keys-example" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -52,7 +52,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -70,7 +70,7 @@ CREATE TABLE MyTable (
 ```sql
 SET hive.metastore.warehouse.dir=warehouse_path;
 
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -88,7 +88,7 @@ TBLPROPERTIES (
 {{< tab "Trino" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -104,7 +104,7 @@ CREATE TABLE MyTable (
 {{< tab "Presto" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -125,14 +125,14 @@ Inserting jobs on the table should be stopped prior to dropping tables, or table
 
 ### Partitioned Tables
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
+The following SQL creates a table named `my_table` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys.
 
 {{< tabs "partitions-example" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -147,7 +147,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -165,7 +165,7 @@ CREATE TABLE MyTable (
 ```sql
 SET hive.metastore.warehouse.dir=warehouse_path;
 
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING
@@ -184,7 +184,7 @@ TBLPROPERTIES (
 {{< tab "Trino" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -201,7 +201,7 @@ CREATE TABLE MyTable (
 {{< tab "Presto" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -258,7 +258,7 @@ note that partition fields and primary key fields can not be specified.
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -276,7 +276,7 @@ with(
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -295,7 +295,7 @@ CREATE TABLE MyTable (
 ```sql
 SET hive.metastore.warehouse.dir=warehouse_path;
 
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -331,31 +331,31 @@ We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, f
 
 /* For streaming mode, you need to enable the checkpoint. */
 
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT
 );
-CREATE TABLE MyTableAs AS SELECT * FROM MyTable;
+CREATE TABLE my_table_as AS SELECT * FROM my_table;
 
 /* partitioned table */
-CREATE TABLE MyTablePartition (
+CREATE TABLE my_table_partition (
      user_id BIGINT,
      item_id BIGINT,
      behavior STRING,
      dt STRING,
      hh STRING
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE MyTablePartitionAs WITH ('partition' = 'dt') AS SELECT * FROM MyTablePartition;
+CREATE TABLE my_table_partition_as WITH ('partition' = 'dt') AS SELECT * FROM my_table_partition;
     
 /* change options */
-CREATE TABLE MyTableOptions (
+CREATE TABLE my_table_options (
        user_id BIGINT,
        item_id BIGINT
 ) WITH ('file.format' = 'orc');
-CREATE TABLE MyTableOptionsAs WITH ('file.format' = 'parquet') AS SELECT * FROM MyTableOptions;
+CREATE TABLE my_table_options_as WITH ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
 
 /* primary key */
-CREATE TABLE MyTablePk (
+CREATE TABLE my_table_pk (
       user_id BIGINT,
       item_id BIGINT,
       behavior STRING,
@@ -363,11 +363,11 @@ CREATE TABLE MyTablePk (
       hh STRING,
       PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
-CREATE TABLE MyTablePkAs WITH ('primary-key' = 'dt,hh') AS SELECT * FROM MyTablePk;
+CREATE TABLE my_table_pk_as WITH ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_pk;
 
 
 /* primary key + partition */
-CREATE TABLE MyTableAll (
+CREATE TABLE my_table_all (
       user_id BIGINT,
       item_id BIGINT,
       behavior STRING,
@@ -375,7 +375,7 @@ CREATE TABLE MyTableAll (
       hh STRING,
       PRIMARY KEY (dt, hh, user_id) NOT ENFORCED 
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE MyTableAllAs WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM MyTableAll;
+CREATE TABLE my_table_all_as WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM my_table_all;
 ```
 
 {{< /tab >}}
@@ -383,32 +383,32 @@ CREATE TABLE MyTableAllAs WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS 
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
      user_id BIGINT,
      item_id BIGINT
 );
-CREATE TABLE MyTableAs AS SELECT * FROM MyTable;
+CREATE TABLE my_table_as AS SELECT * FROM my_table;
 
 /* partitioned table*/
-CREATE TABLE MyTablePartition (
+CREATE TABLE my_table_partition (
       user_id BIGINT,
       item_id BIGINT,
       behavior STRING,
       dt STRING,
       hh STRING
 ) PARTITIONED BY (dt, hh);
-CREATE TABLE MyTablePartitionAs PARTITIONED BY (dt) AS SELECT * FROM MyTablePartition;
+CREATE TABLE my_table_partition_as PARTITIONED BY (dt) AS SELECT * FROM my_table_partition;
 
 /* change TBLPROPERTIES */
-CREATE TABLE MyTableOptions (
+CREATE TABLE my_table_options (
        user_id BIGINT,
        item_id BIGINT
 ) TBLPROPERTIES ('file.format' = 'orc');
-CREATE TABLE MyTableOptionsAs TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM MyTableOptions;
+CREATE TABLE my_table_options_as TBLPROPERTIES ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
 
 
 /* primary key */
-CREATE TABLE MyTablePk (
+CREATE TABLE my_table_pk (
      user_id BIGINT,
      item_id BIGINT,
      behavior STRING,
@@ -417,10 +417,10 @@ CREATE TABLE MyTablePk (
 ) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id'
 );
-CREATE TABLE MyTablePkAs TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM MyTablePk;
+CREATE TABLE my_table_pk_as TBLPROPERTIES ('primary-key' = 'dt') AS SELECT * FROM my_table_pk;
 
 /* primary key + partition */
-CREATE TABLE MyTableAll (
+CREATE TABLE my_table_all (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -429,7 +429,7 @@ CREATE TABLE MyTableAll (
 ) PARTITIONED BY (dt, hh) TBLPROPERTIES (
     'primary-key' = 'dt,hh,user_id'
 );
-CREATE TABLE MyTableAllAs PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM MyTableAll;
+CREATE TABLE my_table_all_as PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_all;
 ```
 
 {{< /tab >}}
@@ -446,7 +446,7 @@ CREATE TABLE MyTableAllAs PARTITIONED BY (dt) TBLPROPERTIES ('primary-key' = 'dt
 To create a table with the same schema, partition, and table properties as another table, use CREATE TABLE LIKE.
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -455,10 +455,10 @@ CREATE TABLE MyTable (
     PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
 
-CREATE TABLE MyTableLike LIKE MyTable;
+CREATE TABLE my_table_like LIKE my_table;
 
 -- Create Paimon Table like other connector table
-CREATE TABLE MyTableLike WITH ('connector' = 'paimon') LIKE MyTable;
+CREATE TABLE my_table_like WITH ('connector' = 'paimon') LIKE my_table;
 ```
 
 {{< /tab >}}
@@ -469,14 +469,14 @@ CREATE TABLE MyTableLike WITH ('connector' = 'paimon') LIKE MyTable;
 
 Users can specify table properties to enable features or improve performance of Paimon. For a complete list of such properties, see [configurations]({{< ref "maintenance/configurations" >}}).
 
-The following SQL creates a table named `MyTable` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
+The following SQL creates a table named `my_table` with five columns partitioned by `dt` and `hh`, where `dt`, `hh` and `user_id` are the primary keys. This table has two properties: `'bucket' = '2'` and `'bucket-key' = 'user_id'`.
 
 {{< tabs "table-properties-example" >}}
 
 {{< tab "Flink" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -494,7 +494,7 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -512,7 +512,7 @@ CREATE TABLE MyTable (
 {{< tab "Hive" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -533,7 +533,7 @@ TBLPROPERTIES (
 {{< tab "Trino" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -552,7 +552,7 @@ CREATE TABLE MyTable (
 {{< tab "Presto" >}}
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior VARCHAR,
@@ -588,10 +588,10 @@ Paimon external tables can be used in any catalog. If you do not want to create 
 Please **DO NOT** use this mode. We recommend using the Paimon Catalog way. The current reservation is only for compatibility.
 {{< /hint >}}
 
-Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `MyTable` with five columns, where the base path of table files is `hdfs:///path/to/table`.
+Flink SQL supports reading and writing an external table. External Paimon tables are created by specifying the `connector` and `path` table properties. The following SQL creates an external table named `my_table` with five columns, where the base path of table files is `hdfs:///path/to/table`.
 
 ```sql
-CREATE TABLE MyTable (
+CREATE TABLE my_table (
     user_id BIGINT,
     item_id BIGINT,
     behavior STRING,
@@ -613,16 +613,6 @@ CREATE TABLE MyTable (
 {{< tab "Spark3" >}}
 
 Spark3 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs:///path/to/table` into a `DataSet`.
-
-```scala
-val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")
-```
-
-{{< /tab >}}
-
-{{< tab "Spark2" >}}
-
-Spark2 only supports creating external tables through Scala API. The following Scala code loads the table located at `hdfs:///path/to/table` into a `DataSet`.
 
 ```scala
 val dataset = spark.read.format("paimon").load("hdfs:///path/to/table")

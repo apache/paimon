@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -77,6 +77,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
+import static org.apache.paimon.hive.HiveCatalogLock.LOCK_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
@@ -84,10 +85,10 @@ import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
+import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
-import static org.apache.paimon.utils.Preconditions.checkState;
 import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
@@ -148,15 +149,10 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.Factory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(HiveCatalogLock.createFactory(hiveConf, clientClassName))
-                : Optional.empty();
-    }
-
-    private boolean lockEnabled() {
-        return Boolean.parseBoolean(
-                hiveConf.get(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(
+                new HiveCatalogLock.HiveLockContext(
+                        new SerializableHiveConf(hiveConf), clientClassName));
     }
 
     @Override
@@ -344,6 +340,17 @@ public class HiveCatalog extends AbstractCatalog {
         try {
             client.dropTable(
                     identifier.getDatabaseName(), identifier.getObjectName(), true, false, true);
+
+            // When drop a Hive external table, only the hive metadata is deleted and the data files
+            // are not deleted.
+            TableType tableType =
+                    OptionsUtils.convertToEnum(
+                            hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
+                            TableType.class);
+            if (TableType.EXTERNAL.equals(tableType)) {
+                return;
+            }
+
             // Deletes table directory to avoid schema in filesystem exists after dropping hive
             // table successfully to keep the table consistency between which in filesystem and
             // which in Hive metastore.
@@ -463,19 +470,6 @@ public class HiveCatalog extends AbstractCatalog {
         return warehouse;
     }
 
-    private void checkIdentifierUpperCase(Identifier identifier) {
-        checkState(
-                identifier.getDatabaseName().equals(identifier.getDatabaseName().toLowerCase()),
-                String.format(
-                        "Database name[%s] cannot contain upper case in hive catalog",
-                        identifier.getDatabaseName()));
-        checkState(
-                identifier.getObjectName().equals(identifier.getObjectName().toLowerCase()),
-                String.format(
-                        "Table name[%s] cannot contain upper case in hive catalog",
-                        identifier.getObjectName()));
-    }
-
     private Table newHmsTable(Identifier identifier, Map<String, String> tableParameters) {
         long currentTimeMillis = System.currentTimeMillis();
         TableType tableType =
@@ -582,10 +576,6 @@ public class HiveCatalog extends AbstractCatalog {
                 dataField.description());
     }
 
-    private boolean schemaFileExists(Identifier identifier) {
-        return new SchemaManager(fileIO, getDataTableLocation(identifier)).latest().isPresent();
-    }
-
     private SchemaManager schemaManager(Identifier identifier) {
         return new SchemaManager(fileIO, getDataTableLocation(identifier))
                 .withLock(lock(identifier));
@@ -672,7 +662,8 @@ public class HiveCatalog extends AbstractCatalog {
 
     public static Catalog createHiveCatalog(CatalogContext context) {
         HiveConf hiveConf = createHiveConf(context);
-        String warehouseStr = context.options().get(CatalogOptions.WAREHOUSE);
+        Options options = context.options();
+        String warehouseStr = options.get(CatalogOptions.WAREHOUSE);
         if (warehouseStr == null) {
             warehouseStr =
                     hiveConf.get(METASTOREWAREHOUSE.varname, METASTOREWAREHOUSE.defaultStrVal);
@@ -689,11 +680,19 @@ public class HiveCatalog extends AbstractCatalog {
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
+
+        /** Hive catalog only support hive lock. */
+        if (options.getOptional(LOCK_ENABLED).orElse(false)) {
+            Optional<String> lockType = options.getOptional(LOCK_TYPE);
+            if (!lockType.isPresent()) {
+                options.set(LOCK_TYPE, LOCK_IDENTIFIER);
+            }
+        }
         return new HiveCatalog(
                 fileIO,
                 hiveConf,
-                context.options().get(HiveCatalogFactory.METASTORE_CLIENT_CLASS),
-                context.options(),
+                options.get(HiveCatalogFactory.METASTORE_CLIENT_CLASS),
+                options,
                 warehouse.toUri().toString());
     }
 

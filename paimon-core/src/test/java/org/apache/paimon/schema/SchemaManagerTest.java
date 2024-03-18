@@ -131,7 +131,7 @@ public class SchemaManagerTest {
                                                                         "f4"),
                                                                 ""))))
                 .isInstanceOf(IllegalArgumentException.class)
-                .hasMessageContaining("Nonexistent sequence field: 'f4'");
+                .hasMessageContaining("Sequence field: 'f4' can not be found in table schema.");
     }
 
     @Test

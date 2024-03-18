@@ -281,6 +281,26 @@ CREATE TABLE test_computed_column (
     PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_time_to_int_epoch (
+    pk INT,
+    _second_val0 INT,
+    _second_val1 BIGINT,
+    _millis_val BIGINT,
+    _micros_val BIGINT,
+    _nanos_val BIGINT,
+    PRIMARY KEY (pk)
+);
+
+CREATE TABLE test_date_format_epoch (
+    pk INT,
+    _second_val0 INT,
+    _second_val1 BIGINT,
+    _millis_val BIGINT,
+    _micros_val BIGINT,
+    _nanos_val BIGINT,
+    PRIMARY KEY (pk)
+);
+
 CREATE TABLE test_options_change (
    pk INT,
    _date DATE,
@@ -374,4 +394,15 @@ CREATE TABLE t (
     ID1 INT,
     PART INT,
     PRIMARY KEY (ID0)
+);
+
+-- ################################################################################
+--  testInvalidAlterBucket
+-- ################################################################################
+
+CREATE DATABASE invalid_alter_bucket;
+USE invalid_alter_bucket;
+
+CREATE TABLE t (
+    k INT PRIMARY KEY
 );

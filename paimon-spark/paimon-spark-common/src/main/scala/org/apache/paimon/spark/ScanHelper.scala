@@ -15,11 +15,12 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.CoreOptions
 import org.apache.paimon.io.DataFileMeta
-import org.apache.paimon.table.source.{DataSplit, RawFile, Split}
+import org.apache.paimon.table.source.{DataSplit, DeletionFile, RawFile, Split}
 
 import org.apache.spark.sql.SparkSession
 
@@ -31,6 +32,8 @@ trait ScanHelper {
   private val spark = SparkSession.active
 
   val coreOptions: CoreOptions
+
+  private lazy val deletionVectors: Boolean = coreOptions.deletionVectorsEnabled()
 
   private lazy val openCostInBytes: Long = coreOptions.splitOpenFileCost()
 
@@ -60,15 +63,18 @@ trait ScanHelper {
 
     var currentSplit: Option[DataSplit] = None
     val currentDataFiles = new ArrayBuffer[DataFileMeta]
+    val currentDeletionFiles = new ArrayBuffer[DeletionFile]
     val currentRawFiles = new ArrayBuffer[RawFile]
     var currentSize = 0L
 
     def closeDataSplit(): Unit = {
       if (currentSplit.nonEmpty && currentDataFiles.nonEmpty) {
-        val newSplit = copyDataSplit(currentSplit.get, currentDataFiles, currentRawFiles)
+        val newSplit =
+          copyDataSplit(currentSplit.get, currentDataFiles, currentDeletionFiles, currentRawFiles)
         newSplits += newSplit
       }
       currentDataFiles.clear()
+      currentDeletionFiles.clear()
       currentRawFiles.clear()
       currentSize = 0
     }
@@ -85,6 +91,9 @@ trait ScanHelper {
             }
             currentSize += file.fileSize + openCostInBytes
             currentDataFiles += file
+            if (deletionVectors) {
+              currentDeletionFiles += split.deletionFiles().get().get(idx)
+            }
             if (hasRawFiles) {
               currentRawFiles += split.convertToRawFiles().get().get(idx)
             }
@@ -106,6 +115,7 @@ trait ScanHelper {
   private def copyDataSplit(
       split: DataSplit,
       dataFiles: Seq[DataFileMeta],
+      deletionFiles: Seq[DeletionFile],
       rawFiles: Seq[RawFile]): DataSplit = {
     val builder = DataSplit
       .builder()
@@ -114,6 +124,9 @@ trait ScanHelper {
       .withBucket(split.bucket())
       .withDataFiles(dataFiles.toList.asJava)
       .rawFiles(rawFiles.toList.asJava)
+    if (deletionVectors) {
+      builder.withDataDeletionFiles(deletionFiles.toList.asJava)
+    }
     builder.build()
   }
 

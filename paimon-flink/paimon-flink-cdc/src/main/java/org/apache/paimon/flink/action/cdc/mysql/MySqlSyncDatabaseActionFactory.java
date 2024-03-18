@@ -18,25 +18,18 @@
 
 package org.apache.paimon.flink.action.cdc.mysql;
 
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
 import org.apache.paimon.flink.action.MultiTablesSinkMode;
 import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.SyncDatabaseActionFactoryBase;
 
 import java.util.Arrays;
-import java.util.Optional;
 
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.METADATA_COLUMN;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.MYSQL_CONF;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Factory to create {@link MySqlSyncDatabaseAction}. */
-public class MySqlSyncDatabaseActionFactory implements ActionFactory {
+public class MySqlSyncDatabaseActionFactory
+        extends SyncDatabaseActionFactoryBase<MySqlSyncDatabaseAction> {
 
     public static final String IDENTIFIER = "mysql_sync_database";
 
@@ -50,35 +43,25 @@ public class MySqlSyncDatabaseActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, MYSQL_CONF);
+    protected String cdcConfigIdentifier() {
+        return MYSQL_CONF;
+    }
 
-        MySqlSyncDatabaseAction action =
-                new MySqlSyncDatabaseAction(
-                        getRequiredValue(params, WAREHOUSE),
-                        getRequiredValue(params, DATABASE),
-                        optionalConfigMap(params, CATALOG_CONF),
-                        optionalConfigMap(params, MYSQL_CONF));
+    @Override
+    public MySqlSyncDatabaseAction createAction() {
+        return new MySqlSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
+    }
 
-        action.withTableConfig(optionalConfigMap(params, TABLE_CONF));
+    @Override
+    protected void withParams(MultipleParameterToolAdapter params, MySqlSyncDatabaseAction action) {
+        super.withParams(params, action);
         action.ignoreIncompatible(Boolean.parseBoolean(params.get(IGNORE_INCOMPATIBLE)))
                 .mergeShards(
                         !params.has(MERGE_SHARDS) || Boolean.parseBoolean(params.get(MERGE_SHARDS)))
-                .withTablePrefix(params.get(TABLE_PREFIX))
-                .withTableSuffix(params.get(TABLE_SUFFIX))
-                .includingTables(params.get(INCLUDING_TABLES))
-                .excludingTables(params.get(EXCLUDING_TABLES))
                 .withMode(MultiTablesSinkMode.fromString(params.get(MODE)));
         if (params.has(METADATA_COLUMN)) {
             action.withMetadataColumns(Arrays.asList(params.get(METADATA_COLUMN).split(",")));
         }
-
-        if (params.has(TYPE_MAPPING)) {
-            String[] options = params.get(TYPE_MAPPING).split(",");
-            action.withTypeMapping(TypeMapping.parse(options));
-        }
-
-        return Optional.of(action);
     }
 
     @Override

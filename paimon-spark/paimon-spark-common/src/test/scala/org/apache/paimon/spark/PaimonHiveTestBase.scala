@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark
 
 import org.apache.paimon.hive.TestHiveMetastore
@@ -42,7 +43,7 @@ class PaimonHiveTestBase extends PaimonSparkTestBase {
     super.sparkConf
       .set("spark.sql.warehouse.dir", tempHiveDBDir.getCanonicalPath)
       .set("spark.sql.catalogImplementation", "hive")
-      .set("spark.sql.catalog.spark_catalog", classOf[SparkGenericCatalog[_]].getName)
+      .set("spark.sql.catalog.spark_catalog", "org.apache.paimon.spark.SparkGenericCatalog")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName", classOf[SparkCatalog].getName)
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.metastore", "hive")
       .set(s"spark.sql.catalog.$paimonHiveCatalogName.warehouse", tempHiveDBDir.getCanonicalPath)

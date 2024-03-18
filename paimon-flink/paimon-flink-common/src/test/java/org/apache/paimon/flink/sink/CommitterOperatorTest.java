@@ -23,7 +23,7 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.MetricUtils;
+import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.NewFilesIncrement;
@@ -484,6 +484,24 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
     }
 
     @Test
+    public void testForceCreateSnapshotCommit() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        options ->
+                                options.set(
+                                        CoreOptions.COMMIT_FORCE_CREATE_SNAPSHOT.key(), "true"));
+
+        OneInputStreamOperatorTestHarness<Committable, Committable> testHarness =
+                createRecoverableTestHarness(table);
+        testHarness.open();
+
+        testHarness.snapshot(1, 1);
+        testHarness.notifyOfCompletedCheckpoint(1);
+        Snapshot snapshot = table.snapshotManager().latestSnapshot();
+        assertThat(snapshot).isNotNull();
+    }
+
+    @Test
     public void testEmptyCommitWithProcessTimeTag() throws Exception {
         FileStoreTable table =
                 createFileStoreTable(
@@ -577,14 +595,19 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                         .addGroup("paimon")
                         .addGroup("table", table.name())
                         .addGroup("commit");
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
-                .isEqualTo(1L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
-                .isEqualTo(0L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+        assertThat(TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
                 .isEqualTo(1L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted")
+                                .getValue())
+                .isEqualTo(0L);
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended")
+                                .getValue())
+                .isEqualTo(1L);
+        assertThat(
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(0L);
 
@@ -602,14 +625,19 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
         testHarness.snapshot(cpId, timestamp++);
         testHarness.notifyOfCompletedCheckpoint(cpId);
 
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
+        assertThat(TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAdded").getValue())
                 .isEqualTo(3L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesDeleted")
+                                .getValue())
                 .isEqualTo(3L);
-        assertThat(MetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended").getValue())
+        assertThat(
+                        TestingMetricUtils.getGauge(commitMetricGroup, "lastTableFilesAppended")
+                                .getValue())
                 .isEqualTo(2L);
         assertThat(
-                        MetricUtils.getGauge(commitMetricGroup, "lastTableFilesCommitCompacted")
+                        TestingMetricUtils.getGauge(
+                                        commitMetricGroup, "lastTableFilesCommitCompacted")
                                 .getValue())
                 .isEqualTo(4L);
 

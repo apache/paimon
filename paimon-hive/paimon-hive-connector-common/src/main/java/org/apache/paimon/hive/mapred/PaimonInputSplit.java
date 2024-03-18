@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,7 +21,9 @@ package org.apache.paimon.hive.mapred;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataOutputSerializer;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.utils.InstantiationUtil;
 
 import org.apache.hadoop.fs.Path;
 import org.apache.hadoop.mapred.FileSplit;
@@ -41,12 +43,15 @@ public class PaimonInputSplit extends FileSplit {
     private String path;
     private DataSplit split;
 
+    private FileStoreTable table;
+
     // public no-argument constructor for deserialization
     public PaimonInputSplit() {}
 
-    public PaimonInputSplit(String path, DataSplit split) {
+    public PaimonInputSplit(String path, DataSplit split, FileStoreTable table) {
         this.path = path;
         this.split = split;
+        this.table = table;
     }
 
     public DataSplit split() {
@@ -73,6 +78,10 @@ public class PaimonInputSplit extends FileSplit {
         return ANYWHERE;
     }
 
+    public FileStoreTable getTable() {
+        return table;
+    }
+
     @Override
     public void write(DataOutput dataOutput) throws IOException {
         dataOutput.writeUTF(path);
@@ -80,6 +89,17 @@ public class PaimonInputSplit extends FileSplit {
         split.serialize(out);
         dataOutput.writeInt(out.length());
         dataOutput.write(out.getCopyOfBuffer());
+        writeFileStoreTable(dataOutput);
+    }
+
+    private void writeFileStoreTable(DataOutput dataOutput) throws IOException {
+        if (table == null) {
+            dataOutput.writeInt(0);
+        } else {
+            byte[] bytes = InstantiationUtil.serializeObject(table);
+            dataOutput.writeInt(bytes.length);
+            dataOutput.write(bytes);
+        }
     }
 
     @Override
@@ -89,6 +109,22 @@ public class PaimonInputSplit extends FileSplit {
         byte[] bytes = new byte[length];
         dataInput.readFully(bytes);
         split = DataSplit.deserialize(new DataInputDeserializer(bytes));
+        readFileStoreTable(dataInput);
+    }
+
+    private void readFileStoreTable(DataInput dataInput) throws IOException {
+        int length = dataInput.readInt();
+        if (length > 0) {
+            byte[] bytes = new byte[length];
+            dataInput.readFully(bytes);
+            try {
+                table =
+                        InstantiationUtil.deserializeObject(
+                                bytes, Thread.currentThread().getContextClassLoader());
+            } catch (ClassNotFoundException e) {
+                throw new RuntimeException(e);
+            }
+        }
     }
 
     @Override
@@ -105,11 +141,13 @@ public class PaimonInputSplit extends FileSplit {
             return false;
         }
         PaimonInputSplit that = (PaimonInputSplit) o;
-        return Objects.equals(path, that.path) && Objects.equals(split, that.split);
+        return Objects.equals(path, that.path)
+                && Objects.equals(split, that.split)
+                && Objects.equals(table, that.table);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(path, split);
+        return Objects.hash(path, split, table);
     }
 }

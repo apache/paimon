@@ -27,6 +27,8 @@ import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.utils.SerializationUtils;
 
+import javax.annotation.Nullable;
+
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
@@ -42,15 +44,17 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Input splits. Needed by most batch computation engines. */
 public class DataSplit implements Split {
 
-    private static final long serialVersionUID = 5L;
+    private static final long serialVersionUID = 6L;
 
     private long snapshotId = 0;
     private boolean isStreaming = false;
     private List<DataFileMeta> beforeFiles = new ArrayList<>();
+    @Nullable private List<DeletionFile> beforeDeletionFiles;
 
     private BinaryRow partition;
     private int bucket = -1;
     private List<DataFileMeta> dataFiles;
+    @Nullable private List<DeletionFile> dataDeletionFiles;
 
     private List<RawFile> rawFiles = Collections.emptyList();
 
@@ -72,8 +76,17 @@ public class DataSplit implements Split {
         return beforeFiles;
     }
 
+    public Optional<List<DeletionFile>> beforeDeletionFiles() {
+        return Optional.ofNullable(beforeDeletionFiles);
+    }
+
     public List<DataFileMeta> dataFiles() {
         return dataFiles;
+    }
+
+    @Override
+    public Optional<List<DeletionFile>> deletionFiles() {
+        return Optional.ofNullable(dataDeletionFiles);
     }
 
     public boolean isStreaming() {
@@ -114,14 +127,24 @@ public class DataSplit implements Split {
         return bucket == split.bucket
                 && Objects.equals(partition, split.partition)
                 && Objects.equals(beforeFiles, split.beforeFiles)
+                && Objects.equals(beforeDeletionFiles, split.beforeDeletionFiles)
                 && Objects.equals(dataFiles, split.dataFiles)
+                && Objects.equals(dataDeletionFiles, split.dataDeletionFiles)
                 && isStreaming == split.isStreaming
                 && Objects.equals(rawFiles, split.rawFiles);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(partition, bucket, beforeFiles, dataFiles, isStreaming, rawFiles);
+        return Objects.hash(
+                partition,
+                bucket,
+                beforeFiles,
+                beforeDeletionFiles,
+                dataFiles,
+                dataDeletionFiles,
+                isStreaming,
+                rawFiles);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -137,7 +160,9 @@ public class DataSplit implements Split {
         this.partition = other.partition;
         this.bucket = other.bucket;
         this.beforeFiles = other.beforeFiles;
+        this.beforeDeletionFiles = other.beforeDeletionFiles;
         this.dataFiles = other.dataFiles;
+        this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawFiles = other.rawFiles;
     }
@@ -153,10 +178,14 @@ public class DataSplit implements Split {
             dataFileSer.serialize(file, out);
         }
 
+        DeletionFile.serializeList(out, beforeDeletionFiles);
+
         out.writeInt(dataFiles.size());
         for (DataFileMeta file : dataFiles) {
             dataFileSer.serialize(file, out);
         }
+
+        DeletionFile.serializeList(out, dataDeletionFiles);
 
         out.writeBoolean(isStreaming);
 
@@ -178,11 +207,15 @@ public class DataSplit implements Split {
             beforeFiles.add(dataFileSer.deserialize(in));
         }
 
+        List<DeletionFile> beforeDeletionFiles = DeletionFile.deserializeList(in);
+
         int fileNumber = in.readInt();
         List<DataFileMeta> dataFiles = new ArrayList<>(fileNumber);
         for (int i = 0; i < fileNumber; i++) {
             dataFiles.add(dataFileSer.deserialize(in));
         }
+
+        List<DeletionFile> dataDeletionFiles = DeletionFile.deserializeList(in);
 
         boolean isStreaming = in.readBoolean();
 
@@ -192,15 +225,22 @@ public class DataSplit implements Split {
             rawFiles.add(RawFile.deserialize(in));
         }
 
-        return builder()
-                .withSnapshot(snapshotId)
-                .withPartition(partition)
-                .withBucket(bucket)
-                .withBeforeFiles(beforeFiles)
-                .withDataFiles(dataFiles)
-                .isStreaming(isStreaming)
-                .rawFiles(rawFiles)
-                .build();
+        DataSplit.Builder builder =
+                builder()
+                        .withSnapshot(snapshotId)
+                        .withPartition(partition)
+                        .withBucket(bucket)
+                        .withBeforeFiles(beforeFiles)
+                        .withDataFiles(dataFiles)
+                        .isStreaming(isStreaming)
+                        .rawFiles(rawFiles);
+        if (beforeDeletionFiles != null) {
+            builder.withBeforeDeletionFiles(beforeDeletionFiles);
+        }
+        if (dataDeletionFiles != null) {
+            builder.withDataDeletionFiles(dataDeletionFiles);
+        }
+        return builder.build();
     }
 
     public static Builder builder() {
@@ -228,12 +268,22 @@ public class DataSplit implements Split {
         }
 
         public Builder withBeforeFiles(List<DataFileMeta> beforeFiles) {
-            this.split.beforeFiles = beforeFiles;
+            this.split.beforeFiles = new ArrayList<>(beforeFiles);
+            return this;
+        }
+
+        public Builder withBeforeDeletionFiles(List<DeletionFile> beforeDeletionFiles) {
+            this.split.beforeDeletionFiles = new ArrayList<>(beforeDeletionFiles);
             return this;
         }
 
         public Builder withDataFiles(List<DataFileMeta> dataFiles) {
-            this.split.dataFiles = dataFiles;
+            this.split.dataFiles = new ArrayList<>(dataFiles);
+            return this;
+        }
+
+        public Builder withDataDeletionFiles(List<DeletionFile> dataDeletionFiles) {
+            this.split.dataDeletionFiles = new ArrayList<>(dataDeletionFiles);
             return this;
         }
 

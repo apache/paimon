@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,8 +71,9 @@ public class PaimonOutputCommitter extends OutputCommitter {
     }
 
     @Override
-    public void commitTask(TaskAttemptContext taskAttemptContext) throws IOException {
-
+    public void commitTask(TaskAttemptContext originalContext) throws IOException {
+        TaskAttemptContext taskAttemptContext =
+                TezUtil.enrichContextWithAttemptWrapper(originalContext);
         TaskAttemptID attemptID = taskAttemptContext.getTaskAttemptID();
         JobConf jobConf = taskAttemptContext.getJobConf();
         FileStoreTable table = createFileStoreTable(jobConf);
@@ -117,7 +118,9 @@ public class PaimonOutputCommitter extends OutputCommitter {
     }
 
     @Override
-    public void abortTask(TaskAttemptContext taskAttemptContext) throws IOException {
+    public void abortTask(TaskAttemptContext originalContext) throws IOException {
+        TaskAttemptContext taskAttemptContext =
+                TezUtil.enrichContextWithAttemptWrapper(originalContext);
         Map<String, PaimonRecordWriter> writers =
                 PaimonRecordWriter.removeWriters(taskAttemptContext.getTaskAttemptID());
 
@@ -130,7 +133,8 @@ public class PaimonOutputCommitter extends OutputCommitter {
     }
 
     @Override
-    public void commitJob(JobContext jobContext) throws IOException {
+    public void commitJob(JobContext originalContext) throws IOException {
+        JobContext jobContext = TezUtil.enrichContextWithVertexId(originalContext);
         JobConf jobConf = jobContext.getJobConf();
 
         long startTime = System.currentTimeMillis();
@@ -161,7 +165,8 @@ public class PaimonOutputCommitter extends OutputCommitter {
     }
 
     @Override
-    public void abortJob(JobContext jobContext, int status) throws IOException {
+    public void abortJob(JobContext originalContext, int status) throws IOException {
+        JobContext jobContext = TezUtil.enrichContextWithVertexId(originalContext);
         FileStoreTable table = createFileStoreTable(jobContext.getJobConf());
         if (table != null) {
 

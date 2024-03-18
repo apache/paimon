@@ -338,7 +338,22 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private void testNoChangelogProducerRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
-        List<TableResult> results = testRandom(tEnv, numProducers, enableFailure, "'bucket' = '4'");
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        boolean enableDeletionVectors = random.nextBoolean();
+        if (enableDeletionVectors) {
+            // Deletion vectors mode not support concurrent write
+            numProducers = 1;
+        }
+        List<TableResult> results =
+                testRandom(
+                        tEnv,
+                        numProducers,
+                        enableFailure,
+                        "'bucket' = '4',"
+                                + String.format(
+                                        "'deletion-vectors.enabled' = '%s'",
+                                        enableDeletionVectors));
+
         for (TableResult result : results) {
             result.await();
         }
@@ -370,7 +385,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     private void testLookupChangelogProducerRandom(
             TableEnvironment tEnv, int numProducers, boolean enableFailure) throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-
+        boolean enableDeletionVectors = random.nextBoolean();
+        if (enableDeletionVectors) {
+            // Deletion vectors mode not support concurrent write
+            numProducers = 1;
+        }
         testRandom(
                 tEnv,
                 numProducers,
@@ -379,7 +398,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                         + String.format(
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
-                        + "'changelog-producer' = 'lookup'");
+                        + "'changelog-producer' = 'lookup',"
+                        + String.format(
+                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
+                        + String.format(
+                                "'deletion-vectors.enabled' = '%s'", enableDeletionVectors));
 
         // sleep for a random amount of time to check
         // if we can first read complete records then read incremental records correctly
@@ -436,6 +459,8 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                                 "'write-buffer-size' = '%s',",
                                 random.nextBoolean() ? "512kb" : "1mb")
                         + "'changelog-producer' = 'lookup',"
+                        + String.format(
+                                "'changelog-producer.lookup-wait' = '%s',", random.nextBoolean())
                         + "'write-only' = 'true'");
 
         // sleep for a random amount of time to check

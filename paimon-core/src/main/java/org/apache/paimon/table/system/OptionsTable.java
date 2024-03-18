@@ -112,7 +112,9 @@ public class OptionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new OptionsSplit(fileIO, location));
+            return () ->
+                    Collections.singletonList(
+                            new OptionsSplit(options(fileIO, location).size(), location));
         }
     }
 
@@ -120,17 +122,17 @@ public class OptionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private OptionsSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private OptionsSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
         }
 
         @Override
         public long rowCount() {
-            return options(fileIO, location).size();
+            return rowCount;
         }
 
         @Override

@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.InternalRow.FieldGetter;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
@@ -69,7 +70,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT())),
                         highLevel::get,
                         EQUALISER,
-                        changelogRowDeduplicate);
+                        changelogRowDeduplicate,
+                        LookupStrategy.CHANGELOG_ONLY,
+                        null);
 
         // Without level-0
         function.reset();
@@ -225,7 +228,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT())),
                         key -> null,
                         EQUALISER,
-                        changelogRowDeduplicate);
+                        changelogRowDeduplicate,
+                        LookupStrategy.CHANGELOG_ONLY,
+                        null);
 
         // Without level-0
         function.reset();
@@ -296,8 +301,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
     @Test
     public void testFirstRow() {
         Set<InternalRow> highLevel = new HashSet<>();
-        FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper function =
-                new FirstRowMergeTreeCompactRewriter.FistRowMergeFunctionWrapper(
+        FistRowMergeFunctionWrapper function =
+                new FistRowMergeFunctionWrapper(
                         projection ->
                                 new FirstRowMergeFunction(
                                         new RowType(
@@ -384,7 +389,9 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                 RowType.of(DataTypes.INT())),
                         key -> null,
                         EQUALISER,
-                        false);
+                        false,
+                        LookupStrategy.CHANGELOG_ONLY,
+                        null);
 
         function.reset();
         function.add(new KeyValue().replace(row(1), 1, DELETE, row(1)).setLevel(2));

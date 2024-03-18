@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -49,7 +49,7 @@ public class SearchArgumentToPredicateConverter {
 
     private final ExpressionTree root;
     private final List<PredicateLeaf> leaves;
-    private final List<String> columnNames;
+    private final List<String> hiveColumnNames;
     private final List<DataType> columnTypes;
     @Nullable private final Set<String> readColumnNames;
     private final PredicateBuilder builder;
@@ -61,7 +61,7 @@ public class SearchArgumentToPredicateConverter {
             @Nullable Set<String> readColumnNames) {
         this.root = searchArgument.getExpression();
         this.leaves = searchArgument.getLeaves();
-        this.columnNames =
+        this.hiveColumnNames =
                 columnNames.stream().map(String::toLowerCase).collect(Collectors.toList());
         this.columnTypes = columnTypes;
         if (readColumnNames != null) {
@@ -74,7 +74,7 @@ public class SearchArgumentToPredicateConverter {
                 new PredicateBuilder(
                         RowType.of(
                                 this.columnTypes.toArray(new DataType[0]),
-                                this.columnNames.toArray(new String[0])));
+                                columnNames.toArray(new String[0])));
     }
 
     public Optional<Predicate> convert() {
@@ -140,7 +140,7 @@ public class SearchArgumentToPredicateConverter {
                             + " is a partition column.");
         }
 
-        int idx = columnNames.indexOf(columnName);
+        int idx = hiveColumnNames.indexOf(columnName);
         Preconditions.checkArgument(idx >= 0, "Column " + columnName + " not found.");
         DataType columnType = columnTypes.get(idx);
         switch (leaf.getOperator()) {

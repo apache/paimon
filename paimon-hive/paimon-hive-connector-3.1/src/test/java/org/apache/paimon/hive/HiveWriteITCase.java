@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -168,6 +168,27 @@ public class HiveWriteITCase {
                 "insert into " + outputTableName + " values (1,2,3,'Hello'),(4,5,6,'Fine')");
         List<String> select = hiveShell.executeQuery("select * from " + outputTableName);
         assertThat(select).isEqualTo(Arrays.asList("1\t2\t3\tHello", "4\t5\t6\tFine"));
+    }
+
+    @Test
+    public void testHiveCreateAndHiveWrite() throws Exception {
+        List<InternalRow> emptyData = Collections.emptyList();
+
+        hiveShell.execute(
+                "CREATE TABLE paimon_table (\n"
+                        + "    `a`   STRING  comment '',\n"
+                        + "    `b`    STRING comment '',\n"
+                        + "    `c`    STRING comment ''\n"
+                        + ") \n"
+                        + "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'\n"
+                        + "TBLPROPERTIES (\n"
+                        + "    'primary-key' = 'a',\n"
+                        + "       'bucket' = '1',\n"
+                        + "   'bucket_key' = 'a'\n"
+                        + ");");
+        hiveShell.execute("insert into  paimon_table  values (2,3,'Hello'),(5,6,'Fine')");
+        List<String> select = hiveShell.executeQuery("select * from paimon_table");
+        assertThat(select).containsExactly("2\t3\tHello", "5\t6\tFine");
     }
 
     @Test

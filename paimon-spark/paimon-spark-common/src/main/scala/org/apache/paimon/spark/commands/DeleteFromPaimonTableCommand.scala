@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.options.Options
@@ -28,6 +29,7 @@ import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.Utils.createDataset
+import org.apache.spark.sql.catalyst.expressions.Expression
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, Filter}
 import org.apache.spark.sql.functions.lit
@@ -36,14 +38,13 @@ import java.util.{Collections, UUID}
 
 import scala.util.control.NonFatal
 
-case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromTable)
-  extends PaimonLeafRunnableCommand
-  with PaimonCommand {
-
+trait DeleteFromPaimonTableCommandBase extends PaimonLeafRunnableCommand with PaimonCommand {
+  self: DeleteFromPaimonTableCommand =>
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 
   private val relation = delete.table
-  private val condition = delete.condition
+
+  def condition(): Expression
 
   private lazy val (deletePredicate, forceDeleteByRows) =
     if (condition == null || condition == TrueLiteral) {
@@ -85,4 +86,9 @@ case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromT
 
     WriteIntoPaimonTable(table, InsertInto, df, new Options()).run(sparkSession)
   }
+}
+
+case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromTable)
+  extends DeleteFromPaimonTableCommandBase {
+  override def condition(): Expression = delete.condition
 }

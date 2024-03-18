@@ -18,22 +18,13 @@
 
 package org.apache.paimon.flink.action.cdc.pulsar;
 
-import org.apache.paimon.flink.action.Action;
-import org.apache.paimon.flink.action.ActionFactory;
-import org.apache.paimon.flink.action.MultipleParameterToolAdapter;
-import org.apache.paimon.flink.action.cdc.TypeMapping;
+import org.apache.paimon.flink.action.cdc.SyncDatabaseActionFactoryBase;
 
-import java.util.Optional;
-
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.EXCLUDING_TABLES;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.INCLUDING_TABLES;
 import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.PULSAR_CONF;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_PREFIX;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TABLE_SUFFIX;
-import static org.apache.paimon.flink.action.cdc.CdcActionCommonUtils.TYPE_MAPPING;
 
 /** Factory to create {@link PulsarSyncDatabaseAction}. */
-public class PulsarSyncDatabaseActionFactory implements ActionFactory {
+public class PulsarSyncDatabaseActionFactory
+        extends SyncDatabaseActionFactoryBase<PulsarSyncDatabaseAction> {
 
     public static final String IDENTIFIER = "pulsar_sync_database";
 
@@ -43,28 +34,13 @@ public class PulsarSyncDatabaseActionFactory implements ActionFactory {
     }
 
     @Override
-    public Optional<Action> create(MultipleParameterToolAdapter params) {
-        checkRequiredArgument(params, PULSAR_CONF);
+    protected String cdcConfigIdentifier() {
+        return PULSAR_CONF;
+    }
 
-        PulsarSyncDatabaseAction action =
-                new PulsarSyncDatabaseAction(
-                        getRequiredValue(params, WAREHOUSE),
-                        getRequiredValue(params, DATABASE),
-                        optionalConfigMap(params, CATALOG_CONF),
-                        optionalConfigMap(params, PULSAR_CONF));
-
-        action.withTablePrefix(params.get(TABLE_PREFIX))
-                .withTableSuffix(params.get(TABLE_SUFFIX))
-                .includingTables(params.get(INCLUDING_TABLES))
-                .excludingTables(params.get(EXCLUDING_TABLES))
-                .withTableConfig(optionalConfigMap(params, TABLE_CONF));
-
-        if (params.has(TYPE_MAPPING)) {
-            String[] options = params.get(TYPE_MAPPING).split(",");
-            action.withTypeMapping(TypeMapping.parse(options));
-        }
-
-        return Optional.of(action);
+    @Override
+    public PulsarSyncDatabaseAction createAction() {
+        return new PulsarSyncDatabaseAction(warehouse, database, catalogConfig, cdcSourceConfig);
     }
 
     @Override

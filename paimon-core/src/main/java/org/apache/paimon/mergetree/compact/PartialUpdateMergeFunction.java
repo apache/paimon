@@ -24,10 +24,23 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.sink.SequenceGenerator;
+import org.apache.paimon.types.BigIntType;
+import org.apache.paimon.types.CharType;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeDefaultVisitor;
+import org.apache.paimon.types.DateType;
+import org.apache.paimon.types.DecimalType;
+import org.apache.paimon.types.DoubleType;
+import org.apache.paimon.types.FloatType;
+import org.apache.paimon.types.IntType;
+import org.apache.paimon.types.LocalZonedTimestampType;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.SmallIntType;
+import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.TinyIntType;
+import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.InternalRowUtils;
 import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
@@ -144,9 +157,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                     row.setField(i, field);
                 }
             } else {
-                Long currentSeq = sequenceGen.generateNullable(kv.value());
+                Long currentSeq = sequenceGen.generate(kv.value());
                 if (currentSeq != null) {
-                    Long previousSeq = sequenceGen.generateNullable(row);
+                    Long previousSeq = sequenceGen.generate(row);
                     if (previousSeq == null || currentSeq >= previousSeq) {
                         row.setField(
                                 i, aggregator == null ? field : aggregator.agg(accumulator, field));
@@ -162,9 +175,9 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         for (int i = 0; i < getters.length; i++) {
             SequenceGenerator sequenceGen = fieldSequences.get(i);
             if (sequenceGen != null) {
-                Long currentSeq = sequenceGen.generateNullable(kv.value());
+                Long currentSeq = sequenceGen.generate(kv.value());
                 if (currentSeq != null) {
-                    Long previousSeq = sequenceGen.generateNullable(row);
+                    Long previousSeq = sequenceGen.generate(row);
                     FieldAggregator aggregator = fieldAggregators.get(i);
                     if (previousSeq == null || currentSeq >= previousSeq) {
                         if (sequenceGen.index() == i) {
@@ -389,6 +402,139 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                 }
             }
             return fieldAggregators;
+        }
+    }
+
+    private static class SequenceGenerator {
+
+        private final int index;
+
+        private final Generator generator;
+        private final DataType fieldType;
+
+        private SequenceGenerator(String field, RowType rowType) {
+            index = rowType.getFieldNames().indexOf(field);
+            if (index == -1) {
+                throw new RuntimeException(
+                        String.format(
+                                "Can not find sequence field %s in table schema: %s",
+                                field, rowType));
+            }
+            fieldType = rowType.getTypeAt(index);
+            generator = fieldType.accept(new SequenceGeneratorVisitor());
+        }
+
+        public SequenceGenerator(int index, DataType dataType) {
+            this.index = index;
+
+            this.fieldType = dataType;
+            if (index == -1) {
+                throw new RuntimeException(String.format("Index : %s is invalid", index));
+            }
+            generator = fieldType.accept(new SequenceGeneratorVisitor());
+        }
+
+        public int index() {
+            return index;
+        }
+
+        public DataType fieldType() {
+            return fieldType;
+        }
+
+        @Nullable
+        public Long generate(InternalRow row) {
+            return generator.generateNullable(row, index);
+        }
+
+        private interface Generator {
+            long generate(InternalRow row, int i);
+
+            @Nullable
+            default Long generateNullable(InternalRow row, int i) {
+                if (row.isNullAt(i)) {
+                    return null;
+                }
+                return generate(row, i);
+            }
+        }
+
+        private static class SequenceGeneratorVisitor extends DataTypeDefaultVisitor<Generator> {
+
+            @Override
+            public Generator visit(CharType charType) {
+                return stringGenerator();
+            }
+
+            @Override
+            public Generator visit(VarCharType varCharType) {
+                return stringGenerator();
+            }
+
+            private Generator stringGenerator() {
+                return (row, i) -> Long.parseLong(row.getString(i).toString());
+            }
+
+            @Override
+            public Generator visit(DecimalType decimalType) {
+                return (row, i) ->
+                        InternalRowUtils.castToIntegral(
+                                row.getDecimal(
+                                        i, decimalType.getPrecision(), decimalType.getScale()));
+            }
+
+            @Override
+            public Generator visit(TinyIntType tinyIntType) {
+                return InternalRow::getByte;
+            }
+
+            @Override
+            public Generator visit(SmallIntType smallIntType) {
+                return InternalRow::getShort;
+            }
+
+            @Override
+            public Generator visit(IntType intType) {
+                return InternalRow::getInt;
+            }
+
+            @Override
+            public Generator visit(BigIntType bigIntType) {
+                return InternalRow::getLong;
+            }
+
+            @Override
+            public Generator visit(FloatType floatType) {
+                return (row, i) -> (long) row.getFloat(i);
+            }
+
+            @Override
+            public Generator visit(DoubleType doubleType) {
+                return (row, i) -> (long) row.getDouble(i);
+            }
+
+            @Override
+            public Generator visit(DateType dateType) {
+                return InternalRow::getInt;
+            }
+
+            @Override
+            public Generator visit(TimestampType timestampType) {
+                return (row, i) ->
+                        row.getTimestamp(i, timestampType.getPrecision()).getMillisecond();
+            }
+
+            @Override
+            public Generator visit(LocalZonedTimestampType localZonedTimestampType) {
+                return (row, i) ->
+                        row.getTimestamp(i, localZonedTimestampType.getPrecision())
+                                .getMillisecond();
+            }
+
+            @Override
+            protected Generator defaultMethod(DataType dataType) {
+                throw new UnsupportedOperationException("Unsupported type: " + dataType);
+            }
         }
     }
 }

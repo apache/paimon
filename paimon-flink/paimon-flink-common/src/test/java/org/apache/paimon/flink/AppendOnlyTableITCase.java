@@ -245,7 +245,7 @@ public class AppendOnlyTableITCase extends CatalogITCaseBase {
 
     @Test
     public void testDynamicOptions() throws Exception {
-        sql("CREATE TABLE T (id INT) WITH ('write-mode'='append-only')");
+        sql("CREATE TABLE T (id INT)");
         batchSql("INSERT INTO T VALUES (1)");
         sEnv.getConfig()
                 .getConfiguration()

@@ -63,12 +63,11 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     private static final String PRIMARY_KEY_IDENTIFIER = "primary-key";
 
-    private String name = null;
     protected Catalog catalog = null;
 
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
-        this.name = name;
+        this.catalogName = name;
         CatalogContext catalogContext =
                 CatalogContext.create(
                         Options.fromMap(options),
@@ -85,11 +84,6 @@ public class SparkCatalog extends SparkBaseCatalog {
     @Override
     public Catalog paimonCatalog() {
         return catalog;
-    }
-
-    @Override
-    public String name() {
-        return name;
     }
 
     @Override

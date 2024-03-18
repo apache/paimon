@@ -15,6 +15,7 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonSparkTestBase
@@ -31,10 +32,10 @@ class RollbackProcedureTest extends PaimonSparkTestBase with StreamTest {
     failAfter(streamingTimeout) {
       withTempDir {
         checkpointDir =>
-          // define a change-log table and test `forEachBatch` api
+          // define a pk table and test `forEachBatch` api
           spark.sql(s"""
                        |CREATE TABLE T (a INT, b STRING)
-                       |TBLPROPERTIES ('primary-key'='a', 'write-mode'='change-log', 'bucket'='3')
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
                        |""".stripMargin)
           val location = loadTable("T").location().toString
 

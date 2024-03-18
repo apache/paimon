@@ -21,6 +21,7 @@ package org.apache.paimon.data.columnar;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.reader.RecordWithPositionIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
@@ -30,13 +31,15 @@ import javax.annotation.Nullable;
  * A {@link RecordReader.RecordIterator} that returns {@link InternalRow}s. The next row is set by
  * {@link ColumnarRow#setRowId}.
  */
-public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
+public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
+        implements RecordWithPositionIterator<InternalRow> {
 
     private final ColumnarRow rowData;
     private final Runnable recycler;
 
     private int num;
-    private int pos;
+    private int nextPos;
+    private long nextGlobalPos;
 
     public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
         super(recycler);
@@ -44,20 +47,37 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
         this.recycler = recycler;
     }
 
-    public void set(int num) {
+    /**
+     * Reset the number of rows in the vectorized batch, the start position in this batch and the
+     * global position.
+     */
+    public void reset(int num, long nextGlobalPos) {
         this.num = num;
-        this.pos = 0;
+        this.nextPos = 0;
+        this.nextGlobalPos = nextGlobalPos;
     }
 
     @Nullable
     @Override
     public InternalRow next() {
-        if (pos < num) {
-            rowData.setRowId(pos++);
+        if (nextPos < num) {
+            rowData.setRowId(nextPos++);
+            nextGlobalPos++;
             return rowData;
         } else {
             return null;
         }
+    }
+
+    @Override
+    public long returnedPosition() {
+        return nextGlobalPos - 1;
+    }
+
+    public ColumnarRowIterator copy(ColumnVector[] vectors) {
+        ColumnarRowIterator newIterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
+        newIterator.reset(num, nextGlobalPos);
+        return newIterator;
     }
 
     public ColumnarRowIterator mapping(
@@ -71,9 +91,7 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow> {
             if (indexMapping != null) {
                 vectors = VectorMappingUtils.createIndexMappedVectors(indexMapping, vectors);
             }
-            ColumnarRowIterator iterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
-            iterator.set(num);
-            return iterator;
+            return copy(vectors);
         }
         return this;
     }

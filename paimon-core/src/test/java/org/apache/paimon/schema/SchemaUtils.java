@@ -18,7 +18,6 @@
 
 package org.apache.paimon.schema;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Preconditions;
@@ -68,12 +67,6 @@ public class SchemaUtils {
                 highestFieldId = RowType.currentHighestFieldId(fields);
                 id = 0;
             }
-
-            String sequenceField = options.get(CoreOptions.SEQUENCE_FIELD.key());
-            Preconditions.checkArgument(
-                    sequenceField == null || rowType.getFieldNames().contains(sequenceField),
-                    "Nonexistent sequence field: '%s'",
-                    sequenceField);
 
             TableSchema newSchema =
                     new TableSchema(

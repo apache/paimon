@@ -91,16 +91,16 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     public static BinaryExternalSortBuffer create(
             IOManager ioManager,
-            RowType keyType,
             RowType rowType,
+            int[] keyFields,
             long bufferSize,
             int pageSize,
             int maxNumFileHandles,
             String compression) {
         return create(
                 ioManager,
-                keyType,
                 rowType,
+                keyFields,
                 new HeapMemorySegmentPool(bufferSize, pageSize),
                 maxNumFileHandles,
                 compression);
@@ -108,17 +108,15 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     public static BinaryExternalSortBuffer create(
             IOManager ioManager,
-            RowType keyType,
             RowType rowType,
+            int[] keyFields,
             MemorySegmentPool pool,
             int maxNumFileHandles,
             String compression) {
-        RecordComparator comparator =
-                newRecordComparator(keyType.getFieldTypes(), "ExternalSort_comparator");
+        RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
-                        newNormalizedKeyComputer(
-                                keyType.getFieldTypes(), "ExternalSort_normalized_key"),
+                        newNormalizedKeyComputer(rowType.getFieldTypes(), keyFields),
                         new InternalRowSerializer(rowType),
                         comparator,
                         pool);

@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,8 +19,12 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.hive.objectinspector.PaimonInternalRowObjectInspector;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.core.type.TypeReference;
 
 import org.apache.hadoop.conf.Configuration;
 import org.apache.hadoop.hive.serde2.AbstractSerDe;
@@ -32,6 +36,7 @@ import org.apache.hadoop.io.Writable;
 
 import javax.annotation.Nullable;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
@@ -53,11 +58,20 @@ public class PaimonSerDe extends AbstractSerDe {
     @Override
     public void initialize(@Nullable Configuration configuration, Properties properties)
             throws SerDeException {
-        HiveSchema schema = HiveSchema.extract(configuration, properties);
-        this.tableSchema = schema;
+        String dataFieldStr = properties.getProperty(PaimonStorageHandler.PAIMON_TABLE_FIELDS);
+        if (dataFieldStr != null) {
+            List<DataField> dataFields =
+                    JsonSerdeUtil.fromJson(dataFieldStr, new TypeReference<List<DataField>>() {});
+            this.tableSchema = new HiveSchema(new RowType(dataFields));
+        } else {
+            this.tableSchema = HiveSchema.extract(configuration, properties);
+        }
+
         inspector =
                 new PaimonInternalRowObjectInspector(
-                        schema.fieldNames(), schema.fieldTypes(), schema.fieldComments());
+                        tableSchema.fieldNames(),
+                        tableSchema.fieldTypes(),
+                        tableSchema.fieldComments());
     }
 
     @Override

@@ -41,14 +41,17 @@ public class CatalogContext {
 
     private final Options options;
     private final Configuration hadoopConf;
+    @Nullable private final FileIOLoader preferIOLoader;
     @Nullable private final FileIOLoader fallbackIOLoader;
 
     private CatalogContext(
             Options options,
             @Nullable Configuration hadoopConf,
+            @Nullable FileIOLoader preferIOLoader,
             @Nullable FileIOLoader fallbackIOLoader) {
         this.options = checkNotNull(options);
         this.hadoopConf = hadoopConf == null ? getHadoopConfiguration(options) : hadoopConf;
+        this.preferIOLoader = preferIOLoader;
         this.fallbackIOLoader = fallbackIOLoader;
     }
 
@@ -59,20 +62,28 @@ public class CatalogContext {
     }
 
     public static CatalogContext create(Options options) {
-        return new CatalogContext(options, null, null);
+        return new CatalogContext(options, null, null, null);
     }
 
     public static CatalogContext create(Options options, Configuration hadoopConf) {
-        return new CatalogContext(options, hadoopConf, null);
+        return new CatalogContext(options, hadoopConf, null, null);
     }
 
     public static CatalogContext create(Options options, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, null, fallbackIOLoader);
+        return new CatalogContext(options, null, null, fallbackIOLoader);
     }
 
     public static CatalogContext create(
-            Options options, Configuration hadoopConf, FileIOLoader fallbackIOLoader) {
-        return new CatalogContext(options, hadoopConf, fallbackIOLoader);
+            Options options, FileIOLoader preferIOLoader, FileIOLoader fallbackIOLoader) {
+        return new CatalogContext(options, null, preferIOLoader, fallbackIOLoader);
+    }
+
+    public static CatalogContext create(
+            Options options,
+            Configuration hadoopConf,
+            FileIOLoader preferIOLoader,
+            FileIOLoader fallbackIOLoader) {
+        return new CatalogContext(options, hadoopConf, preferIOLoader, fallbackIOLoader);
     }
 
     public Options options() {
@@ -82,6 +93,11 @@ public class CatalogContext {
     /** Return hadoop {@link Configuration}. */
     public Configuration hadoopConf() {
         return hadoopConf;
+    }
+
+    @Nullable
+    public FileIOLoader preferIO() {
+        return preferIOLoader;
     }
 
     @Nullable

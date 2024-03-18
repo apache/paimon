@@ -18,15 +18,16 @@
 
 package org.apache.paimon;
 
+import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -190,6 +191,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The minimum number of completed snapshots to retain. Should be greater than or equal to 1.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<Integer> SNAPSHOT_NUM_RETAINED_MAX =
             key("snapshot.num-retained.max")
                     .intType()
@@ -484,26 +486,6 @@ public class CoreOptions implements Serializable {
                             "The field that generates the row kind for primary key table,"
                                     + " the row kind determines which data is '+I', '-U', '+U' or '-D'.");
 
-    public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
-            key("sequence.auto-padding")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
-                                    .list(
-                                            text("You can specific:"),
-                                            text(
-                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-                                            text(
-                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
-                                            text(
-                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
-                                            text(
-                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
-                                    .build());
-
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
                     .enumType(StartupMode.class)
@@ -723,6 +705,7 @@ public class CoreOptions implements Serializable {
                                     + " if there is a need for access, it will be re-read from the DFS to build"
                                     + " an index on the local disk.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<MemorySize> LOOKUP_CACHE_MAX_DISK_SIZE =
             key("lookup.cache-max-disk-size")
                     .memoryType()
@@ -1086,6 +1069,21 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
+    public static final ConfigOption<Boolean> COMMIT_FORCE_CREATE_SNAPSHOT =
+            key("commit.force-create-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force create snapshot on commit.");
+
+    public static final ConfigOption<Boolean> DELETION_VECTORS_ENABLED =
+            key("deletion-vectors.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
+                                    + " vectors are generated when data is written, which marks the data for deletion."
+                                    + " During read operations, by applying these index files, merging can be avoided.");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1388,6 +1386,16 @@ public class CoreOptions implements Serializable {
         return options.get(CHANGELOG_PRODUCER);
     }
 
+    public boolean needLookup() {
+        return lookupStrategy().needLookup;
+    }
+
+    public LookupStrategy lookupStrategy() {
+        return LookupStrategy.from(
+                options.get(CHANGELOG_PRODUCER).equals(ChangelogProducer.LOOKUP),
+                deletionVectorsEnabled());
+    }
+
     public boolean changelogRowDeduplicate() {
         return options.get(CHANGELOG_PRODUCER_ROW_DEDUPLICATE);
     }
@@ -1483,20 +1491,14 @@ public class CoreOptions implements Serializable {
         return options.get(DYNAMIC_BUCKET_ASSIGNER_PARALLELISM);
     }
 
-    public Optional<String> sequenceField() {
-        return options.getOptional(SEQUENCE_FIELD);
+    public List<String> sequenceField() {
+        return options.getOptional(SEQUENCE_FIELD)
+                .map(s -> Arrays.asList(s.split(",")))
+                .orElse(Collections.emptyList());
     }
 
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
-    }
-
-    public List<String> sequenceAutoPadding() {
-        String padding = options.get(SEQUENCE_AUTO_PADDING);
-        if (padding == null) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(padding.split(","));
     }
 
     public boolean writeOnly() {
@@ -1588,6 +1590,10 @@ public class CoreOptions implements Serializable {
         return options.get(SINK_WATERMARK_TIME_ZONE);
     }
 
+    public boolean forceCreatingSnapshot() {
+        return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
+    }
+
     public Map<String, String> getFieldDefaultValues() {
         Map<String, String> defaultValues = new HashMap<>();
         String fieldPrefix = FIELDS_PREFIX + ".";
@@ -1647,6 +1653,10 @@ public class CoreOptions implements Serializable {
 
     public int varTypeSize() {
         return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+    }
+
+    public boolean deletionVectorsEnabled() {
+        return options.get(DELETION_VECTORS_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2089,41 +2099,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-    }
-
-    /** Specifies the way of making up time precision for sequence field. */
-    public enum SequenceAutoPadding implements DescribedEnum {
-        ROW_KIND_FLAG(
-                "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
-
-        private final String value;
-        private final String description;
-
-        SequenceAutoPadding(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public static SequenceAutoPadding fromString(String s) {
-            return OptionsUtils.convertToEnum(s, SequenceAutoPadding.class);
         }
     }
 

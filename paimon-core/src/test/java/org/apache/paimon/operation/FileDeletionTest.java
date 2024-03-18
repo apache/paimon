@@ -36,6 +36,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.RecordWriter;
@@ -664,13 +665,14 @@ public class FileDeletionTest {
         }
 
         SchemaManager schemaManager = new SchemaManager(fileIO, new Path(root));
-        schemaManager.createTable(
-                new Schema(
-                        rowType.getFields(),
-                        partitionType.getFieldNames(),
-                        TestKeyValueGenerator.getPrimaryKeys(mode),
-                        Collections.emptyMap(),
-                        null));
+        TableSchema tableSchema =
+                schemaManager.createTable(
+                        new Schema(
+                                rowType.getFields(),
+                                partitionType.getFieldNames(),
+                                TestKeyValueGenerator.getPrimaryKeys(mode),
+                                Collections.emptyMap(),
+                                null));
 
         return new TestFileStore.Builder(
                         "avro",
@@ -680,7 +682,8 @@ public class FileDeletionTest {
                         TestKeyValueGenerator.KEY_TYPE,
                         rowType,
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory())
+                        DeduplicateMergeFunction.factory(),
+                        tableSchema)
                 .changelogProducer(changelogProducer)
                 .build();
     }

@@ -21,6 +21,7 @@ package org.apache.paimon.catalog;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -34,7 +35,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
@@ -54,11 +54,6 @@ public class FileSystemCatalog extends AbstractCatalog {
     public FileSystemCatalog(FileIO fileIO, Path warehouse, Options options) {
         super(fileIO, options);
         this.warehouse = warehouse;
-    }
-
-    @Override
-    public Optional<CatalogLock.Factory> lockFactory() {
-        return Optional.empty();
     }
 
     @Override
@@ -128,8 +123,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public TableSchema getDataTableSchema(Identifier identifier) throws TableNotExistException {
-        Path path = getDataTableLocation(identifier);
-        return new SchemaManager(fileIO, path)
+        return schemaManager(identifier)
                 .latest()
                 .orElseThrow(() -> new TableNotExistException(identifier));
     }
@@ -142,8 +136,24 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void createTableImpl(Identifier identifier, Schema schema) {
+        uncheck(() -> schemaManager(identifier).createTable(schema));
+    }
+
+    private SchemaManager schemaManager(Identifier identifier) {
         Path path = getDataTableLocation(identifier);
-        uncheck(() -> new SchemaManager(fileIO, path).createTable(schema));
+        CatalogLock catalogLock =
+                lockFactory()
+                        .map(
+                                fac ->
+                                        fac.create(
+                                                lockContext()
+                                                        .orElseThrow(
+                                                                () ->
+                                                                        new RuntimeException(
+                                                                                "No lock context when lock is enabled."))))
+                        .orElse(null);
+        return new SchemaManager(fileIO, path)
+                .withLock(catalogLock == null ? null : Lock.fromCatalog(catalogLock, identifier));
     }
 
     @Override
@@ -156,7 +166,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     protected void alterTableImpl(Identifier identifier, List<SchemaChange> changes)
             throws TableNotExistException, ColumnAlreadyExistException, ColumnNotExistException {
-        new SchemaManager(fileIO, getDataTableLocation(identifier)).commitChanges(changes);
+        schemaManager(identifier).commitChanges(changes);
     }
 
     private static <T> T uncheck(Callable<T> callable) {

@@ -46,8 +46,10 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
 
@@ -159,6 +161,21 @@ public class PredicateBuilder {
         return predicates.stream()
                 .reduce((a, b) -> new CompoundPredicate(And.INSTANCE, Arrays.asList(a, b)))
                 .get();
+    }
+
+    @Nullable
+    public static Predicate andNullable(Predicate... predicates) {
+        return andNullable(Arrays.asList(predicates));
+    }
+
+    @Nullable
+    public static Predicate andNullable(List<Predicate> predicates) {
+        predicates = predicates.stream().filter(Objects::nonNull).collect(Collectors.toList());
+        if (predicates.isEmpty()) {
+            return null;
+        }
+
+        return and(predicates);
     }
 
     public static Predicate or(Predicate... predicates) {

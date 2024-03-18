@@ -86,6 +86,12 @@ Append path to paimon jar file to the `--jars` argument when starting `spark-sql
 spark-sql ... --jars /path/to/paimon-spark-3.3-{{< version >}}.jar
 ```
 
+OR use the `--packages` option.
+
+```bash
+spark-sql ... --packages org.apache.paimon:paimon-spark-3.3:{{< version >}}
+```
+
 Alternatively, you can copy `paimon-spark-3.3-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
 
 **Step 2: Specify Paimon Catalog**
@@ -576,6 +582,53 @@ s
       </td>
       <td>CALL sys.expire_snapshots(table => 'default.T', retain_max => 10)</td>
     </tr>
+    <tr>
+      <td>create_tag</td>
+      <td>
+         To create a tag based on given snapshot. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the new tag. Cannot be empty.</li>
+            <li>snapshot(Long):  id of the snapshot which the new tag is based on.</li>
+      </td>
+      <td>
+         -- based on snapshot 10 <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag', snapshot => 10) <br/>
+         -- based on the latest snapshot <br/>
+         CALL sys.create_tag(table => 'default.T', tag => 'my_tag')
+      </td>
+    </tr>
+    <tr>
+      <td>delete_tag</td>
+      <td>
+         To delete a tag. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>tag: name of the tag to be deleted.</li>
+      </td>
+      <td>CALL sys.delete_tag(table => 'default.T', tag => 'my_tag')</td>
+    </tr>
+    <tr>
+      <td>rollback</td>
+      <td>
+         To rollback to a specific version of target table. Argument:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>version: id of the snapshot or name of tag that will roll back to.</li>
+      </td>
+      <td>
+          CALL sys.rollback(table => 'default.T', version => 'my_tag')<br/>
+          CALL sys.rollback(table => 'default.T', version => 10)
+      </td>
+    </tr>
+    <tr>
+      <td>remove_orphan_files</td>
+      <td>
+         To remove the orphan data files and metadata files. Arguments:
+            <li>table: the target table identifier. Cannot be empty.</li>
+            <li>older_than: to avoid deleting newly written files, this procedure only deletes orphan files older than 1 day by default. This argument can modify the interval.</li>
+      </td>
+      <td>
+          CALL sys.remove_orphan_files(table => 'default.T', older_than => '2023-10-31 12:00:00')
+      </td>
+    </tr>
     </tbody>
 </table>
 
@@ -677,51 +730,3 @@ All Spark's data types are available in package `org.apache.spark.sql.types`.
 - Conversion between Spark's `UserDefinedType` and Paimon's `UserDefinedType` is not supported.
 
 {{< /hint >}}
-
-## Spark 2
-
-Paimon supports Spark 2.4+. We highly recommend using versions above Spark3, as Spark2 only provides reading capabilities.
-
-{{< stable >}}
-
-Download [paimon-spark-2-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-spark-2/{{< version >}}/paimon-spark-2-{{< version >}}.jar).
-
-{{< /stable >}}
-
-{{< unstable >}}
-
-Download [paimon-spark-2-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-spark-2/{{< version >}}/).
-
-{{< /unstable >}}
-
-{{< hint info >}}
-
-If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
-
-{{< /hint >}}
-
-**Step 1: Prepare Test Data**
-
-Paimon currently only supports reading tables through Spark2. To create a Paimon table with records, please follow our [Flink quick start guide]({{< ref "engines/flink#quick-start" >}}).
-
-After the guide, all table files should be stored under the path `/tmp/paimon`, or the warehouse path you've specified.
-
-**Step 2: Specify Paimon Jar File**
-
-You can append path to paimon jar file to the `--jars` argument when starting `spark-shell`.
-
-```bash
-spark-shell ... --jars /path/to/paimon-spark-2-{{< version >}}.jar
-```
-
-Alternatively, you can copy `paimon-spark-2-{{< version >}}.jar` under `spark/jars` in your Spark installation directory.
-
-**Step 3: Query Table**
-
-Paimon with Spark 2.4 does not support DDL. You can use the `Dataset` reader and register the `Dataset` as a temporary table. In spark shell:
-
-```scala
-val dataset = spark.read.format("paimon").load("file:/tmp/paimon/default.db/word_count")
-dataset.createOrReplaceTempView("word_count")
-spark.sql("SELECT * FROM word_count").show()
-```

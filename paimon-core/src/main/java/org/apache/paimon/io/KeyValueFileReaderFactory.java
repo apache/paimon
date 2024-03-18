@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -21,6 +21,8 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
@@ -29,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
 import org.apache.paimon.utils.BulkFormatMapping;
@@ -42,6 +45,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /** Factory to create {@link RecordReader}s for reading {@link KeyValue} files. */
@@ -49,7 +53,7 @@ public class KeyValueFileReaderFactory {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
-    private final long schemaId;
+    private final TableSchema schema;
     private final RowType keyType;
     private final RowType valueType;
 
@@ -59,20 +63,22 @@ public class KeyValueFileReaderFactory {
 
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
     private final BinaryRow partition;
+    private final DeletionVector.Factory dvFactory;
 
     private KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType keyType,
             RowType valueType,
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
             DataFilePathFactory pathFactory,
             long asyncThreshold,
-            BinaryRow partition) {
+            BinaryRow partition,
+            DeletionVector.Factory dvFactory) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
+        this.schema = schema;
         this.keyType = keyType;
         this.valueType = valueType;
         this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
@@ -80,6 +86,7 @@ public class KeyValueFileReaderFactory {
         this.asyncThreshold = asyncThreshold;
         this.partition = partition;
         this.bulkFormatMappings = new HashMap<>();
+        this.dvFactory = dvFactory;
     }
 
     public RecordReader<KeyValue> createRecordReader(
@@ -104,8 +111,8 @@ public class KeyValueFileReaderFactory {
                 () ->
                         bulkFormatMappingBuilder.build(
                                 formatIdentifier,
-                                schemaManager.schema(this.schemaId),
-                                schemaManager.schema(schemaId));
+                                schema,
+                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
         BulkFormatMapping bulkFormatMapping =
                 reuseFormat
@@ -113,23 +120,29 @@ public class KeyValueFileReaderFactory {
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
-        return new KeyValueDataFileRecordReader(
-                fileIO,
-                bulkFormatMapping.getReaderFactory(),
-                pathFactory.toPath(fileName),
-                keyType,
-                valueType,
-                level,
-                poolSize,
-                bulkFormatMapping.getIndexMapping(),
-                bulkFormatMapping.getCastMapping(),
-                PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+        RecordReader<KeyValue> recordReader =
+                new KeyValueDataFileRecordReader(
+                        fileIO,
+                        bulkFormatMapping.getReaderFactory(),
+                        pathFactory.toPath(fileName),
+                        keyType,
+                        valueType,
+                        level,
+                        poolSize,
+                        bulkFormatMapping.getIndexMapping(),
+                        bulkFormatMapping.getCastMapping(),
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+        Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());
+        }
+        return recordReader;
     }
 
     public static Builder builder(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType keyType,
             RowType valueType,
             FileFormatDiscover formatDiscover,
@@ -139,7 +152,7 @@ public class KeyValueFileReaderFactory {
         return new Builder(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 keyType,
                 valueType,
                 formatDiscover,
@@ -153,7 +166,7 @@ public class KeyValueFileReaderFactory {
 
         private final FileIO fileIO;
         private final SchemaManager schemaManager;
-        private final long schemaId;
+        private final TableSchema schema;
         private final RowType keyType;
         private final RowType valueType;
         private final FileFormatDiscover formatDiscover;
@@ -170,7 +183,7 @@ public class KeyValueFileReaderFactory {
         private Builder(
                 FileIO fileIO,
                 SchemaManager schemaManager,
-                long schemaId,
+                TableSchema schema,
                 RowType keyType,
                 RowType valueType,
                 FileFormatDiscover formatDiscover,
@@ -179,7 +192,7 @@ public class KeyValueFileReaderFactory {
                 CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
-            this.schemaId = schemaId;
+            this.schema = schema;
             this.keyType = keyType;
             this.valueType = valueType;
             this.formatDiscover = formatDiscover;
@@ -197,7 +210,7 @@ public class KeyValueFileReaderFactory {
             return new Builder(
                     fileIO,
                     schemaManager,
-                    schemaId,
+                    schema,
                     keyType,
                     valueType,
                     formatDiscover,
@@ -226,13 +239,15 @@ public class KeyValueFileReaderFactory {
             return projectedValueType;
         }
 
-        public KeyValueFileReaderFactory build(BinaryRow partition, int bucket) {
-            return build(partition, bucket, true, Collections.emptyList());
+        public KeyValueFileReaderFactory build(
+                BinaryRow partition, int bucket, DeletionVector.Factory dvFactory) {
+            return build(partition, bucket, dvFactory, true, Collections.emptyList());
         }
 
         public KeyValueFileReaderFactory build(
                 BinaryRow partition,
                 int bucket,
+                DeletionVector.Factory dvFactory,
                 boolean projectKeys,
                 @Nullable List<Predicate> filters) {
             int[][] keyProjection = projectKeys ? this.keyProjection : fullKeyProjection;
@@ -241,19 +256,24 @@ public class KeyValueFileReaderFactory {
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
-                    schemaId,
+                    schema,
                     projectedKeyType,
                     projectedValueType,
                     BulkFormatMapping.newBuilder(
                             formatDiscover, extractor, keyProjection, valueProjection, filters),
                     pathFactory.createDataFilePathFactory(partition, bucket),
                     options.fileReaderAsyncThreshold().getBytes(),
-                    partition);
+                    partition,
+                    dvFactory);
         }
 
         private void applyProjection() {
             projectedKeyType = Projection.of(keyProjection).project(keyType);
             projectedValueType = Projection.of(valueProjection).project(valueType);
+        }
+
+        public FileIO fileIO() {
+            return fileIO;
         }
     }
 }

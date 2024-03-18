@@ -124,7 +124,10 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         protected Plan innerPlan() {
-            return () -> Collections.singletonList(new ManifestsSplit(fileIO, location, dataTable));
+            return () ->
+                    Collections.singletonList(
+                            new ManifestsSplit(
+                                    allManifests(fileIO, location, dataTable).size(), location));
         }
     }
 
@@ -132,19 +135,17 @@ public class ManifestsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
-        private final Table dataTable;
 
-        private ManifestsSplit(FileIO fileIO, Path location, Table dataTable) {
-            this.fileIO = fileIO;
+        private ManifestsSplit(long rowCount, Path location) {
+            this.rowCount = rowCount;
             this.location = location;
-            this.dataTable = dataTable;
         }
 
         @Override
         public long rowCount() {
-            return allManifests(fileIO, location, dataTable).size();
+            return rowCount;
         }
 
         @Override

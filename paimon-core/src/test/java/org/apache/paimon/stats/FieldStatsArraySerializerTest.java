@@ -18,10 +18,10 @@
 
 package org.apache.paimon.stats;
 
-import org.apache.paimon.casting.CastExecutor;
 import org.apache.paimon.data.BinaryArray;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.format.FieldStats;
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
 import org.apache.paimon.schema.TableSchema;
@@ -38,6 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link FieldStatsArraySerializer}. */
 public class FieldStatsArraySerializerTest {
+
     @Test
     public void testFromBinary() {
         TableSchema dataSchema =
@@ -49,9 +50,9 @@ public class FieldStatsArraySerializerTest {
                                 new DataField(2, "c", new IntType()),
                                 new DataField(3, "d", new IntType())),
                         3,
-                        Collections.EMPTY_LIST,
-                        Collections.EMPTY_LIST,
-                        Collections.EMPTY_MAP,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
                         "");
         TableSchema tableSchema =
                 new TableSchema(
@@ -63,24 +64,19 @@ public class FieldStatsArraySerializerTest {
                                 new DataField(6, "e", new IntType()),
                                 new DataField(7, "b", new IntType())),
                         7,
-                        Collections.EMPTY_LIST,
-                        Collections.EMPTY_LIST,
-                        Collections.EMPTY_MAP,
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
                         "");
 
         IndexCastMapping indexCastMapping =
                 SchemaEvolutionUtil.createIndexCastMapping(
                         tableSchema.fields(), dataSchema.fields());
         int[] indexMapping = indexCastMapping.getIndexMapping();
-        CastExecutor<Object, Object>[] converterMapping =
-                (CastExecutor<Object, Object>[])
-                        SchemaEvolutionUtil.createConvertMapping(
-                                tableSchema.fields(), dataSchema.fields(), indexMapping);
-        FieldStatsArraySerializer fieldStatsArraySerializer =
+        FieldStatsArraySerializer serializer =
                 new FieldStatsArraySerializer(
                         tableSchema.logicalRowType(),
                         indexMapping,
-                        converterMapping,
                         indexCastMapping.getCastMapping());
         BinaryRow minRowData = row(1, 2, 3, 4);
         BinaryRow maxRowData = row(100, 99, 98, 97);
@@ -88,18 +84,27 @@ public class FieldStatsArraySerializerTest {
         BinaryTableStats dataTableStats =
                 new BinaryTableStats(minRowData, maxRowData, BinaryArray.fromLongArray(nullCounts));
 
-        FieldStats[] fieldStatsArray = fieldStatsArraySerializer.fromBinary(dataTableStats, 1000L);
-        assertThat(fieldStatsArray.length).isEqualTo(tableSchema.fields().size()).isEqualTo(5);
-        checkFieldStats(fieldStatsArray[0], 2, 99, 0L);
-        checkFieldStats(fieldStatsArray[1], 4, 97, 100L);
-        checkFieldStats(fieldStatsArray[2], null, null, 1000L);
-        checkFieldStats(fieldStatsArray[3], null, null, 1000L);
-        checkFieldStats(fieldStatsArray[4], null, null, 1000L);
+        InternalRow min = serializer.evolution(dataTableStats.minValues());
+        InternalRow max = serializer.evolution(dataTableStats.maxValues());
+        InternalArray nulls = serializer.evolution(dataTableStats.nullCounts(), 1000L);
+
+        checkFieldStats(min, max, nulls, 0, 2, 99, 0L);
+        checkFieldStats(min, max, nulls, 1, 4, 97, 100L);
+        checkFieldStats(min, max, nulls, 2, null, null, 1000L);
+        checkFieldStats(min, max, nulls, 3, null, null, 1000L);
+        checkFieldStats(min, max, nulls, 4, null, null, 1000L);
     }
 
-    private void checkFieldStats(FieldStats fieldStats, Integer min, Integer max, Long nullCount) {
-        assertThat(fieldStats.minValue()).isEqualTo(min);
-        assertThat(fieldStats.maxValue()).isEqualTo(max);
-        assertThat(fieldStats.nullCount()).isEqualTo(nullCount);
+    private void checkFieldStats(
+            InternalRow minRow,
+            InternalRow maxRow,
+            InternalArray nulls,
+            int i,
+            Integer min,
+            Integer max,
+            Long nullCount) {
+        assertThat(minRow.isNullAt(i) ? null : minRow.getInt(i)).isEqualTo(min);
+        assertThat(maxRow.isNullAt(i) ? null : maxRow.getInt(i)).isEqualTo(max);
+        assertThat(nulls.getLong(i)).isEqualTo(nullCount);
     }
 }

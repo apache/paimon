@@ -25,8 +25,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.schema.TableSchema;
 
-import static org.apache.paimon.utils.Preconditions.checkArgument;
-
 /** {@link KeyAndBucketExtractor} for {@link InternalRow}. */
 public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
 
@@ -40,7 +38,6 @@ public class FixedBucketRowKeyExtractor extends RowKeyExtractor {
     public FixedBucketRowKeyExtractor(TableSchema schema) {
         super(schema);
         numBuckets = new CoreOptions(schema.options()).bucket();
-        checkArgument(numBuckets > 0, "Num bucket is illegal: " + numBuckets);
         sameBucketKeyAndTrimmedPrimaryKey = schema.bucketKeys().equals(schema.trimmedPrimaryKeys());
         bucketKeyProjection =
                 CodeGenUtils.newProjection(

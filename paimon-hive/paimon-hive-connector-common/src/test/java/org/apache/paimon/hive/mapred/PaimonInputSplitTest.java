@@ -19,8 +19,20 @@
 package org.apache.paimon.hive.mapred;
 
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileTestDataGenerator;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.types.VarCharType;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -29,8 +41,11 @@ import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
+import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
+import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
@@ -62,8 +77,12 @@ public class PaimonInputSplitTest {
                                         .map(d -> d.meta)
                                         .collect(Collectors.toList()))
                         .build();
-        PaimonInputSplit split = new PaimonInputSplit(tempDir.toString(), dataSplit);
+        PaimonInputSplit split = new PaimonInputSplit(tempDir.toString(), dataSplit, null);
 
+        assertPaimonInputSplitSerialization(split);
+    }
+
+    private void assertPaimonInputSplitSerialization(PaimonInputSplit split) throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         DataOutputStream output = new DataOutputStream(baos);
         split.write(output);
@@ -74,5 +93,38 @@ public class PaimonInputSplitTest {
         PaimonInputSplit actual = new PaimonInputSplit();
         actual.readFields(input);
         assertThat(actual).isEqualTo(split);
+    }
+
+    @Test
+    public void testWriteAndReadWithTable() throws Exception {
+        Path path = new Path(tempDir.toString());
+        SchemaManager schemaManager = new SchemaManager(LocalFileIO.create(), path);
+        schemaManager.createTable(
+                new Schema(
+                        RowType.of(VarCharType.STRING_TYPE).getFields(),
+                        Collections.emptyList(),
+                        Collections.emptyList(),
+                        Collections.emptyMap(),
+                        ""));
+
+        FileStoreTable fileStoreTable = FileStoreTableFactory.create(LocalFileIO.create(), path);
+        writeData(fileStoreTable);
+
+        DataSplit split = (DataSplit) fileStoreTable.newScan().plan().splits().get(0);
+
+        PaimonInputSplit paimonInputSplit =
+                new PaimonInputSplit(path.toString(), split, fileStoreTable);
+
+        assertPaimonInputSplitSerialization(paimonInputSplit);
+    }
+
+    private void writeData(FileStoreTable fileStoreTable) throws Exception {
+        String commitUser = UUID.randomUUID().toString();
+        TableWriteImpl<?> tableWrite = fileStoreTable.newWrite(commitUser);
+        tableWrite.write(GenericRow.of(BinaryString.fromString("1111")));
+        TableCommitImpl commit = fileStoreTable.newCommit(commitUser);
+        commit.commit(0, tableWrite.prepareCommit(true, 0));
+        tableWrite.close();
+        commit.close();
     }
 }

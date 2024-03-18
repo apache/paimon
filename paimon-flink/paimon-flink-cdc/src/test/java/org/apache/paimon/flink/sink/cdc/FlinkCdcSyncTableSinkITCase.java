@@ -22,6 +22,7 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogUtils;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.FileIO;
@@ -29,12 +30,15 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.FileStoreTableFactory;
+import org.apache.paimon.table.source.ReadBuilder;
+import org.apache.paimon.table.source.TableScan;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
@@ -168,18 +172,21 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
 
         // enable failure when running jobs if needed
         FailingFileIO.reset(failingName, 10, 10000);
-
-        if (unawareBucketMode) {
-            // there's a compact operator which won't terminate
-            env.executeAsync();
-        } else {
-            env.execute();
-        }
+        env.execute();
 
         // no failure when checking results
         FailingFileIO.reset(failingName, 0, 1);
 
-        testTable.assertResult(table);
+        table = table.copyWithLatestSchema();
+        SchemaManager schemaManager = new SchemaManager(table.fileIO(), table.location());
+        TableSchema schema = schemaManager.latest().get();
+
+        ReadBuilder readBuilder = table.newReadBuilder();
+        TableScan.Plan plan = readBuilder.newScan().plan();
+        try (RecordReaderIterator<InternalRow> it =
+                new RecordReaderIterator<>(readBuilder.newRead().createReader(plan))) {
+            testTable.assertResult(schema, it);
+        }
     }
 
     private FileStoreTable createFileStoreTable(
@@ -195,6 +202,10 @@ public class FlinkCdcSyncTableSinkITCase extends AbstractTestBase {
         conf.set(CoreOptions.DYNAMIC_BUCKET_TARGET_ROW_NUM, 100L);
         conf.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
         conf.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        // disable compaction for unaware bucket mode to avoid instability
+        if (primaryKeys.isEmpty() && numBucket == -1) {
+            conf.set(CoreOptions.WRITE_ONLY, true);
+        }
 
         TableSchema tableSchema =
                 SchemaUtils.forceCommit(

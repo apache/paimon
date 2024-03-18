@@ -156,6 +156,20 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testAllBasicTypeWorksWithHilbert() throws Exception {
+        prepareData(300, 1);
+        // All the basic types should support hilbert
+        Assertions.assertThatCode(
+                        () ->
+                                hilbert(
+                                        Arrays.asList(
+                                                "f0", "f1", "f2", "f3", "f4", "f5", "f6", "f7",
+                                                "f8", "f9", "f10", "f11", "f12", "f13", "f14",
+                                                "f15")))
+                .doesNotThrowAnyException();
+    }
+
+    @Test
     public void testZorderActionWorks() throws Exception {
         prepareData(300, 2);
         PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
@@ -171,6 +185,33 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         Assertions.assertThat(files.size()).isEqualTo(filesFilter.size());
 
         zorder(Arrays.asList("f2", "f1"));
+
+        files = getTable().store().newScan().plan().files();
+        filesFilter =
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+        Assertions.assertThat(files.size()).isGreaterThan(filesFilter.size());
+    }
+
+    @Test
+    public void testHilbertActionWorks() throws Exception {
+        prepareData(300, 2);
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate = predicateBuilder.between(1, 100, 200);
+
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilter =
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+
+        // before hilbert, we don't filter any file
+        Assertions.assertThat(files.size()).isEqualTo(filesFilter.size());
+
+        hilbert(Arrays.asList("f2", "f1"));
 
         files = getTable().store().newScan().plan().files();
         filesFilter =
@@ -205,6 +246,33 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                         .files();
 
         Assertions.assertThat(filesFilterZorder.size() / (double) filesZorder.size())
+                .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
+    }
+
+    @Test
+    public void testCompareHilbertAndOrder() throws Exception {
+        prepareData(300, 10);
+
+        hilbert(Arrays.asList("f2", "f1"));
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate = predicateBuilder.between(1, 10, 20);
+
+        List<ManifestEntry> filesHilbert = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilterHilbert =
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+
+        order(Arrays.asList("f2", "f1"));
+        List<ManifestEntry> filesOrder = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilterOrder =
+                ((AppendOnlyFileStoreScan) getTable().store().newScan())
+                        .withFilter(predicate)
+                        .plan()
+                        .files();
+
+        Assertions.assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
                 .isLessThan(filesFilterOrder.size() / (double) filesOrder.size());
     }
 
@@ -267,6 +335,14 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
             createAction("zorder", columns).run();
         } else {
             callProcedure("zorder", columns);
+        }
+    }
+
+    private void hilbert(List<String> columns) throws Exception {
+        if (RANDOM.nextBoolean()) {
+            createAction("hilbert", columns).run();
+        } else {
+            callProcedure("hilbert", columns);
         }
     }
 

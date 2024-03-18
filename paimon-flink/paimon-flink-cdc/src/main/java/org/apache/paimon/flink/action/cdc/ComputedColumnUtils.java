@@ -88,7 +88,7 @@ public class ComputedColumnUtils {
                             Expression.create(
                                     exprName,
                                     fieldReference,
-                                    typeMapping.get(fieldReference),
+                                    typeMapping.get(fieldReferenceCheckForm),
                                     literals)));
         }
 

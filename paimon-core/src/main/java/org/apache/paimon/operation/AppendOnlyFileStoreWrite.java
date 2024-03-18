@@ -26,6 +26,7 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
@@ -85,7 +86,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             FileStoreScan scan,
             CoreOptions options,
             String tableName) {
-        super(commitUser, snapshotManager, scan, options, null, tableName, pathFactory);
+        super(commitUser, snapshotManager, scan, options, null, null, tableName);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -110,7 +111,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             int bucket,
             List<DataFileMeta> restoredFiles,
             @Nullable CommitIncrement restoreIncrement,
-            ExecutorService compactExecutor) {
+            ExecutorService compactExecutor,
+            @Nullable DeletionVectorsMaintainer ignore) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
         long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
@@ -125,7 +127,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                getCompactionMetrics(partition, bucket));
+                                compactionMetrics == null
+                                        ? null
+                                        : compactionMetrics.createReporter(partition, bucket));
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -142,8 +146,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 useWriteBuffer || forceBufferSpill,
                 spillable || forceBufferSpill,
                 fileCompression,
-                statsCollectors,
-                getWriterMetrics(partition, bucket));
+                statsCollectors);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(

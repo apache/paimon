@@ -42,6 +42,9 @@ import org.apache.hadoop.hive.metastore.api.FieldSchema;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.PrimaryKeysRequest;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -60,8 +63,12 @@ import static org.apache.paimon.utils.FileUtils.COMMON_IO_FORK_JOIN_POOL;
 /** Migrate hive table to paimon table. */
 public class HiveMigrator implements Migrator {
 
+    private static final Logger LOG = LoggerFactory.getLogger(HiveMigrator.class);
+
     private static final Predicate<FileStatus> HIDDEN_PATH_FILTER =
             p -> !p.getPath().getName().startsWith("_") && !p.getPath().getName().startsWith(".");
+
+    private static final String PAIMON_SUFFIX = "_paimon_";
 
     private final FileIO fileIO;
     private final HiveCatalog hiveCatalog;
@@ -89,6 +96,27 @@ public class HiveMigrator implements Migrator {
         this.options = options;
     }
 
+    public static List<Migrator> databaseMigrators(
+            HiveCatalog hiveCatalog, String sourceDatabase, Map<String, String> options) {
+        IMetaStoreClient client = hiveCatalog.getHmsClient();
+        try {
+            return client.getAllTables(sourceDatabase).stream()
+                    .map(
+                            sourceTable ->
+                                    new HiveMigrator(
+                                            hiveCatalog,
+                                            sourceDatabase,
+                                            sourceTable,
+                                            sourceDatabase,
+                                            sourceTable + PAIMON_SUFFIX,
+                                            options))
+                    .collect(Collectors.toList());
+        } catch (TException e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public void executeMigrate() throws Exception {
         if (!client.tableExists(sourceDatabase, sourceTable)) {
             throw new RuntimeException("Source hive table does not exist");
@@ -176,6 +204,14 @@ public class HiveMigrator implements Migrator {
 
         // if all success, drop the origin table
         client.dropTable(sourceDatabase, sourceTable, true, true);
+    }
+
+    @Override
+    public void renameTable(boolean ignoreIfNotExists) throws Exception {
+        Identifier targetTableId = Identifier.create(targetDatabase, targetTable);
+        Identifier sourceTableId = Identifier.create(sourceDatabase, sourceTable);
+        LOG.info("Last step: rename {} to {}.", targetTableId, sourceTableId);
+        hiveCatalog.renameTable(targetTableId, sourceTableId, ignoreIfNotExists);
     }
 
     private void checkPrimaryKey() throws Exception {

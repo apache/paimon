@@ -31,6 +31,8 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.flink.table.runtime.operators.TableStreamOperator;
 
+import java.util.stream.IntStream;
+
 /** SortOperator to sort the `InternalRow`s by the `KeyType`. */
 public class SortOperator extends TableStreamOperator<InternalRow>
         implements OneInputStreamOperator<InternalRow, InternalRow>, BoundedOneInput {
@@ -87,8 +89,8 @@ public class SortOperator extends TableStreamOperator<InternalRow>
         buffer =
                 BinaryExternalSortBuffer.create(
                         ioManager,
-                        keyType,
                         rowType,
+                        IntStream.range(0, keyType.getFieldCount()).toArray(),
                         maxMemory,
                         pageSize,
                         spillSortMaxNumFiles,

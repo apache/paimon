@@ -164,4 +164,33 @@ public class FullCompactionFileStoreITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM %s$audit_log", table))
                 .containsExactlyInAnyOrder(Row.ofKind(RowKind.INSERT, "+I", "1", "4", "5"));
     }
+
+    @Test
+    public void testRowDeduplicateWithArrayRow() throws Exception {
+        String table = "T_ARRAY_ROW";
+        tEnv.executeSql(
+                "CREATE TABLE IF NOT EXISTS "
+                        + table
+                        + "("
+                        + "ID INT PRIMARY KEY NOT ENFORCED,\n"
+                        + "NAMES ARRAY<ROW<NAME STRING, MARK STRING>>\n"
+                        + ") WITH ("
+                        + "'changelog-producer'='full-compaction',"
+                        + "'changelog-producer.compaction-interval' = '1s',"
+                        + "'changelog-producer.row-deduplicate' = 'true')");
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(streamSqlIter("SELECT * FROM %s", table));
+
+        sql("INSERT INTO %s VALUES (1, ARRAY[('a','mark1')]);", table);
+        assertThat(iterator.collect(1).stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactlyInAnyOrder("+I[1, [+I[a, mark1]]]");
+
+        sql("INSERT INTO %s VALUES (1, ARRAY[('b', 'mark2')])", table);
+        assertThat(iterator.collect(2).stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactly("-U[1, [+I[a, mark1]]]", "+U[1, [+I[b, mark2]]]");
+
+        sql("INSERT INTO %s VALUES (1, ARRAY[('b', 'mark2')]), (2, ARRAY[('c', 'mark3')])", table);
+        assertThat(iterator.collect(1).stream().map(Row::toString).collect(Collectors.toList()))
+                .containsExactly("+I[2, [+I[c, mark3]]]");
+    }
 }

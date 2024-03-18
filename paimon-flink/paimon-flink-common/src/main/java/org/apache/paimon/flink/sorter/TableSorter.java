@@ -78,8 +78,7 @@ public abstract class TableSorter {
             case ZORDER:
                 return new ZorderSorter(batchTEnv, origin, fileStoreTable, orderColumns);
             case HILBERT:
-                // todo support hilbert curve
-                throw new IllegalArgumentException("Not supported yet.");
+                return new HilbertSorter(batchTEnv, origin, fileStoreTable, orderColumns);
             default:
                 throw new IllegalArgumentException("cannot match order type: " + sortStrategy);
         }

@@ -20,9 +20,14 @@ package org.apache.paimon.index;
 
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.utils.IntIterator;
+import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
@@ -30,24 +35,32 @@ import java.io.UncheckedIOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 
 /** Handle index files. */
 public class IndexFileHandler {
 
     private final SnapshotManager snapshotManager;
+    private final PathFactory pathFactory;
     private final IndexManifestFile indexManifestFile;
     private final HashIndexFile hashIndex;
+    private final DeletionVectorsIndexFile deletionVectorsIndex;
 
     public IndexFileHandler(
             SnapshotManager snapshotManager,
+            PathFactory pathFactory,
             IndexManifestFile indexManifestFile,
-            HashIndexFile hashIndex) {
+            HashIndexFile hashIndex,
+            DeletionVectorsIndexFile deletionVectorsIndex) {
         this.snapshotManager = snapshotManager;
+        this.pathFactory = pathFactory;
         this.indexManifestFile = indexManifestFile;
         this.hashIndex = hashIndex;
+        this.deletionVectorsIndex = deletionVectorsIndex;
     }
 
     public Optional<IndexFileMeta> scan(
@@ -92,6 +105,10 @@ public class IndexFileHandler {
         }
 
         return result;
+    }
+
+    public Path filePath(IndexFileMeta file) {
+        return pathFactory.toPath(file.fileName());
     }
 
     public List<Integer> readHashIndexList(IndexFileMeta file) {
@@ -147,5 +164,42 @@ public class IndexFileHandler {
 
     public void deleteManifest(String indexManifest) {
         indexManifestFile.delete(indexManifest);
+    }
+
+    public Map<String, DeletionVector> readAllDeletionVectors(IndexFileMeta fileMeta) {
+        if (!fileMeta.indexType().equals(DELETION_VECTORS_INDEX)) {
+            throw new IllegalArgumentException(
+                    "Input file is not deletion vectors index " + fileMeta.indexType());
+        }
+        Map<String, Pair<Integer, Integer>> deleteIndexRange = fileMeta.deletionVectorsRanges();
+        if (deleteIndexRange == null || deleteIndexRange.isEmpty()) {
+            return Collections.emptyMap();
+        }
+        return deletionVectorsIndex.readAllDeletionVectors(fileMeta.fileName(), deleteIndexRange);
+    }
+
+    public Optional<DeletionVector> readDeletionVector(IndexFileMeta fileMeta, String fileName) {
+        if (!fileMeta.indexType().equals(DELETION_VECTORS_INDEX)) {
+            throw new IllegalArgumentException(
+                    "Input file is not deletion vectors index " + fileMeta.indexType());
+        }
+        Map<String, Pair<Integer, Integer>> deleteIndexRange = fileMeta.deletionVectorsRanges();
+        if (deleteIndexRange == null || !deleteIndexRange.containsKey(fileName)) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                deletionVectorsIndex.readDeletionVector(
+                        fileMeta.fileName(), deleteIndexRange.get(fileName)));
+    }
+
+    public IndexFileMeta writeDeletionVectorsIndex(Map<String, DeletionVector> deletionVectors) {
+        Pair<String, Map<String, Pair<Integer, Integer>>> pair =
+                deletionVectorsIndex.write(deletionVectors);
+        return new IndexFileMeta(
+                DELETION_VECTORS_INDEX,
+                pair.getLeft(),
+                deletionVectorsIndex.fileSize(pair.getLeft()),
+                deletionVectors.size(),
+                pair.getRight());
     }
 }

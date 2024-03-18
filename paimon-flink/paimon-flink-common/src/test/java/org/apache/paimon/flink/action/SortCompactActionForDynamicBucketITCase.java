@@ -108,6 +108,36 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testDynamicBucketSortWithOrderAndHilbert() throws Exception {
+        createTable();
+
+        commit(writeData(100));
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate = predicateBuilder.between(1, 100L, 200L);
+
+        // order f2,f1 will make predicate of f1 perform worse.
+        order(Arrays.asList("f2", "f1"));
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilter =
+                ((KeyValueFileStoreScan) getTable().store().newScan())
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+
+        hilbert(Arrays.asList("f2", "f1"));
+
+        List<ManifestEntry> filesHilbert = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilterHilbert =
+                ((KeyValueFileStoreScan) getTable().store().newScan())
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+
+        Assertions.assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
+                .isLessThan(filesFilter.size() / (double) files.size());
+    }
+
+    @Test
     public void testDynamicBucketSortWithStringType() throws Exception {
         createTable();
 
@@ -143,6 +173,14 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
             createAction("zorder", columns).run();
         } else {
             callProcedure("zorder", columns);
+        }
+    }
+
+    private void hilbert(List<String> columns) throws Exception {
+        if (RANDOM.nextBoolean()) {
+            createAction("hilbert", columns).run();
+        } else {
+            callProcedure("hilbert", columns);
         }
     }
 

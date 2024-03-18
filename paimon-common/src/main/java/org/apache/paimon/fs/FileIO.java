@@ -316,13 +316,24 @@ public interface FileIO extends Serializable {
                             + "')");
         }
 
-        Map<String, FileIOLoader> loaders = discoverLoaders();
-        FileIOLoader loader = loaders.get(uri.getScheme());
+        FileIOLoader loader = null;
+        List<IOException> ioExceptionList = new ArrayList<>();
+
+        // load preferIO
+        FileIOLoader perferIOLoader = config.preferIO();
+        try {
+            loader = checkAccess(perferIOLoader, path, config);
+        } catch (IOException ioException) {
+            ioExceptionList.add(ioException);
+        }
+
+        if (loader == null) {
+            Map<String, FileIOLoader> loaders = discoverLoaders();
+            loader = loaders.get(uri.getScheme());
+        }
 
         // load fallbackIO
         FileIOLoader fallbackIO = config.fallbackIO();
-
-        List<IOException> ioExceptionList = new ArrayList<>();
 
         if (loader != null) {
             Set<String> options =
@@ -374,6 +385,13 @@ public interface FileIO extends Serializable {
 
         if (loader == null) {
             String fallbackMsg = "";
+            String preferMsg = "";
+            if (perferIOLoader != null) {
+                preferMsg =
+                        " "
+                                + perferIOLoader.getClass().getSimpleName()
+                                + " also cannot access this path.";
+            }
             if (fallbackIO != null) {
                 fallbackMsg =
                         " "
@@ -384,8 +402,8 @@ public interface FileIO extends Serializable {
                     new UnsupportedSchemeException(
                             String.format(
                                     "Could not find a file io implementation for scheme '%s' in the classpath."
-                                            + "%s Hadoop FileSystem also cannot access this path '%s'.",
-                                    uri.getScheme(), fallbackMsg, path));
+                                            + "%s %s Hadoop FileSystem also cannot access this path '%s'.",
+                                    uri.getScheme(), preferMsg, fallbackMsg, path));
             for (IOException ioException : ioExceptionList) {
                 ex.addSuppressed(ioException);
             }

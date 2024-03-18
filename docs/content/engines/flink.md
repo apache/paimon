@@ -30,7 +30,7 @@ This documentation is a guide for using Paimon in Flink.
 
 ## Preparing Paimon Jar File
 
-Paimon currently supports Flink 1.17, 1.16, 1.15 and 1.14. We recommend the latest Flink version for a better experience.
+Paimon currently supports Flink 1.18, 1.17, 1.16, 1.15. We recommend the latest Flink version for a better experience.
 
 Download the jar file with corresponding version.
 
@@ -43,7 +43,6 @@ Download the jar file with corresponding version.
 | Flink 1.17 | Bundled Jar  | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
 | Flink 1.16 | Bundled Jar  | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
 | Flink 1.15 | Bundled Jar  | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
-| Flink 1.14 | Bundled Jar  | [paimon-flink-1.14-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.14/{{< version >}}/paimon-flink-1.14-{{< version >}}.jar) |
 | Flink Action | Action Jar  | [paimon-flink-action-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-action/{{< version >}}/paimon-flink-action-{{< version >}}.jar) |
 
 {{< /stable >}}
@@ -56,7 +55,6 @@ Download the jar file with corresponding version.
 | Flink 1.17 | Bundled Jar | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/) |
 | Flink 1.16 | Bundled Jar | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
 | Flink 1.15 | Bundled Jar | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
-| Flink 1.14 | Bundled Jar | [paimon-flink-1.14-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.14/{{< version >}}/) |
 | Flink Action | Action Jar | [paimon-flink-action-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/{{< version >}}/) |
 
 {{< /unstable >}}
@@ -357,7 +355,7 @@ table options syntax: we use string to represent table options. The format is 'k
          TO compact a table. Arguments:
             <li>identifier: the target table identifier. Cannot be empty.</li>
             <li>partitions: partition filter.</li>
-            <li>order_strategy: 'order' or 'zorder' or 'none'. Left empty for 'none'.</li>
+            <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
             <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
             <li>table_options: additional dynamic options of the table.</li>
       </td>
@@ -392,7 +390,10 @@ table options syntax: we use string to represent table options. The format is 'k
    <tr>
       <td>create_tag</td>
       <td>
-         CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId)
+         -- based on the specified snapshot <br/>
+         CALL [catalog.]sys.create_tag('identifier', 'tagName', snapshotId) <br/>
+         -- based on the latest snapshot <br/>
+         CALL [catalog.]sys.create_tag('identifier', 'tagName')
       </td>
       <td>
          To create a tag based on given snapshot. Arguments:

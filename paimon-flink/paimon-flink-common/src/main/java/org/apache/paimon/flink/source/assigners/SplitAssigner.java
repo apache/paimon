@@ -54,4 +54,10 @@ public interface SplitAssigner {
 
     /** Gets the snapshot id of the next split. */
     Optional<Long> getNextSnapshotId(int subtask);
+
+    /**
+     * Gets the current number of remaining splits. This method should be guaranteed to be
+     * thread-safe.
+     */
+    int numberOfRemainingSplits();
 }

@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.testutils.assertj.AssertionUtils;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.table.api.ValidationException;
@@ -58,6 +57,7 @@ import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.sEnv;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testBatchRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.testStreamingRead;
 import static org.apache.paimon.flink.util.ReadWriteTableTestUtil.validateStreamingReadResult;
+import static org.apache.paimon.testutils.assertj.PaimonAssertions.anyCauseMatches;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.junit.jupiter.params.provider.Arguments.arguments;
 
@@ -495,9 +495,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMatchedDelete("S.v IS NULL");
 
         assertThatThrownBy(() -> action.build().run())
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                ValidationException.class, "Object 'S' not found"));
+                .satisfies(anyCauseMatches(ValidationException.class, "Object 'S' not found"));
     }
 
     @Test
@@ -515,9 +513,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                 .withMatchedDelete("S.v IS NULL");
 
         assertThatThrownBy(() -> action.build().run())
-                .satisfies(
-                        AssertionUtils.anyCauseMatches(
-                                ValidationException.class, "Object 'S' not found"));
+                .satisfies(anyCauseMatches(ValidationException.class, "Object 'S' not found"));
     }
 
     private void validateActionRunResult(

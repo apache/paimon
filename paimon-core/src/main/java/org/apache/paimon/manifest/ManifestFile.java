@@ -7,7 +7,7 @@
  * "License"); you may not use this file except in compliance
  * with the License.  You may obtain a copy of the License at
  *
- * http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS,
@@ -81,14 +81,7 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
      * <p>NOTE: This method is atomic.
      */
     public List<ManifestFileMeta> write(List<ManifestEntry> entries) {
-        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
-                new RollingFileWriter<>(
-                        () ->
-                                new ManifestEntryWriter(
-                                        writerFactory,
-                                        pathFactory.newPath(),
-                                        CoreOptions.FILE_COMPRESSION.defaultValue()),
-                        suggestedFileSize);
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer = createRollingWriter();
         try {
             writer.write(entries);
             writer.close();
@@ -96,6 +89,16 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
             throw new RuntimeException(e);
         }
         return writer.result();
+    }
+
+    public RollingFileWriter<ManifestEntry, ManifestFileMeta> createRollingWriter() {
+        return new RollingFileWriter<>(
+                () ->
+                        new ManifestEntryWriter(
+                                writerFactory,
+                                pathFactory.newPath(),
+                                CoreOptions.FILE_COMPRESSION.defaultValue()),
+                suggestedFileSize);
     }
 
     private class ManifestEntryWriter extends SingleFileWriter<ManifestEntry, ManifestFileMeta> {
@@ -186,6 +189,17 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     fileFormat.createWriterFactory(entryType),
                     pathFactory.manifestFileFactory(),
                     suggestedFileSize,
+                    cache);
+        }
+
+        public ObjectsFile<SimpleFileEntry> createSimpleFileEntryReader() {
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
+            return new ObjectsFile<>(
+                    fileIO,
+                    new SimpleFileEntrySerializer(),
+                    fileFormat.createReaderFactory(entryType),
+                    fileFormat.createWriterFactory(entryType),
+                    pathFactory.manifestFileFactory(),
                     cache);
         }
     }

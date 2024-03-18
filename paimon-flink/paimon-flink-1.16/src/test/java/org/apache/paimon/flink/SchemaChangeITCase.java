@@ -18,7 +18,7 @@
 
 package org.apache.paimon.flink;
 
-import org.junit.Test;
+import org.junit.jupiter.api.Test;
 
 import java.util.Map;
 
@@ -44,7 +44,7 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testSetAndResetImmutableOptions() throws Exception {
+    public void testSetAndResetImmutableOptions() {
         // bucket-key is immutable
         sql("CREATE TABLE T1 (a STRING, b STRING, c STRING)");
 
@@ -53,7 +53,8 @@ public class SchemaChangeITCase extends CatalogITCaseBase {
                 .isInstanceOf(UnsupportedOperationException.class)
                 .hasMessage("Change 'bucket-key' is not supported yet.");
 
-        sql("CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket-key' = 'c')");
+        sql(
+                "CREATE TABLE T2 (a STRING, b STRING, c STRING) WITH ('bucket' = '1', 'bucket-key' = 'c')");
         assertThatThrownBy(() -> sql("ALTER TABLE T2 RESET ('bucket-key')"))
                 .getRootCause()
                 .isInstanceOf(UnsupportedOperationException.class)

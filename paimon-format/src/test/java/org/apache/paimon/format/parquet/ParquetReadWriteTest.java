@@ -48,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.InstantiationUtil;
 
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -279,6 +280,38 @@ public class ParquetReadWriteTest {
                     assertThat(row.isNullAt(3)).isTrue();
                     cnt.incrementAndGet();
                 });
+    }
+
+    @RepeatedTest(10)
+    void testReadRowPosition() throws IOException {
+        int recordNumber = new Random().nextInt(10000) + 1;
+        int batchSize = new Random().nextInt(1000) + 1;
+        int rowGroupSize = new Random().nextInt(1000) + 1;
+        List<InternalRow> records = new ArrayList<>(recordNumber);
+        for (int i = 0; i < recordNumber; i++) {
+            Integer v = i;
+            records.add(newRow(v));
+        }
+
+        Path testPath = createTempParquetFile(folder, records, rowGroupSize);
+
+        DataType[] fieldTypes = new DataType[] {new DoubleType()};
+        ParquetReaderFactory format =
+                new ParquetReaderFactory(
+                        new Options(),
+                        RowType.builder().fields(fieldTypes, new String[] {"f7"}).build(),
+                        batchSize);
+
+        AtomicInteger cnt = new AtomicInteger(0);
+        try (RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath)) {
+            reader.forEachRemainingWithPosition(
+                    (rowPosition, row) -> {
+                        assertThat(row.getDouble(0)).isEqualTo(cnt.get());
+                        // check row position
+                        assertThat(rowPosition).isEqualTo(cnt.get());
+                        cnt.incrementAndGet();
+                    });
+        }
     }
 
     private void innerTestTypes(File folder, List<Integer> records, int rowGroupSize)

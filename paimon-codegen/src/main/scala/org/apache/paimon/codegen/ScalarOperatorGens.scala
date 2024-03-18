@@ -15,14 +15,18 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
+
 package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
 import org.apache.paimon.data.serializer.InternalMapSerializer
 import org.apache.paimon.types._
+import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, isCompositeType}
 import org.apache.paimon.utils.InternalRowUtils
 import org.apache.paimon.utils.TypeCheckUtils._
 import org.apache.paimon.utils.TypeUtils.isInteroperable
+
+import scala.collection.JavaConverters._
 
 /**
  * Utilities to generate SQL scalar operators, e.g. arithmetic operator, compare operator, equal
@@ -77,6 +81,10 @@ object ScalarOperatorGens {
     // comparable types of same type
     else if (isComparable(left.resultType) && canEqual) {
       generateComparison(ctx, "==", left, right, resultType)
+    } else if (isCompositeType(left.resultType) && canEqual) {
+      val equaliserTerm = generateRowEqualiser(ctx, left.resultType)
+      generateOperatorIfNotNull(ctx, resultType, left, right)(
+        (leftTerm, rightTerm) => s"$equaliserTerm.equals($leftTerm, $rightTerm)")
     }
     // non comparable types
     else {
@@ -92,6 +100,25 @@ object ScalarOperatorGens {
         }
       }
     }
+  }
+
+  /** Generates [[RecordEqualiser]] code for row and return equaliser name. */
+  def generateRowEqualiser(ctx: CodeGeneratorContext, fieldType: DataType): String = {
+    val equaliserGenerator =
+      new EqualiserCodeGenerator(getFieldTypes(fieldType).asScala.toArray)
+    val generatedEqualiser =
+      equaliserGenerator.generateRecordEqualiser("fieldGeneratedEqualiser")
+    val generatedEqualiserTerm =
+      ctx.addReusableObject(generatedEqualiser, "fieldGeneratedEqualiser")
+    val equaliserTypeTerm = classOf[RecordEqualiser].getCanonicalName
+    val equaliserTerm = newName("equaliser")
+    ctx.addReusableMember(s"private $equaliserTypeTerm $equaliserTerm = null;")
+    ctx.addReusableInitStatement(
+      s"""
+         |$equaliserTerm = ($equaliserTypeTerm)
+         |  $generatedEqualiserTerm.newInstance(this.getClass().getClassLoader());
+         |""".stripMargin)
+    equaliserTerm
   }
 
   /** Generates comparison code for numeric types and comparable types of same type. */

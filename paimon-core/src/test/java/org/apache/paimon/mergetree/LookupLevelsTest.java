@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -89,7 +90,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(1, 11, 1), kv(3, 33, 2), kv(5, 5, 3)),
                                 newFile(2, kv(2, 22, 4), kv(5, 55, 5))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         // only in level 1
         KeyValue kv = lookupLevels.lookup(row(1), 1);
@@ -131,7 +133,8 @@ public class LookupLevelsTest {
                                 newFile(1, kv(7, 77), kv(8, 88)),
                                 newFile(1, kv(10, 1010), kv(11, 1111))),
                         1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         Map<Integer, Integer> contains =
                 new HashMap<Integer, Integer>() {
@@ -178,7 +181,8 @@ public class LookupLevelsTest {
             files.add(newFile(1, kvs.toArray(new KeyValue[0])));
         }
         Levels levels = new Levels(comparator, files, 1);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofKibiBytes(20));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofKibiBytes(20));
 
         for (int i = 0; i < fileNum * recordInFile; i++) {
             KeyValue kv = lookupLevels.lookup(row(i), 1);
@@ -209,18 +213,55 @@ public class LookupLevelsTest {
                                 // empty level 2
                                 newFile(3, kv(2, 22), kv(5, 55))),
                         3);
-        LookupLevels lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
 
         KeyValue kv = lookupLevels.lookup(row(2), 1);
         assertThat(kv).isNotNull();
     }
 
-    private LookupLevels createLookupLevels(Levels levels, MemorySize maxDiskSize) {
-        return new LookupLevels(
+    @Test
+    public void testLookupLevel0() throws Exception {
+        Levels levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(0, kv(1, 0)),
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        LookupLevels<KeyValue> lookupLevels =
+                createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        KeyValue kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(0);
+        assertThat(kv.value().getInt(1)).isEqualTo(0);
+
+        levels =
+                new Levels(
+                        comparator,
+                        Arrays.asList(
+                                newFile(1, kv(1, 11), kv(3, 33), kv(5, 5)),
+                                newFile(2, kv(2, 22), kv(5, 55))),
+                        3);
+        lookupLevels = createLookupLevels(levels, MemorySize.ofMebiBytes(10));
+
+        // not in level 0
+        kv = lookupLevels.lookup(row(1), 0);
+        assertThat(kv).isNotNull();
+        assertThat(kv.sequenceNumber()).isEqualTo(UNKNOWN_SEQUENCE);
+        assertThat(kv.level()).isEqualTo(1);
+        assertThat(kv.value().getInt(1)).isEqualTo(11);
+    }
+
+    private LookupLevels<KeyValue> createLookupLevels(Levels levels, MemorySize maxDiskSize) {
+        return new LookupLevels<>(
                 levels,
                 comparator,
                 keyType,
-                rowType,
+                new LookupLevels.KeyValueProcessor(rowType),
                 file ->
                         createReaderFactory()
                                 .createRecordReader(
@@ -274,7 +315,7 @@ public class LookupLevelsTest {
                 KeyValueFileReaderFactory.builder(
                         FileIOFinder.find(path),
                         createSchemaManager(path),
-                        0,
+                        createSchemaManager(path).schema(0),
                         keyType,
                         rowType,
                         ignore -> new FlushingFileFormat("avro"),
@@ -291,7 +332,7 @@ public class LookupLevelsTest {
                             }
                         },
                         new CoreOptions(new HashMap<>()));
-        return builder.build(BinaryRow.EMPTY_ROW, 0);
+        return builder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
     }
 
     private SchemaManager createSchemaManager(Path path) {

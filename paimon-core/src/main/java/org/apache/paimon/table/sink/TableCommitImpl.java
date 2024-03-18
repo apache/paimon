@@ -88,6 +88,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
+    private final boolean forceCreatingSnapshot;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -99,7 +100,8 @@ public class TableCommitImpl implements InnerTableCommit {
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
-            String tableName) {
+            String tableName,
+            boolean forceCreatingSnapshot) {
         commit.withLock(lock);
         if (partitionExpire != null) {
             partitionExpire.withLock(lock);
@@ -124,10 +126,12 @@ public class TableCommitImpl implements InnerTableCommit {
         this.expireError = new AtomicReference<>(null);
 
         this.tableName = tableName;
+        this.forceCreatingSnapshot = forceCreatingSnapshot;
     }
 
     public boolean forceCreatingSnapshot() {
-        return tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot();
+        return this.forceCreatingSnapshot
+                || (tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot());
     }
 
     @Override

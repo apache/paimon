@@ -19,11 +19,13 @@
 package org.apache.paimon.flink;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.StreamingReadMode;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -34,6 +36,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_MODE;
 import static org.apache.paimon.options.ConfigOptions.key;
 import static org.apache.paimon.options.description.TextElement.text;
@@ -140,7 +143,7 @@ public class FlinkConnectorOptions {
                             "When "
                                     + CoreOptions.CHANGELOG_PRODUCER.key()
                                     + " is set to "
-                                    + CoreOptions.ChangelogProducer.FULL_COMPACTION.name()
+                                    + ChangelogProducer.FULL_COMPACTION.name()
                                     + ", full compaction will be constantly triggered after this interval.");
 
     public static final ConfigOption<Boolean> CHANGELOG_PRODUCER_LOOKUP_WAIT =
@@ -151,7 +154,7 @@ public class FlinkConnectorOptions {
                             "When "
                                     + CoreOptions.CHANGELOG_PRODUCER.key()
                                     + " is set to "
-                                    + CoreOptions.ChangelogProducer.LOOKUP.name()
+                                    + ChangelogProducer.LOOKUP.name()
                                     + ", commit will wait for changelog generation by lookup.");
 
     public static final ConfigOption<WatermarkEmitStrategy> SCAN_WATERMARK_EMIT_STRATEGY =
@@ -293,6 +296,21 @@ public class FlinkConnectorOptions {
                     .defaultValue(LookupCacheMode.AUTO)
                     .withDescription("The cache mode of lookup join.");
 
+    public static final ConfigOption<String> LOOKUP_DYNAMIC_PARTITION =
+            ConfigOptions.key("lookup.dynamic-partition")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Specific dynamic partition for lookup, only support 'max_pt()' currently.");
+
+    public static final ConfigOption<Duration> LOOKUP_DYNAMIC_PARTITION_REFRESH_INTERVAL =
+            ConfigOptions.key("lookup.dynamic-partition.refresh-interval")
+                    .durationType()
+                    .defaultValue(Duration.ofHours(1))
+                    .withDescription(
+                            "Specific dynamic partition refresh interval for lookup, "
+                                    + "scan all partitions and obtain corresponding partition.");
+
     public static final ConfigOption<Boolean> SINK_AUTO_TAG_FOR_SAVEPOINT =
             ConfigOptions.key("sink.savepoint.auto-tag")
                     .booleanType()
@@ -327,6 +345,20 @@ public class FlinkConnectorOptions {
             }
         }
         return list;
+    }
+
+    public static boolean prepareCommitWaitCompaction(Options options) {
+        if (options.get(DELETION_VECTORS_ENABLED)) {
+            // DeletionVector (DV) is maintained in the compaction thread, but it needs to be
+            // read into a file during prepareCommit (write thread) to commit it.
+            // We must set waitCompaction to true so that there are no multiple threads
+            // operating DV simultaneously.
+            return true;
+        }
+
+        ChangelogProducer changelogProducer = options.get(CoreOptions.CHANGELOG_PRODUCER);
+        return changelogProducer == ChangelogProducer.LOOKUP
+                && options.get(CHANGELOG_PRODUCER_LOOKUP_WAIT);
     }
 
     /** The mode of lookup cache. */

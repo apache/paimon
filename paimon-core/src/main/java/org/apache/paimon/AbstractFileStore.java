@@ -19,6 +19,7 @@
 package org.apache.paimon;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.index.HashIndexFile;
 import org.apache.paimon.index.IndexFileHandler;
@@ -33,6 +34,7 @@ import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFile;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -64,7 +66,7 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
 
     protected final FileIO fileIO;
     protected final SchemaManager schemaManager;
-    protected final long schemaId;
+    protected final TableSchema schema;
     protected final CoreOptions options;
     protected final RowType partitionType;
     private final CatalogEnvironment catalogEnvironment;
@@ -74,13 +76,13 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public AbstractFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             CoreOptions options,
             RowType partitionType,
             CatalogEnvironment catalogEnvironment) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
+        this.schema = schema;
         this.options = options;
         this.partitionType = partitionType;
         this.catalogEnvironment = catalogEnvironment;
@@ -142,8 +144,10 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     public IndexFileHandler newIndexFileHandler() {
         return new IndexFileHandler(
                 snapshotManager(),
+                pathFactory().indexFileFactory(),
                 indexManifestFileFactory().create(),
-                new HashIndexFile(fileIO, pathFactory().indexFileFactory()));
+                new HashIndexFile(fileIO, pathFactory().indexFileFactory()),
+                new DeletionVectorsIndexFile(fileIO, pathFactory().indexFileFactory()));
     }
 
     @Override
