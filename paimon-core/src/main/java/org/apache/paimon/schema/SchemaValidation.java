@@ -463,10 +463,9 @@ public class SchemaValidation {
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for none or lookup changelog producer now.");
 
-        // todo: implement it
         checkArgument(
                 !options.mergeEngine().equals(MergeEngine.FIRST_ROW),
-                "Deletion vectors mode is not supported for first row merge engine now.");
+                "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
     }
 
     private static void validateSequenceField(TableSchema schema, CoreOptions options) {
