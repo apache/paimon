@@ -123,17 +123,7 @@ spark.read
 
 {{< /tab >}}
 
-{{< tab "Trino" >}}
-
-```sql
--- read the snapshot from specified timestamp with a long value in unix milliseconds
-SET SESSION paimon.scan_timestamp_millis=1679486589444;
-SELECT * FROM t;
-```
-
-{{< /tab >}}
-
-{{< tab "Trino 368+" >}}
+{{< tab "Trino 422+" >}}
 
 ```sql
 -- read the snapshot from specified timestamp
