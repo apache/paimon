@@ -113,6 +113,7 @@ public class ManifestCommittableSerializerTest {
                 0,
                 1,
                 0,
-                level);
+                level,
+                0L);
     }
 }
