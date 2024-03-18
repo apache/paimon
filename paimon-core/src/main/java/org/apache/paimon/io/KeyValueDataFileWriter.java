@@ -160,7 +160,6 @@ public class KeyValueDataFileWriter
                 path.getName(),
                 fileIO.getFileSize(path),
                 recordCount(),
-                deleteRecordCount,
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),
                 keyStats,
@@ -168,6 +167,7 @@ public class KeyValueDataFileWriter
                 minSeqNumber,
                 maxSeqNumber,
                 schemaId,
-                level);
+                level,
+                deleteRecordCount);
     }
 }

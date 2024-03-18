@@ -106,7 +106,6 @@ public class ManifestCommittableSerializerTest {
                 String.valueOf(name),
                 0,
                 1,
-                0L,
                 row(0),
                 row(0),
                 newTableStats(0, 1),
@@ -114,6 +113,7 @@ public class ManifestCommittableSerializerTest {
                 0,
                 1,
                 0,
-                level);
+                level,
+                0L);
     }
 }

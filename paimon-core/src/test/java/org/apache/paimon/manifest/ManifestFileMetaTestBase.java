@@ -72,7 +72,6 @@ public abstract class ManifestFileMetaTestBase {
                         fileName,
                         0, // not used
                         0, // not used
-                        0L, // not used
                         binaryRow, // not used
                         binaryRow, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
@@ -82,7 +81,9 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         Collections.emptyList(),
-                        Timestamp.fromEpochMillis(200000)));
+                        Timestamp.fromEpochMillis(200000),
+                        0L // not used
+                        ));
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
@@ -236,7 +237,6 @@ public abstract class ManifestFileMetaTestBase {
                         "", // not used
                         0, // not used
                         rowCount,
-                        0L,
                         null, // not used
                         null, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
@@ -244,7 +244,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         0, // not used
                         0, // not used
-                        0 // not used
-                        ));
+                        0, // not used
+                        0L));
     }
 }

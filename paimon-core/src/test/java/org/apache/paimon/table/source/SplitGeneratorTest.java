@@ -43,7 +43,6 @@ public class SplitGeneratorTest {
                 name,
                 rowCount,
                 1,
-                0L,
                 EMPTY_ROW,
                 EMPTY_ROW,
                 null,
@@ -51,7 +50,8 @@ public class SplitGeneratorTest {
                 minSequence,
                 maxSequence,
                 0,
-                0);
+                0,
+                0L);
     }
 
     @Test

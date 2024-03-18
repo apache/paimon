@@ -67,7 +67,6 @@ public class CompactionTaskSimpleSerializerTest {
                 UUID.randomUUID().toString(),
                 0,
                 1,
-                0L,
                 row(0),
                 row(0),
                 newTableStats(0, 1),
@@ -75,6 +74,7 @@ public class CompactionTaskSimpleSerializerTest {
                 0,
                 1,
                 0,
-                0);
+                0,
+                0L);
     }
 }

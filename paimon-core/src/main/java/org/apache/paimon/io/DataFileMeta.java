@@ -61,12 +61,8 @@ public class DataFileMeta {
     private final String fileName;
     private final long fileSize;
 
-    // rowCount = addRowCount + deleteRowCount
-    // Why don't we keep addRowCount and deleteRowCount?
-    // Because in previous versions of DataFileMeta, we only keep rowCount.
-    // We have to keep the compatibility.
+    // total number of rows (including add & delete) in this file
     private final long rowCount;
-    private final @Nullable Long deleteRowCount;
 
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
@@ -81,6 +77,12 @@ public class DataFileMeta {
     private final List<String> extraFiles;
     private final Timestamp creationTime;
 
+    // rowCount = addRowCount + deleteRowCount
+    // Why don't we keep addRowCount and deleteRowCount?
+    // Because in previous versions of DataFileMeta, we only keep rowCount.
+    // We have to keep the compatibility.
+    private final @Nullable Long deleteRowCount;
+
     public static DataFileMeta forAppend(
             String fileName,
             long fileSize,
@@ -93,7 +95,6 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
-                0L,
                 EMPTY_MIN_KEY,
                 EMPTY_MAX_KEY,
                 EMPTY_KEY_STATS,
@@ -101,14 +102,14 @@ public class DataFileMeta {
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                DUMMY_LEVEL);
+                DUMMY_LEVEL,
+                0L);
     }
 
     public DataFileMeta(
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable Long deleteRowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -116,12 +117,12 @@ public class DataFileMeta {
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId,
-            int level) {
+            int level,
+            @Nullable Long deleteRowCount) {
         this(
                 fileName,
                 fileSize,
                 rowCount,
-                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -131,14 +132,14 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 Collections.emptyList(),
-                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp());
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
+                deleteRowCount);
     }
 
     public DataFileMeta(
             String fileName,
             long fileSize,
             long rowCount,
-            @Nullable Long deleteRowCount,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -148,12 +149,12 @@ public class DataFileMeta {
             long schemaId,
             int level,
             List<String> extraFiles,
-            Timestamp creationTime) {
+            Timestamp creationTime,
+            @Nullable Long deleteRowCount) {
         this.fileName = fileName;
         this.fileSize = fileSize;
 
         this.rowCount = rowCount;
-        this.deleteRowCount = deleteRowCount;
 
         this.minKey = minKey;
         this.maxKey = maxKey;
@@ -166,6 +167,8 @@ public class DataFileMeta {
         this.schemaId = schemaId;
         this.extraFiles = Collections.unmodifiableList(extraFiles);
         this.creationTime = creationTime;
+
+        this.deleteRowCount = deleteRowCount;
     }
 
     public String fileName() {
@@ -263,7 +266,6 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
-                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -273,7 +275,8 @@ public class DataFileMeta {
                 schemaId,
                 newLevel,
                 extraFiles,
-                creationTime);
+                creationTime,
+                deleteRowCount);
     }
 
     public List<Path> collectFiles(DataFilePathFactory pathFactory) {
@@ -288,7 +291,6 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
-                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -298,7 +300,8 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 newExtraFiles,
-                creationTime);
+                creationTime,
+                deleteRowCount);
     }
 
     @Override
@@ -313,7 +316,6 @@ public class DataFileMeta {
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
-                && Objects.equals(deleteRowCount, that.deleteRowCount)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
                 && Objects.equals(keyStats, that.keyStats)
@@ -323,7 +325,8 @@ public class DataFileMeta {
                 && schemaId == that.schemaId
                 && level == that.level
                 && Objects.equals(extraFiles, that.extraFiles)
-                && Objects.equals(creationTime, that.creationTime);
+                && Objects.equals(creationTime, that.creationTime)
+                && Objects.equals(deleteRowCount, that.deleteRowCount);
     }
 
     @Override
@@ -332,7 +335,6 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
-                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -342,20 +344,20 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime);
+                creationTime,
+                deleteRowCount);
     }
 
     @Override
     public String toString() {
         return String.format(
-                "{fileName: %s, fileSize: %d, rowCount: %d, deleteRowCount: %d, "
+                "{fileName: %s, fileSize: %d, rowCount: %d, "
                         + "minKey: %s, maxKey: %s, keyStats: %s, valueStats: %s, "
                         + "minSequenceNumber: %d, maxSequenceNumber: %d, "
-                        + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s}",
+                        + "schemaId: %d, level: %d, extraFiles: %s, creationTime: %s, deleteRowCount: %d}",
                 fileName,
                 fileSize,
                 rowCount,
-                deleteRowCount,
                 minKey,
                 maxKey,
                 keyStats,
@@ -365,7 +367,8 @@ public class DataFileMeta {
                 schemaId,
                 level,
                 extraFiles,
-                creationTime);
+                creationTime,
+                deleteRowCount);
     }
 
     public static RowType schema() {

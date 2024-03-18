@@ -40,7 +40,6 @@ public class DataFileTestUtils {
         return new DataFileMeta(
                 "",
                 maxSeq - minSeq + 1,
-                maxSeq - minSeq + 1,
                 0L,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
@@ -51,7 +50,8 @@ public class DataFileTestUtils {
                 0L,
                 DataFileMeta.DUMMY_LEVEL,
                 Collections.emptyList(),
-                Timestamp.fromEpochMillis(100));
+                Timestamp.fromEpochMillis(100),
+                maxSeq - minSeq + 1);
     }
 
     public static DataFileMeta newFile() {
@@ -59,7 +59,6 @@ public class DataFileTestUtils {
                 "",
                 0,
                 0,
-                0L,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
                 StatsTestUtils.newEmptyTableStats(),
@@ -67,7 +66,8 @@ public class DataFileTestUtils {
                 0,
                 0,
                 0,
-                0);
+                0,
+                0L);
     }
 
     public static DataFileMeta newFile(
@@ -76,7 +76,6 @@ public class DataFileTestUtils {
                 name,
                 maxKey - minKey + 1,
                 1,
-                0L,
                 row(minKey),
                 row(maxKey),
                 null,
@@ -84,7 +83,8 @@ public class DataFileTestUtils {
                 0,
                 maxSequence,
                 0,
-                level);
+                level,
+                0L);
     }
 
     public static BinaryRow row(int i) {

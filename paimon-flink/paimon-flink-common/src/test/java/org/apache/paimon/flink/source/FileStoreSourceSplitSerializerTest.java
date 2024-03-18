@@ -77,7 +77,6 @@ public class FileStoreSourceSplitSerializerTest {
                 "",
                 0,
                 1,
-                0L,
                 row(0),
                 row(0),
                 StatsTestUtils.newEmptyTableStats(),
@@ -85,7 +84,8 @@ public class FileStoreSourceSplitSerializerTest {
                 0,
                 1,
                 0,
-                level);
+                level,
+                0L);
     }
 
     public static FileStoreSourceSplit newSourceSplit(
