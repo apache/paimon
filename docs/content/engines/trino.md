@@ -96,7 +96,7 @@ Let Paimon use a secure temporary directory.
 ```bash
 tar -zxf paimon-trino-<trino-version>-{{< version >}}-plugin.tar.gz -C ${TRINO_HOME}/plugin
 ```
-the variable `trino-version` is module name, must be one of 422,427.
+the variable `trino-version` is module name, must be one of 422, 427.
 > NOTE: For JDK 17, when Deploying Trino, should add jvm options: `--add-opens=java.base/sun.nio.ch=ALL-UNNAMED --add-opens=java.base/java.nio=ALL-UNNAMED`
 
 ### Configure
