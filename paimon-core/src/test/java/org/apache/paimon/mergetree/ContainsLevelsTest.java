@@ -235,7 +235,7 @@ public class ContainsLevelsTest {
                 KeyValueFileReaderFactory.builder(
                         FileIOFinder.find(path),
                         createSchemaManager(path),
-                        0,
+                        createSchemaManager(path).schema(0),
                         keyType,
                         rowType,
                         ignore -> new FlushingFileFormat("avro"),

@@ -86,7 +86,8 @@ public abstract class FileStoreExpireTestBase {
                         TestKeyValueGenerator.KEY_TYPE,
                         TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                         TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                        DeduplicateMergeFunction.factory())
+                        DeduplicateMergeFunction.factory(),
+                        null)
                 .changelogProducer(changelogProducer)
                 .build();
     }

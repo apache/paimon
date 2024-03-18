@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.FieldStatsConverters;
@@ -50,7 +51,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             KeyValueFieldsExtractor keyValueFieldsExtractor,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
@@ -64,6 +65,7 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
+                schema,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
@@ -72,10 +74,12 @@ public class KeyValueFileStoreScan extends AbstractFileStoreScan {
                 branchName);
         this.fieldKeyStatsConverters =
                 new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)), schemaId);
+                        sid -> keyValueFieldsExtractor.keyFields(scanTableSchema(sid)),
+                        schema.id());
         this.fieldValueStatsConverters =
                 new FieldStatsConverters(
-                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)), schemaId);
+                        sid -> keyValueFieldsExtractor.valueFields(scanTableSchema(sid)),
+                        schema.id());
         this.deletionVectorsEnabled = deletionVectorsEnabled;
     }
 

@@ -282,7 +282,7 @@ public class KeyValueFileReadWriteTest {
                 KeyValueFileReaderFactory.builder(
                         fileIO,
                         createTestSchemaManager(path),
-                        0,
+                        createTestSchemaManager(path).schema(0),
                         KEY_TYPE,
                         DEFAULT_ROW_TYPE,
                         ignore -> new FlushingFileFormat(format),

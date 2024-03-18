@@ -31,6 +31,7 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.AsyncRecordReader;
 import org.apache.paimon.utils.BulkFormatMapping;
@@ -52,7 +53,7 @@ public class KeyValueFileReaderFactory {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
-    private final long schemaId;
+    private final TableSchema schema;
     private final RowType keyType;
     private final RowType valueType;
 
@@ -67,7 +68,7 @@ public class KeyValueFileReaderFactory {
     private KeyValueFileReaderFactory(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType keyType,
             RowType valueType,
             BulkFormatMapping.BulkFormatMappingBuilder bulkFormatMappingBuilder,
@@ -77,7 +78,7 @@ public class KeyValueFileReaderFactory {
             DeletionVector.Factory dvFactory) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
+        this.schema = schema;
         this.keyType = keyType;
         this.valueType = valueType;
         this.bulkFormatMappingBuilder = bulkFormatMappingBuilder;
@@ -110,8 +111,8 @@ public class KeyValueFileReaderFactory {
                 () ->
                         bulkFormatMappingBuilder.build(
                                 formatIdentifier,
-                                schemaManager.schema(this.schemaId),
-                                schemaManager.schema(schemaId));
+                                schema,
+                                schemaId == schema.id() ? schema : schemaManager.schema(schemaId));
 
         BulkFormatMapping bulkFormatMapping =
                 reuseFormat
@@ -141,7 +142,7 @@ public class KeyValueFileReaderFactory {
     public static Builder builder(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType keyType,
             RowType valueType,
             FileFormatDiscover formatDiscover,
@@ -151,7 +152,7 @@ public class KeyValueFileReaderFactory {
         return new Builder(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 keyType,
                 valueType,
                 formatDiscover,
@@ -165,7 +166,7 @@ public class KeyValueFileReaderFactory {
 
         private final FileIO fileIO;
         private final SchemaManager schemaManager;
-        private final long schemaId;
+        private final TableSchema schema;
         private final RowType keyType;
         private final RowType valueType;
         private final FileFormatDiscover formatDiscover;
@@ -182,7 +183,7 @@ public class KeyValueFileReaderFactory {
         private Builder(
                 FileIO fileIO,
                 SchemaManager schemaManager,
-                long schemaId,
+                TableSchema schema,
                 RowType keyType,
                 RowType valueType,
                 FileFormatDiscover formatDiscover,
@@ -191,7 +192,7 @@ public class KeyValueFileReaderFactory {
                 CoreOptions options) {
             this.fileIO = fileIO;
             this.schemaManager = schemaManager;
-            this.schemaId = schemaId;
+            this.schema = schema;
             this.keyType = keyType;
             this.valueType = valueType;
             this.formatDiscover = formatDiscover;
@@ -209,7 +210,7 @@ public class KeyValueFileReaderFactory {
             return new Builder(
                     fileIO,
                     schemaManager,
-                    schemaId,
+                    schema,
                     keyType,
                     valueType,
                     formatDiscover,
@@ -255,7 +256,7 @@ public class KeyValueFileReaderFactory {
             return new KeyValueFileReaderFactory(
                     fileIO,
                     schemaManager,
-                    schemaId,
+                    schema,
                     projectedKeyType,
                     projectedValueType,
                     BulkFormatMapping.newBuilder(
