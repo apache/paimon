@@ -56,6 +56,7 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
 import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
 import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
@@ -345,8 +346,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 segment.put(bytes.length - 1, kv.valueKind().toByteValue());
                 return bytes;
             } else {
-                // len: min 1 - max 9
-                byte[] bytes = new byte[9];
+                byte[] bytes = new byte[MAX_VAR_LONG_SIZE];
                 int len = encodeLong(bytes, rowPosition);
                 return Arrays.copyOf(bytes, len);
             }
