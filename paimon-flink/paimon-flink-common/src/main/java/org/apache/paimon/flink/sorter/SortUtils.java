@@ -146,7 +146,9 @@ public class SortUtils {
                         keyTypeInformation,
                         sampleSize,
                         rangeNum,
-                        sinkParallelism)
+                        sinkParallelism,
+                        valueRowType,
+                        options.sortBySize())
                 .map(
                         a -> new JoinedRow(convertor.apply(a.f0), new FlinkRowWrapper(a.f1)),
                         internalRowType)
