@@ -165,9 +165,9 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public void purgeTable() {
+    public void truncateTable() {
         checkCommitted();
-        commit.purgeTable(COMMIT_IDENTIFIER);
+        commit.truncateTable(COMMIT_IDENTIFIER);
     }
 
     private void checkCommitted() {

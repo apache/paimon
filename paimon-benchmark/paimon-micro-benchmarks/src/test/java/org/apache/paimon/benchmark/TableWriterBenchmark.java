@@ -130,7 +130,7 @@ public class TableWriterBenchmark extends TableBenchmark {
                     }
                     try {
                         commit.commit(write.prepareCommit());
-                        writeBuilder.newCommit().purgeTable();
+                        writeBuilder.newCommit().truncateTable();
                         write.close();
                         commit.close();
                     } catch (Exception e) {

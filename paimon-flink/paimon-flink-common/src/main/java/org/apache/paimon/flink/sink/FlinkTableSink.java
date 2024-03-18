@@ -41,6 +41,6 @@ public class FlinkTableSink extends SupportsRowLevelOperationFlinkTableSink
 
     @Override
     public void executeTruncation() {
-        table.newBatchWriteBuilder().newCommit().purgeTable();
+        table.newBatchWriteBuilder().newCommit().truncateTable();
     }
 }
