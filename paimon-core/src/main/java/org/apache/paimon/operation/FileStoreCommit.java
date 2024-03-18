@@ -78,7 +78,7 @@ public interface FileStoreCommit {
      */
     void dropPartitions(List<Map<String, String>> partitions, long commitIdentifier);
 
-    void purgeTable(long commitIdentifier);
+    void truncateTable(long commitIdentifier);
 
     /** Abort an unsuccessful commit. The data files will be deleted. */
     void abort(List<CommitMessage> commitMessages);

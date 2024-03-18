@@ -65,6 +65,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
+import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
@@ -159,9 +160,19 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Override
     public void commit(List<CommitMessage> commitMessages) {
+        checkCommitted();
+        commit(COMMIT_IDENTIFIER, commitMessages);
+    }
+
+    @Override
+    public void truncateTable() {
+        checkCommitted();
+        commit.truncateTable(COMMIT_IDENTIFIER);
+    }
+
+    private void checkCommitted() {
         checkState(!batchCommitted, "BatchTableCommit only support one-time committing.");
         batchCommitted = true;
-        commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
     }
 
     @Override
