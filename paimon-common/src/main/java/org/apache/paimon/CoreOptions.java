@@ -28,7 +28,6 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -2100,41 +2099,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-    }
-
-    /** Specifies the way of making up time precision for sequence field. */
-    public enum SequenceAutoPadding implements DescribedEnum {
-        ROW_KIND_FLAG(
-                "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
-
-        private final String value;
-        private final String description;
-
-        SequenceAutoPadding(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public static SequenceAutoPadding fromString(String s) {
-            return OptionsUtils.convertToEnum(s, SequenceAutoPadding.class);
         }
     }
 
