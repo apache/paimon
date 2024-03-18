@@ -28,6 +28,7 @@ import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
@@ -50,14 +51,14 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
     public AppendOnlyFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             CoreOptions options,
             RowType partitionType,
             RowType bucketKeyType,
             RowType rowType,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
         this.bucketKeyType = bucketKeyType;
         this.rowType = rowType;
         this.tableName = tableName;
@@ -82,7 +83,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
         return new AppendOnlyFileStoreRead(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 rowType,
                 FileFormatDiscover.of(options),
                 pathFactory());
@@ -99,7 +100,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
         return new AppendOnlyFileStoreWrite(
                 fileIO,
                 newRead(),
-                schemaId,
+                schema.id(),
                 commitUser,
                 rowType,
                 pathFactory(),
@@ -138,7 +139,7 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
-                schemaId,
+                schema,
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),

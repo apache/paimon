@@ -41,7 +41,6 @@ import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
@@ -89,14 +88,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     public KeyValueFileStoreRead(
             CoreOptions options,
-            SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType keyType,
             RowType valueType,
             Comparator<InternalRow> keyComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             KeyValueFileReaderFactory.Builder readerFactoryBuilder) {
-        this.tableSchema = schemaManager.schema(schemaId);
+        this.tableSchema = schema;
         this.readerFactoryBuilder = readerFactoryBuilder;
         this.fileIO = readerFactoryBuilder.fileIO();
         this.keyComparator = keyComparator;
