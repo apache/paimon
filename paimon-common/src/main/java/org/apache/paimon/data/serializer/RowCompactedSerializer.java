@@ -50,6 +50,7 @@ import static org.apache.paimon.memory.MemorySegmentUtils.bitSet;
 import static org.apache.paimon.types.DataTypeChecks.getPrecision;
 import static org.apache.paimon.types.DataTypeChecks.getScale;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_INT_SIZE;
 
 /** A {@link Serializer} for {@link InternalRow} using compacted binary. */
 public class RowCompactedSerializer implements Serializer<InternalRow> {
@@ -415,7 +416,7 @@ public class RowCompactedSerializer implements Serializer<InternalRow> {
 
         private void writeUnsignedInt(int value) {
             checkArgument(value >= 0);
-            ensureCapacity(5);
+            ensureCapacity(MAX_VAR_INT_SIZE);
             int len = VarLengthIntUtils.encodeInt(buffer, position, value);
             position += len;
         }

@@ -28,7 +28,6 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -1084,6 +1083,14 @@ public class CoreOptions implements Serializable {
                             "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
+    public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
+            key("sort-compaction.range-strategy")
+                    .enumType(RangeStrategy.class)
+                    .defaultValue(RangeStrategy.QUANTITY)
+                    .withDescription(
+                            "The range strategy of sort compaction, the default value is quantity.\n"
+                                    + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
+                                    + "the config can be set to size.");
 
     private final Options options;
 
@@ -1149,6 +1156,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public boolean sortBySize() {
+        return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
     }
 
     public static FileFormat createFileFormat(
@@ -2103,41 +2114,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the way of making up time precision for sequence field. */
-    public enum SequenceAutoPadding implements DescribedEnum {
-        ROW_KIND_FLAG(
-                "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
-
-        private final String value;
-        private final String description;
-
-        SequenceAutoPadding(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public static SequenceAutoPadding fromString(String s) {
-            return OptionsUtils.convertToEnum(s, SequenceAutoPadding.class);
-        }
-    }
-
     /** The mode for tag creation. */
     public enum TagCreationMode implements DescribedEnum {
         NONE("none", "No automatically created tags."),
@@ -2244,6 +2220,12 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    /** Specifies range strategy. */
+    public enum RangeStrategy {
+        SIZE,
+        QUANTITY
     }
 
     /** Specifies the log consistency mode for table. */

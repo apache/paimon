@@ -321,7 +321,7 @@ public class ManifestFileMeta {
         for (; j < base.size(); j++) {
             ManifestFileMeta file = base.get(j);
             boolean contains = false;
-            for (ManifestEntry entry : manifestFile.read(file.fileName)) {
+            for (ManifestEntry entry : manifestFile.read(file.fileName, file.fileSize)) {
                 checkArgument(entry.kind() == FileKind.ADD);
                 if (deleteEntries.contains(entry.identifier())) {
                     contains = true;

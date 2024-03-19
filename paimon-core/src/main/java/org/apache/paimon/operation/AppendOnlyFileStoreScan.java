@@ -24,6 +24,7 @@ import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.FieldStatsConverters;
@@ -44,7 +45,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             ScanBucketFilter bucketFilter,
             SnapshotManager snapshotManager,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             ManifestFile.Factory manifestFileFactory,
             ManifestList.Factory manifestListFactory,
             int numOfBuckets,
@@ -56,6 +57,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 bucketFilter,
                 snapshotManager,
                 schemaManager,
+                schema,
                 manifestFileFactory,
                 manifestListFactory,
                 numOfBuckets,
@@ -63,7 +65,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 scanManifestParallelism,
                 branchName);
         this.fieldStatsConverters =
-                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schemaId);
+                new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {

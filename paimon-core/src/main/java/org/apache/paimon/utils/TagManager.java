@@ -77,18 +77,24 @@ public class TagManager {
     /** Create a tag from given snapshot and save it in the storage. */
     public void createTag(Snapshot snapshot, String tagName, List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
-        checkArgument(!tagExists(tagName), "Tag name '%s' already exists.", tagName);
 
-        Path newTagPath = tagPath(tagName);
-        try {
-            fileIO.writeFileUtf8(newTagPath, snapshot.toJson());
-        } catch (IOException e) {
-            throw new RuntimeException(
-                    String.format(
-                            "Exception occurs when committing tag '%s' (path %s). "
-                                    + "Cannot clean up because we can't determine the success.",
-                            tagName, newTagPath),
-                    e);
+        // skip create tag for the same snapshot of the same name.
+        if (tagExists(tagName)) {
+            Snapshot tagged = taggedSnapshot(tagName);
+            Preconditions.checkArgument(
+                    tagged.id() == snapshot.id(), "Tag name '%s' already exists.", tagName);
+        } else {
+            Path newTagPath = tagPath(tagName);
+            try {
+                fileIO.writeFileUtf8(newTagPath, snapshot.toJson());
+            } catch (IOException e) {
+                throw new RuntimeException(
+                        String.format(
+                                "Exception occurs when committing tag '%s' (path %s). "
+                                        + "Cannot clean up because we can't determine the success.",
+                                tagName, newTagPath),
+                        e);
+            }
         }
 
         try {

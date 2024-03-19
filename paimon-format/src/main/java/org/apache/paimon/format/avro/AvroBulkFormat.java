@@ -49,14 +49,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException {
-        return new AvroReader(fileIO, file);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+    public RecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        throw new UnsupportedOperationException();
+        return new AvroReader(context.fileIO(), context.filePath(), context.fileSize());
     }
 
     private class AvroReader implements RecordReader<InternalRow> {
@@ -67,20 +62,20 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private final long end;
         private final Pool<Object> pool;
 
-        private AvroReader(FileIO fileIO, Path path) throws IOException {
+        private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
             this.fileIO = fileIO;
-            this.reader = createReaderFromPath(path);
+            this.end = fileSize;
+            this.reader = createReaderFromPath(path, end);
             this.reader.sync(0);
-            this.end = fileIO.getFileSize(path);
             this.pool = new Pool<>(1);
             this.pool.add(new Object());
         }
 
-        private DataFileReader<InternalRow> createReaderFromPath(Path path) throws IOException {
+        private DataFileReader<InternalRow> createReaderFromPath(Path path, long fileSize)
+                throws IOException {
             DatumReader<InternalRow> datumReader = new AvroRowDatumReader(projectedRowType);
             SeekableInput in =
-                    new SeekableInputStreamWrapper(
-                            fileIO.newInputStream(path), fileIO.getFileSize(path));
+                    new SeekableInputStreamWrapper(fileIO.newInputStream(path), fileSize);
             try {
                 return (DataFileReader<InternalRow>) DataFileReader.openReader(in, datumReader);
             } catch (Throwable e) {

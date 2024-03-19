@@ -19,9 +19,9 @@
 package org.apache.paimon.codegen
 
 import org.apache.paimon.codegen.GenerateUtils._
-import org.apache.paimon.codegen.ScalarOperatorGens.generateEquals
+import org.apache.paimon.codegen.ScalarOperatorGens.{generateEquals, generateRowEqualiser}
 import org.apache.paimon.types.{BooleanType, DataType, RowType}
-import org.apache.paimon.types.DataTypeChecks.{getFieldTypes, isCompositeType}
+import org.apache.paimon.types.DataTypeChecks.isCompositeType
 import org.apache.paimon.types.DataTypeRoot._
 import org.apache.paimon.utils.TypeUtils.isPrimitive
 
@@ -136,19 +136,7 @@ class EqualiserCodeGenerator(fieldTypes: Array[DataType]) {
     if (isInternalPrimitive(fieldType)) {
       ("", s"$leftFieldTerm == $rightFieldTerm")
     } else if (isCompositeType(fieldType)) {
-      val equaliserGenerator =
-        new EqualiserCodeGenerator(getFieldTypes(fieldType).asScala.toArray)
-      val generatedEqualiser = equaliserGenerator.generateRecordEqualiser("fieldGeneratedEqualiser")
-      val generatedEqualiserTerm =
-        ctx.addReusableObject(generatedEqualiser, "fieldGeneratedEqualiser")
-      val equaliserTypeTerm = classOf[RecordEqualiser].getCanonicalName
-      val equaliserTerm = newName("equaliser")
-      ctx.addReusableMember(s"private $equaliserTypeTerm $equaliserTerm = null;")
-      ctx.addReusableInitStatement(
-        s"""
-           |$equaliserTerm = ($equaliserTypeTerm)
-           |  $generatedEqualiserTerm.newInstance(this.getClass().getClassLoader());
-           |""".stripMargin)
+      val equaliserTerm = generateRowEqualiser(ctx, fieldType)
       ("", s"$equaliserTerm.equals($leftFieldTerm, $rightFieldTerm)")
     } else {
       val left = GeneratedExpression(leftFieldTerm, leftNullTerm, "", fieldType)

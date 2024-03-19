@@ -98,7 +98,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                     new KeyValueFileStore(
                             fileIO(),
                             schemaManager(),
-                            tableSchema.id(),
+                            tableSchema,
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),

@@ -46,7 +46,7 @@ public class ObjectsCacheTest {
                 new ObjectsCache<>(
                         new SegmentsCache<>(1024, MemorySize.ofKibiBytes(5)),
                         new StringSerializer(),
-                        k ->
+                        (k, size) ->
                                 CloseableIterator.adapterForIterator(
                                         map.get(k).stream()
                                                 .map(BinaryString::fromString)
@@ -56,36 +56,48 @@ public class ObjectsCacheTest {
 
         // test empty
         map.put("k1", Collections.emptyList());
-        List<String> values = cache.read("k1", Filter.alwaysTrue(), Filter.alwaysTrue());
+        List<String> values = cache.read("k1", null, Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).isEmpty();
 
         // test values
         List<String> expect = Arrays.asList("v1", "v2", "v3");
         map.put("k2", expect);
-        values = cache.read("k2", Filter.alwaysTrue(), Filter.alwaysTrue());
+        values = cache.read("k2", null, Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).containsExactlyElementsOf(expect);
 
         // test cache
-        values = cache.read("k2", Filter.alwaysTrue(), Filter.alwaysTrue());
+        values = cache.read("k2", null, Filter.alwaysTrue(), Filter.alwaysTrue());
         assertThat(values).containsExactlyElementsOf(expect);
 
         // test filter
         values =
-                cache.read("k2", Filter.alwaysTrue(), r -> r.getString(0).toString().endsWith("2"));
+                cache.read(
+                        "k2",
+                        null,
+                        Filter.alwaysTrue(),
+                        r -> r.getString(0).toString().endsWith("2"));
         assertThat(values).containsExactly("v2");
 
         // test load filter
         expect = Arrays.asList("v1", "v2", "v3");
         map.put("k3", expect);
         values =
-                cache.read("k3", r -> r.getString(0).toString().endsWith("2"), Filter.alwaysTrue());
+                cache.read(
+                        "k3",
+                        null,
+                        r -> r.getString(0).toString().endsWith("2"),
+                        Filter.alwaysTrue());
         assertThat(values).containsExactly("v2");
 
         // test load filter empty
         expect = Arrays.asList("v1", "v2", "v3");
         map.put("k4", expect);
         values =
-                cache.read("k4", r -> r.getString(0).toString().endsWith("5"), Filter.alwaysTrue());
+                cache.read(
+                        "k4",
+                        null,
+                        r -> r.getString(0).toString().endsWith("5"),
+                        Filter.alwaysTrue());
         assertThat(values).isEmpty();
     }
 

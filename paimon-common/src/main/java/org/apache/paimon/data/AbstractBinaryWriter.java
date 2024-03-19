@@ -177,12 +177,6 @@ abstract class AbstractBinaryWriter implements BinaryWriter {
         }
     }
 
-    private void zeroBytes(int offset, int size) {
-        for (int i = offset; i < offset + size; i++) {
-            segment.put(i, (byte) 0);
-        }
-    }
-
     protected void zeroOutPaddingBytes(int numBytes) {
         if ((numBytes & 0x07) > 0) {
             segment.putLong(cursor + ((numBytes >> 3) << 3), 0L);

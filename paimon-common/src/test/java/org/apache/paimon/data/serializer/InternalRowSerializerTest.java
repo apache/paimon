@@ -50,11 +50,7 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
 
     @Override
     protected boolean deepEquals(InternalRow o1, InternalRow o2) {
-        return deepEqualsInternalRow(
-                o1,
-                o2,
-                (InternalRowSerializer) serializer.duplicate(),
-                (InternalRowSerializer) serializer.duplicate());
+        return deepEqualsInternalRow(o1, o2, serializer.duplicate(), serializer.duplicate());
     }
 
     // ----------------------------------------------------------------------------------------------
@@ -113,11 +109,7 @@ abstract class InternalRowSerializerTest extends SerializerTestInstance<Internal
     private void checkDeepEquals(InternalRow should, InternalRow is, boolean checkClass) {
         boolean equals =
                 deepEqualsInternalRow(
-                        should,
-                        is,
-                        (InternalRowSerializer) serializer.duplicate(),
-                        (InternalRowSerializer) serializer.duplicate(),
-                        checkClass);
+                        should, is, serializer.duplicate(), serializer.duplicate(), checkClass);
         assertThat(equals).isTrue();
     }
 

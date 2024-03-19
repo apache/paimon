@@ -60,6 +60,7 @@ import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.FieldsComparator;
@@ -79,6 +80,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.function.Supplier;
 
 import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 import static org.apache.paimon.lookup.LookupStoreFactory.bfGenerator;
@@ -102,7 +104,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
     public KeyValueFileStoreWrite(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             String commitUser,
             RowType keyType,
             RowType valueType,
@@ -135,7 +137,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 KeyValueFileReaderFactory.builder(
                         fileIO,
                         schemaManager,
-                        schemaId,
+                        schema,
                         keyType,
                         valueType,
                         FileFormatDiscover.of(options),
@@ -145,7 +147,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
         this.writerFactoryBuilder =
                 KeyValueFileWriterFactory.builder(
                         fileIO,
-                        schemaId,
+                        schema.id(),
                         keyType,
                         valueType,
                         options.fileFormat(),
@@ -254,8 +256,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             @Nullable FieldsComparator userDefinedSeqComparator,
             Levels levels,
             @Nullable DeletionVectorsMaintainer dvMaintainer) {
-        KeyValueFileReaderFactory.Builder readerFactoryBuilder =
-                this.readerFactoryBuilder.copyWithoutProjection();
         DeletionVector.Factory dvFactory = DeletionVector.factory(dvMaintainer);
         KeyValueFileReaderFactory readerFactory =
                 readerFactoryBuilder.build(partition, bucket, dvFactory);
@@ -285,10 +285,11 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
             if (mergeEngine == FIRST_ROW) {
                 if (options.deletionVectorsEnabled()) {
                     throw new UnsupportedOperationException(
-                            "Deletion vectors mode is not supported for first row merge engine now.");
+                            "First row merge engine does not need deletion vectors because there is no deletion of old data in this merge engine.");
                 }
                 lookupReaderFactory =
                         readerFactoryBuilder
+                                .copyWithoutProjection()
                                 .withValueProjection(new int[0][])
                                 .build(partition, bucket, dvFactory);
                 processor = new ContainsValueProcessor();
@@ -297,7 +298,9 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 processor =
                         lookupStrategy.deletionVector
                                 ? new PositionedKeyValueProcessor(
-                                        valueType, lookupStrategy.produceChangelog)
+                                        valueType,
+                                        lookupStrategy.produceChangelog
+                                                || mergeEngine != DEDUPLICATE)
                                 : new KeyValueProcessor(valueType);
                 wrapperFactory =
                         new LookupMergeFunctionWrapperFactory<>(
