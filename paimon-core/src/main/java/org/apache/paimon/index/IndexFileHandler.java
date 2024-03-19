@@ -151,7 +151,7 @@ public class IndexFileHandler {
 
     public List<IndexManifestEntry> readManifestWithIOException(String indexManifest)
             throws IOException {
-        return indexManifestFile.readWithIOException(indexManifest, null);
+        return indexManifestFile.readWithIOException(indexManifest);
     }
 
     public boolean existsIndexFile(IndexManifestEntry file) {

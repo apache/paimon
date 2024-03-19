@@ -82,6 +82,10 @@ public class ObjectsFile<T> {
         return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
 
+    public List<T> readWithIOException(String fileName) throws IOException {
+        return readWithIOException(fileName, null);
+    }
+
     public List<T> readWithIOException(String fileName, @Nullable Long fileSize)
             throws IOException {
         return readWithIOException(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());

@@ -256,7 +256,7 @@ public abstract class FileDeletionBase {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
         for (String manifest : files) {
             List<ManifestEntry> entries;
-            entries = manifestFile.readWithIOException(manifest, null);
+            entries = manifestFile.readWithIOException(manifest);
             FileEntry.mergeEntries(entries, map);
         }
 
