@@ -87,14 +87,7 @@ public abstract class ManifestFileMetaTestBase {
     }
 
     protected ManifestFileMeta makeManifest(ManifestEntry... entries) {
-        ManifestFileMeta writtenMeta = getManifestFile().write(Arrays.asList(entries)).get(0);
-        return new ManifestFileMeta(
-                writtenMeta.fileName(),
-                entries.length * 100, // for testing purpose
-                writtenMeta.numAddedFiles(),
-                writtenMeta.numDeletedFiles(),
-                writtenMeta.partitionStats(),
-                0);
+        return getManifestFile().write(Arrays.asList(entries)).get(0);
     }
 
     abstract ManifestFile getManifestFile();
