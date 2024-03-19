@@ -68,6 +68,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 import org.apache.paimon.utils.TraceableFileIO;
 
+import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -913,6 +914,64 @@ public abstract class FileStoreTableTestBase {
         Snapshot tagged = tagManager.taggedSnapshot("test-tag");
         Snapshot snapshot2 = table.snapshotManager().snapshot(2);
         assertThat(tagged.equals(snapshot2)).isTrue();
+    }
+
+    @Test
+    public void testCreateTagOnExpiredSnapshot() throws Exception {
+        FileStoreTable table =
+                createFileStoreTable(
+                        conf -> {
+                            conf.set(SNAPSHOT_NUM_RETAINED_MAX, 1);
+                            conf.set(SNAPSHOT_NUM_RETAINED_MIN, 1);
+                        });
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // snapshot 1
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            table.createTag("test-tag", 1);
+            // verify that tag file exist
+            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            assertThat(tagManager.tagExists("test-tag")).isTrue();
+            // verify that test-tag is equal to snapshot 1
+            Snapshot tagged = tagManager.taggedSnapshot("test-tag");
+            Snapshot snapshot1 = table.snapshotManager().snapshot(1);
+            assertThat(tagged.equals(snapshot1)).isTrue();
+            // snapshot 2
+            write.write(rowData(2, 20, 200L));
+            commit.commit(1, write.prepareCommit(false, 2));
+            SnapshotManager snapshotManager = new SnapshotManager(new TraceableFileIO(), tablePath);
+            // The snapshot 1 is expired.
+            assertThat(snapshotManager.snapshotExists(1)).isFalse();
+            table.createTag("test-tag-2", 1);
+            // verify that tag file exist
+            assertThat(tagManager.tagExists("test-tag-2")).isTrue();
+            // verify that test-tag is equal to snapshot 1
+            Snapshot tag2 = tagManager.taggedSnapshot("test-tag-2");
+            assertThat(tag2.equals(snapshot1)).isTrue();
+        }
+    }
+
+    @Test
+    public void testCreateSameTagName() throws Exception {
+        FileStoreTable table = createFileStoreTable();
+        try (StreamTableWrite write = table.newWrite(commitUser);
+                StreamTableCommit commit = table.newCommit(commitUser)) {
+            // snapshot 1
+            write.write(rowData(1, 10, 100L));
+            commit.commit(0, write.prepareCommit(false, 1));
+            // snapshot 2
+            write.write(rowData(1, 10, 100L));
+            commit.commit(1, write.prepareCommit(false, 2));
+            TagManager tagManager = new TagManager(new TraceableFileIO(), tablePath);
+            table.createTag("test-tag", 1);
+            // verify that tag file exist
+            assertThat(tagManager.tagExists("test-tag")).isTrue();
+            // Create again
+            table.createTag("test-tag", 1);
+            Assertions.assertThatThrownBy(() -> table.createTag("test-tag", 2))
+                    .hasMessageContaining("Tag name 'test-tag' already exists.");
+        }
     }
 
     @Test

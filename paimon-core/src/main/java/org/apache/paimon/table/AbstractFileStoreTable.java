@@ -65,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -427,11 +428,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
+        Snapshot snapshot = null;
+        if (snapshotManager.snapshotExists(fromSnapshotId)) {
+            snapshot = snapshotManager.snapshot(fromSnapshotId);
+        } else {
+            SortedMap<Snapshot, List<String>> tags = tagManager().tags();
+            for (Snapshot snap : tags.keySet()) {
+                if (snap.id() == fromSnapshotId) {
+                    snapshot = snap;
+                    break;
+                } else if (snap.id() > fromSnapshotId) {
+                    break;
+                }
+            }
+        }
         checkArgument(
-                snapshotManager.snapshotExists(fromSnapshotId),
+                snapshot != null,
                 "Cannot create tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
-        createTag(tagName, snapshotManager.snapshot(fromSnapshotId));
+        createTag(tagName, snapshot);
     }
 
     @Override
