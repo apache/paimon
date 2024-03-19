@@ -282,12 +282,12 @@ public class OrphanFilesClean {
             throws IOException {
         List<ManifestFileMeta> result = new ArrayList<>();
 
-        result.addAll(manifestList.readWithIOException(snapshot.baseManifestList()));
-        result.addAll(manifestList.readWithIOException(snapshot.deltaManifestList()));
+        result.addAll(manifestList.readWithIOException(snapshot.baseManifestList(), null));
+        result.addAll(manifestList.readWithIOException(snapshot.deltaManifestList(), null));
 
         String changelogManifestList = snapshot.changelogManifestList();
         if (changelogManifestList != null) {
-            result.addAll(manifestList.readWithIOException(changelogManifestList));
+            result.addAll(manifestList.readWithIOException(changelogManifestList, null));
         }
 
         return result;
@@ -298,7 +298,7 @@ public class OrphanFilesClean {
         List<String> dataFiles = new ArrayList<>();
         for (String manifestName : manifestNames) {
             List<ManifestEntry> manifestEntries =
-                    retryReadingFiles(() -> manifestFile.readWithIOException(manifestName));
+                    retryReadingFiles(() -> manifestFile.readWithIOException(manifestName, null));
             if (manifestEntries == null) {
                 return null;
             }

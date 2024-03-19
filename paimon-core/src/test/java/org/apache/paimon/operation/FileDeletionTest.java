@@ -579,11 +579,12 @@ public class FileDeletionTest {
         ManifestFile manifestFile = store.manifestFileFactory().create();
 
         String deltaManifestList = snapshot2.deltaManifestList();
-        List<ManifestFileMeta> manifestFileMetas = manifestList.read(snapshot2.deltaManifestList());
+        List<ManifestFileMeta> manifestFileMetas =
+                manifestList.read(snapshot2.deltaManifestList(), null);
         assertThat(manifestFileMetas.size()).isEqualTo(1);
 
         String deltaManifestFile = manifestFileMetas.get(0).fileName();
-        List<ManifestEntry> entries = manifestFile.read(deltaManifestFile);
+        List<ManifestEntry> entries = manifestFile.read(deltaManifestFile, null);
         assertThat(entries.size()).isEqualTo(2);
 
         ManifestEntry addEntry = null, deleteEntry = null;

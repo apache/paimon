@@ -214,7 +214,7 @@ public abstract class FileDeletionBase {
      */
     protected List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
         try {
-            return manifestList.read(manifestListName);
+            return manifestList.read(manifestListName, null);
         } catch (Exception e) {
             LOG.warn("Failed to read manifest list file " + manifestListName, e);
             return Collections.emptyList();
@@ -256,7 +256,7 @@ public abstract class FileDeletionBase {
         Map<ManifestEntry.Identifier, ManifestEntry> map = new HashMap<>();
         for (String manifest : files) {
             List<ManifestEntry> entries;
-            entries = manifestFile.readWithIOException(manifest);
+            entries = manifestFile.readWithIOException(manifest, null);
             FileEntry.mergeEntries(entries, map);
         }
 

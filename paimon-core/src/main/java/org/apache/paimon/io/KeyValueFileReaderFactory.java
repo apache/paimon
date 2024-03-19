@@ -25,7 +25,10 @@ import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
+import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -103,7 +106,7 @@ public class KeyValueFileReaderFactory {
             String fileName,
             int level,
             boolean reuseFormat,
-            @Nullable Integer poolSize,
+            @Nullable Integer orcPoolSize,
             long fileSize)
             throws IOException {
         String formatIdentifier = DataFilePathFactory.formatIdentifier(fileName);
@@ -121,19 +124,20 @@ public class KeyValueFileReaderFactory {
                                 new FormatKey(schemaId, formatIdentifier),
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
+        Path filePath = pathFactory.toPath(fileName);
         RecordReader<KeyValue> recordReader =
                 new KeyValueDataFileRecordReader(
-                        fileIO,
                         bulkFormatMapping.getReaderFactory(),
-                        pathFactory.toPath(fileName),
+                        orcPoolSize == null
+                                ? new FormatReaderContext(fileIO, filePath, fileSize)
+                                : new OrcFormatReaderContext(
+                                        fileIO, filePath, fileSize, orcPoolSize),
                         keyType,
                         valueType,
                         level,
-                        poolSize,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),
-                        fileSize);
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());

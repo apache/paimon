@@ -28,13 +28,15 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ObjectSerializer;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Preconditions;
 
 import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
+
+import static org.apache.paimon.utils.FileUtils.createFormatReader;
 
 /**
  * {@link TableStatsExtractor} for test. It reads all records from the file and use {@link
@@ -66,14 +68,25 @@ public class TestTableStatsExtractor implements TableStatsExtractor {
             throws IOException {
         IdentityObjectSerializer serializer = new IdentityObjectSerializer(rowType);
         FormatReaderFactory readerFactory = format.createReaderFactory(rowType);
-        List<InternalRow> records =
-                FileUtils.readListFromFile(fileIO, path, serializer, readerFactory);
+        List<InternalRow> records = readListFromFile(fileIO, path, serializer, readerFactory);
 
         TableStatsCollector statsCollector = new TableStatsCollector(rowType, stats);
         for (InternalRow record : records) {
             statsCollector.collect(record);
         }
         return Pair.of(statsCollector.extract(), new FileInfo(records.size()));
+    }
+
+    private static <T> List<T> readListFromFile(
+            FileIO fileIO,
+            Path path,
+            ObjectSerializer<T> serializer,
+            FormatReaderFactory readerFactory)
+            throws IOException {
+        List<T> result = new ArrayList<>();
+        createFormatReader(fileIO, readerFactory, path, null)
+                .forEachRemaining(row -> result.add(serializer.fromRow(row)));
+        return result;
     }
 
     private static class IdentityObjectSerializer extends ObjectSerializer<InternalRow> {

@@ -22,31 +22,17 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 
-/** the context for creating RecordReader {@link RecordReader}. */
-public class FormatReaderContext implements FormatReaderFactory.Context {
+/** The context for creating orc {@link RecordReader}. */
+public class OrcFormatReaderContext extends FormatReaderContext {
 
-    private final FileIO fileIO;
-    private final Path file;
-    private final long fileSize;
+    private final Integer poolSize;
 
-    public FormatReaderContext(FileIO fileIO, Path file, long fileSize) {
-        this.fileIO = fileIO;
-        this.file = file;
-        this.fileSize = fileSize;
+    public OrcFormatReaderContext(FileIO fileIO, Path filePath, Long fileSize, Integer poolSize) {
+        super(fileIO, filePath, fileSize);
+        this.poolSize = poolSize;
     }
 
-    @Override
-    public FileIO fileIO() {
-        return fileIO;
-    }
-
-    @Override
-    public Path filePath() {
-        return file;
-    }
-
-    @Override
-    public long fileSize() {
-        return fileSize;
+    public int poolSize() {
+        return poolSize;
     }
 }

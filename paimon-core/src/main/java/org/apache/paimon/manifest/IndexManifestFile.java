@@ -61,7 +61,7 @@ public class IndexManifestFile extends ObjectsFile<IndexManifestEntry> {
         if (newIndexFiles.size() > 0) {
             Map<Identifier, IndexManifestEntry> indexEntries = new LinkedHashMap<>();
             List<IndexManifestEntry> entries =
-                    indexManifest == null ? new ArrayList<>() : read(indexManifest);
+                    indexManifest == null ? new ArrayList<>() : read(indexManifest, null);
             entries.addAll(newIndexFiles);
             for (IndexManifestEntry file : entries) {
                 if (file.kind() == FileKind.ADD) {

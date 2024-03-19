@@ -54,7 +54,7 @@ public class ManifestListTest {
         ManifestList manifestList = createManifestList(tempDir.toString());
 
         String manifestListName = manifestList.write(metas);
-        List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName);
+        List<ManifestFileMeta> actualMetas = manifestList.read(manifestListName, null);
         assertThat(actualMetas).isEqualTo(metas);
     }
 

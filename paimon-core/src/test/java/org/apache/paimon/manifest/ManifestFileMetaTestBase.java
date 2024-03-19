@@ -105,7 +105,7 @@ public abstract class ManifestFileMetaTestBase {
             List<ManifestFileMeta> input, List<ManifestFileMeta> merged) {
         List<ManifestEntry> inputEntry =
                 input.stream()
-                        .flatMap(f -> getManifestFile().read(f.fileName()).stream())
+                        .flatMap(f -> getManifestFile().read(f.fileName(), f.fileSize()).stream())
                         .collect(Collectors.toList());
         List<String> entryBeforeMerge =
                 FileEntry.mergeEntries(inputEntry).stream()
@@ -115,7 +115,9 @@ public abstract class ManifestFileMetaTestBase {
 
         List<String> entryAfterMerge = new ArrayList<>();
         for (ManifestFileMeta manifestFileMeta : merged) {
-            List<ManifestEntry> entries = getManifestFile().read(manifestFileMeta.fileName());
+            List<ManifestEntry> entries =
+                    getManifestFile()
+                            .read(manifestFileMeta.fileName(), manifestFileMeta.fileSize());
             for (ManifestEntry entry : entries) {
                 entryAfterMerge.add(entry.kind() + "-" + entry.file().fileName());
             }
@@ -146,7 +148,10 @@ public abstract class ManifestFileMetaTestBase {
             List<ManifestFileMeta> mergedMainfest, List<String> expecteded) {
         List<String> actual =
                 mergedMainfest.stream()
-                        .flatMap(file -> getManifestFile().read(file.fileName()).stream())
+                        .flatMap(
+                                file ->
+                                        getManifestFile().read(file.fileName(), file.fileSize())
+                                                .stream())
                         .map(f -> f.kind() + "-" + f.file().fileName())
                         .collect(Collectors.toList());
         assertThat(actual).hasSameElementsAs(expecteded);
@@ -160,8 +165,8 @@ public abstract class ManifestFileMetaTestBase {
         assertThat(actual.partitionStats()).isEqualTo(expected.partitionStats());
 
         // check content
-        assertThat(manifestFile.read(actual.fileName()))
-                .isEqualTo(manifestFile.read(expected.fileName()));
+        assertThat(manifestFile.read(actual.fileName(), actual.fileSize()))
+                .isEqualTo(manifestFile.read(expected.fileName(), expected.fileSize()));
     }
 
     protected List<ManifestFileMeta> createBaseManifestFileMetas(boolean hasPartition) {
