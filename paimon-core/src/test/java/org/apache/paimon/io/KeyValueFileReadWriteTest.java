@@ -391,7 +391,6 @@ public class KeyValueFileReadWriteTest {
     @ParameterizedTest
     @ValueSource(strings = {"parquet", "orc", "avro"})
     public void testReaderUseFileSizeFromMetadata(String format) throws Exception {
-        testWriteAndReadDataFileImpl(format);
         DataFileTestDataGenerator.Data data = gen.next();
         KeyValueFileWriterFactory writerFactory = createWriterFactory(tempDir.toString(), format);
         DataFileMetaSerializer serializer = new DataFileMetaSerializer();
