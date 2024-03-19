@@ -277,6 +277,15 @@ under the License.
     <profiles>
         <!-- Activate these profiles with -Pflink-x.xx to build and test against different Flink versions -->
         <profile>
+            <id>flink-1.19</id>
+            <properties>
+                <test.flink.main.version>1.19</test.flink.main.version>
+                <test.flink.version>1.19.0</test.flink.version>
+                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
+            </properties>
+        </profile>
+
+        <profile>
             <id>flink-1.17</id>
             <properties>
                 <test.flink.main.version>1.17</test.flink.main.version>
