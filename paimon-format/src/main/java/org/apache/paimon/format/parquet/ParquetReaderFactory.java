@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
@@ -87,9 +88,12 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
+    public ParquetReader createReader(FormatReaderContext context) throws IOException {
+        Path filePath = context.getFile();
+        FileIO fileIO = context.getFileIO();
+        Long fileSize = context.getFileSize();
         final long splitOffset = 0;
-        final long splitLength = fileIO.getFileSize(filePath);
+        final long splitLength = fileSize == null ? fileIO.getFileSize(filePath) : fileSize;
 
         ParquetReadOptions.Builder builder =
                 ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
@@ -106,12 +110,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
 
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException {
-        throw new UnsupportedOperationException();
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {

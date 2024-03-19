@@ -177,6 +177,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                             new RowDataFileRecordReader(
                                     fileIO,
                                     dataFilePathFactory.toPath(file.fileName()),
+                                    file.fileSize(),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),
