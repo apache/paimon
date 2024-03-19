@@ -24,13 +24,10 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
-import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
@@ -88,19 +85,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FormatReaderContext context) throws IOException {
-        Path filePath = context.getFile();
-        FileIO fileIO = context.getFileIO();
-        Long fileSize = context.getFileSize();
-        final long splitOffset = 0;
-        final long splitLength = fileSize == null ? fileIO.getFileSize(filePath) : fileSize;
-
+    public ParquetReader createReader(FormatReaderFactory.Context context) throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
+                ParquetReadOptions.builder().withRange(0, context.fileSize());
         setReadOptions(builder);
 
         ParquetFileReader reader =
-                new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        builder.build());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);

@@ -63,7 +63,7 @@ public class ManifestFileTest {
         checkRollingFiles(meta, actualMetas, manifestFile.suggestedFileSize());
         List<ManifestEntry> actualEntries =
                 actualMetas.stream()
-                        .flatMap(m -> manifestFile.read(m.fileName()).stream())
+                        .flatMap(m -> manifestFile.read(m.fileName(), m.fileSize()).stream())
                         .collect(Collectors.toList());
         assertThat(actualEntries).isEqualTo(entries);
     }

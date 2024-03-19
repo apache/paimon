@@ -54,7 +54,7 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
-        FormatReaderContext context = new FormatReaderContext(fileIO, path, null, fileSize);
+        FormatReaderContext context = new FormatReaderContext(fileIO, path, fileSize);
         this.reader = readerFactory.createReader(context);
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;

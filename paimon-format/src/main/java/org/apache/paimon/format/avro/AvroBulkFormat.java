@@ -19,7 +19,6 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -50,9 +49,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(FormatReaderContext formatReaderContext)
+    public RecordReader<InternalRow> createReader(FormatReaderFactory.Context context)
             throws IOException {
-        return new AvroReader(formatReaderContext.getFileIO(), formatReaderContext.getFile());
+        return new AvroReader(context.fileIO(), context.filePath(), context.fileSize());
     }
 
     private class AvroReader implements RecordReader<InternalRow> {
@@ -63,9 +62,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
         private final long end;
         private final Pool<Object> pool;
 
-        private AvroReader(FileIO fileIO, Path path) throws IOException {
+        private AvroReader(FileIO fileIO, Path path, long fileSize) throws IOException {
             this.fileIO = fileIO;
-            this.end = fileIO.getFileSize(path);
+            this.end = fileSize;
             this.reader = createReaderFromPath(path, end);
             this.reader.sync(0);
             this.pool = new Pool<>(1);

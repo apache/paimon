@@ -458,6 +458,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 .create()
                 .read(
                         manifest.fileName(),
+                        manifest.fileSize(),
                         ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
                         ManifestEntry.createEntryRowFilter(
                                 partitionFilter, bucketFilter, numOfBuckets));
@@ -469,6 +470,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                 .createSimpleFileEntryReader()
                 .read(
                         manifest.fileName(),
+                        manifest.fileSize(),
                         // use filter for ManifestEntry
                         // currently, projection is not pushed down to file format
                         // see SimpleFileEntrySerializer
