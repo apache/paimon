@@ -25,9 +25,9 @@ import org.apache.paimon.reader.RecordReader;
 /** The context for creating orc {@link RecordReader}. */
 public class OrcFormatReaderContext extends FormatReaderContext {
 
-    private final Integer poolSize;
+    private final int poolSize;
 
-    public OrcFormatReaderContext(FileIO fileIO, Path filePath, Long fileSize, Integer poolSize) {
+    public OrcFormatReaderContext(FileIO fileIO, Path filePath, long fileSize, int poolSize) {
         super(fileIO, filePath, fileSize);
         this.poolSize = poolSize;
     }
