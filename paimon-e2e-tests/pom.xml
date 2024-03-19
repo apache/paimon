@@ -281,7 +281,6 @@ under the License.
             <properties>
                 <test.flink.main.version>1.19</test.flink.main.version>
                 <test.flink.version>1.19.0</test.flink.version>
-                <test.flink.connector.kafka.version>${test.flink.version}</test.flink.connector.kafka.version>
             </properties>
         </profile>
 
