@@ -161,6 +161,24 @@ public class TableSchemaTest {
                 .hasMessageContaining("Should not define aggregation on sequence field: 'f3'.");
     }
 
+    @Test
+    public void testFieldsPrefix() {
+        List<DataField> fields =
+                Arrays.asList(
+                        new DataField(0, "f0", DataTypes.INT()),
+                        new DataField(1, "f1", DataTypes.INT()),
+                        new DataField(2, "f2", DataTypes.INT()));
+        List<String> primaryKeys = Collections.singletonList("f0");
+        Map<String, String> options = new HashMap<>();
+        options.put(MERGE_ENGINE.key(), CoreOptions.MergeEngine.AGGREGATE.toString());
+        options.put(FIELDS_PREFIX + ".f1." + AGG_FUNCTION, "max");
+        options.put(FIELDS_PREFIX + ".fake_col." + AGG_FUNCTION, "max");
+        TableSchema schema =
+                new TableSchema(1, fields, 10, Collections.emptyList(), primaryKeys, options, "");
+        assertThatThrownBy(() -> validateTableSchema(schema))
+                .hasMessageContaining("Field fake_col can not be found in table schema.");
+    }
+
     static RowType newRowType(boolean isNullable, int fieldId) {
         return new RowType(
                 isNullable,
