@@ -21,6 +21,7 @@ package org.apache.paimon.flink.sink;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.sink.TagCallback;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -64,6 +65,8 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
     private final CommitterOperator<CommitT, GlobalCommitT> commitOperator;
 
     protected final FileStoreTable table;
+
+    private transient List<TagCallback> callbacks;
 
     public BatchWriteGeneratorTagOperator(
             CommitterOperator<CommitT, GlobalCommitT> commitOperator, FileStoreTable table) {
@@ -114,7 +117,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
         try {
             // If the tag already exists, delete the tag
             if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+                tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
             }
             // Create a new tag
             tagManager.createTag(snapshot, tagName, table.store().createTagCallbacks());
@@ -122,7 +125,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             expireTag();
         } catch (Exception e) {
             if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+                tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
             }
         }
     }
@@ -147,7 +150,8 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
                         for (String toBeDeleted : sortedTagNames) {
-                            tagManager.deleteTag(toBeDeleted, tagDeletion, snapshotManager);
+                            tagManager.deleteTag(
+                                    toBeDeleted, tagDeletion, snapshotManager, callbacks);
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {
                                 break;
@@ -163,6 +167,7 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
     @Override
     public void open() throws Exception {
         commitOperator.open();
+        this.callbacks = table.store().createTagCallbacks();
     }
 
     @Override

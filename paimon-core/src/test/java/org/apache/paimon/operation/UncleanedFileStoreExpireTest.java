@@ -109,7 +109,11 @@ public class UncleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         // randomly delete tags
         for (int id = 1; id <= latestSnapshotId; id++) {
             if (random.nextBoolean()) {
-                tagManager.deleteTag("tag" + id, store.newTagDeletion(), snapshotManager);
+                tagManager.deleteTag(
+                        "tag" + id,
+                        store.newTagDeletion(),
+                        snapshotManager,
+                        Collections.emptyList());
             }
         }
 

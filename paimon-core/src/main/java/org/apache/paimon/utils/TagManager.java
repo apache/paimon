@@ -120,7 +120,10 @@ public class TagManager {
     }
 
     public void deleteTag(
-            String tagName, TagDeletion tagDeletion, SnapshotManager snapshotManager) {
+            String tagName,
+            TagDeletion tagDeletion,
+            SnapshotManager snapshotManager,
+            List<TagCallback> callbacks) {
         checkArgument(!StringUtils.isBlank(tagName), "Tag name '%s' is blank.", tagName);
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
 
@@ -129,12 +132,12 @@ public class TagManager {
 
         // skip file deletion if snapshot exists
         if (snapshotManager.snapshotExists(taggedSnapshot.id())) {
-            fileIO.deleteQuietly(tagPath(tagName));
+            deleteTagMetaFile(tagName, callbacks);
             return;
         } else {
             // FileIO discovers tags by tag file, so we should read all tags before we delete tag
             SortedMap<Snapshot, List<String>> tags = tags();
-            fileIO.deleteQuietly(tagPath(tagName));
+            deleteTagMetaFile(tagName, callbacks);
 
             // skip data file clean if more than 1 tags are created based on this snapshot
             if (tags.get(taggedSnapshot).size() > 1) {
@@ -144,6 +147,17 @@ public class TagManager {
         }
 
         doClean(taggedSnapshot, taggedSnapshots, snapshotManager, tagDeletion);
+    }
+
+    private void deleteTagMetaFile(String tagName, List<TagCallback> callbacks) {
+        fileIO.deleteQuietly(tagPath(tagName));
+        try {
+            callbacks.forEach(callback -> callback.notifyDeletion(tagName));
+        } finally {
+            for (TagCallback tagCallback : callbacks) {
+                IOUtils.closeQuietly(tagCallback);
+            }
+        }
     }
 
     private void doClean(
