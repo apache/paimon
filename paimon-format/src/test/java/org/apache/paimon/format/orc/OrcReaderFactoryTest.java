@@ -19,6 +19,7 @@
 package org.apache.paimon.format.orc;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
@@ -179,8 +180,10 @@ class OrcReaderFactoryTest {
 
         AtomicBoolean isFirst = new AtomicBoolean(true);
 
+        LocalFileIO localFileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
-                format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
+                format.createReader(
+                        new FormatReaderContext(localFileIO, flatFile, randomPooSize, null))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         // check filter: _col0 > randomStart
@@ -202,8 +205,10 @@ class OrcReaderFactoryTest {
         int randomPooSize = new Random().nextInt(3) + 1;
         OrcReaderFactory format = createFormat(FLAT_FILE_TYPE, new int[] {2, 0, 1});
 
+        LocalFileIO localFileIO = new LocalFileIO();
         try (RecordReader<InternalRow> reader =
-                format.createReader(new LocalFileIO(), flatFile, randomPooSize)) {
+                format.createReader(
+                        new FormatReaderContext(localFileIO, flatFile, randomPooSize, null))) {
             reader.transform(row -> row)
                     .filter(row -> row.getInt(1) % 123 == 0)
                     .forEachRemainingWithPosition(

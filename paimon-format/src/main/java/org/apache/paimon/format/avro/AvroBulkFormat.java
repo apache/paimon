@@ -19,6 +19,7 @@
 package org.apache.paimon.format.avro;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -49,14 +50,9 @@ public class AvroBulkFormat implements FormatReaderFactory {
     }
 
     @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file) throws IOException {
-        return new AvroReader(fileIO, file);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
+    public RecordReader<InternalRow> createReader(FormatReaderContext formatReaderContext)
             throws IOException {
-        throw new UnsupportedOperationException();
+        return new AvroReader(formatReaderContext.getFileIO(), formatReaderContext.getFile());
     }
 
     private class AvroReader implements RecordReader<InternalRow> {
