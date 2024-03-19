@@ -24,6 +24,7 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.data.columnar.writable.WritableColumnVector;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
@@ -87,13 +88,10 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
-        return createReader(fileIO, filePath, null);
-    }
-
-    @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath, Long fileSize)
-            throws IOException {
+    public ParquetReader createReader(FormatReaderContext context) throws IOException {
+        Path filePath = context.getFile();
+        FileIO fileIO = context.getFileIO();
+        Long fileSize = context.getFileSize();
         final long splitOffset = 0;
         final long splitLength = fileSize == null ? fileIO.getFileSize(filePath) : fileSize;
 

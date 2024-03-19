@@ -131,7 +131,8 @@ public class KeyValueFileReaderFactory {
                         poolSize,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),fileSize);
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition),
+                        fileSize);
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
             recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());

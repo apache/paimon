@@ -24,6 +24,7 @@ import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -53,7 +54,8 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
-        this.reader = readerFactory.createReader(fileIO, path, fileSize);
+        FormatReaderContext context = new FormatReaderContext(fileIO, path, null, fileSize);
+        this.reader = readerFactory.createReader(context);
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
