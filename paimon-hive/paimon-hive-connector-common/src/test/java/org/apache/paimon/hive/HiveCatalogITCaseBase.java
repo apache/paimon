@@ -177,6 +177,10 @@ public abstract class HiveCatalogITCaseBase {
         Path tablePath = new Path(path, "test_db2.db/t");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("Cannot drop a database which is currently in use.");
+        tEnv.executeSql("USE test_db");
+        assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
                 .hasRootCauseInstanceOf(DatabaseNotEmptyException.class)
                 .hasRootCauseMessage("Database test_db2 in catalog my_hive is not empty.");
 

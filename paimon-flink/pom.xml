@@ -39,6 +39,7 @@ under the License.
         <module>paimon-flink-1.16</module>
         <module>paimon-flink-1.17</module>
         <module>paimon-flink-1.18</module>
+        <module>paimon-flink-1.19</module>
         <module>paimon-flink-action</module>
         <module>paimon-flink-cdc</module>
     </modules>
@@ -94,6 +95,10 @@ under the License.
                 <exclusion>
                     <groupId>com.google.protobuf</groupId>
                     <artifactId>protobuf-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <groupId>commons-io</groupId>
+                    <artifactId>commons-io</artifactId>
                 </exclusion>
             </exclusions>
         </dependency>
@@ -162,6 +167,7 @@ under the License.
                 <module>paimon-flink-1.16</module>
                 <module>paimon-flink-1.17</module>
                 <module>paimon-flink-1.18</module>
+                <module>paimon-flink-1.19</module>
                 <module>paimon-flink-cdc</module>
             </modules>
             <build>
