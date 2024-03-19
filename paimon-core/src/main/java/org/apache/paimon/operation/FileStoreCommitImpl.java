@@ -692,7 +692,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // collect index files
                 if (latestSnapshot.indexManifest() != null) {
                     List<IndexManifestEntry> entries =
-                            indexManifestFile.read(latestSnapshot.indexManifest(), null);
+                            indexManifestFile.read(latestSnapshot.indexManifest());
                     for (IndexManifestEntry entry : entries) {
                         if (partitionFilter == null || partitionFilter.test(entry.partition())) {
                             indexChangesWithOverwrite.add(entry.toDeleteEntry());

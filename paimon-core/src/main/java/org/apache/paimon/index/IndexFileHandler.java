@@ -95,7 +95,7 @@ public class IndexFileHandler {
             return Collections.emptyList();
         }
 
-        List<IndexManifestEntry> allFiles = indexManifestFile.read(indexManifest, null);
+        List<IndexManifestEntry> allFiles = indexManifestFile.read(indexManifest);
         List<IndexManifestEntry> result = new ArrayList<>();
         for (IndexManifestEntry file : allFiles) {
             if (file.indexFile().indexType().equals(indexType)
@@ -146,7 +146,7 @@ public class IndexFileHandler {
     }
 
     public List<IndexManifestEntry> readManifest(String indexManifest) {
-        return indexManifestFile.read(indexManifest, null);
+        return indexManifestFile.read(indexManifest);
     }
 
     public List<IndexManifestEntry> readManifestWithIOException(String indexManifest)

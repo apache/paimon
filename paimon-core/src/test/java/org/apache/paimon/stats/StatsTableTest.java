@@ -71,7 +71,7 @@ public class StatsTableTest extends TableTestBase {
         String manifestListFile = storeTable.snapshotManager().latestSnapshot().deltaManifestList();
 
         ManifestList manifestList = store.manifestListFactory().create();
-        ManifestFileMeta manifest = manifestList.read(manifestListFile, null).get(0);
+        ManifestFileMeta manifest = manifestList.read(manifestListFile).get(0);
 
         // should have partition stats
         BinaryTableStats partitionStats = manifest.partitionStats();

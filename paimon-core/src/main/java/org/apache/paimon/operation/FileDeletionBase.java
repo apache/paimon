@@ -214,7 +214,7 @@ public abstract class FileDeletionBase {
      */
     protected List<ManifestFileMeta> tryReadManifestList(String manifestListName) {
         try {
-            return manifestList.read(manifestListName, null);
+            return manifestList.read(manifestListName);
         } catch (Exception e) {
             LOG.warn("Failed to read manifest list file " + manifestListName, e);
             return Collections.emptyList();

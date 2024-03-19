@@ -74,7 +74,7 @@ public class SnapshotDeletion extends FileDeletionBase {
         Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         for (String manifest : manifestFileNames) {
             try {
-                manifestEntries = manifestFile.read(manifest, null);
+                manifestEntries = manifestFile.read(manifest);
             } catch (Exception e) {
                 // cancel deletion if any exception occurs
                 LOG.warn("Failed to read some manifest files. Cancel deletion.", e);
@@ -154,7 +154,7 @@ public class SnapshotDeletion extends FileDeletionBase {
                 readManifestFileNames(tryReadManifestList(manifestListName));
         for (String file : manifestFileNames) {
             try {
-                List<ManifestEntry> manifestEntries = manifestFile.read(file, null);
+                List<ManifestEntry> manifestEntries = manifestFile.read(file);
                 deleteAddedDataFiles(manifestEntries);
             } catch (Exception e) {
                 // We want to delete the data file, so just ignore the unavailable files

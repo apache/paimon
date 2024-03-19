@@ -367,7 +367,7 @@ public class Snapshot {
      */
     public List<ManifestFileMeta> dataManifests(ManifestList manifestList) {
         List<ManifestFileMeta> result = new ArrayList<>();
-        result.addAll(manifestList.read(baseManifestList, null));
+        result.addAll(manifestList.read(baseManifestList));
         result.addAll(deltaManifests(manifestList));
         return result;
     }
@@ -379,7 +379,7 @@ public class Snapshot {
      * @return a list of ManifestFileMeta.
      */
     public List<ManifestFileMeta> deltaManifests(ManifestList manifestList) {
-        return manifestList.read(deltaManifestList, null);
+        return manifestList.read(deltaManifestList);
     }
 
     /**
@@ -391,7 +391,7 @@ public class Snapshot {
     public List<ManifestFileMeta> changelogManifests(ManifestList manifestList) {
         return changelogManifestList == null
                 ? Collections.emptyList()
-                : manifestList.read(changelogManifestList, null);
+                : manifestList.read(changelogManifestList);
     }
 
     /**

@@ -74,6 +74,10 @@ public class ObjectsFile<T> {
         }
     }
 
+    public List<T> read(String fileName) {
+        return read(fileName, null);
+    }
+
     public List<T> read(String fileName, @Nullable Long fileSize) {
         return read(fileName, fileSize, Filter.alwaysTrue(), Filter.alwaysTrue());
     }
