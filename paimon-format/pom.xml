@@ -37,6 +37,7 @@ under the License.
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
+        <zstd-jni.version>1.5.5-11</zstd-jni.version>
     </properties>
 
     <dependencies>
@@ -51,6 +52,12 @@ under the License.
             <groupId>org.xerial.snappy</groupId>
             <artifactId>snappy-java</artifactId>
             <version>${snappy.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>com.github.luben</groupId>
+            <artifactId>zstd-jni</artifactId>
+            <version>${zstd-jni.version}</version>
         </dependency>
 
         <!-- Hadoop -->
@@ -149,6 +156,10 @@ under the License.
                 <exclusion>
                     <groupId>org.xerial.snappy</groupId>
                     <artifactId>snappy-java</artifactId>
+                </exclusion>
+                <exclusion>
+                    <artifactId>zstd-jni</artifactId>
+                    <groupId>com.github.luben</groupId>
                 </exclusion>
             </exclusions>
         </dependency>

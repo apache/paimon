@@ -79,7 +79,7 @@ public class OrcFileFormat extends FileFormat {
     }
 
     @VisibleForTesting
-    Properties orcProperties() {
+    public Properties orcProperties() {
         return orcProperties;
     }
 
