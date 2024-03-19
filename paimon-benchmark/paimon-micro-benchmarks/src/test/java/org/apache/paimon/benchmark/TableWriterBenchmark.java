@@ -100,7 +100,7 @@ public class TableWriterBenchmark extends TableBenchmark {
          * Intel(R) Core(TM) i7-9750H CPU @ 2.60GHz
          * orc:               Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
          * ---------------------------------------------------------------------------------
-         * orc_write           36489 / 36697             82.2          12163.1       1.0X
+         * orc_write           31812 / 32223             94.3          10604.1       1.0X
          */
     }
 
