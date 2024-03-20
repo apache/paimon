@@ -255,6 +255,14 @@ from http://iceberg.apache.org/ version 1.3.0
 paimon-hive/paimon-hive-common/src/test/resources/hive-schema-3.1.0.derby.sql
 from https://hive.apache.org/ version 3.1.0
 
+paimon-format/src/main/java/org/apache/orc/impl/PhysicalFsWriter.java
+paimon-format/src/main/java/org/apache/orc/impl/WriterImpl.java
+paimon-format/src/main/java/org/apache/orc/impl/ZstdCodec.java
+paimon-format/src/main/java/org/apache/orc/CompressionKind.java
+paimon-format/src/main/java/org/apache/orc/OrcConf.java
+paimon-format/src/main/java/org/apache/orc/OrcFile.java
+from https://orc.apache.org/ version 2.0
+
 MIT License
 -----------
 

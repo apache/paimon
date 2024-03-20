@@ -42,7 +42,16 @@ import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 
-/** Contains factory methods to read or write ORC files. */
+/* This file is based on source code from the ORC Project (http://orc.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
+/**
+ * Contains factory methods to read or write ORC files.
+ *
+ * <p>NOTE: The file was copied and modified to support zstd-jni. This feature is only supported in
+ * ORC 2.0, but 2.0 only supports JDK17. We need to support JDK8.
+ */
 public class OrcFile {
     private static final Logger LOG = LoggerFactory.getLogger(OrcFile.class);
     public static final String MAGIC = "ORC";

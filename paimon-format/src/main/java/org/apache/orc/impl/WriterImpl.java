@@ -62,6 +62,10 @@ import java.util.SortedMap;
 import java.util.TimeZone;
 import java.util.TreeMap;
 
+/* This file is based on source code from the ORC Project (http://orc.apache.org/), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /**
  * An ORC file writer. The file is divided into stripes, which is the natural unit of work when
  * reading. Each stripe is buffered in memory until the memory reaches the stripe size and then it
@@ -76,6 +80,9 @@ import java.util.TreeMap;
  *
  * <p>Caveat: the MemoryManager is created during WriterOptions create, that has to be confined to a
  * single thread as well.
+ *
+ * <p>NOTE: The file was copied and modified to support zstd-jni. This feature is only supported in
+ * ORC 2.0, but 2.0 only supports JDK17. We need to support JDK8.
  */
 public class WriterImpl implements WriterInternal, MemoryManager.Callback {
 
