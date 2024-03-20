@@ -90,6 +90,8 @@ public class SchemaValidation {
 
         validateStartupMode(options);
 
+        validateFieldsPrefix(schema, options);
+
         validateSequenceField(schema, options);
 
         validateSequenceGroup(schema, options);
@@ -345,6 +347,23 @@ public class SchemaValidation {
 
     private static String concatConfigKeys(List<ConfigOption<?>> configOptions) {
         return configOptions.stream().map(ConfigOption::key).collect(Collectors.joining(","));
+    }
+
+    private static void validateFieldsPrefix(TableSchema schema, CoreOptions options) {
+        List<String> fieldNames = schema.fieldNames();
+        options.toMap()
+                .keySet()
+                .forEach(
+                        k -> {
+                            if (k.startsWith(FIELDS_PREFIX)) {
+                                String fieldName = k.split("\\.")[1];
+                                checkArgument(
+                                        fieldNames.contains(fieldName),
+                                        String.format(
+                                                "Field %s can not be found in table schema.",
+                                                fieldName));
+                            }
+                        });
     }
 
     private static void validateSequenceGroup(TableSchema schema, CoreOptions options) {

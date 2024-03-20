@@ -217,8 +217,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                                                 + "'merge-engine'='partial-update', "
                                                 + "'fields.g_0.sequence-group'='a,b', "
                                                 + "'fields.g_2.sequence-group'='c,d');"))
-                .hasRootCauseMessage(
-                        "The sequence field group: g_0 can not be found in table schema.");
+                .hasRootCauseMessage("Field g_0 can not be found in table schema.");
 
         Assertions.assertThatThrownBy(
                         () ->
