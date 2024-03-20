@@ -129,7 +129,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                 Projection.of(dataProjection).toTopLevelIndexes(),
                                 dataSchema.fields());
 
-                // todo: cache this
+                // TODO: cache this
                 List<Predicate> dataFilters =
                         this.schema.id() == key.schemaId
                                 ? filters
