@@ -30,6 +30,8 @@ import java.util.BitSet;
 /* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
  * additional information regarding copyright ownership. */
+
+/** Mostly copied from hadoop BloomFilter. */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
 public class HadoopBloomFilter extends HadoopFilter {
