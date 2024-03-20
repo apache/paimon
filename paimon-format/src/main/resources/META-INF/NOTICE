@@ -6,8 +6,8 @@ The Apache Software Foundation (http://www.apache.org/).
 
 This project bundles the following dependencies under the Apache Software License 2.0. (http://www.apache.org/licenses/LICENSE-2.0.txt)
 
-- org.apache.orc:orc-core:1.8.3
-- org.apache.orc:orc-shims:1.8.3
+- org.apache.orc:orc-core:1.9.2
+- org.apache.orc:orc-shims:1.9.2
 - org.apache.hive:hive-storage-api:2.8.1
 - io.airlift:aircompressor:0.21
 - commons-lang:commons-lang:2.6
@@ -32,5 +32,5 @@ You find it under licenses/LICENSE.protobuf, licenses/LICENSE.zstd-jni
 and licenses/LICENSE.threeten-extra
 
 - com.google.protobuf:protobuf-java:3.17.3
-- com.github.luben:zstd-jni:1.5.0-1
+- com.github.luben:zstd-jni:1.5.5-11
 - org.threeten:threeten-extra:1.7.1
