@@ -22,7 +22,6 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.utils.Int2ShortHashMap;
 import org.apache.paimon.utils.IntIterator;
-import org.apache.paimon.utils.MathUtils;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -113,7 +112,7 @@ public class PartitionIndex {
             IntPredicate loadFilter,
             IntPredicate bucketFilter) {
         List<IndexManifestEntry> files = indexFileHandler.scan(HASH_INDEX, partition);
-        Int2ShortHashMap map = new Int2ShortHashMap(calculateInitialMapSize(files));
+        Int2ShortHashMap.Builder mapBuilder = Int2ShortHashMap.builder();
         Map<Integer, Long> buckets = new HashMap<>();
         for (IndexManifestEntry file : files) {
             try (IntIterator iterator = indexFileHandler.readHashIndex(file.indexFile())) {
@@ -121,7 +120,7 @@ public class PartitionIndex {
                     try {
                         int hash = iterator.next();
                         if (loadFilter.test(hash)) {
-                            map.put(hash, (short) file.bucket());
+                            mapBuilder.put(hash, (short) file.bucket());
                         }
                         if (bucketFilter.test(file.bucket())) {
                             buckets.compute(
@@ -136,16 +135,6 @@ public class PartitionIndex {
                 throw new UncheckedIOException(e);
             }
         }
-        return new PartitionIndex(map, buckets, targetBucketRowNumber);
-    }
-
-    private static int calculateInitialMapSize(List<IndexManifestEntry> files) {
-        long size = 16;
-        for (IndexManifestEntry file : files) {
-            size = Math.max(size, file.indexFile().rowCount());
-        }
-        return MathUtils.isPowerOf2(size)
-                ? (int) size
-                : MathUtils.roundDownToPowerOf2((int) size) * 2;
+        return new PartitionIndex(mapBuilder.build(), buckets, targetBucketRowNumber);
     }
 }
