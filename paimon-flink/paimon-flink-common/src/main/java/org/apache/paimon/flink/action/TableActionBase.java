@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.sink.FlinkSinkBuilder;
-import org.apache.paimon.flink.utils.TableEnvironmentUtils;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Preconditions;
@@ -30,8 +29,11 @@ import org.apache.paimon.utils.Preconditions;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.table.api.TableResult;
+import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.table.data.RowData;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
@@ -68,8 +70,34 @@ public abstract class TableActionBase extends ActionBase {
 
         List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
 
-        return TableEnvironmentUtils.executeInternal(
-                batchTEnv, transformations, sinkIdentifierNames);
+        return executeInternal(transformations, sinkIdentifierNames);
+    }
+
+    /**
+     * Invoke {@code TableEnvironmentImpl#executeInternal(List<Transformation<?>>, List<String>)}
+     * from a {@link StreamTableEnvironment} instance through reflecting.
+     */
+    private TableResult executeInternal(
+            List<Transformation<?>> transformations, List<String> sinkIdentifierNames) {
+        Class<?> clazz = batchTEnv.getClass().getSuperclass().getSuperclass();
+        try {
+            Method executeInternal =
+                    clazz.getDeclaredMethod("executeInternal", List.class, List.class);
+            executeInternal.setAccessible(true);
+
+            return (TableResult)
+                    executeInternal.invoke(batchTEnv, transformations, sinkIdentifierNames);
+        } catch (NoSuchMethodException e) {
+            throw new RuntimeException(
+                    "Failed to get 'TableEnvironmentImpl#executeInternal(List, List)' method "
+                            + "from given StreamTableEnvironment instance by Java reflection. This is unexpected.",
+                    e);
+        } catch (IllegalAccessException | InvocationTargetException e) {
+            throw new RuntimeException(
+                    "Failed to invoke 'TableEnvironmentImpl#executeInternal(List, List)' method "
+                            + "from given StreamTableEnvironment instance by Java reflection. This is unexpected.",
+                    e);
+        }
     }
 
     /**

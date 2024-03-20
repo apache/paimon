@@ -23,7 +23,6 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.flink.FlinkCatalogFactory;
 import org.apache.paimon.flink.LogicalTypeConversion;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
@@ -80,7 +79,7 @@ public abstract class ActionBase implements Action {
     }
 
     protected void execute(String defaultName) throws Exception {
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         String name = conf.getOptional(PipelineOptions.NAME).orElse(defaultName);
         env.execute(name);
     }
