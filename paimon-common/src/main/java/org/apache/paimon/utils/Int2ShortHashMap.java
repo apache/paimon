@@ -29,6 +29,10 @@ public class Int2ShortHashMap {
         this.map = new Int2ShortOpenHashMap();
     }
 
+    public Int2ShortHashMap(int capacity) {
+        this.map = new Int2ShortOpenHashMap(capacity);
+    }
+
     public void put(int key, short value) {
         map.put(key, value);
     }
