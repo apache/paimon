@@ -28,6 +28,8 @@ import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import java.util.ArrayList;
 import java.util.List;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+
 /** {@link TableScan} implementation for batch planning. */
 public class InnerTableScanImpl extends AbstractInnerTableScan {
 
@@ -39,13 +41,14 @@ public class InnerTableScanImpl extends AbstractInnerTableScan {
     private Integer pushDownLimit;
 
     public InnerTableScanImpl(
+            boolean pkTable,
             CoreOptions options,
             SnapshotReader snapshotReader,
             DefaultValueAssigner defaultValueAssigner) {
         super(options, snapshotReader);
         this.hasNext = true;
         this.defaultValueAssigner = defaultValueAssigner;
-        if (options.deletionVectorsEnabled()) {
+        if (pkTable && (options.deletionVectorsEnabled() || options.mergeEngine() == FIRST_ROW)) {
             snapshotReader.withLevelFilter(level -> level > 0);
         }
     }
