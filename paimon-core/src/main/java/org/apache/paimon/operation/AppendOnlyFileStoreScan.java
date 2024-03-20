@@ -98,7 +98,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
         return filter.test(
                         entry.file().rowCount(),
-                        // todo: use cached dataPredicate?
+                        // TODO: use cached dataPredicate?
                         serializer.evolution(stats.minValues()),
                         serializer.evolution(stats.maxValues()),
                         serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
