@@ -26,7 +26,9 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
-/** Mostly copied from hadoop DynamicBloomFilter. */
+/* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
 public class HadoopDynamicBloomFilter extends HadoopFilter {

@@ -31,6 +31,10 @@ import java.io.IOException;
 import java.util.Collection;
 import java.util.List;
 
+/* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
+ * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
+ * additional information regarding copyright ownership. */
+
 /**
  * Defines the general behavior of a filter.
  *
