@@ -85,6 +85,9 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     @Override
     protected void notifyCompactBefore(List<DataFileMeta> files) {
         if (dvMaintainer != null) {
+            // For normal rewrite, remove before files' DV as usual. And for rewrite caused by an
+            // upgrade, since this only occur from level 0 to higher level, and files on level 0
+            // don't have DV, thus the remove operation can also be safely executed.
             files.forEach(file -> dvMaintainer.removeDeletionVectorOf(file.fileName()));
         }
     }
@@ -101,10 +104,11 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
             return NO_CHANGELOG;
         }
 
-        // TODO In deletionVector mode, since drop delete is required, rewrite is always required.
-        // TODO wait https://github.com/apache/incubator-paimon/pull/2962
-        // TODO but should be careful to not be deleted by DeletionVectorsMaintainer!
-        if (dvMaintainer != null) {
+        // In deletionVector mode, since drop delete is required, when delete row count > 0 rewrite
+        // is required.
+        if (dvMaintainer != null
+                && file.deleteRowCount().isPresent()
+                && file.deleteRowCount().get() > 0) {
             return CHANGELOG_WITH_REWRITE;
         }
 
