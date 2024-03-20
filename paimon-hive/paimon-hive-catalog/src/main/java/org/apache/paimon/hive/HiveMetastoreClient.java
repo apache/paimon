@@ -95,8 +95,6 @@ public class HiveMetastoreClient implements MetastoreClient {
     public void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
-            client.getPartition(
-                    identifier.getDatabaseName(), identifier.getObjectName(), partitionValues);
             client.dropPartition(
                     identifier.getDatabaseName(),
                     identifier.getObjectName(),
