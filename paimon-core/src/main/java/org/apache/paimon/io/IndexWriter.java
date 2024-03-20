@@ -70,16 +70,21 @@ public final class IndexWriter {
         this.indexSizeInMeta = indexSizeInMeta;
         ArrayList<String> columns = new ArrayList<>(indexColumns);
         List<DataField> fields = rowType.getFields();
-        for (int i = 0; i < fields.size(); i++) {
-            DataField field = fields.get(i);
-            if (columns.contains(field.name())) {
-                indexMaintainers.add(
-                        new IndexMaintainer(
-                                field.name(),
-                                i,
-                                FilterInterface.getFilter(indexType),
-                                field.type().accept(InternalRowToBytesVisitor.INSTANCE)));
-            }
+        Map<String, DataField> map = new HashMap<>();
+        Map<String, Integer> index = new HashMap<>();
+        fields.forEach(
+                dataField -> {
+                    map.put(dataField.name(), dataField);
+                    index.put(dataField.name(), rowType.getFieldIndex(dataField.name()));
+                });
+        for (String columnName : columns) {
+            DataField field = map.get(columnName);
+            indexMaintainers.add(
+                    new IndexMaintainer(
+                            field.name(),
+                            index.get(columnName),
+                            FilterInterface.getFilter(indexType),
+                            field.type().accept(InternalRowToBytesVisitor.INSTANCE)));
         }
     }
 

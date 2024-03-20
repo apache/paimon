@@ -20,7 +20,10 @@ package org.apache.paimon.filter;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -33,8 +36,10 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
@@ -47,40 +52,37 @@ public class PredicateFilterUtil {
         }
     }
 
+    public static boolean checkPredicate(byte[] serializedBytes, @Nullable Predicate predicate) {
+        DataInput dataInput = new DataInputStream(new ByteArrayInputStream(serializedBytes));
+        return checkPredicate(dataInput, predicate);
+    }
+
     public static boolean checkPredicate(DataInput dataInput, @Nullable Predicate predicate) {
         if (predicate == null) {
             return true;
         }
 
-        Pair<String, Map<String, byte[]>> pair = deserializeIndexString(dataInput);
+        Set<String> requiredFields =
+                predicate.visit(
+                        new PredicateVisitor<Set<String>>() {
+                            final Set<String> names = new HashSet<>();
 
-        String type = pair.getLeft();
-        Map<String, byte[]> checker = pair.getRight();
+                            @Override
+                            public Set<String> visit(LeafPredicate predicate) {
+                                names.add(predicate.fieldName());
+                                return names;
+                            }
 
-        List<PredicateTester> testers =
-                checker.entrySet().stream()
-                        .map(
-                                entry ->
-                                        new PredicateTester(
-                                                entry.getKey(),
-                                                FilterInterface.getFilter(type)
-                                                        .recoverFrom(entry.getValue())))
-                        .collect(Collectors.toList());
+                            @Override
+                            public Set<String> visit(CompoundPredicate predicate) {
+                                for (Predicate child : predicate.children()) {
+                                    child.visit(this);
+                                }
+                                return names;
+                            }
+                        });
 
-        for (PredicateTester tester : testers) {
-            if (!predicate.visit(tester)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    public static boolean checkPredicate(byte[] serializedBytes, @Nullable Predicate predicate) {
-        if (predicate == null) {
-            return true;
-        }
-
-        Pair<String, Map<String, byte[]>> pair = deserializeIndexString(serializedBytes);
+        Pair<String, Map<String, byte[]>> pair = deserializeIndexString(dataInput, requiredFields);
 
         String type = pair.getLeft();
         Map<String, byte[]> checker = pair.getRight();
@@ -129,13 +131,8 @@ public class PredicateFilterUtil {
         }
     }
 
-    public static Pair<String, Map<String, byte[]>> deserializeIndexString(byte[] serializedBytes) {
-        DataInput dataInput = new DataInputStream(new ByteArrayInputStream(serializedBytes));
-
-        return deserializeIndexString(dataInput);
-    }
-
-    public static Pair<String, Map<String, byte[]>> deserializeIndexString(DataInput dataInput) {
+    public static Pair<String, Map<String, byte[]>> deserializeIndexString(
+            DataInput dataInput, Set<String> requiredFields) {
         Map<String, byte[]> indexMap = new HashMap<>();
         try {
             int typeLength = dataInput.readInt();
@@ -147,9 +144,14 @@ public class PredicateFilterUtil {
             for (int i = 0; i < size; i++) {
                 byte[] columnNameByte = new byte[dataInput.readInt()];
                 dataInput.readFully(columnNameByte);
-                byte[] indexBytes = new byte[dataInput.readInt()];
-                dataInput.readFully(indexBytes);
-                indexMap.put(new String(columnNameByte, StandardCharsets.UTF_8), indexBytes);
+                String columnName = new String(columnNameByte, StandardCharsets.UTF_8);
+                if (requiredFields.contains(columnName)) {
+                    byte[] indexBytes = new byte[dataInput.readInt()];
+                    dataInput.readFully(indexBytes);
+                    indexMap.put(columnName, indexBytes);
+                } else {
+                    dataInput.skipBytes(dataInput.readInt());
+                }
             }
 
             return Pair.of(type, indexMap);
