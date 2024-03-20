@@ -53,6 +53,16 @@ USE CATALOG my_catalog;
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
+The FileSystem catalog supports jdbc lock and can take effect through the following configuration:
+
+> ```shell
+> 'uri' = 'jdbc:mysql://<host>:<port>/<databaseName>'
+> 'jdbc.user' = '...',
+> 'jdbc.password' = '...',
+> ```
+
+
+
 {{< /tab >}}
 
 {{< tab "Spark3" >}}

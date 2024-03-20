@@ -35,6 +35,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
@@ -157,6 +158,11 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return LockContextUtils.lockContext(catalogOptions, "filesystem");
+    }
+
+    @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
         Path fromPath = getDataTableLocation(fromTable);
         Path toPath = getDataTableLocation(toTable);
@@ -187,7 +193,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        LockContextUtils.close();
+    }
 
     @Override
     public String warehouse() {
