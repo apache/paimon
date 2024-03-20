@@ -43,7 +43,6 @@ public class ManagedMemoryUtils {
                         operator.getOperatorConfig()
                                 .getManagedMemoryFractionOperatorUseCaseOfSlot(
                                         ManagedMemoryUseCase.OPERATOR,
-                                        environment.getJobConfiguration(),
                                         environment.getTaskManagerInfo().getConfiguration(),
                                         environment.getUserCodeClassLoader().asClassLoader()));
     }
