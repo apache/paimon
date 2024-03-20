@@ -20,12 +20,15 @@ package org.apache.paimon.flink.action.cdc;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.ActionBase;
 import org.apache.paimon.flink.action.cdc.watermark.CdcWatermarkStrategy;
 import org.apache.paimon.flink.sink.cdc.EventParser;
 import org.apache.paimon.flink.sink.cdc.RichCdcMultiplexRecord;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.table.FileStoreTable;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -41,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_GROUP;
@@ -176,6 +180,16 @@ public abstract class SynchronizationActionBase extends ActionBase {
         Map<String, String> toCopy = new HashMap<>(tableConfig);
         toCopy.remove(CoreOptions.BUCKET.key());
         return table.copy(toCopy);
+    }
+
+    protected void toOptionsChange(Identifier identifier, Map<String, String> options)
+            throws Catalog.ColumnAlreadyExistException, Catalog.TableNotExistException,
+                    Catalog.ColumnNotExistException {
+        List<SchemaChange> optionChanges =
+                options.entrySet().stream()
+                        .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
+                        .collect(Collectors.toList());
+        catalog.alterTable(identifier, optionChanges, false);
     }
 
     @Override

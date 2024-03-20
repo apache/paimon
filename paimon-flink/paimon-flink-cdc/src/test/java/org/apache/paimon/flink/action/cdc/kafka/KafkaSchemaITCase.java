@@ -109,8 +109,9 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         KafkaSyncTableAction action2 =
                 syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);
-        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
-        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig).containsKey("path");
+
+        FileStoreTable table = getFileStoreTable(tableName);
+        waitForOptions(tableConfig, table);
     }
 
     @Test
