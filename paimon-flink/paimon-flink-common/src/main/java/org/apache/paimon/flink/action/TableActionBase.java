@@ -70,7 +70,7 @@ public abstract class TableActionBase extends ActionBase {
 
         List<String> sinkIdentifierNames = Collections.singletonList(identifier.getFullName());
 
-        return executeInternal(batchTEnv, transformations, sinkIdentifierNames);
+        return executeInternal(transformations, sinkIdentifierNames);
     }
 
     /**
@@ -78,16 +78,15 @@ public abstract class TableActionBase extends ActionBase {
      * from a {@link StreamTableEnvironment} instance through reflecting.
      */
     private TableResult executeInternal(
-            StreamTableEnvironment tEnv,
-            List<Transformation<?>> transformations,
-            List<String> sinkIdentifierNames) {
-        Class<?> clazz = tEnv.getClass().getSuperclass().getSuperclass();
+            List<Transformation<?>> transformations, List<String> sinkIdentifierNames) {
+        Class<?> clazz = batchTEnv.getClass().getSuperclass().getSuperclass();
         try {
             Method executeInternal =
                     clazz.getDeclaredMethod("executeInternal", List.class, List.class);
             executeInternal.setAccessible(true);
 
-            return (TableResult) executeInternal.invoke(tEnv, transformations, sinkIdentifierNames);
+            return (TableResult)
+                    executeInternal.invoke(batchTEnv, transformations, sinkIdentifierNames);
         } catch (NoSuchMethodException e) {
             throw new RuntimeException(
                     "Failed to get 'TableEnvironmentImpl#executeInternal(List, List)' method "
