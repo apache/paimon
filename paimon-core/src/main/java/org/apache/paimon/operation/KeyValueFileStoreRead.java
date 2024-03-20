@@ -213,7 +213,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
     private RecordReader<KeyValue> createReaderWithoutOuterProjection(DataSplit split)
             throws IOException {
         if (split.beforeFiles().isEmpty()) {
-            if (split.isStreaming() || split.deletionFiles().isPresent()) {
+            if (split.isStreaming() || split.convertToRawFiles().isPresent()) {
                 return noMergeRead(
                         split.partition(),
                         split.bucket(),
