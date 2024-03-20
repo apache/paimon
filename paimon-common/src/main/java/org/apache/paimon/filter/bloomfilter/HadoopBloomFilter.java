@@ -27,6 +27,7 @@ import java.io.DataOutput;
 import java.io.IOException;
 import java.util.BitSet;
 
+/** Mostly copied from hadoop BloomFilter. */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
 public class HadoopBloomFilter extends HadoopFilter {
@@ -45,13 +46,13 @@ public class HadoopBloomFilter extends HadoopFilter {
     /** The bit vector. */
     BitSet bits;
 
-    /** Default constructor - use with readFields */
+    /** Default constructor - use with readFields. */
     public HadoopBloomFilter() {
         super();
     }
 
     /**
-     * Constructor
+     * Constructor.
      *
      * @param vectorSize The vector size of <i>this</i> filter.
      * @param nbHash The number of hash function to consider.

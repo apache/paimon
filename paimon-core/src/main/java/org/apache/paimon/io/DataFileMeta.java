@@ -90,6 +90,31 @@ public class DataFileMeta {
             long fileSize,
             long rowCount,
             BinaryTableStats rowStats,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                EMPTY_FILTER,
+                EMPTY_MIN_KEY,
+                EMPTY_MAX_KEY,
+                EMPTY_KEY_STATS,
+                rowStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                DUMMY_LEVEL,
+                Collections.emptyList(),
+                0L);
+    }
+
+    public static DataFileMeta forAppend(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryTableStats rowStats,
             BinaryRow filter,
             long minSequenceNumber,
             long maxSequenceNumber,

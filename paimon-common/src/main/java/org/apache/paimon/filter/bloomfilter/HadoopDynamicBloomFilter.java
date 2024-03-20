@@ -26,6 +26,7 @@ import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 
+/** Mostly copied from hadoop DynamicBloomFilter. */
 @InterfaceAudience.Public
 @InterfaceStability.Stable
 public class HadoopDynamicBloomFilter extends HadoopFilter {
