@@ -33,7 +33,7 @@ under the License.
 
     <properties>
         <parquet.version>1.13.1</parquet.version>
-        <orc.version>1.8.3</orc.version>
+        <orc.version>1.9.2</orc.version>
         <joda-time.version>2.5</joda-time.version>
         <commons.pool.version>1.6</commons.pool.version>
         <commons.lang3.version>3.12.0</commons.lang3.version>
