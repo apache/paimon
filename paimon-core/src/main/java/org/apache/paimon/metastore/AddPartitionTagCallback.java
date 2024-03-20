@@ -45,6 +45,17 @@ public class AddPartitionTagCallback implements TagCallback {
     }
 
     @Override
+    public void notifyDeletion(String tagName) {
+        LinkedHashMap<String, String> partitionSpec = new LinkedHashMap<>();
+        partitionSpec.put(partitionField, tagName);
+        try {
+            client.deletePartition(partitionSpec);
+        } catch (Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
+    @Override
     public void close() throws Exception {
         client.close();
     }

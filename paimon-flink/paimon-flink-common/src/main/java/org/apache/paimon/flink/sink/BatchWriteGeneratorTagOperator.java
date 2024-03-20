@@ -114,7 +114,8 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
         try {
             // If the tag already exists, delete the tag
             if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+                tagManager.deleteTag(
+                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
             }
             // Create a new tag
             tagManager.createTag(snapshot, tagName, table.store().createTagCallbacks());
@@ -122,7 +123,8 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
             expireTag();
         } catch (Exception e) {
             if (tagManager.tagExists(tagName)) {
-                tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+                tagManager.deleteTag(
+                        tagName, tagDeletion, snapshotManager, table.store().createTagCallbacks());
             }
         }
     }
@@ -147,7 +149,11 @@ public class BatchWriteGeneratorTagOperator<CommitT, GlobalCommitT>
                     } else {
                         List<String> sortedTagNames = tagManager.sortTagsOfOneSnapshot(tagNames);
                         for (String toBeDeleted : sortedTagNames) {
-                            tagManager.deleteTag(toBeDeleted, tagDeletion, snapshotManager);
+                            tagManager.deleteTag(
+                                    toBeDeleted,
+                                    tagDeletion,
+                                    snapshotManager,
+                                    table.store().createTagCallbacks());
                             tagCount--;
                             if (tagCount == tagNumRetainedMax) {
                                 break;

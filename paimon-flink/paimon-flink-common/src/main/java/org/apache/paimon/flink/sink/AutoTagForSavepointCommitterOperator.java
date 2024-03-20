@@ -156,7 +156,7 @@ public class AutoTagForSavepointCommitterOperator<CommitT, GlobalCommitT>
         identifiersForTags.remove(checkpointId);
         String tagName = SAVEPOINT_TAG_PREFIX + checkpointId;
         if (tagManager.tagExists(tagName)) {
-            tagManager.deleteTag(tagName, tagDeletion, snapshotManager);
+            tagManager.deleteTag(tagName, tagDeletion, snapshotManager, callbacks);
         }
     }
 
