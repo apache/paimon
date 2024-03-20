@@ -329,4 +329,24 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                 "SELECT * FROM T1 /*+ OPTIONS('log.consistency'='eventual') */"),
                 "File store continuous reading does not support eventual consistency mode");
     }
+
+    @Test
+    public void testFlinkMemoryPool() {
+        // Check if the configuration is effective
+        assertThatThrownBy(
+                        () ->
+                                batchSql(
+                                        "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='0M') */ "
+                                                + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                                        "T1"))
+                .hasCauseInstanceOf(IllegalArgumentException.class)
+                .hasRootCauseMessage(
+                        "Weights for operator scope use cases must be greater than 0.");
+
+        batchSql(
+                "INSERT INTO %s /*+ OPTIONS('sink.use-managed-memory-allocator'='true', 'sink.managed.writer-buffer-memory'='1M') */ "
+                        + "VALUES ('1', '2', '3'), ('4', '5', '6')",
+                "T1");
+        assertThat(batchSql("SELECT * FROM T1").size()).isEqualTo(2);
+    }
 }
