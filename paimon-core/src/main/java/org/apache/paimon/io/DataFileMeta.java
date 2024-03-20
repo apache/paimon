@@ -260,6 +260,10 @@ public class DataFileMeta {
         }
     }
 
+    public boolean rawConvertible() {
+        return level != 0 && Objects.equals(deleteRowCount, 0L);
+    }
+
     public DataFileMeta upgrade(int newLevel) {
         checkArgument(newLevel > this.level);
         return new DataFileMeta(

@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -65,7 +66,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
         for (Map.Entry<Pair<BinaryRow, Integer>, List<DataFileMeta>> entry : grouped.entrySet()) {
             BinaryRow partition = entry.getKey().getLeft();
             int bucket = entry.getKey().getRight();
-            for (List<DataFileMeta> files :
+            for (SplitGenerator.SplitGroup splitGroup :
                     reader.splitGenerator().splitForBatch(entry.getValue())) {
                 // TODO pass deletion files
                 result.add(
@@ -73,7 +74,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                 .withSnapshot(endingSnapshotId)
                                 .withPartition(partition)
                                 .withBucket(bucket)
-                                .withDataFiles(files)
+                                .withDataFiles(splitGroup.files)
                                 .build());
             }
         }

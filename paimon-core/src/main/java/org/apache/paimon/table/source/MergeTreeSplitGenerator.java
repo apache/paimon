@@ -61,11 +61,17 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files) {
-        if (deletionVectorsEnabled || mergeEngine == FIRST_ROW) {
+    public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
+        boolean rawConvertible = files.stream().allMatch(DataFileMeta::rawConvertible);
+        boolean oneLevel =
+                files.stream().map(DataFileMeta::level).collect(Collectors.toSet()).size() == 1;
+
+        if (rawConvertible && (deletionVectorsEnabled || mergeEngine == FIRST_ROW || oneLevel)) {
             Function<DataFileMeta, Long> weightFunc =
                     file -> Math.max(file.fileSize(), openFileCost);
-            return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);
+            return BinPacking.packForOrdered(files, weightFunc, targetSplitSize).stream()
+                    .map(SplitGroup::rawConvertibleGroup)
+                    .collect(Collectors.toList());
         }
 
         /*
@@ -93,13 +99,19 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
                 new IntervalPartition(files, keyComparator)
                         .partition().stream().map(this::flatRun).collect(Collectors.toList());
 
-        return packSplits(sections);
+        return packSplits(sections).stream()
+                .map(
+                        f ->
+                                f.size() == 1 && f.get(0).rawConvertible()
+                                        ? SplitGroup.rawConvertibleGroup(f)
+                                        : SplitGroup.nonRawConvertibleGroup(f))
+                .collect(Collectors.toList());
     }
 
     @Override
-    public List<List<DataFileMeta>> splitForStreaming(List<DataFileMeta> files) {
+    public List<SplitGroup> splitForStreaming(List<DataFileMeta> files) {
         // We don't split streaming scan files
-        return Collections.singletonList(files);
+        return Collections.singletonList(SplitGroup.rawConvertibleGroup(files));
     }
 
     private List<List<DataFileMeta>> packSplits(List<List<DataFileMeta>> sections) {

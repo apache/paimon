@@ -124,11 +124,11 @@ public class SplitGeneratorTest {
                         Collections.singletonList("6"));
     }
 
-    private List<List<String>> toNames(List<List<DataFileMeta>> splits) {
-        return splits.stream()
+    private List<List<String>> toNames(List<SplitGenerator.SplitGroup> splitGroups) {
+        return splitGroups.stream()
                 .map(
-                        files ->
-                                files.stream()
+                        splitGroup ->
+                                splitGroup.files.stream()
                                         .map(DataFileMeta::fileName)
                                         .collect(Collectors.toList()))
                 .collect(Collectors.toList());
