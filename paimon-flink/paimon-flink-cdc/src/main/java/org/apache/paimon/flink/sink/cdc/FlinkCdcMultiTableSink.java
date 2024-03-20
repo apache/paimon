@@ -32,7 +32,6 @@ import org.apache.paimon.flink.sink.StoreMultiCommitter;
 import org.apache.paimon.flink.sink.StoreSinkWrite;
 import org.apache.paimon.flink.sink.StoreSinkWriteImpl;
 import org.apache.paimon.flink.sink.WrappedManifestCommittableSerializer;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -133,10 +132,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                         createCommittableStateManager()))
                         .setParallelism(input.getParallelism());
         configureGlobalCommitter(
-                committed,
-                commitCpuCores,
-                commitHeapMemory,
-                StreamExecutionEnvironmentUtils.getConfiguration(env));
+                committed, commitCpuCores, commitHeapMemory, env.getConfiguration());
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
