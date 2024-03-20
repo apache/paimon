@@ -934,6 +934,32 @@ public abstract class HiveCatalogITCaseBase {
     }
 
     @Test
+    public void testDeletePartitionForTag() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE t (\n"
+                        + "    k INT,\n"
+                        + "    v BIGINT,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'metastore.tag-to-partition' = 'dt'\n"
+                        + ")");
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16", "dt=2023-10-17");
+
+        tEnv.executeSql("CALL sys.delete_tag('test_db.t', '2023-10-16')");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-17");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'")).isEmpty();
+    }
+
+    @Test
     public void testHistoryPartitionsCascadeToUpdate() throws Exception {
         tEnv.executeSql(
                 String.join(
