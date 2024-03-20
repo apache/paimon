@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table.source;
 
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.SortedRun;
@@ -31,6 +32,8 @@ import java.util.List;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
+
 /** Merge tree implementation of {@link SplitGenerator}. */
 public class MergeTreeSplitGenerator implements SplitGenerator {
 
@@ -42,20 +45,24 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     private final boolean deletionVectorsEnabled;
 
+    private final MergeEngine mergeEngine;
+
     public MergeTreeSplitGenerator(
             Comparator<InternalRow> keyComparator,
             long targetSplitSize,
             long openFileCost,
-            boolean deletionVectorsEnabled) {
+            boolean deletionVectorsEnabled,
+            MergeEngine mergeEngine) {
         this.keyComparator = keyComparator;
         this.targetSplitSize = targetSplitSize;
         this.openFileCost = openFileCost;
         this.deletionVectorsEnabled = deletionVectorsEnabled;
+        this.mergeEngine = mergeEngine;
     }
 
     @Override
     public List<List<DataFileMeta>> splitForBatch(List<DataFileMeta> files) {
-        if (deletionVectorsEnabled) {
+        if (deletionVectorsEnabled || mergeEngine == FIRST_ROW) {
             Function<DataFileMeta, Long> weightFunc =
                     file -> Math.max(file.fileSize(), openFileCost);
             return BinPacking.packForOrdered(files, weightFunc, targetSplitSize);

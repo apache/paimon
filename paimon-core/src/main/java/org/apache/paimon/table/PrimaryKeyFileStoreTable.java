@@ -116,11 +116,13 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected SplitGenerator splitGenerator() {
+        CoreOptions options = store().options();
         return new MergeTreeSplitGenerator(
                 store().newKeyComparator(),
-                store().options().splitTargetSize(),
-                store().options().splitOpenFileCost(),
-                store().options().deletionVectorsEnabled());
+                options.splitTargetSize(),
+                options.splitOpenFileCost(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine());
     }
 
     @Override
