@@ -18,6 +18,9 @@
 
 package org.apache.paimon.fileindex;
 
+import java.util.Arrays;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.DataGetters;
@@ -47,10 +50,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-
-import java.util.Arrays;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 /** Convert different type object to bytes. */
 public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, byte[]>> {

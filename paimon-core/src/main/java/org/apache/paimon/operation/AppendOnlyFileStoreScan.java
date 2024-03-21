@@ -20,7 +20,7 @@ package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fileindex.PredicateFilterUtil;
+import org.apache.paimon.fileindex.FileIndexPredicateUtil;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -117,7 +117,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().schemaId(),
                         id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
 
-        return PredicateFilterUtil.checkPredicate(
+        return FileIndexPredicateUtil.checkPredicate(
                 filterRow.getBinary(0), dataRowType, dataPredicate);
     }
 }

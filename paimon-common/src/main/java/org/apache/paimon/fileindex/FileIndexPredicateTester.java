@@ -26,14 +26,19 @@ import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
 
 /** Predicate test. */
-public class PredicateTester implements PredicateVisitor<Boolean> {
+public class FileIndexPredicateTester implements PredicateVisitor<Boolean> {
 
     private final String columnName;
-    private final FileIndex fileIndex;
+    private final FileIndexFunctionVisitor fileIndexFunctionVisitor;
 
-    public PredicateTester(String columnName, FileIndex fileIndex) {
+    public FileIndexPredicateTester(
+            String columnName, FileIndexFunctionVisitor fileIndexFunctionVisitor) {
         this.columnName = columnName;
-        this.fileIndex = fileIndex;
+        this.fileIndexFunctionVisitor = fileIndexFunctionVisitor;
+    }
+
+    public Boolean test(Predicate predicate) {
+        return predicate.visit(this);
     }
 
     @Override
@@ -42,7 +47,7 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
             return predicate
                     .function()
                     .visit(
-                            fileIndex,
+                            fileIndexFunctionVisitor,
                             new FieldRef(
                                     predicate.index(), predicate.fieldName(), predicate.type()),
                             predicate.literals());

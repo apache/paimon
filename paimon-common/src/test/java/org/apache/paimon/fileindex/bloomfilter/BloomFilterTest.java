@@ -18,6 +18,8 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import org.apache.paimon.fileindex.FileIndexFunctionVisitor;
+import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
@@ -36,23 +38,25 @@ public class BloomFilterTest {
     public void testAddFindByRandom() {
 
         BloomFilter filter = new BloomFilter(DataTypes.BYTES());
+        FileIndexWriter writer = filter.createWriter();
+        FileIndexFunctionVisitor visitor = filter.createVisitor();
         List<byte[]> testData = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {
             testData.add(random());
         }
 
-        testData.forEach(filter::add);
+        testData.forEach(writer::write);
 
         for (byte[] bytes : testData) {
-            Assertions.assertThat(filter.visitEqual(null, bytes)).isTrue();
+            Assertions.assertThat(visitor.visitEqual(null, bytes)).isTrue();
         }
 
         int errorCount = 0;
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
-            if (filter.visitEqual(null, ra)) {
+            if (visitor.visitEqual(null, ra)) {
                 errorCount++;
             }
         }

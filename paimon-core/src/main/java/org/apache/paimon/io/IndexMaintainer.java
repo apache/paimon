@@ -19,23 +19,24 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndex;
+import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fileindex.FileIndexer;
 
 /** One index maintainer for one column. */
 public class IndexMaintainer {
 
     private final String columnName;
-    private final FileIndex filter;
+    private final FileIndexWriter fileIndexWriter;
     private final InternalRow.FieldGetter getter;
 
-    public IndexMaintainer(String columnName, FileIndex filter, InternalRow.FieldGetter getter) {
+    public IndexMaintainer(String columnName, FileIndexWriter fileIndexWriter, InternalRow.FieldGetter getter) {
         this.columnName = columnName;
-        this.filter = filter;
+        this.fileIndexWriter = fileIndexWriter;
         this.getter = getter;
     }
 
     public void write(InternalRow row) {
-        filter.add(getter.getFieldOrNull(row));
+        fileIndexWriter.write(getter.getFieldOrNull(row));
     }
 
     public String getColumnName() {
@@ -43,6 +44,6 @@ public class IndexMaintainer {
     }
 
     public byte[] serializedBytes() {
-        return filter.serializedBytes();
+        return fileIndexWriter.serializedBytes();
     }
 }

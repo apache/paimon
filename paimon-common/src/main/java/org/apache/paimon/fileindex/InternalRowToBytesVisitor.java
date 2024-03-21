@@ -18,6 +18,11 @@
 
 package org.apache.paimon.fileindex;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.types.ArrayType;
@@ -41,12 +46,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.List;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 /** Generate bytes from {@link InternalRow}. */
 public class InternalRowToBytesVisitor

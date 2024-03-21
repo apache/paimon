@@ -18,7 +18,9 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.fileindex.FileIndex;
+import org.apache.paimon.fileindex.FileIndexFunctionVisitor;
+import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.ObjectToBytesVisitor;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
@@ -34,7 +36,7 @@ import java.io.IOException;
 import java.util.function.Function;
 
 /** Bloom filter for secondary index. */
-public class BloomFilter implements FileIndex {
+public class BloomFilter implements FileIndexer {
 
     public static final String BLOOM_FILTER = "bloom";
 
@@ -55,42 +57,59 @@ public class BloomFilter implements FileIndex {
         return BLOOM_FILTER;
     }
 
+
     @Override
-    public void add(Object key) {
-        filterKey.set(converter.apply(key), 1.0);
-        filter.add(filterKey);
+    public FileIndexWriter createWriter() {
+        return new Writer();
     }
 
     @Override
-    public Boolean visitEqual(FieldRef fieldRef, Object key) {
-        filterKey.set(converter.apply(key), 1.0);
-        return filter.membershipTest(filterKey);
+    public FileIndexFunctionVisitor createVisitor() {
+        return new Visitor();
     }
 
-    @Override
-    public byte[] serializedBytes() {
-        ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
-        DataOutputStream dos = new DataOutputStream(baos);
+    private class Writer implements FileIndexWriter {
 
-        try {
-            filter.write(dos);
-            byte[] bytes = baos.toByteArray();
-            dos.close();
-            return bytes;
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        @Override
+        public void write(Object key) {
+            filterKey.set(converter.apply(key), 1.0);
+            filter.add(filterKey);
+        }
+
+        @Override
+        public byte[] serializedBytes() {
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
+            DataOutputStream dos = new DataOutputStream(baos);
+
+            try {
+                filter.write(dos);
+                byte[] bytes = baos.toByteArray();
+                dos.close();
+                return bytes;
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         }
     }
 
-    @Override
-    public BloomFilter recoverFrom(byte[] bytes) {
-        DataInputStream dis = new DataInputStream(new ByteArrayInputStream(bytes));
+    private class Visitor implements FileIndexFunctionVisitor {
 
-        try {
-            filter.readFields(dis);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
+        @Override
+        public FileIndexFunctionVisitor recoverFrom(byte[] serializedBytes) {
+            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(serializedBytes));
+
+            try {
+                filter.readFields(dis);
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return this;
         }
-        return this;
+
+        @Override
+        public Boolean visitEqual(FieldRef fieldRef, Object key) {
+            filterKey.set(converter.apply(key), 1.0);
+            return filter.membershipTest(filterKey);
+        }
     }
 }

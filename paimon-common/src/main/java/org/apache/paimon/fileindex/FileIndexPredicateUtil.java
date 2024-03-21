@@ -18,18 +18,6 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.predicate.CompoundPredicate;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateVisitor;
-import org.apache.paimon.types.DataType;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
-
-import javax.annotation.Nullable;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
@@ -43,9 +31,19 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import javax.annotation.Nullable;
+import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.LeafPredicate;
+import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Pair;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
-public class PredicateFilterUtil {
+public class FileIndexPredicateUtil {
 
     public static boolean checkPredicate(
             Path path, FileIO fileIO, RowType fileRowType, @Nullable Predicate filePredicate)
@@ -94,19 +92,20 @@ public class PredicateFilterUtil {
         String type = pair.getLeft();
         Map<String, byte[]> checker = pair.getRight();
 
-        List<PredicateTester> testers =
+        List<FileIndexPredicateTester> testers =
                 checker.entrySet().stream()
                         .map(
                                 entry ->
-                                        new PredicateTester(
+                                        new FileIndexPredicateTester(
                                                 entry.getKey(),
-                                                FileIndex.getFilter(
+                                                FileIndexer.create(
                                                                 type, fileTypes.get(entry.getKey()))
+                                                        .createVisitor()
                                                         .recoverFrom(entry.getValue())))
                         .collect(Collectors.toList());
 
-        for (PredicateTester tester : testers) {
-            if (!filePredicate.visit(tester)) {
+        for (FileIndexPredicateTester tester : testers) {
+            if (!tester.test(filePredicate)) {
                 return false;
             }
         }

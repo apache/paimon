@@ -18,34 +18,17 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fileindex.bloomfilter.BloomFilter;
-import org.apache.paimon.predicate.CompoundPredicate;
+import java.util.List;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.LeafPredicate;
-import org.apache.paimon.types.DataType;
-
-import java.util.List;
-
-import static org.apache.paimon.fileindex.bloomfilter.BloomFilter.BLOOM_FILTER;
 
 /**
- * Secondary index filter interface. Return true, means we need to search this file, else means
+ * Read file index from serialized bytes. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FileIndex extends FunctionVisitor<Boolean> {
+public interface FileIndexFunctionVisitor extends FunctionVisitor<Boolean> {
 
-    void add(Object key);
-
-    @Override
-    default Boolean visit(LeafPredicate predicate) {
-        return true;
-    }
-
-    @Override
-    default Boolean visit(CompoundPredicate predicate) {
-        return true;
-    }
+    FileIndexFunctionVisitor recoverFrom(byte[] serializedBytes);
 
     @Override
     default Boolean visitIsNotNull(FieldRef fieldRef) {
@@ -120,18 +103,5 @@ public interface FileIndex extends FunctionVisitor<Boolean> {
     @Override
     default Boolean visitOr(List<Boolean> children) {
         return true;
-    }
-
-    byte[] serializedBytes();
-
-    FileIndex recoverFrom(byte[] bytes);
-
-    static FileIndex getFilter(String type, DataType dataType) {
-        switch (type) {
-            case BLOOM_FILTER:
-                return new BloomFilter(dataType);
-            default:
-                throw new RuntimeException("Doesn't support filter type: " + type);
-        }
     }
 }
