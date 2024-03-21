@@ -108,20 +108,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
 
-    public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
-            key("orc.bloom.filter.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "A comma-separated list of columns for which to create a bloom filter when writing.");
-
-    public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
-            key("orc.bloom.filter.fpp")
-                    .doubleType()
-                    .defaultValue(0.05)
-                    .withDescription(
-                            "Define the default false positive probability for bloom filters.");
-
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
                     .mapType()
@@ -745,12 +731,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
-    public static final ConfigOption<Integer> ORC_WRITE_BATCH_SIZE =
-            key("orc.write.batch-size")
-                    .intType()
-                    .defaultValue(1024)
-                    .withDescription("write batch size for orc.");
-
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
                     .stringType()
@@ -1001,22 +981,6 @@ public class CoreOptions implements Serializable {
                     .intType()
                     .noDefaultValue()
                     .withDescription("Turn off the dictionary encoding for all fields in parquet.");
-
-    public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
-            key("orc.column.encoding.direct")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
-
-    public static final ConfigOption<Integer> ORC_DICTIONARY_KEY_THRESHOLD =
-            key("orc.dictionary.key.threshold")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "If the number of distinct keys in a dictionary is greater than this "
-                                    + "fraction of the total number of non-null rows, turn off "
-                                    + "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
 
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
@@ -1641,10 +1605,6 @@ public class CoreOptions implements Serializable {
             result.put(className, param);
         }
         return result;
-    }
-
-    public int orcWriteBatch() {
-        return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
     }
 
     public boolean localMergeEnabled() {
