@@ -24,7 +24,7 @@ import org.apache.paimon.types.DataType;
  * Secondary index filter interface. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FilterInterface {
+public interface FileIndex {
 
     void add(Object key);
 
@@ -76,9 +76,9 @@ public interface FilterInterface {
 
     byte[] serializedBytes();
 
-    FilterInterface recoverFrom(byte[] bytes);
+    FileIndex recoverFrom(byte[] bytes);
 
-    static FilterInterface getFilter(String type, DataType dataType) {
+    static FileIndex getFilter(String type, DataType dataType) {
         switch (type) {
             default:
                 throw new RuntimeException("Doesn't support filter type: " + type);

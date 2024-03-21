@@ -29,14 +29,14 @@ import org.apache.paimon.predicate.PredicateVisitor;
 import java.util.List;
 
 /** Predicate test. */
-public class PredicateTester implements PredicateVisitor<Boolean> {
+public class FileIndexPredicateTester implements PredicateVisitor<Boolean> {
 
     private final String columnName;
     private final PredicateFunctionChecker predicateFunctionChecker;
 
-    public PredicateTester(String columnName, FilterInterface filterInterface) {
+    public FileIndexPredicateTester(String columnName, FileIndex fileIndex) {
         this.columnName = columnName;
-        this.predicateFunctionChecker = new PredicateFunctionChecker(filterInterface);
+        this.predicateFunctionChecker = new PredicateFunctionChecker(fileIndex);
     }
 
     @Override
@@ -76,55 +76,55 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
 
     private static final class PredicateFunctionChecker implements FunctionVisitor<Boolean> {
 
-        private final FilterInterface filterInterface;
+        private final FileIndex fileIndex;
 
-        public PredicateFunctionChecker(FilterInterface filterInterface) {
-            this.filterInterface = filterInterface;
+        public PredicateFunctionChecker(FileIndex fileIndex) {
+            this.fileIndex = fileIndex;
         }
 
         @Override
         public Boolean visitIsNotNull(FieldRef fieldRef) {
-            return filterInterface.testNotContains(null);
+            return fileIndex.testNotContains(null);
         }
 
         @Override
         public Boolean visitIsNull(FieldRef fieldRef) {
-            return filterInterface.testContains(null);
+            return fileIndex.testContains(null);
         }
 
         @Override
         public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
-            return filterInterface.testStartsWith(literal);
+            return fileIndex.testStartsWith(literal);
         }
 
         @Override
         public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
-            return filterInterface.testLessThan(literal);
+            return fileIndex.testLessThan(literal);
         }
 
         @Override
         public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testGreaterOrEqual(literal);
+            return fileIndex.testGreaterOrEqual(literal);
         }
 
         @Override
         public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testNotContains(literal);
+            return fileIndex.testNotContains(literal);
         }
 
         @Override
         public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testLessOrEqual(literal);
+            return fileIndex.testLessOrEqual(literal);
         }
 
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testContains(literal);
+            return fileIndex.testContains(literal);
         }
 
         @Override
         public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
-            return filterInterface.testGreaterThan(literal);
+            return fileIndex.testGreaterThan(literal);
         }
 
         @Override
@@ -133,7 +133,7 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
             for (int i = 0; i < literals.size(); i++) {
                 keys[i] = literals.get(i);
             }
-            return filterInterface.testIn(keys);
+            return fileIndex.testIn(keys);
         }
 
         @Override
@@ -142,7 +142,7 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
             for (int i = 0; i < literals.size(); i++) {
                 keys[i] = literals.get(i);
             }
-            return filterInterface.testNotIn(keys);
+            return fileIndex.testNotIn(keys);
         }
 
         @Override

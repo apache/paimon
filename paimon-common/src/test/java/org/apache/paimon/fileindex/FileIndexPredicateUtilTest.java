@@ -29,8 +29,8 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Random;
 
-/** Test for {@link PredicateFilterUtil}. */
-public class PredicateFilterUtilTest {
+/** Test for {@link FileIndexPredicateUtil}. */
+public class FileIndexPredicateUtilTest {
 
     private static final Random RANDOM = new Random();
 
@@ -46,10 +46,10 @@ public class PredicateFilterUtilTest {
         }
 
         Pair<String, Map<String, byte[]>> deObject =
-                PredicateFilterUtil.deserializeIndexString(
+                FileIndexPredicateUtil.deserializeIndexString(
                         new DataInputStream(
                                 new ByteArrayInputStream(
-                                        PredicateFilterUtil.serializeIndexMap(type, map))),
+                                        FileIndexPredicateUtil.serializeIndexMap(type, map))),
                         map.keySet());
 
         Assertions.assertThat(deObject.getLeft()).isEqualTo(type);

@@ -45,7 +45,7 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
-public class PredicateFilterUtil {
+public class FileIndexPredicateUtil {
 
     public static boolean checkPredicate(
             Path path, FileIO fileIO, RowType fileRowType, @Nullable Predicate filePredicate)
@@ -94,18 +94,18 @@ public class PredicateFilterUtil {
         String type = pair.getLeft();
         Map<String, byte[]> checker = pair.getRight();
 
-        List<PredicateTester> testers =
+        List<FileIndexPredicateTester> testers =
                 checker.entrySet().stream()
                         .map(
                                 entry ->
-                                        new PredicateTester(
+                                        new FileIndexPredicateTester(
                                                 entry.getKey(),
-                                                FilterInterface.getFilter(
+                                                FileIndex.getFilter(
                                                                 type, fileTypes.get(entry.getKey()))
                                                         .recoverFrom(entry.getValue())))
                         .collect(Collectors.toList());
 
-        for (PredicateTester tester : testers) {
+        for (FileIndexPredicateTester tester : testers) {
             if (!filePredicate.visit(tester)) {
                 return false;
             }
