@@ -100,9 +100,10 @@ public class FileIndexPredicateUtil {
                                 entry ->
                                         new FileIndexPredicateTester(
                                                 entry.getKey(),
-                                                FileIndex.getFilter(
+                                                FileIndexer.getFilter(
                                                                 type, fileTypes.get(entry.getKey()))
-                                                        .recoverFrom(entry.getValue())))
+                                                        .recoverFrom(entry.getValue())
+                                                        .getPredicate()))
                         .collect(Collectors.toList());
 
         for (FileIndexPredicateTester tester : testers) {

@@ -30,7 +30,7 @@ import java.util.Map;
 import java.util.Random;
 
 /** Test for {@link FileIndexPredicateUtil}. */
-public class FileIndexPredicateUtilTest {
+public class FileIndexerPredicateUtilTest {
 
     private static final Random RANDOM = new Random();
 
