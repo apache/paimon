@@ -125,8 +125,8 @@ public class OrphanFilesClean {
         nonSnapshotFiles.forEach(this::deleteFileOrDirQuietly);
         deletedFilesNum += nonSnapshotFiles.size();
 
-        Set<String> usedFiles = getUsedFiles();
         Map<String, Path> candidates = getCandidateDeletingFiles();
+        Set<String> usedFiles = getUsedFiles();
 
         Set<String> deleted = new HashSet<>(candidates.keySet());
         deleted.removeAll(usedFiles);
