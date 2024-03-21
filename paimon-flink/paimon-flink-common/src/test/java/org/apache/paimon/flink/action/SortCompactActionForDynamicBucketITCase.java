@@ -211,7 +211,7 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     private void callProcedure(String orderStrategy, List<String> orderByColumns) {
         callProcedure(
                 String.format(
-                        "C sys.compact('%s.%s', '', '%s', '%s')",
+                        "CALL sys.compact('%s.%s', '', '%s', '%s')",
                         database, tableName, orderStrategy, String.join(",", orderByColumns)),
                 false,
                 true);
