@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter.bloomfilter;
+package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;

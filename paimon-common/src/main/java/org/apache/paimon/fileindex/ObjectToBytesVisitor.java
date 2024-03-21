@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter;
+package org.apache.paimon.fileindex;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryString;

@@ -16,10 +16,11 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter.bloomfilter;
+package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.filter.FilterInterface;
-import org.apache.paimon.filter.ObjectToBytesVisitor;
+import org.apache.paimon.fileindex.FileIndex;
+import org.apache.paimon.fileindex.ObjectToBytesVisitor;
+import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.util.bloom.Key;
@@ -33,7 +34,7 @@ import java.io.IOException;
 import java.util.function.Function;
 
 /** Bloom filter for secondary index. */
-public class BloomFilter implements FilterInterface {
+public class BloomFilter implements FileIndex {
 
     public static final String BLOOM_FILTER = "bloom";
 
@@ -61,7 +62,7 @@ public class BloomFilter implements FilterInterface {
     }
 
     @Override
-    public boolean testContains(Object key) {
+    public Boolean visitEqual(FieldRef fieldRef, Object key) {
         filterKey.set(converter.apply(key), 1.0);
         return filter.membershipTest(filterKey);
     }

@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter;
+package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -100,7 +100,7 @@ public class PredicateFilterUtil {
                                 entry ->
                                         new PredicateTester(
                                                 entry.getKey(),
-                                                FilterInterface.getFilter(
+                                                FileIndex.getFilter(
                                                                 type, fileTypes.get(entry.getKey()))
                                                         .recoverFrom(entry.getValue())))
                         .collect(Collectors.toList());

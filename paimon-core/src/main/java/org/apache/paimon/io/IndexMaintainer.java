@@ -16,25 +16,20 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter;
+package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndex;
 
 /** One index maintainer for one column. */
 public class IndexMaintainer {
 
     private final String columnName;
-    //    private final int columnIndex;
-    private final FilterInterface filter;
+    private final FileIndex filter;
     private final InternalRow.FieldGetter getter;
 
-    public IndexMaintainer(
-            String columnName,
-            //            int columnIndex,
-            FilterInterface filter,
-            InternalRow.FieldGetter getter) {
+    public IndexMaintainer(String columnName, FileIndex filter, InternalRow.FieldGetter getter) {
         this.columnName = columnName;
-        //        this.columnIndex = columnIndex;
         this.filter = filter;
         this.getter = getter;
     }

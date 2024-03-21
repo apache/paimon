@@ -21,7 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.filter.PredicateFilterUtil;
+import org.apache.paimon.fileindex.PredicateFilterUtil;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;

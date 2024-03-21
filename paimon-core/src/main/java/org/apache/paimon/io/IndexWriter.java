@@ -21,9 +21,8 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.filter.FilterInterface;
-import org.apache.paimon.filter.IndexMaintainer;
-import org.apache.paimon.filter.PredicateFilterUtil;
+import org.apache.paimon.fileindex.FileIndex;
+import org.apache.paimon.fileindex.PredicateFilterUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
@@ -81,7 +80,7 @@ public final class IndexWriter {
             indexMaintainers.add(
                     new IndexMaintainer(
                             field.name(),
-                            FilterInterface.getFilter(indexType, field.type()),
+                            FileIndex.getFilter(indexType, field.type()),
                             InternalRow.createFieldGetter(field.type(), index.get(columnName))));
         }
     }

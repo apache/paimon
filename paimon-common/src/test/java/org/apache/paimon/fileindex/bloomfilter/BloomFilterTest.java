@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.filter.bloomfilter;
+package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.types.DataTypes;
 
@@ -45,14 +45,14 @@ public class BloomFilterTest {
         testData.forEach(filter::add);
 
         for (byte[] bytes : testData) {
-            Assertions.assertThat(filter.testContains(bytes)).isTrue();
+            Assertions.assertThat(filter.visitEqual(null, bytes)).isTrue();
         }
 
         int errorCount = 0;
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
-            if (filter.testContains(random())) {
+            if (filter.visitEqual(null, ra)) {
                 errorCount++;
             }
         }
