@@ -112,7 +112,7 @@ public class CompactProcedure extends ProcedureBase {
                     "You must specify 'order strategy' and 'order by columns' both.");
         }
 
-        if (!(StringUtils.isBlank(partitions) || "ALL".equals(partitions))) {
+        if (!(StringUtils.isBlank(partitions))) {
             action.withPartitions(ParameterUtils.getPartitions(partitions.split(";")));
         }
 
