@@ -18,6 +18,8 @@
 
 package org.apache.paimon.filter.bloomfilter;
 
+import org.apache.paimon.types.DataTypes;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -33,7 +35,7 @@ public class BloomFilterTest {
     @Test
     public void testAddFindByRandom() {
 
-        BloomFilter filter = new BloomFilter();
+        BloomFilter filter = new BloomFilter(DataTypes.BYTES());
         List<byte[]> testData = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {

@@ -18,32 +18,29 @@
 
 package org.apache.paimon.filter;
 
-import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.InternalRow;
-
-import java.util.function.BiFunction;
 
 /** One index maintainer for one column. */
 public class IndexMaintainer {
 
     private final String columnName;
-    private final int columnIndex;
+    //    private final int columnIndex;
     private final FilterInterface filter;
-    private final BiFunction<DataGetters, Integer, byte[]> getter;
+    private final InternalRow.FieldGetter getter;
 
     public IndexMaintainer(
             String columnName,
-            int columnIndex,
+            //            int columnIndex,
             FilterInterface filter,
-            BiFunction<DataGetters, Integer, byte[]> getter) {
+            InternalRow.FieldGetter getter) {
         this.columnName = columnName;
-        this.columnIndex = columnIndex;
+        //        this.columnIndex = columnIndex;
         this.filter = filter;
         this.getter = getter;
     }
 
     public void write(InternalRow row) {
-        filter.add(getter.apply(row, columnIndex));
+        filter.add(getter.getFieldOrNull(row));
     }
 
     public String getColumnName() {

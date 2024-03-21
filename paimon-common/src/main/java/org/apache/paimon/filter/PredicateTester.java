@@ -28,8 +28,6 @@ import org.apache.paimon.predicate.PredicateVisitor;
 
 import java.util.List;
 
-import static org.apache.paimon.filter.InternalRowToBytesVisitor.NULL_BYTES;
-
 /** Predicate test. */
 public class PredicateTester implements PredicateVisitor<Boolean> {
 
@@ -79,73 +77,70 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
     private static final class PredicateFunctionChecker implements FunctionVisitor<Boolean> {
 
         private final FilterInterface filterInterface;
-        private final ObjectToBytesVisitor objectToBytesVisitor;
 
         public PredicateFunctionChecker(FilterInterface filterInterface) {
             this.filterInterface = filterInterface;
-            this.objectToBytesVisitor = new ObjectToBytesVisitor();
         }
 
         @Override
         public Boolean visitIsNotNull(FieldRef fieldRef) {
-            return filterInterface.testNotContains(NULL_BYTES);
+            return filterInterface.testNotContains(null);
         }
 
         @Override
         public Boolean visitIsNull(FieldRef fieldRef) {
-            return filterInterface.testContains(NULL_BYTES);
+            return filterInterface.testContains(null);
         }
 
         @Override
         public Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
-            return filterInterface.testStartsWith(getBytes(fieldRef, literal));
+            return filterInterface.testStartsWith(literal);
         }
 
         @Override
         public Boolean visitLessThan(FieldRef fieldRef, Object literal) {
-            return filterInterface.testLessThan(getBytes(fieldRef, literal));
+            return filterInterface.testLessThan(literal);
         }
 
         @Override
         public Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testGreaterOrEqual(getBytes(fieldRef, literal));
+            return filterInterface.testGreaterOrEqual(literal);
         }
 
         @Override
         public Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testNotContains(getBytes(fieldRef, literal));
+            return filterInterface.testNotContains(literal);
         }
 
         @Override
         public Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testLessOrEqual(getBytes(fieldRef, literal));
+            return filterInterface.testLessOrEqual(literal);
         }
 
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object literal) {
-            return filterInterface.testContains(
-                    fieldRef.type().accept(objectToBytesVisitor).apply(literal));
+            return filterInterface.testContains(literal);
         }
 
         @Override
         public Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
-            return filterInterface.testGreaterThan(getBytes(fieldRef, literal));
+            return filterInterface.testGreaterThan(literal);
         }
 
         @Override
         public Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
-            byte[][] keys = new byte[literals.size()][];
+            Object[] keys = new byte[literals.size()][];
             for (int i = 0; i < literals.size(); i++) {
-                keys[i] = getBytes(fieldRef, literals.get(i));
+                keys[i] = literals.get(i);
             }
             return filterInterface.testIn(keys);
         }
 
         @Override
         public Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
-            byte[][] keys = new byte[literals.size()][];
+            Object[] keys = new byte[literals.size()][];
             for (int i = 0; i < literals.size(); i++) {
-                keys[i] = getBytes(fieldRef, literals.get(i));
+                keys[i] = literals.get(i);
             }
             return filterInterface.testNotIn(keys);
         }
@@ -158,10 +153,6 @@ public class PredicateTester implements PredicateVisitor<Boolean> {
         @Override
         public Boolean visitOr(List<Boolean> children) {
             return true;
-        }
-
-        private byte[] getBytes(FieldRef fieldRef, Object o) {
-            return fieldRef.type().accept(objectToBytesVisitor).apply(o);
         }
     }
 }

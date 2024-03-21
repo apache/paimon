@@ -24,6 +24,8 @@ import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateVisitor;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
@@ -45,25 +47,28 @@ import java.util.stream.Collectors;
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
 public class PredicateFilterUtil {
 
-    public static boolean checkPredicate(Path path, FileIO fileIO, @Nullable Predicate predicate)
+    public static boolean checkPredicate(
+            Path path, FileIO fileIO, RowType fileRowType, @Nullable Predicate filePredicate)
             throws IOException {
         try (DataInputStream dataInput = new DataInputStream(fileIO.newInputStream(path))) {
-            return checkPredicate(dataInput, predicate);
+            return checkPredicate(dataInput, fileRowType, filePredicate);
         }
     }
 
-    public static boolean checkPredicate(byte[] serializedBytes, @Nullable Predicate predicate) {
+    public static boolean checkPredicate(
+            byte[] serializedBytes, RowType fileRowType, @Nullable Predicate filePredicate) {
         DataInput dataInput = new DataInputStream(new ByteArrayInputStream(serializedBytes));
-        return checkPredicate(dataInput, predicate);
+        return checkPredicate(dataInput, fileRowType, filePredicate);
     }
 
-    public static boolean checkPredicate(DataInput dataInput, @Nullable Predicate predicate) {
-        if (predicate == null) {
+    public static boolean checkPredicate(
+            DataInput dataInput, RowType fileRowType, @Nullable Predicate filePredicate) {
+        if (filePredicate == null) {
             return true;
         }
 
         Set<String> requiredFields =
-                predicate.visit(
+                filePredicate.visit(
                         new PredicateVisitor<Set<String>>() {
                             final Set<String> names = new HashSet<>();
 
@@ -83,6 +88,8 @@ public class PredicateFilterUtil {
                         });
 
         Pair<String, Map<String, byte[]>> pair = deserializeIndexString(dataInput, requiredFields);
+        Map<String, DataType> fileTypes = new HashMap<>();
+        fileRowType.getFields().forEach(field -> fileTypes.put(field.name(), field.type()));
 
         String type = pair.getLeft();
         Map<String, byte[]> checker = pair.getRight();
@@ -93,12 +100,13 @@ public class PredicateFilterUtil {
                                 entry ->
                                         new PredicateTester(
                                                 entry.getKey(),
-                                                FilterInterface.getFilter(type)
+                                                FilterInterface.getFilter(
+                                                                type, fileTypes.get(entry.getKey()))
                                                         .recoverFrom(entry.getValue())))
                         .collect(Collectors.toList());
 
         for (PredicateTester tester : testers) {
-            if (!predicate.visit(tester)) {
+            if (!filePredicate.visit(tester)) {
                 return false;
             }
         }

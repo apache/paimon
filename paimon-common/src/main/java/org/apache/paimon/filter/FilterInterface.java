@@ -19,6 +19,7 @@
 package org.apache.paimon.filter;
 
 import org.apache.paimon.filter.bloomfilter.BloomFilter;
+import org.apache.paimon.types.DataType;
 
 import static org.apache.paimon.filter.bloomfilter.BloomFilter.BLOOM_FILTER;
 
@@ -28,38 +29,38 @@ import static org.apache.paimon.filter.bloomfilter.BloomFilter.BLOOM_FILTER;
  */
 public interface FilterInterface {
 
-    void add(byte[] key);
+    void add(Object key);
 
-    default boolean testStartsWith(byte[] key) {
+    default boolean testStartsWith(Object key) {
         return true;
     }
 
-    default boolean testLessThan(byte[] key) {
+    default boolean testLessThan(Object key) {
         return true;
     }
 
-    default boolean testGreaterOrEqual(byte[] key) {
+    default boolean testGreaterOrEqual(Object key) {
         return true;
     }
 
-    default boolean testNotContains(byte[] key) {
+    default boolean testNotContains(Object key) {
         return true;
     }
 
-    default boolean testLessOrEqual(byte[] key) {
+    default boolean testLessOrEqual(Object key) {
         return true;
     }
 
-    default boolean testContains(byte[] key) {
+    default boolean testContains(Object key) {
         return true;
     }
 
-    default boolean testGreaterThan(byte[] key) {
+    default boolean testGreaterThan(Object key) {
         return true;
     }
 
-    default boolean testIn(byte[][] keys) {
-        for (byte[] key : keys) {
+    default boolean testIn(Object[] keys) {
+        for (Object key : keys) {
             if (testContains(key)) {
                 return true;
             }
@@ -67,8 +68,8 @@ public interface FilterInterface {
         return false;
     }
 
-    default boolean testNotIn(byte[][] keys) {
-        for (byte[] key : keys) {
+    default boolean testNotIn(Object[] keys) {
+        for (Object key : keys) {
             if (testNotContains(key)) {
                 return true;
             }
@@ -80,10 +81,10 @@ public interface FilterInterface {
 
     FilterInterface recoverFrom(byte[] bytes);
 
-    static FilterInterface getFilter(String type) {
+    static FilterInterface getFilter(String type, DataType dataType) {
         switch (type) {
             case BLOOM_FILTER:
-                return new BloomFilter();
+                return new BloomFilter(dataType);
             default:
                 throw new RuntimeException("Doesn't support filter type: " + type);
         }

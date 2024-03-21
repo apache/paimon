@@ -91,18 +91,12 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 fieldStatsConverters.getOrCreate(entry.file().schemaId());
         BinaryTableStats stats = entry.file().valueStats();
 
-        Predicate dataPredicate =
-                dataFilterMapping.computeIfAbsent(
-                        entry.file().schemaId(),
-                        id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
-
         return filter.test(
                         entry.file().rowCount(),
-                        // TODO: use cached dataPredicate?
                         serializer.evolution(stats.minValues()),
                         serializer.evolution(stats.maxValues()),
                         serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
-                && test(entry.file().filter(), dataPredicate);
+                && test(entry.file().filter(), entry);
     }
 
     @Override
@@ -111,11 +105,19 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return entries;
     }
 
-    private boolean test(BinaryRow filterRow, Predicate dataFilter) {
+    private boolean test(BinaryRow filterRow, ManifestEntry entry) {
         if (filterRow.getFieldCount() == 0 || filterRow.isNullAt(0)) {
             return true;
         }
 
-        return PredicateFilterUtil.checkPredicate(filterRow.getBinary(0), dataFilter);
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+
+        Predicate dataPredicate =
+                dataFilterMapping.computeIfAbsent(
+                        entry.file().schemaId(),
+                        id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
+
+        return PredicateFilterUtil.checkPredicate(
+                filterRow.getBinary(0), dataRowType, dataPredicate);
     }
 }

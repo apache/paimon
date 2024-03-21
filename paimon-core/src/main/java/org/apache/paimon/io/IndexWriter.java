@@ -23,7 +23,6 @@ import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.filter.FilterInterface;
 import org.apache.paimon.filter.IndexMaintainer;
-import org.apache.paimon.filter.InternalRowToBytesVisitor;
 import org.apache.paimon.filter.PredicateFilterUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -82,9 +81,8 @@ public final class IndexWriter {
             indexMaintainers.add(
                     new IndexMaintainer(
                             field.name(),
-                            index.get(columnName),
-                            FilterInterface.getFilter(indexType),
-                            field.type().accept(InternalRowToBytesVisitor.INSTANCE)));
+                            FilterInterface.getFilter(indexType, field.type()),
+                            InternalRow.createFieldGetter(field.type(), index.get(columnName))));
         }
     }
 

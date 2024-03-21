@@ -48,6 +48,7 @@ import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 
+import java.util.Arrays;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -56,111 +57,93 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     public static final ObjectToBytesVisitor INSTANCE = new ObjectToBytesVisitor();
 
+    public static final byte[] NULL_BYTES = new byte[1];
+
+    static {
+        Arrays.fill(NULL_BYTES, (byte) 0x00);
+    }
+
     @Override
     public Function<Object, byte[]> visit(CharType charType) {
-        return o -> ((BinaryString) o).toBytes();
+        return o -> o == null ? NULL_BYTES : ((BinaryString) o).toBytes();
     }
 
     @Override
     public Function<Object, byte[]> visit(VarCharType varCharType) {
-        return o -> ((BinaryString) o).toBytes();
+        return o -> o == null ? NULL_BYTES : ((BinaryString) o).toBytes();
     }
 
     @Override
     public Function<Object, byte[]> visit(BooleanType booleanType) {
-        return o -> ((Boolean) o) ? new byte[] {0x01} : new byte[] {0x00};
+        return o -> o == null ? NULL_BYTES : ((Boolean) o) ? new byte[] {0x01} : new byte[] {0x00};
     }
 
     @Override
     public Function<Object, byte[]> visit(BinaryType binaryType) {
-        return o -> (byte[]) o;
+        return o -> o == null ? NULL_BYTES : (byte[]) o;
     }
 
     @Override
     public Function<Object, byte[]> visit(VarBinaryType varBinaryType) {
-        return o -> (byte[]) o;
+        return o -> o == null ? NULL_BYTES : (byte[]) o;
     }
 
     @Override
     public Function<Object, byte[]> visit(DecimalType decimalType) {
-        return o -> ((Decimal) o).toUnscaledBytes();
+        return o -> o == null ? NULL_BYTES : ((Decimal) o).toUnscaledBytes();
     }
 
     @Override
     public Function<Object, byte[]> visit(TinyIntType tinyIntType) {
-        return o -> new byte[] {(byte) o};
+        return o -> o == null ? NULL_BYTES : new byte[] {(byte) o};
     }
 
     @Override
     public Function<Object, byte[]> visit(SmallIntType smallIntType) {
-        return o -> {
-            short x = (short) o;
-            return new byte[] {(byte) (x & 0xff), (byte) (x >> 8 & 0xff)};
-        };
+        return o ->
+                o == null
+                        ? NULL_BYTES
+                        : new byte[] {(byte) ((short) o & 0xff), (byte) ((short) o >> 8 & 0xff)};
     }
 
     @Override
     public Function<Object, byte[]> visit(IntType intType) {
-        return o -> {
-            int x = (int) o;
-            return intToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : intToBytes((int) o);
     }
 
     @Override
     public Function<Object, byte[]> visit(BigIntType bigIntType) {
-        return o -> {
-            long x = (long) o;
-            return longToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : longToBytes((long) 0);
     }
 
     @Override
     public Function<Object, byte[]> visit(FloatType floatType) {
-        return o -> {
-            int x = Float.floatToIntBits((float) o);
-            return intToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : intToBytes(Float.floatToIntBits((float) o));
     }
 
     @Override
     public Function<Object, byte[]> visit(DoubleType doubleType) {
-        return o -> {
-            long x = Double.doubleToLongBits((double) o);
-            return longToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : longToBytes(Double.doubleToLongBits((double) o));
     }
 
     @Override
     public Function<Object, byte[]> visit(DateType dateType) {
-        return o -> {
-            int x = (int) o;
-            return intToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : intToBytes((int) o);
     }
 
     @Override
     public Function<Object, byte[]> visit(TimeType timeType) {
-        return o -> {
-            int x = (int) o;
-            return intToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : intToBytes((int) o);
     }
 
     @Override
     public Function<Object, byte[]> visit(TimestampType timestampType) {
-        return o -> {
-            long x = ((Timestamp) o).getMillisecond();
-            return longToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : longToBytes(((Timestamp) o).getMillisecond());
     }
 
     @Override
     public Function<Object, byte[]> visit(LocalZonedTimestampType localZonedTimestampType) {
-        return o -> {
-            long x = ((Timestamp) o).getMillisecond();
-            return longToBytes(x);
-        };
+        return o -> o == null ? NULL_BYTES : longToBytes(((Timestamp) o).getMillisecond());
     }
 
     @Override
@@ -168,6 +151,9 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
         BiFunction<DataGetters, Integer, byte[]> function =
                 arrayType.getElementType().accept(InternalRowToBytesVisitor.INSTANCE);
         return o -> {
+            if (o == null) {
+                return NULL_BYTES;
+            }
             InternalArray internalArray = (InternalArray) o;
             int count = 0;
             byte[][] bytes = new byte[internalArray.size()][];
@@ -191,6 +177,9 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
         BiFunction<DataGetters, Integer, byte[]> function =
                 multisetType.getElementType().accept(InternalRowToBytesVisitor.INSTANCE);
         return o -> {
+            if (o == null) {
+                return NULL_BYTES;
+            }
             InternalMap map = (InternalMap) o;
 
             int count = 0;
@@ -218,6 +207,9 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
                 mapType.getValueType().accept(new InternalRowToBytesVisitor());
 
         return o -> {
+            if (o == null) {
+                return NULL_BYTES;
+            }
             InternalMap map = (InternalMap) o;
 
             int count = 0;
@@ -250,6 +242,9 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
         BiFunction<DataGetters, Integer, byte[]> function =
                 rowType.accept(new InternalRowToBytesVisitor());
         return o -> {
+            if (o == null) {
+                return NULL_BYTES;
+            }
             InternalRow secondRow = (InternalRow) o;
 
             int count = 0;

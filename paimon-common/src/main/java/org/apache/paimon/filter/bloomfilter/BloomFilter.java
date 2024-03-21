@@ -19,6 +19,8 @@
 package org.apache.paimon.filter.bloomfilter;
 
 import org.apache.paimon.filter.FilterInterface;
+import org.apache.paimon.filter.ObjectToBytesVisitor;
+import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.util.bloom.Key;
 import org.apache.hadoop.util.hash.Hash;
@@ -28,6 +30,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.util.function.Function;
 
 /** Bloom filter for secondary index. */
 public class BloomFilter implements FilterInterface {
@@ -41,21 +44,25 @@ public class BloomFilter implements FilterInterface {
     // reuse
     private final Key filterKey = new Key();
 
-    public BloomFilter() {}
+    private final Function<Object, byte[]> converter;
+
+    public BloomFilter(DataType type) {
+        converter = type.accept(ObjectToBytesVisitor.INSTANCE);
+    }
 
     public String name() {
         return BLOOM_FILTER;
     }
 
     @Override
-    public void add(byte[] key) {
-        filterKey.set(key, 1.0);
+    public void add(Object key) {
+        filterKey.set(converter.apply(key), 1.0);
         filter.add(filterKey);
     }
 
     @Override
-    public boolean testContains(byte[] key) {
-        filterKey.set(key, 1.0);
+    public boolean testContains(Object key) {
+        filterKey.set(converter.apply(key), 1.0);
         return filter.membershipTest(filterKey);
     }
 

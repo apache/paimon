@@ -149,6 +149,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                         if (!PredicateFilterUtil.checkPredicate(
                                 dataFilePathFactory.toPath(indexFiles.get(0)),
                                 fileIO,
+                                dataSchema.logicalRowType(),
                                 PredicateBuilder.and(dataFilters.toArray(new Predicate[0])))) {
                             // this file does not pass the secondary index check, just skip it.
                             continue;
