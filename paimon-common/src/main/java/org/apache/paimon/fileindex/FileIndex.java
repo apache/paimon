@@ -18,63 +18,108 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.predicate.CompoundPredicate;
+import org.apache.paimon.predicate.FieldRef;
+import org.apache.paimon.predicate.FunctionVisitor;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.types.DataType;
+
+import java.util.List;
 
 /**
  * Secondary index filter interface. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FileIndex {
+public interface FileIndex extends FunctionVisitor<Boolean> {
 
     void add(Object key);
 
-    default boolean testStartsWith(Object key) {
-        return true;
-    }
-
-    default boolean testLessThan(Object key) {
-        return true;
-    }
-
-    default boolean testGreaterOrEqual(Object key) {
-        return true;
-    }
-
-    default boolean testNotContains(Object key) {
-        return true;
-    }
-
-    default boolean testLessOrEqual(Object key) {
-        return true;
-    }
-
-    default boolean testContains(Object key) {
-        return true;
-    }
-
-    default boolean testGreaterThan(Object key) {
-        return true;
-    }
-
-    default boolean testIn(Object[] keys) {
-        for (Object key : keys) {
-            if (testContains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    default boolean testNotIn(Object[] keys) {
-        for (Object key : keys) {
-            if (testNotContains(key)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
     byte[] serializedBytes();
+
+    @Override
+    default Boolean visit(LeafPredicate predicate) {
+        return true;
+    }
+
+    @Override
+    default Boolean visit(CompoundPredicate predicate) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitIsNotNull(FieldRef fieldRef) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitIsNull(FieldRef fieldRef) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitStartsWith(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitLessThan(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitGreaterOrEqual(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitNotEqual(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitLessOrEqual(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitEqual(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitGreaterThan(FieldRef fieldRef, Object literal) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitIn(FieldRef fieldRef, List<Object> literals) {
+        for (Object key : literals) {
+            if (visitEqual(fieldRef, key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    default Boolean visitNotIn(FieldRef fieldRef, List<Object> literals) {
+        for (Object key : literals) {
+            if (visitNotEqual(fieldRef, key)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    @Override
+    default Boolean visitAnd(List<Boolean> children) {
+        return true;
+    }
+
+    @Override
+    default Boolean visitOr(List<Boolean> children) {
+        return true;
+    }
 
     FileIndex recoverFrom(byte[] bytes);
 
