@@ -18,10 +18,8 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.predicate.CompoundPredicate;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
-import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.types.DataType;
 
 import java.util.List;
@@ -35,16 +33,6 @@ public interface FileIndex extends FunctionVisitor<Boolean> {
     void add(Object key);
 
     byte[] serializedBytes();
-
-    @Override
-    default Boolean visit(LeafPredicate predicate) {
-        return true;
-    }
-
-    @Override
-    default Boolean visit(CompoundPredicate predicate) {
-        return true;
-    }
 
     @Override
     default Boolean visitIsNotNull(FieldRef fieldRef) {
