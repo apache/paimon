@@ -24,10 +24,7 @@ import org.apache.paimon.types.DataType;
 
 import java.util.List;
 
-/**
- * Secondary index filter interface. Return true, means we need to search this file, else means
- * needn't.
- */
+/** File index interface. To build a file index. */
 public interface FileIndexer {
 
     void add(Object key);
@@ -45,6 +42,7 @@ public interface FileIndexer {
         }
     }
 
+    /** Return true, means we need to search this file, else means needn't. */
     interface FileIndexPredicate extends FunctionVisitor<Boolean> {
 
         @Override
