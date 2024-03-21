@@ -245,9 +245,10 @@ public class ContinuousFileSplitEnumerator
         // create assignment
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
+        Set<Integer> subtaskIds = context.registeredReaders().keySet();
         while (readersAwait.hasNext()) {
             Integer task = readersAwait.next();
-            if (!context.registeredReaders().containsKey(task)) {
+            if (!subtaskIds.contains(task)) {
                 readersAwait.remove();
                 continue;
             }
