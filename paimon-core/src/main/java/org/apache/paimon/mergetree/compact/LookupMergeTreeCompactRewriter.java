@@ -41,7 +41,7 @@ import java.util.List;
 
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_WITH_REWRITE;
-import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG_NO_REWRITE;
 
 /**
  * A {@link MergeTreeCompactRewriter} which produces changelog files by lookup for the compaction
@@ -83,7 +83,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     @Override
-    protected void notifyCompactBefore(List<DataFileMeta> files) {
+    protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {
         if (dvMaintainer != null) {
             files.forEach(file -> dvMaintainer.removeDeletionVectorOf(file.fileName()));
         }
@@ -96,15 +96,14 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
     }
 
     @Override
-    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
+    protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
         if (file.level() != 0) {
-            return NO_CHANGELOG;
+            return NO_CHANGELOG_NO_REWRITE;
         }
 
-        // TODO In deletionVector mode, since drop delete is required, rewrite is always required.
-        // TODO wait https://github.com/apache/incubator-paimon/pull/2962
-        // TODO but should be careful to not be deleted by DeletionVectorsMaintainer!
-        if (dvMaintainer != null) {
+        // In deletionVector mode, since drop delete is required, when delete row count > 0 rewrite
+        // is required.
+        if (dvMaintainer != null && file.deleteRowCount().map(cnt -> cnt > 0).orElse(true)) {
             return CHANGELOG_WITH_REWRITE;
         }
 
