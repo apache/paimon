@@ -82,7 +82,7 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
         writer.write(new RecordReaderIterator<>(reader));
         writer.close();
         List<DataFileMeta> before = extractFilesFromSections(sections);
-        notifyCompactBefore(before);
+        notifyRewriteCompactBefore(before);
         return new CompactResult(before, writer.result());
     }
 
@@ -98,10 +98,5 @@ public class MergeTreeCompactRewriter extends AbstractCompactRewriter {
                 mergeSorter);
     }
 
-    /**
-     * Hook to handle the files before compact in rewriting stage. Note: In addition to normal
-     * rewrite, in some cases, upgrade can also transition into rewrite, see {@link
-     * ChangelogMergeTreeRewriter#upgrade}
-     */
-    protected void notifyCompactBefore(List<DataFileMeta> files) {}
+    protected void notifyRewriteCompactBefore(List<DataFileMeta> files) {}
 }
