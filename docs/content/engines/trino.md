@@ -34,7 +34,7 @@ Paimon currently supports Trino 422 and above.
 
 ## Filesystem
 
-From version 0.8, paimon share trino filesystem for all actions, which means, iyou should 
+From version 0.8, paimon share trino filesystem for all actions, which means, you should 
 config trino filesystem before using trino-paimon. You can find information about how to config
 filesystems for trino on trino official website.
 
@@ -51,7 +51,7 @@ https://paimon.apache.org/docs/master/project/download/
 
 | Version       | Package                                                                                                                                       |
 |---------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| [422, 427]    | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
+| [422, 426]    | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
 | [427, latest] | [paimon-trino-427-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/) |
 
 {{< /unstable >}}
