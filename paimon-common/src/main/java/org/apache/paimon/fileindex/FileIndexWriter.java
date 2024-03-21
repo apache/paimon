@@ -18,19 +18,9 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.types.DataType;
+public interface FileIndexWriter {
 
-/** File index interface. To build a file index. */
-public interface FileIndexer {
+    void add(Object key);
 
-    FileIndexWriter createIndexWriter();
-
-    FileIndexReader createIndexReader();
-
-    static FileIndexer create(String type, DataType dataType) {
-        switch (type) {
-            default:
-                throw new RuntimeException("Doesn't support filter type: " + type);
-        }
-    }
+    byte[] serializedBytes();
 }
