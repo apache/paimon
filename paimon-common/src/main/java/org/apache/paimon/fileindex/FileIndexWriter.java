@@ -20,7 +20,7 @@ package org.apache.paimon.fileindex;
 
 public interface FileIndexWriter {
 
-    void add(Object key);
+    void write(Object key);
 
     byte[] serializedBytes();
 }
