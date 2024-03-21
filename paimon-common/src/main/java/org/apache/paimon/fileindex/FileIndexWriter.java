@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex;
 
+/** To write file index. */
 public interface FileIndexWriter {
 
     void write(Object key);

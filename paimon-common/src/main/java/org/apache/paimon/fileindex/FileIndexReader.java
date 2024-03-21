@@ -23,7 +23,10 @@ import org.apache.paimon.predicate.FunctionVisitor;
 
 import java.util.List;
 
-/** Return true, means we need to search this file, else means needn't. */
+/**
+ * Read file index from serialized bytes. Return true, means we need to search this file, else means
+ * needn't.
+ */
 public interface FileIndexReader extends FunctionVisitor<Boolean> {
 
     FileIndexReader recoverFrom(byte[] serializedBytes);
