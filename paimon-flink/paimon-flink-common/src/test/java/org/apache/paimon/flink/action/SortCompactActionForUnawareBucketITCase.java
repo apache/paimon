@@ -381,7 +381,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
             String orderStrategy, String rangeStrategy, List<String> orderByColumns) {
         callProcedure(
                 String.format(
-                        "CALL sys.compact('%s.%s', 'ALL', '%s', '%s','sort-compaction.range-strategy=%s')",
+                        "CALL sys.compact('%s.%s', '', '%s', '%s','sort-compaction.range-strategy=%s')",
                         database,
                         tableName,
                         orderStrategy,
