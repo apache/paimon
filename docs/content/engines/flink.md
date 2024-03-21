@@ -30,32 +30,34 @@ This documentation is a guide for using Paimon in Flink.
 
 ## Preparing Paimon Jar File
 
-Paimon currently supports Flink 1.18, 1.17, 1.16, 1.15. We recommend the latest Flink version for a better experience.
+Paimon currently supports Flink 1.19, 1.18, 1.17, 1.16, 1.15. We recommend the latest Flink version for a better experience.
 
 Download the jar file with corresponding version.
 
 > Currently, paimon provides two types jar: one of which(the bundled jar) is used for read/write data, and the other(action jar) for operations such as manually compaction,
 {{< stable >}}
 
-| Version    | Type | Jar                                                                                                                                                                     |
-|------------|-------|------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| Flink 1.18 | Bundled Jar  | [paimon-flink-1.18-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.18/{{< version >}}/paimon-flink-1.18-{{< version >}}.jar) |
-| Flink 1.17 | Bundled Jar  | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar) |
-| Flink 1.16 | Bundled Jar  | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar) |
-| Flink 1.15 | Bundled Jar  | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar) |
+| Version      | Type        | Jar                                                                                                                                                                           |
+|--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.19   | Bundled Jar | [paimon-flink-1.19-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.19/{{< version >}}/paimon-flink-1.19-{{< version >}}.jar)       |
+| Flink 1.18   | Bundled Jar | [paimon-flink-1.18-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.18/{{< version >}}/paimon-flink-1.18-{{< version >}}.jar)       |
+| Flink 1.17   | Bundled Jar | [paimon-flink-1.17-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.17/{{< version >}}/paimon-flink-1.17-{{< version >}}.jar)       |
+| Flink 1.16   | Bundled Jar | [paimon-flink-1.16-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.16/{{< version >}}/paimon-flink-1.16-{{< version >}}.jar)       |
+| Flink 1.15   | Bundled Jar | [paimon-flink-1.15-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-1.15/{{< version >}}/paimon-flink-1.15-{{< version >}}.jar)       |
 | Flink Action | Action Jar  | [paimon-flink-action-{{< version >}}.jar](https://repo.maven.apache.org/maven2/org/apache/paimon/paimon-flink-action/{{< version >}}/paimon-flink-action-{{< version >}}.jar) |
 
 {{< /stable >}}
 
 {{< unstable >}}
 
-| Version    | Type | Jar                                                                                                                                   |
-|------------|------|---------------------------------------------------------------------------------------------------------------------------------|
-| Flink 1.18 | Bundled Jar | [paimon-flink-1.18-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.18/{{< version >}}/) |
-| Flink 1.17 | Bundled Jar | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/) |
-| Flink 1.16 | Bundled Jar | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/) |
-| Flink 1.15 | Bundled Jar | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/) |
-| Flink Action | Action Jar | [paimon-flink-action-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/{{< version >}}/) |
+| Version      | Type        | Jar                                                                                                                                       |
+|--------------|-------------|-------------------------------------------------------------------------------------------------------------------------------------------|
+| Flink 1.19   | Bundled Jar | [paimon-flink-1.19-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.19/{{< version >}}/)     |
+| Flink 1.18   | Bundled Jar | [paimon-flink-1.18-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.18/{{< version >}}/)     |
+| Flink 1.17   | Bundled Jar | [paimon-flink-1.17-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.17/{{< version >}}/)     |
+| Flink 1.16   | Bundled Jar | [paimon-flink-1.16-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.16/{{< version >}}/)     |
+| Flink 1.15   | Bundled Jar | [paimon-flink-1.15-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-1.15/{{< version >}}/)     |
+| Flink Action | Action Jar  | [paimon-flink-action-{{< version >}}.jar](https://repository.apache.org/snapshots/org/apache/paimon/paimon-flink-action/{{< version >}}/) |
 
 {{< /unstable >}}
 
