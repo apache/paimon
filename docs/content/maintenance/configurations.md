@@ -74,7 +74,11 @@ Spark connector options for paimon.
 
 {{< generated/spark_connector_configuration >}}
 
-## RocksDB Options
+### ORC Options
+
+{{< generated/orc_configuration >}}
+
+### RocksDB Options
 
 The following options allow users to finely adjust RocksDB for better performance. You can either specify them in table properties or in dynamic table hints.
 
