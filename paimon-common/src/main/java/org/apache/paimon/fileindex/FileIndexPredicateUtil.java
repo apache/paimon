@@ -102,7 +102,7 @@ public class FileIndexPredicateUtil {
                                                 entry.getKey(),
                                                 FileIndexer.create(
                                                                 type, fileTypes.get(entry.getKey()))
-                                                        .createIndexReader()
+                                                        .createVisitor()
                                                         .recoverFrom(entry.getValue())))
                         .collect(Collectors.toList());
 

@@ -27,9 +27,9 @@ import java.util.List;
  * Read file index from serialized bytes. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FileIndexReader extends FunctionVisitor<Boolean> {
+public interface FileIndexFunctionVisitor extends FunctionVisitor<Boolean> {
 
-    FileIndexReader recoverFrom(byte[] serializedBytes);
+    FileIndexFunctionVisitor recoverFrom(byte[] serializedBytes);
 
     @Override
     default Boolean visitIsNotNull(FieldRef fieldRef) {

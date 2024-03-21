@@ -23,9 +23,9 @@ import org.apache.paimon.types.DataType;
 /** File index interface. To build a file index. */
 public interface FileIndexer {
 
-    FileIndexWriter createIndexWriter();
+    FileIndexWriter createWriter();
 
-    FileIndexReader createIndexReader();
+    FileIndexFunctionVisitor createVisitor();
 
     static FileIndexer create(String type, DataType dataType) {
         switch (type) {
