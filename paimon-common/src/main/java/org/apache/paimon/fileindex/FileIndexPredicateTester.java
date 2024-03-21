@@ -37,6 +37,10 @@ public class FileIndexPredicateTester implements PredicateVisitor<Boolean> {
         this.fileIndexFunctionVisitor = fileIndexFunctionVisitor;
     }
 
+    public Boolean test(Predicate predicate) {
+        return predicate.visit(this);
+    }
+
     @Override
     public Boolean visit(LeafPredicate predicate) {
         if (columnName.equals(predicate.fieldName())) {

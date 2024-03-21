@@ -107,7 +107,7 @@ public class FileIndexPredicateUtil {
                         .collect(Collectors.toList());
 
         for (FileIndexPredicateTester tester : testers) {
-            if (!filePredicate.visit(tester)) {
+            if (!tester.test(filePredicate)) {
                 return false;
             }
         }
