@@ -113,7 +113,7 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     @Override
     public Function<Object, byte[]> visit(BigIntType bigIntType) {
-        return o -> o == null ? NULL_BYTES : longToBytes((long) 0);
+        return o -> o == null ? NULL_BYTES : longToBytes((long) o);
     }
 
     @Override
