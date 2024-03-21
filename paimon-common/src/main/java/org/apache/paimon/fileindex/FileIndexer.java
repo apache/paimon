@@ -33,7 +33,7 @@ public interface FileIndexer {
 
     FileIndexer recoverFrom(byte[] bytes);
 
-    FileIndexPredicate getPredicate();
+    FileIndexPredicate getPredicateVisitor();
 
     static FileIndexer getFilter(String type, DataType dataType) {
         switch (type) {

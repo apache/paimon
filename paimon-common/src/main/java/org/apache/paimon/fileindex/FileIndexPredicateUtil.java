@@ -103,7 +103,7 @@ public class FileIndexPredicateUtil {
                                                 FileIndexer.getFilter(
                                                                 type, fileTypes.get(entry.getKey()))
                                                         .recoverFrom(entry.getValue())
-                                                        .getPredicate()))
+                                                        .getPredicateVisitor()))
                         .collect(Collectors.toList());
 
         for (FileIndexPredicateTester tester : testers) {
