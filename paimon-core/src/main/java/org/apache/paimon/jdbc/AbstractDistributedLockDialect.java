@@ -18,6 +18,8 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.options.Options;
+
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -27,7 +29,9 @@ import java.sql.SQLException;
 public abstract class AbstractDistributedLockDialect implements JdbcDistributedLockDialect {
 
     @Override
-    public void createTable(JdbcClientPool connections) throws SQLException, InterruptedException {
+    public void createTable(JdbcClientPool connections, Options options)
+            throws SQLException, InterruptedException {
+        Integer lockKeyMaxLength = JdbcCatalogOptions.lockKeyMaxLength(options);
         connections.run(
                 conn -> {
                     DatabaseMetaData dbMeta = conn.getMetaData();
@@ -37,7 +41,9 @@ public abstract class AbstractDistributedLockDialect implements JdbcDistributedL
                     if (tableExists.next()) {
                         return true;
                     }
-                    return conn.prepareStatement(getCreateTableSql()).execute();
+                    String createDistributedLockTableSql =
+                            String.format(getCreateTableSql(), lockKeyMaxLength);
+                    return conn.prepareStatement(createDistributedLockTableSql).execute();
                 });
     }
 

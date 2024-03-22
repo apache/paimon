@@ -20,14 +20,13 @@ package org.apache.paimon.jdbc;
 
 /** Distributed lock implementation based on sqlite table. */
 public class SqlLiteDistributedLockDialect extends AbstractDistributedLockDialect {
-
     @Override
     public String getCreateTableSql() {
         return "CREATE TABLE "
                 + JdbcUtils.DISTRIBUTED_LOCKS_TABLE_NAME
                 + "("
                 + JdbcUtils.LOCK_ID
-                + " VARCHAR(1000) NOT NULL,"
+                + " VARCHAR(%s) NOT NULL,"
                 + JdbcUtils.ACQUIRED_AT
                 + " TIMESTAMP DEFAULT CURRENT_TIMESTAMP NOT NULL,"
                 + JdbcUtils.EXPIRE_TIME

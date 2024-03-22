@@ -47,6 +47,6 @@ public class JdbcCatalogFactory implements CatalogFactory {
                 options.set(LOCK_TYPE, JdbcCatalogLock.JdbcCatalogLockFactory.IDENTIFIER);
             }
         }
-        return new JdbcCatalog(fileIO, catalogKey, context.options().toMap(), warehouse.toString());
+        return new JdbcCatalog(fileIO, catalogKey, context.options(), warehouse.toString());
     }
 }
