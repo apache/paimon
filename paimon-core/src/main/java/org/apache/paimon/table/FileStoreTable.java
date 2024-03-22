@@ -25,6 +25,7 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.table.query.LocalTableQuery;
+import org.apache.paimon.table.sink.RowKeyExtractor;
 import org.apache.paimon.table.sink.TableCommitImpl;
 import org.apache.paimon.table.sink.TableWriteImpl;
 import org.apache.paimon.types.RowType;
@@ -108,4 +109,6 @@ public interface FileStoreTable extends DataTable {
     }
 
     boolean supportStreamingReadOverwrite();
+
+    RowKeyExtractor createRowKeyExtractor();
 }
