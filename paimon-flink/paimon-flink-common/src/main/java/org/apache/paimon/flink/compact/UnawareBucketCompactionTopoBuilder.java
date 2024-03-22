@@ -98,6 +98,7 @@ public class UnawareBucketCompactionTopoBuilder {
                         specifiedPartitions != null
                                 ? PredicateBuilder.partitions(specifiedPartitions, table.rowType())
                                 : null);
+
         return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }
 
