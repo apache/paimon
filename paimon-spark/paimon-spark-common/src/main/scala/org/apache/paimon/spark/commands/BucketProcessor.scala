@@ -22,7 +22,7 @@ import org.apache.paimon.data.{InternalRow => PaimonInternalRow}
 import org.apache.paimon.index.HashBucketAssigner
 import org.apache.paimon.spark.SparkRow
 import org.apache.paimon.spark.util.EncoderUtils
-import org.apache.paimon.table.{AbstractFileStoreTable, FileStoreTable}
+import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.RowPartitionKeyExtractor
 
 import org.apache.spark.TaskContext
@@ -63,7 +63,7 @@ case class CommonBucketProcessor(
 
   def processPartition(rowIterator: Iterator[Row]): Iterator[Row] = {
     val rowType = table.rowType()
-    val rowKeyExtractor = table.asInstanceOf[AbstractFileStoreTable].createRowKeyExtractor()
+    val rowKeyExtractor = table.createRowKeyExtractor()
 
     def getBucketId(row: PaimonInternalRow): Int = {
       rowKeyExtractor.setRecord(row)
