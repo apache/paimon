@@ -19,7 +19,6 @@
 package org.apache.paimon.flink.action.cdc.mysql;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.Action;
 import org.apache.paimon.flink.action.cdc.CdcActionCommonUtils;
@@ -153,7 +152,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             metadataConverters,
                             caseSensitive,
                             true);
-            try {
+            if (catalog.tableExists(identifier)) {
                 table = (FileStoreTable) catalog.getTable(identifier);
                 table = copyOptionsWithoutBucket(table);
                 Supplier<String> errMsg =
@@ -164,7 +163,7 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 } else {
                     excludedTables.addAll(tableInfo.identifiers());
                 }
-            } catch (Catalog.TableNotExistException e) {
+            } else {
                 catalog.createTable(identifier, fromMySql, false);
                 table = (FileStoreTable) catalog.getTable(identifier);
                 tables.add(table);
