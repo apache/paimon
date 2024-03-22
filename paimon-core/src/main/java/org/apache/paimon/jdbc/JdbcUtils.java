@@ -19,6 +19,7 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -402,9 +403,10 @@ public class JdbcUtils {
         return sqlStatement.toString();
     }
 
-    public static void createDistributedLockTable(JdbcClientPool connections)
+    public static void createDistributedLockTable(JdbcClientPool connections, Options options)
             throws SQLException, InterruptedException {
-        DistributedLockDialectFactory.create(connections.getProtocol()).createTable(connections);
+        DistributedLockDialectFactory.create(connections.getProtocol())
+                .createTable(connections, options);
     }
 
     public static boolean acquire(

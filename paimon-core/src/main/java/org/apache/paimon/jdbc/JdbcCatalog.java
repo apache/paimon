@@ -71,24 +71,20 @@ public class JdbcCatalog extends AbstractCatalog {
 
     private final JdbcClientPool connections;
     private final String catalogKey;
-    private final Map<String, String> options;
+    private final Options options;
     private final String warehouse;
 
-    protected JdbcCatalog(
-            FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
-        super(fileIO, Options.fromMap(config));
+    protected JdbcCatalog(FileIO fileIO, String catalogKey, Options options, String warehouse) {
+        super(fileIO, options);
         this.catalogKey = catalogKey;
-        this.options = config;
+        this.options = options;
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
                 new JdbcClientPool(
-                        Integer.parseInt(
-                                config.getOrDefault(
-                                        CatalogOptions.CLIENT_POOL_SIZE.key(),
-                                        CatalogOptions.CLIENT_POOL_SIZE.defaultValue().toString())),
+                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
                         options.get(CatalogOptions.URI.key()),
-                        options);
+                        options.toMap());
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
@@ -135,7 +131,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
         // if lock enabled, Check and create distributed lock table.
         if (lockEnabled()) {
-            JdbcUtils.createDistributedLockTable(connections);
+            JdbcUtils.createDistributedLockTable(connections, options);
         }
     }
 
@@ -357,7 +353,10 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
-                        connections, catalogKey, checkMaxSleep(options), acquireTimeout(options));
+                        connections,
+                        catalogKey,
+                        checkMaxSleep(options.toMap()),
+                        acquireTimeout(options.toMap()));
         return Lock.fromCatalog(lock, identifier);
     }
 
