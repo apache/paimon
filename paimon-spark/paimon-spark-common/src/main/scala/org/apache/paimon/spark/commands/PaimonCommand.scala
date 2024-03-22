@@ -20,38 +20,16 @@ package org.apache.paimon.spark.commands
 
 import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkFilterConverter
-import org.apache.paimon.table.{BucketMode, FileStoreTable}
-import org.apache.paimon.table.sink.{CommitMessage, CommitMessageSerializer}
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.AnalysisException
 import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper}
-import org.apache.spark.sql.execution.datasources.DataSourceStrategy
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 import java.io.IOException
 
 /** Helper trait for all paimon commands. */
 trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
-
-  lazy val bucketMode: BucketMode = table match {
-    case fileStoreTable: FileStoreTable =>
-      fileStoreTable.bucketMode
-    case _ =>
-      BucketMode.FIXED
-  }
-
-  def deserializeCommitMessage(
-      serializer: CommitMessageSerializer,
-      bytes: Array[Byte]): CommitMessage = {
-    try {
-      serializer.deserialize(serializer.getVersion, bytes)
-    } catch {
-      case e: IOException =>
-        throw new RuntimeException("Failed to deserialize CommitMessage's object", e)
-    }
-  }
 
   protected def convertConditionToPaimonPredicate(
       condition: Expression,
@@ -98,7 +76,7 @@ trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
     }.toMap
   }
 
-  def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
+  private def splitConjunctiveFilters(filter: Filter): Seq[Filter] = {
     filter match {
       case And(filter1, filter2) =>
         splitConjunctiveFilters(filter1) ++ splitConjunctiveFilters(filter2)
@@ -106,7 +84,7 @@ trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
     }
   }
 
-  def isNestedFilterInValue(value: Any): Boolean = {
+  private def isNestedFilterInValue(value: Any): Boolean = {
     value.isInstanceOf[Filter]
   }
 
