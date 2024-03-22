@@ -98,10 +98,7 @@ public class UnawareBucketCompactionTopoBuilder {
                         specifiedPartitions != null
                                 ? PredicateBuilder.partitions(specifiedPartitions, table.rowType())
                                 : null);
-        Integer scanParallelism =
-                Options.fromMap(table.options()).get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        return BucketUnawareCompactSource.buildSource(
-                env, source, isContinuous, scanParallelism, tableIdentifier);
+        return BucketUnawareCompactSource.buildSource(env, source, isContinuous, tableIdentifier);
     }
 
     private void sinkFromSource(DataStreamSource<AppendOnlyCompactionTask> input) {
