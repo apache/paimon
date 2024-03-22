@@ -117,15 +117,21 @@ public class BucketUnawareCompactSource extends RichSourceFunction<AppendOnlyCom
             StreamExecutionEnvironment env,
             BucketUnawareCompactSource source,
             boolean streaming,
+            @Nullable Integer parallelism,
             String tableIdentifier) {
         final StreamSource<AppendOnlyCompactionTask, BucketUnawareCompactSource> sourceOperator =
                 new StreamSource<>(source);
-        return new DataStreamSource<>(
-                env,
-                new CompactionTaskTypeInfo(),
-                sourceOperator,
-                false,
-                COMPACTION_COORDINATOR_NAME + " : " + tableIdentifier,
-                streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED);
+        DataStreamSource<AppendOnlyCompactionTask> dataStream =
+                new DataStreamSource<>(
+                        env,
+                        new CompactionTaskTypeInfo(),
+                        sourceOperator,
+                        false,
+                        COMPACTION_COORDINATOR_NAME + " : " + tableIdentifier,
+                        streaming ? Boundedness.CONTINUOUS_UNBOUNDED : Boundedness.BOUNDED);
+        if (parallelism != null) {
+            dataStream.setParallelism(parallelism);
+        }
+        return dataStream;
     }
 }
