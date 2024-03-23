@@ -1056,6 +1056,27 @@ public class CoreOptions implements Serializable {
                                     + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
                                     + "the config can be set to size.");
 
+    public static final ConfigOption<Integer> SORT_COMPACTION_LOCAL_SAMPLE_SIZE =
+            key("sort-compaction.local-sample.size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The size of local sample for sort-compaction.By default,the value is the sink parallelism * 1000");
+
+    public static final ConfigOption<Integer> SORT_COMPACTION_GLOBAL_SAMPLE_SIZE =
+            key("sort-compaction.global-sample.size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "the size of global sample for sort-compaction.By default,the value is the sink parallelism * 1000");
+
+    public static final ConfigOption<Integer> SORT_RANGE =
+            key("sort-compaction.range.size")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The range for sort-compaction.By default,the value is the sink parallelism * 10");
+
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1124,6 +1145,18 @@ public class CoreOptions implements Serializable {
 
     public boolean sortBySize() {
         return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
+    }
+
+    public Optional<Integer> getLocalSampleSize() {
+        return options.getOptional(SORT_COMPACTION_LOCAL_SAMPLE_SIZE);
+    }
+
+    public Optional<Integer> getGlobalSampleSize() {
+        return options.getOptional(SORT_COMPACTION_GLOBAL_SAMPLE_SIZE);
+    }
+
+    public Optional<Integer> getSortRange() {
+        return options.getOptional(SORT_RANGE);
     }
 
     public static FileFormat createFileFormat(
