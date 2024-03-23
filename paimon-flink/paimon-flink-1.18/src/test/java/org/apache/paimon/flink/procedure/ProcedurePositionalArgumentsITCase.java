@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThatCode;
 
-/** Ensure that the legacy multiply overridden CALL with positional arguments can be invoked. */
+/** Ensure that the legacy multiply overloaded CALL with positional arguments can be invoked. */
 public class ProcedurePositionalArgumentsITCase extends CatalogITCaseBase {
 
     @Test
