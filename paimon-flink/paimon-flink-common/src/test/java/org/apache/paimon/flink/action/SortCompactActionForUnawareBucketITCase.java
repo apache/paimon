@@ -39,6 +39,8 @@ import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.types.DataTypes;
 
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -359,22 +361,83 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
     private SortCompactAction createAction(
             String orderStrategy, String rangeStrategy, List<String> columns) {
+        return createAction(orderStrategy, rangeStrategy, columns, Lists.newArrayList());
+    }
 
-        return createAction(
-                SortCompactAction.class,
-                "compact",
-                "--warehouse",
-                warehouse,
-                "--database",
-                database,
-                "--table",
-                tableName,
-                "--order_strategy",
-                orderStrategy,
-                "--order_by",
-                String.join(",", columns),
-                "--table_conf sort-compaction.range-strategy=" + rangeStrategy,
-                rangeStrategy);
+    private SortCompactAction createAction(
+            String orderStrategy,
+            String rangeStrategy,
+            List<String> columns,
+            List<String> extraConfigs) {
+        ArrayList<String> args =
+                Lists.newArrayList(
+                        "compact",
+                        "--warehouse",
+                        warehouse,
+                        "--database",
+                        database,
+                        "--table",
+                        tableName,
+                        "--order_strategy",
+                        orderStrategy,
+                        "--order_by",
+                        String.join(",", columns),
+                        "--table_conf",
+                        "sort-compaction.range-strategy=" + rangeStrategy);
+        args.addAll(extraConfigs);
+        return createAction(SortCompactAction.class, args.toArray(new String[0]));
+    }
+
+    @Test
+    public void testSampleConfig() throws Exception {
+        prepareData(300, 1);
+
+        {
+            ArrayList<String> extraCompactionConfig =
+                    Lists.newArrayList(
+                            "--table_conf",
+                            "sort-compaction.range.size=100",
+                            "--table_conf",
+                            "sort-compaction.global-sample.size=10");
+            Assertions.assertThatCode(
+                            () -> {
+                                createAction(
+                                                "order",
+                                                "size",
+                                                Arrays.asList(
+                                                        "f0", "f1", "f2", "f3", "f4", "f5", "f6",
+                                                        "f7", "f8", "f9", "f10", "f11", "f12",
+                                                        "f13", "f14", "f15"),
+                                                extraCompactionConfig)
+                                        .run();
+                            })
+                    .hasMessage("The global sample size 10 should be greater than rangeNum 100.");
+        }
+
+        {
+            ArrayList<String> extraCompactionConfig =
+                    Lists.newArrayList(
+                            "--table_conf",
+                            "sort-compaction.local-sample.size=1",
+                            "--table_conf",
+                            "sort-compaction.global-sample.size=100",
+                            "--table_conf",
+                            "sink.parallelism=3");
+            Assertions.assertThatCode(
+                            () -> {
+                                createAction(
+                                                "order",
+                                                "size",
+                                                Arrays.asList(
+                                                        "f0", "f1", "f2", "f3", "f4", "f5", "f6",
+                                                        "f7", "f8", "f9", "f10", "f11", "f12",
+                                                        "f13", "f14", "f15"),
+                                                extraCompactionConfig)
+                                        .run();
+                            })
+                    .hasMessage(
+                            "The sum size 3 of local sample must be greater than the global sample 100.");
+        }
     }
 
     private void callProcedure(

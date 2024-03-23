@@ -105,6 +105,8 @@ public class SortUtils {
                 options.getGlobalSampleSize().orElseGet(() -> sinkParallelism * 1000);
         final int rangeNum = options.getSortRange().orElseGet(() -> sinkParallelism * 10);
 
+        validateSampleConfig(localSampleSize, globalSampleSize, rangeNum, sinkParallelism);
+
         int keyFieldCount = sortKeyType.getFieldCount();
         int valueFieldCount = valueRowType.getFieldCount();
         final int[] valueProjectionMap = new int[valueFieldCount];
@@ -190,6 +192,22 @@ public class SortUtils {
                 .setParallelism(sinkParallelism)
                 .map(FlinkRowData::new, inputStream.getType())
                 .setParallelism(sinkParallelism);
+    }
+
+    private static void validateSampleConfig(
+            int localSampleSize, int globalSampleSize, int rangeNum, int sinkParallelism) {
+        if (globalSampleSize < rangeNum) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The global sample size %d should be greater than rangeNum %d.",
+                            globalSampleSize, rangeNum));
+        }
+        if (sinkParallelism * localSampleSize < globalSampleSize) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "The sum size %d of local sample must be greater than the global sample %d.",
+                            localSampleSize * sinkParallelism, globalSampleSize));
+        }
     }
 
     /** Abstract key from a row data. */
