@@ -723,7 +723,7 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
         runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable();
-        waitForOptions(tableConfig, table);
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test

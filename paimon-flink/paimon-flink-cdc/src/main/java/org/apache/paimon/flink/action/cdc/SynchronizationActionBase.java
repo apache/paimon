@@ -176,20 +176,25 @@ public abstract class SynchronizationActionBase extends ActionBase {
             DataStream<RichCdcMultiplexRecord> input,
             EventParser.Factory<RichCdcMultiplexRecord> parserFactory);
 
-    protected FileStoreTable copyOptionsWithoutBucket(FileStoreTable table) {
-        Map<String, String> toCopy = new HashMap<>(tableConfig);
-        toCopy.remove(CoreOptions.BUCKET.key());
-        return table.copy(toCopy);
-    }
+    protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
+        // doesn't support altering bucket here
+        Map<String, String> withoutBucket = new HashMap<>(tableConfig);
+        withoutBucket.remove(CoreOptions.BUCKET.key());
 
-    protected void toOptionsChange(Identifier identifier, Map<String, String> options)
-            throws Catalog.ColumnAlreadyExistException, Catalog.TableNotExistException,
-                    Catalog.ColumnNotExistException {
         List<SchemaChange> optionChanges =
-                options.entrySet().stream()
+                withoutBucket.entrySet().stream()
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
-        catalog.alterTable(identifier, optionChanges, false);
+
+        try {
+            catalog.alterTable(identifier, optionChanges, false);
+        } catch (Catalog.TableNotExistException
+                | Catalog.ColumnAlreadyExistException
+                | Catalog.ColumnNotExistException e) {
+            throw new RuntimeException("This is unexpected.", e);
+        }
+
+        return table.copy(withoutBucket);
     }
 
     @Override

@@ -1094,7 +1094,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable();
-        waitForOptions(tableConfig, table);
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test
@@ -1276,6 +1276,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         assertThatCode(action::build).doesNotThrowAnyException();
 
         FileStoreTable table = getFileStoreTable();
-        waitForOptions(Collections.singletonMap(BUCKET.key(), "1"), table);
+        assertThat(table.options().get(BUCKET.key())).isEqualTo("1");
     }
 }
