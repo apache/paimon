@@ -25,12 +25,6 @@ import org.apache.paimon.options.Options;
 /** Options for jdbc catalog. */
 public final class JdbcCatalogOptions {
 
-    public static final ConfigOption<String> CATALOG_KEY =
-            ConfigOptions.key("catalog-key")
-                    .stringType()
-                    .defaultValue("jdbc")
-                    .withDescription("Custom jdbc catalog store key.");
-
     public static final ConfigOption<Integer> LOCK_KEY_MAX_LENGTH =
             ConfigOptions.key("lock-key-max-length")
                     .intType()

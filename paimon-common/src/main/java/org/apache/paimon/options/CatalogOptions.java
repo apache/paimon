@@ -110,4 +110,16 @@ public class CatalogOptions {
                                             TextElement.text(
                                                     "\"custom\": You can implement LineageMetaFactory and LineageMeta to store lineage information in customized storage."))
                                     .build());
+
+    public static final ConfigOption<String> CATALOG_KEY =
+            ConfigOptions.key("catalog-key")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("Custom catalog key.");
+
+    public static final ConfigOption<Long> CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS =
+            ConfigOptions.key("client-pool-cache-eviction-interval-ms")
+                    .longType()
+                    .defaultValue(5 * 60 * 1000L)
+                    .withDescription("Client pool cache eviction interval ms.");
 }

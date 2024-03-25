@@ -20,6 +20,7 @@ package org.apache.paimon.hive.migrate;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryWriter;
 import org.apache.paimon.fs.FileIO;
@@ -72,7 +73,7 @@ public class HiveMigrator implements Migrator {
 
     private final FileIO fileIO;
     private final HiveCatalog hiveCatalog;
-    private final IMetaStoreClient client;
+    private final ClientPool<IMetaStoreClient, TException> clients;
     private final String sourceDatabase;
     private final String sourceTable;
     private final String targetDatabase;
@@ -88,7 +89,7 @@ public class HiveMigrator implements Migrator {
             Map<String, String> options) {
         this.hiveCatalog = hiveCatalog;
         this.fileIO = hiveCatalog.fileIO();
-        this.client = hiveCatalog.getHmsClient();
+        this.clients = hiveCatalog.getHmsClient();
         this.sourceDatabase = sourceDatabase;
         this.sourceTable = sourceTable;
         this.targetDatabase = targetDatabase;
@@ -98,31 +99,35 @@ public class HiveMigrator implements Migrator {
 
     public static List<Migrator> databaseMigrators(
             HiveCatalog hiveCatalog, String sourceDatabase, Map<String, String> options) {
-        IMetaStoreClient client = hiveCatalog.getHmsClient();
+        ClientPool<IMetaStoreClient, TException> clients = hiveCatalog.getHmsClient();
         try {
-            return client.getAllTables(sourceDatabase).stream()
-                    .map(
-                            sourceTable ->
-                                    new HiveMigrator(
-                                            hiveCatalog,
-                                            sourceDatabase,
-                                            sourceTable,
-                                            sourceDatabase,
-                                            sourceTable + PAIMON_SUFFIX,
-                                            options))
-                    .collect(Collectors.toList());
+            return clients.run(
+                    client ->
+                            client.getAllTables(sourceDatabase).stream()
+                                    .map(
+                                            sourceTable ->
+                                                    new HiveMigrator(
+                                                            hiveCatalog,
+                                                            sourceDatabase,
+                                                            sourceTable,
+                                                            sourceDatabase,
+                                                            sourceTable + PAIMON_SUFFIX,
+                                                            options))
+                                    .collect(Collectors.toList()));
         } catch (TException e) {
+            throw new RuntimeException(e);
+        } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
     }
 
     @Override
     public void executeMigrate() throws Exception {
-        if (!client.tableExists(sourceDatabase, sourceTable)) {
+        if (!clients.run(client -> client.tableExists(sourceDatabase, sourceTable))) {
             throw new RuntimeException("Source hive table does not exist");
         }
 
-        Table sourceHiveTable = client.getTable(sourceDatabase, sourceTable);
+        Table sourceHiveTable = clients.run(client -> client.getTable(sourceDatabase, sourceTable));
         Map<String, String> properties = new HashMap<>(sourceHiveTable.getParameters());
         checkPrimaryKey();
 
@@ -132,7 +137,7 @@ public class HiveMigrator implements Migrator {
         if (!alreadyExist) {
             Schema schema =
                     from(
-                            client.getSchema(sourceDatabase, sourceTable),
+                            clients.run(client -> client.getSchema(sourceDatabase, sourceTable)),
                             sourceHiveTable.getPartitionKeys(),
                             properties);
             hiveCatalog.createTable(identifier, schema, false);
@@ -143,7 +148,10 @@ public class HiveMigrator implements Migrator {
             checkPaimonTable(paimonTable);
 
             List<String> partitionsNames =
-                    client.listPartitionNames(sourceDatabase, sourceTable, Short.MAX_VALUE);
+                    clients.run(
+                            client ->
+                                    client.listPartitionNames(
+                                            sourceDatabase, sourceTable, Short.MAX_VALUE));
             checkCompatible(sourceHiveTable, paimonTable);
 
             List<MigrateTask> tasks = new ArrayList<>();
@@ -155,7 +163,7 @@ public class HiveMigrator implements Migrator {
             } else {
                 tasks.addAll(
                         importPartitionedTableTask(
-                                client,
+                                clients,
                                 fileIO,
                                 partitionsNames,
                                 sourceHiveTable,
@@ -203,7 +211,11 @@ public class HiveMigrator implements Migrator {
         }
 
         // if all success, drop the origin table
-        client.dropTable(sourceDatabase, sourceTable, true, true);
+        clients.run(
+                client -> {
+                    client.dropTable(sourceDatabase, sourceTable, true, true);
+                    return null;
+                });
     }
 
     @Override
@@ -216,7 +228,7 @@ public class HiveMigrator implements Migrator {
 
     private void checkPrimaryKey() throws Exception {
         PrimaryKeysRequest primaryKeysRequest = new PrimaryKeysRequest(sourceDatabase, sourceTable);
-        if (!client.getPrimaryKeys(primaryKeysRequest).isEmpty()) {
+        if (!clients.run(client -> client.getPrimaryKeys(primaryKeysRequest).isEmpty())) {
             throw new IllegalArgumentException("Can't migrate primary key table yet.");
         }
     }
@@ -264,7 +276,7 @@ public class HiveMigrator implements Migrator {
     }
 
     private List<MigrateTask> importPartitionedTableTask(
-            IMetaStoreClient client,
+            ClientPool<IMetaStoreClient, TException> clients,
             FileIO fileIO,
             List<String> partitionNames,
             Table sourceTable,
@@ -283,9 +295,14 @@ public class HiveMigrator implements Migrator {
 
         for (String partitionName : partitionNames) {
             Partition partition =
-                    client.getPartition(
-                            sourceTable.getDbName(), sourceTable.getTableName(), partitionName);
-            Map<String, String> values = client.partitionNameToSpec(partitionName);
+                    clients.run(
+                            client ->
+                                    client.getPartition(
+                                            sourceTable.getDbName(),
+                                            sourceTable.getTableName(),
+                                            partitionName));
+            Map<String, String> values =
+                    clients.run(client -> client.partitionNameToSpec(partitionName));
             String format = parseFormat(partition.getSd().getSerdeInfo().toString());
             String location = partition.getSd().getLocation();
             BinaryRow partitionRow =

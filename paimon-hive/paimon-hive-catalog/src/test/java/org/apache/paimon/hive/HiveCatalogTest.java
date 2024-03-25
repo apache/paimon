@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -34,10 +35,9 @@ import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.HiveMetaStoreClient;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.mockito.MockedStatic;
-import org.mockito.Mockito;
 
 import java.lang.reflect.Field;
 import java.util.Arrays;
@@ -66,10 +66,11 @@ public class HiveCatalogTest extends CatalogTestBase {
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(hiveConf);
         String metastoreClientClass = "org.apache.hadoop.hive.metastore.HiveMetaStoreClient";
-        try (MockedStatic<HiveCatalog> mocked = Mockito.mockStatic(HiveCatalog.class)) {
-            mocked.when(() -> HiveCatalog.createClient(hiveConf, metastoreClientClass))
-                    .thenReturn(metaStoreClient);
-        }
+
+        //        try (MockedStatic<HiveCatalog> mocked = Mockito.mockStatic(HiveCatalog.class)) {
+        //            mocked.when(() -> HiveCatalog.createClient(hiveConf, metastoreClientClass))
+        //                    .thenReturn(metaStoreClient);
+        //        }
         catalog = new HiveCatalog(fileIO, hiveConf, metastoreClientClass, warehouse);
     }
 
@@ -203,10 +204,11 @@ public class HiveCatalogTest extends CatalogTestBase {
                     addHiveTableParametersSchema,
                     false);
 
-            Field clientField = HiveCatalog.class.getDeclaredField("client");
+            Field clientField = HiveCatalog.class.getDeclaredField("clients");
             clientField.setAccessible(true);
-            IMetaStoreClient client = (IMetaStoreClient) clientField.get(catalog);
-            Table table = client.getTable(databaseName, tableName);
+            ClientPool<IMetaStoreClient, TException> clients =
+                    (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+            Table table = clients.run(client -> client.getTable(databaseName, tableName));
             Map<String, String> tableProperties = table.getParameters();
 
             // Verify the transformed parameters
@@ -258,10 +260,11 @@ public class HiveCatalogTest extends CatalogTestBase {
                     Arrays.asList(schemaChange1, schemaChange2),
                     false);
 
-            Field clientField = HiveCatalog.class.getDeclaredField("client");
+            Field clientField = HiveCatalog.class.getDeclaredField("clients");
             clientField.setAccessible(true);
-            IMetaStoreClient client = (IMetaStoreClient) clientField.get(catalog);
-            Table table = client.getTable(databaseName, tableName);
+            ClientPool<IMetaStoreClient, TException> clients =
+                    (ClientPool<IMetaStoreClient, TException>) clientField.get(catalog);
+            Table table = clients.run(client -> client.getTable(databaseName, tableName));
             Map<String, String> tableProperties = table.getParameters();
 
             assertThat(tableProperties).containsEntry("table.owner", "Hms");

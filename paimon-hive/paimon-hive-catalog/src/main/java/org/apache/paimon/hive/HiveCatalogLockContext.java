@@ -19,19 +19,25 @@
 package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.options.Options;
+
+import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.thrift.TException;
 
 /** Hive {@link CatalogLockContext}. */
 public class HiveCatalogLockContext implements CatalogLockContext {
 
     private final SerializableHiveConf hiveConf;
-    private final String clientClassName;
     private final Options options;
+    private final ClientPool<IMetaStoreClient, TException> clients;
 
     public HiveCatalogLockContext(
-            SerializableHiveConf hiveConf, String clientClassName, Options options) {
+            ClientPool<IMetaStoreClient, TException> clients,
+            SerializableHiveConf hiveConf,
+            Options options) {
+        this.clients = clients;
         this.hiveConf = hiveConf;
-        this.clientClassName = clientClassName;
         this.options = options;
     }
 
@@ -44,7 +50,7 @@ public class HiveCatalogLockContext implements CatalogLockContext {
         return hiveConf;
     }
 
-    public String clientClassName() {
-        return clientClassName;
+    public ClientPool<IMetaStoreClient, TException> getClients() {
+        return clients;
     }
 }

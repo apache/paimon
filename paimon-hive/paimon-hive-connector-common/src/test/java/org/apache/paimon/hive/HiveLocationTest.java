@@ -21,6 +21,7 @@ package org.apache.paimon.hive;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.hive.annotation.Minio;
@@ -41,7 +42,9 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.Sets;
 import com.klarna.hiverunner.HiveShell;
 import com.klarna.hiverunner.annotations.HiveSQL;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
+import org.apache.hadoop.hive.metastore.api.Database;
 import org.apache.hadoop.hive.metastore.api.Table;
+import org.apache.thrift.TException;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
@@ -75,7 +78,7 @@ public class HiveLocationTest {
 
     private HiveCatalog catalog;
 
-    private IMetaStoreClient hmsClient;
+    private ClientPool<IMetaStoreClient, TException> hmsClient;
 
     private String objectStorepath;
 
@@ -145,7 +148,8 @@ public class HiveLocationTest {
         List<Path> paths = new ArrayList<>();
         for (String db : dbs) {
             catalog.createDatabase(db, true);
-            assertThat(hmsClient.getDatabase(db)).isNotNull();
+            Database database = hmsClient.run(client -> client.getDatabase(db));
+            assertThat(database).isNotNull();
 
             Path actual = catalog.newDatabasePath(db);
             Path expected = new Path(this.objectStorepath + "/" + db + ".db");
@@ -192,8 +196,11 @@ public class HiveLocationTest {
                 false);
 
         Table hmsClientTablea =
-                hmsClient.getTable(
-                        tableIdentifier.getDatabaseName(), tableIdentifier.getObjectName());
+                hmsClient.run(
+                        client ->
+                                client.getTable(
+                                        tableIdentifier.getDatabaseName(),
+                                        tableIdentifier.getObjectName()));
         String location =
                 hmsClientTablea.getParameters().get(LocationKeyExtractor.TBPROPERTIES_LOCATION_KEY);
         String expected = this.objectStorepath + "/" + db + ".db" + "/" + table;

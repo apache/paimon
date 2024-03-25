@@ -18,12 +18,21 @@
 
 package org.apache.paimon.client;
 
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.StringUtils;
+
+import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.Closeable;
+import java.io.IOException;
+import java.io.Serializable;
 import java.util.ArrayDeque;
 import java.util.Deque;
+import java.util.List;
 
 import static org.apache.paimon.utils.Preconditions.checkState;
 
@@ -43,7 +52,8 @@ public interface ClientPool<C, E extends Exception> {
     <R> R run(Action<R, C, E> action, boolean retry) throws E, InterruptedException;
 
     /** Default implementation for {@link ClientPool}. */
-    abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
+    abstract class ClientPoolImpl<C, E extends Exception>
+            implements Closeable, Serializable, ClientPool<C, E> {
         private static final Logger LOG = LoggerFactory.getLogger(ClientPoolImpl.class);
 
         private final int poolSize;
@@ -167,6 +177,62 @@ public interface ClientPool<C, E extends Exception> {
 
         public boolean isClosed() {
             return closed;
+        }
+    }
+
+    /** Cached client pool for {@link ClientPool}. */
+    abstract class CachedClientPool<C, E extends Exception, CP extends ClientPoolImpl>
+            implements Closeable, Serializable, ClientPool<C, E> {
+
+        protected static final String CONF_KEY_PREFIX = "confKey:";
+        protected final long evictionInterval;
+        protected final String key;
+        protected final String metadata;
+        private final Options options;
+
+        public CachedClientPool(Options options) {
+            this.options = options;
+            this.evictionInterval =
+                    options.get(CatalogOptions.CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS);
+            this.metadata = options.get(CatalogOptions.METASTORE);
+            this.key = extractKey(options);
+            init();
+        }
+
+        protected Options options() {
+            return options;
+        }
+
+        protected abstract void init();
+
+        protected abstract ClientPool<C, E> clientPool();
+
+        @Override
+        public <R> R run(Action<R, C, E> action) throws E, InterruptedException {
+            return clientPool().run(action);
+        }
+
+        @Override
+        public <R> R run(Action<R, C, E> action, boolean retry) throws E, InterruptedException {
+            return clientPool().run(action, retry);
+        }
+
+        private String extractKey(Options options) {
+            List<Object> elements = Lists.newArrayList();
+            elements.add(options.get(CatalogOptions.URI));
+            String metastore = options.get(CatalogOptions.METASTORE);
+            elements.add(metastore);
+            String catalogKey = options.getOptional(CatalogOptions.CATALOG_KEY).orElse(metastore);
+            elements.add(catalogKey);
+            elements.addAll(extractKeyElement());
+            return CONF_KEY_PREFIX.concat(StringUtils.join(elements, "."));
+        }
+
+        protected abstract List<String> extractKeyElement();
+
+        @Override
+        public void close() throws IOException {
+            // Do nothing, will automatically clean up
         }
     }
 }

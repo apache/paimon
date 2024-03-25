@@ -23,6 +23,7 @@ import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
 
 /** Factory to create {@link JdbcCatalog}. */
@@ -38,7 +39,7 @@ public class JdbcCatalogFactory implements CatalogFactory {
     @Override
     public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
         Options options = context.options();
-        String catalogKey = options.get(JdbcCatalogOptions.CATALOG_KEY);
+        String catalogKey = options.get(CatalogOptions.CATALOG_KEY);
         return new JdbcCatalog(fileIO, catalogKey, context.options(), warehouse.toString());
     }
 }

@@ -20,17 +20,20 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.metastore.MetastoreClient;
+import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.PartitionPathUtils;
 import org.apache.paimon.utils.RowDataPartitionComputer;
 
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.hadoop.hive.metastore.IMetaStoreClient;
 import org.apache.hadoop.hive.metastore.api.NoSuchObjectException;
 import org.apache.hadoop.hive.metastore.api.Partition;
 import org.apache.hadoop.hive.metastore.api.StorageDescriptor;
+import org.apache.thrift.TException;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -42,10 +45,13 @@ public class HiveMetastoreClient implements MetastoreClient {
     private final Identifier identifier;
     private final RowDataPartitionComputer partitionComputer;
 
-    private final IMetaStoreClient client;
+    private final ClientPool<IMetaStoreClient, TException> clients;
     private final StorageDescriptor sd;
 
-    private HiveMetastoreClient(Identifier identifier, TableSchema schema, IMetaStoreClient client)
+    private HiveMetastoreClient(
+            Identifier identifier,
+            TableSchema schema,
+            ClientPool<IMetaStoreClient, TException> clients)
             throws Exception {
         this.identifier = identifier;
         this.partitionComputer =
@@ -54,8 +60,14 @@ public class HiveMetastoreClient implements MetastoreClient {
                         schema.logicalPartitionType(),
                         schema.partitionKeys().toArray(new String[0]));
 
-        this.client = client;
-        this.sd = client.getTable(identifier.getDatabaseName(), identifier.getObjectName()).getSd();
+        this.clients = clients;
+        this.sd =
+                clients.run(
+                        client ->
+                                client.getTable(
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName())
+                                        .getSd());
     }
 
     @Override
@@ -67,8 +79,12 @@ public class HiveMetastoreClient implements MetastoreClient {
     public void addPartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
-            client.getPartition(
-                    identifier.getDatabaseName(), identifier.getObjectName(), partitionValues);
+            clients.run(
+                    client ->
+                            client.getPartition(
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    partitionValues));
             // do nothing if the partition already exists
         } catch (NoSuchObjectException e) {
             // partition not found, create new partition
@@ -87,7 +103,7 @@ public class HiveMetastoreClient implements MetastoreClient {
             hivePartition.setCreateTime(currentTime);
             hivePartition.setLastAccessTime(currentTime);
 
-            client.add_partition(hivePartition);
+            clients.run(client -> client.add_partition(hivePartition));
         }
     }
 
@@ -95,11 +111,13 @@ public class HiveMetastoreClient implements MetastoreClient {
     public void deletePartition(LinkedHashMap<String, String> partitionSpec) throws Exception {
         List<String> partitionValues = new ArrayList<>(partitionSpec.values());
         try {
-            client.dropPartition(
-                    identifier.getDatabaseName(),
-                    identifier.getObjectName(),
-                    partitionValues,
-                    false);
+            clients.run(
+                    client ->
+                            client.dropPartition(
+                                    identifier.getDatabaseName(),
+                                    identifier.getObjectName(),
+                                    partitionValues,
+                                    false));
         } catch (NoSuchObjectException e) {
             // do nothing if the partition not exists
         }
@@ -107,7 +125,7 @@ public class HiveMetastoreClient implements MetastoreClient {
 
     @Override
     public void close() throws Exception {
-        client.close();
+        // Do nothing
     }
 
     /** Factory to create {@link HiveMetastoreClient}. */
@@ -115,28 +133,36 @@ public class HiveMetastoreClient implements MetastoreClient {
 
         private static final long serialVersionUID = 1L;
 
+        private final SerializableHiveConf hiveConf;
         private final Identifier identifier;
         private final TableSchema schema;
-        private final SerializableHiveConf hiveConf;
         private final String clientClassName;
+        private final Options options;
 
         public Factory(
+                SerializableHiveConf hiveConf,
                 Identifier identifier,
                 TableSchema schema,
-                HiveConf hiveConf,
-                String clientClassName) {
+                String clientClassName,
+                Options options) {
+            this.hiveConf = hiveConf;
             this.identifier = identifier;
             this.schema = schema;
-            this.hiveConf = new SerializableHiveConf(hiveConf);
             this.clientClassName = clientClassName;
+            this.options = options;
         }
 
         @Override
         public MetastoreClient create() {
-            HiveConf conf = hiveConf.conf();
             try {
                 return new HiveMetastoreClient(
-                        identifier, schema, HiveCatalog.createClient(conf, clientClassName));
+                        identifier,
+                        schema,
+                        HiveCatalog.createClients(
+                                hiveConf.conf(),
+                                clientClassName,
+                                options,
+                                options.get(CatalogOptions.CLIENT_POOL_SIZE)));
             } catch (Exception e) {
                 throw new RuntimeException(e);
             }
