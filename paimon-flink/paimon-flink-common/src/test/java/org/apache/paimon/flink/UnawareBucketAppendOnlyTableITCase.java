@@ -25,7 +25,6 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.flink.table.planner.factories.TestValuesTableFactory;
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
@@ -244,7 +243,6 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
     }
 
     // test is not correct, append table may insert twice if always retry when file io fails
-    @Disabled
     @Test
     public void testReadWriteFailRandom() throws Exception {
         setFailRate(100, 1000);
@@ -268,13 +266,11 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 () -> {
                     batchSql("SELECT * FROM append_table");
                     List<Row> rows = batchSql("SELECT * FROM append_table");
-                    assertThat(rows.size()).isEqualTo(size);
+                    assertThat(rows.size()).isGreaterThan(size);
                     assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
                 });
     }
 
-    // test is not correct, append table may insert twice if always retry when file io fails
-    @Disabled
     @Test
     public void testReadWriteFailRandomString() throws Exception {
         setFailRate(100, 1000);
@@ -299,7 +295,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 () -> {
                     batchSql("SELECT * FROM append_table");
                     List<Row> rows = batchSql("SELECT * FROM append_table");
-                    assertThat(rows.size()).isEqualTo(size);
+                    assertThat(rows.size()).isGreaterThan(size);
                     assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
                 });
     }
