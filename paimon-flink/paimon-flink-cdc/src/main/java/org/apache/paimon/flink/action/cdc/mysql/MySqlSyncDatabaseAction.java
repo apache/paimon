@@ -161,6 +161,8 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
+                    // Update the latest options to schema
+                    toOptionsChange(identifier, table.options());
                 } else {
                     excludedTables.addAll(tableInfo.identifiers());
                 }
