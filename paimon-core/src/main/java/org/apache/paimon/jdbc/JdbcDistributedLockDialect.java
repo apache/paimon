@@ -18,11 +18,14 @@
 
 package org.apache.paimon.jdbc;
 
+import org.apache.paimon.options.Options;
+
 import java.sql.SQLException;
 
 /** Jdbc distributed lock interface. */
 public interface JdbcDistributedLockDialect {
-    void createTable(JdbcClientPool connections) throws SQLException, InterruptedException;
+    void createTable(JdbcClientPool connections, Options options)
+            throws SQLException, InterruptedException;
 
     boolean lockAcquire(JdbcClientPool connections, String lockId, long timeoutMillSeconds)
             throws SQLException, InterruptedException;

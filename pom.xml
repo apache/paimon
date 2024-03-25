@@ -46,9 +46,9 @@ under the License.
     </licenses>
 
     <scm>
-        <url>https://github.com/apache/incubator-paimon</url>
-        <connection>git@github.com:apache/incubator-paimon.git</connection>
-        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/incubator-paimon.git</developerConnection>
+        <url>https://github.com/apache/paimon</url>
+        <connection>git@github.com:apache/paimon.git</connection>
+        <developerConnection>scm:git:https://gitbox.apache.org/repos/asf/paimon.git</developerConnection>
     </scm>
 
     <modules>
@@ -711,7 +711,7 @@ under the License.
                                 <!-- The ApacheNoticeResourceTransformer collects and aggregates NOTICE files -->
                                 <transformer
                                         implementation="org.apache.maven.plugins.shade.resource.ApacheNoticeResourceTransformer">
-                                    <projectName>Apache Paimon (incubating)</projectName>
+                                    <projectName>Apache Paimon</projectName>
                                     <inceptionYear>${project.inceptionYear}</inceptionYear>
                                     <encoding>UTF-8</encoding>
                                 </transformer>
@@ -950,24 +950,6 @@ under the License.
                             <version>${project.version}</version>
                         </dependency>
                     </dependencies>
-                </plugin>
-
-                <plugin>
-                    <groupId>org.apache.maven.plugins</groupId>
-                    <artifactId>maven-remote-resources-plugin</artifactId>
-                    <version>1.7.0</version>
-                    <executions>
-                        <execution>
-                            <goals>
-                                <goal>process</goal>
-                            </goals>
-                            <configuration>
-                                <resourceBundles>
-                                    <resourceBundle>org.apache.apache.resources:apache-incubator-disclaimer-resource-bundle:1.5</resourceBundle>
-                                </resourceBundles>
-                            </configuration>
-                        </execution>
-                    </executions>
                 </plugin>
             </plugins>
         </pluginManagement>

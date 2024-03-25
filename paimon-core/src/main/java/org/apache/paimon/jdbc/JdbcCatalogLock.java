@@ -19,6 +19,7 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.io.IOException;
@@ -103,18 +104,17 @@ public class JdbcCatalogLock implements CatalogLock {
             return new JdbcCatalogLock(
                     lockContext.connections,
                     lockContext.catalogKey,
-                    checkMaxSleep(lockContext.conf),
-                    acquireTimeout(lockContext.conf));
+                    checkMaxSleep(lockContext.conf.toMap()),
+                    acquireTimeout(lockContext.conf.toMap()));
         }
     }
 
     static class JdbcLockContext implements LockContext {
         private final JdbcClientPool connections;
         private final String catalogKey;
-        private final Map<String, String> conf;
+        private final Options conf;
 
-        public JdbcLockContext(
-                JdbcClientPool connections, String catalogKey, Map<String, String> conf) {
+        public JdbcLockContext(JdbcClientPool connections, String catalogKey, Options conf) {
             this.connections = connections;
             this.catalogKey = catalogKey;
             this.conf = conf;

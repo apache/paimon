@@ -210,7 +210,10 @@ You can configure any connection parameters that have been declared by JDBC thro
 
 You can also perform logical isolation for databases under multiple catalogs by specifying "catalog-key".
 
+Additionally, when creating a JdbcCatalog, you can specify the maximum length for the lock key by configuring "lock-key-max-length," which defaults to 255. Since this value is a combination of {catalog-key}.{database-name}.{table-name}, please adjust accordingly.
+
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
+
 
 {{< /tab >}}
 

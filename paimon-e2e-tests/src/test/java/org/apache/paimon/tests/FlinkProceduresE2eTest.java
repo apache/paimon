@@ -93,9 +93,16 @@ public class FlinkProceduresE2eTest extends E2eTestBase {
                 testDataSourceDdl);
 
         // execute compact procedure
+        String callStatement;
+        if (System.getProperty("test.flink.main.version").compareTo("1.18") == 0) {
+            callStatement = "CALL sys.compact('default.ts_table', 'dt=20221205;dt=20221206');";
+        } else {
+            callStatement =
+                    "CALL sys.compact(\\`table\\` => 'default.ts_table', partitions => 'dt=20221205;dt=20221206');";
+        }
+
         runSql(
-                "SET 'execution.checkpointing.interval' = '1s';\n"
-                        + "CALL sys.compact('default.ts_table', 'dt=20221205;dt=20221206');",
+                "SET 'execution.checkpointing.interval' = '1s';\n" + callStatement,
                 catalogDdl,
                 useCatalogCmd);
 

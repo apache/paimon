@@ -118,11 +118,18 @@ public class CompactorSourceBuilder {
 
         BucketsTable bucketsTable = new BucketsTable(table, isContinuous);
         RowType produceType = bucketsTable.rowType();
-        return env.fromSource(
-                buildSource(bucketsTable),
-                WatermarkStrategy.noWatermarks(),
-                tableIdentifier + "-compact-source",
-                InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
+        DataStreamSource<RowData> dataStream =
+                env.fromSource(
+                        buildSource(bucketsTable),
+                        WatermarkStrategy.noWatermarks(),
+                        tableIdentifier + "-compact-source",
+                        InternalTypeInfo.of(LogicalTypeConversion.toLogicalType(produceType)));
+        Integer parallelism =
+                Options.fromMap(table.options()).get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        if (parallelism != null) {
+            dataStream.setParallelism(parallelism);
+        }
+        return dataStream;
     }
 
     private Map<String, String> streamingCompactOptions() {
