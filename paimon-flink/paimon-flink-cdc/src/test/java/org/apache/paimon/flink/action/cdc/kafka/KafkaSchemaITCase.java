@@ -111,7 +111,7 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
         runActionWithDefaultEnv(action2);
 
         FileStoreTable table = getFileStoreTable(tableName);
-        waitForOptions(tableConfig, table);
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test
