@@ -68,7 +68,7 @@ You can join the Paimon community on Slack. Paimon channel is in ASF Slack works
 
 ## Building
 
-JDK 8/11 is required for building the project.
+JDK 8/11 is required for building the project. Maven version >=3.3.1.
 
 - Run the `mvn clean install -DskipTests` command to build the project.
 - Run the `mvn spotless:apply` to format the project (both Java and Scala).
