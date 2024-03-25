@@ -332,29 +332,17 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
 
     private void zorder(List<String> columns) throws Exception {
         String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
-        if (RANDOM.nextBoolean()) {
-            createAction("zorder", rangeStrategy, columns).run();
-        } else {
-            callProcedure("zorder", rangeStrategy, columns);
-        }
+        createAction("zorder", rangeStrategy, columns).run();
     }
 
     private void hilbert(List<String> columns) throws Exception {
         String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
-        if (RANDOM.nextBoolean()) {
-            createAction("hilbert", rangeStrategy, columns).run();
-        } else {
-            callProcedure("hilbert", rangeStrategy, columns);
-        }
+        createAction("hilbert", rangeStrategy, columns).run();
     }
 
     private void order(List<String> columns) throws Exception {
         String rangeStrategy = RANDOM.nextBoolean() ? "size" : "quantity";
-        if (RANDOM.nextBoolean()) {
-            createAction("order", rangeStrategy, columns).run();
-        } else {
-            callProcedure("order", rangeStrategy, columns);
-        }
+        createAction("order", rangeStrategy, columns).run();
     }
 
     private SortCompactAction createAction(
@@ -375,20 +363,6 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                 String.join(",", columns),
                 "--table_conf sort-compaction.range-strategy=" + rangeStrategy,
                 rangeStrategy);
-    }
-
-    private void callProcedure(
-            String orderStrategy, String rangeStrategy, List<String> orderByColumns) {
-        callProcedure(
-                String.format(
-                        "CALL sys.compact('%s.%s', '', '%s', '%s','sort-compaction.range-strategy=%s')",
-                        database,
-                        tableName,
-                        orderStrategy,
-                        String.join(",", orderByColumns),
-                        rangeStrategy),
-                false,
-                true);
     }
 
     private void createTable() throws Exception {

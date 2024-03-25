@@ -324,17 +324,23 @@ SELECT * FROM T;
 
 Flink 1.18 and later versions support [Call Statements](https://nightlies.apache.org/flink/flink-docs-master/docs/dev/table/sql/call/), 
 which make it easier to manipulate data and metadata of Paimon table by writing SQLs instead of submitting Flink jobs.
-All available procedures are listed below. Note that when you call a procedure, you must pass all parameters in order, 
-and if you don't want to pass some parameters, you must use `''` as placeholder. For example, if you want to compact 
-table `default.t` with parallelism 4, but you don't want to specify partitions and sort strategy, the call statement 
-should be \
+
+In 1.18, the procedure only supports passing arguments by position. You must pass all arguments in order, and if you 
+don't want to pass some arguments, you must use `''` as placeholder. For example, if you want to compact table `default.t` 
+with parallelism 4, but you don't want to specify partitions and sort strategy, the call statement should be \
 `CALL sys.compact('default.t', '', '', '', 'sink.parallelism=4')`.
+
+In higher versions, the procedure supports passing arguments by name. You can pass arguments in any order and any optional 
+argument can be omitted. For the above example, the call statement is \
+``CALL sys.compact(`table` => 'default.t', options => 'sink.parallelism=4')``. 
 
 Specify partitions: we use string to represent partition filter. "," means "AND" and ";" means "OR". For example, if you want 
 to specify two partitions date=01 and date=02, you need to write 'date=01;date=02'; If you want to specify one partition 
 with date=01 and day=01, you need to write 'date=01,day=01'.
 
-table options syntax: we use string to represent table options. The format is 'key1=value1,key2=value2...'.
+Table options syntax: we use string to represent table options. The format is 'key1=value1,key2=value2...'.
+
+All available procedures are listed below.
 
 <table class="table table-bordered">
    <thead>
@@ -349,20 +355,17 @@ table options syntax: we use string to represent table options. The format is 'k
    <tr>
       <td>compact</td>
       <td>
-         CALL [catalog.]sys.compact('identifier') <br/><br/>
-         CALL [catalog.]sys.compact('identifier', 'partitions') <br/><br/>
-         CALL [catalog.]sys.compact('identifier', 'partitions', 'order_strategy', 'order_columns', 'table_options')
       </td>
       <td>
-         TO compact a table. Arguments:
-            <li>identifier: the target table identifier. Cannot be empty.</li>
-            <li>partitions: partition filter.</li>
-            <li>order_strategy: 'order' or 'zorder' or 'hilbert' or 'none'. Left empty for 'none'.</li>
-            <li>order_columns: the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
-            <li>table_options: additional dynamic options of the table.</li>
+         To compact a table. Arguments:
+            <li>table(required): the target table identifier.</li>
+            <li>partitions(optional): partition filter.</li>
+            <li>order_strategy(optional): 'order' or 'zorder' or 'hilbert' or 'none'.</li>
+            <li>order_by(optional): the columns need to be sort. Left empty if 'order_strategy' is 'none'.</li>
+            <li>options(optional): additional dynamic options of the table.</li>
       </td>
       <td>
-         CALL sys.compact('default.T', 'p=0', 'zorder', 'a,b', 'sink.parallelism=4')
+         CALL sys.compact(`table` => 'default.T', partitions => 'p=0', order_strategy => 'zorder', order_by => 'a,b', options => 'sink.parallelism=4')
       </td>
    </tr>
    <tr>
