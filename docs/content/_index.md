@@ -24,7 +24,7 @@ under the License.
 
 # Apache Paimon
 
-Apache Paimon(incubating) is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
+Apache Paimon is a lake format that enables building a Realtime Lakehouse Architecture with Flink and Spark 
 for both streaming and batch operations. Paimon innovatively combines lake format and LSM (Log-structured merge-tree) 
 structure, bringing realtime streaming updates into the lake architecture.
 
