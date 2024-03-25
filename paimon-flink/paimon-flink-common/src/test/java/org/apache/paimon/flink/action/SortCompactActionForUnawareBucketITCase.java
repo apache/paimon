@@ -389,40 +389,11 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
     }
 
     @Test
-    public void testSampleConfig() throws Exception {
+    public void testvalidSampleConfig() throws Exception {
         prepareData(300, 1);
-
         {
             ArrayList<String> extraCompactionConfig =
-                    Lists.newArrayList(
-                            "--table_conf",
-                            "sort-compaction.range.size=100",
-                            "--table_conf",
-                            "sort-compaction.global-sample.size=10");
-            Assertions.assertThatCode(
-                            () -> {
-                                createAction(
-                                                "order",
-                                                "size",
-                                                Arrays.asList(
-                                                        "f0", "f1", "f2", "f3", "f4", "f5", "f6",
-                                                        "f7", "f8", "f9", "f10", "f11", "f12",
-                                                        "f13", "f14", "f15"),
-                                                extraCompactionConfig)
-                                        .run();
-                            })
-                    .hasMessage("The global sample size 10 should be greater than rangeNum 100.");
-        }
-
-        {
-            ArrayList<String> extraCompactionConfig =
-                    Lists.newArrayList(
-                            "--table_conf",
-                            "sort-compaction.local-sample.size=1",
-                            "--table_conf",
-                            "sort-compaction.global-sample.size=100",
-                            "--table_conf",
-                            "sink.parallelism=3");
+                    Lists.newArrayList("--table_conf", "sort-compaction.local-sample.size=1");
             Assertions.assertThatCode(
                             () -> {
                                 createAction(
@@ -436,7 +407,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                                         .run();
                             })
                     .hasMessage(
-                            "The sum size 3 of local sample must be greater than the global sample 100.");
+                            "the config sort-compaction.local-sample.size=1 is set too small,greater than or equal to 20 is needed.");
         }
     }
 

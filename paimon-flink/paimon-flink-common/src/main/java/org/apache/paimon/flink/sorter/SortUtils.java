@@ -101,11 +101,15 @@ public class SortUtils {
         }
         final int localSampleSize =
                 options.getLocalSampleSize().orElseGet(() -> sinkParallelism * 1000);
-        final int globalSampleSize =
-                options.getGlobalSampleSize().orElseGet(() -> sinkParallelism * 1000);
-        final int rangeNum = options.getSortRange().orElseGet(() -> sinkParallelism * 10);
+        final int globalSampleSize = sinkParallelism * 1000;
+        final int rangeNum = sinkParallelism * 10;
 
-        validateSampleConfig(localSampleSize, globalSampleSize, rangeNum, sinkParallelism);
+        if (localSampleSize < 20) {
+            throw new IllegalArgumentException(
+                    String.format(
+                            "the config %s=%d is set too small,greater than or equal to 20 is needed.",
+                            CoreOptions.SORT_COMPACTION_LOCAL_SAMPLE_SIZE.key(), localSampleSize));
+        }
 
         int keyFieldCount = sortKeyType.getFieldCount();
         int valueFieldCount = valueRowType.getFieldCount();
@@ -192,22 +196,6 @@ public class SortUtils {
                 .setParallelism(sinkParallelism)
                 .map(FlinkRowData::new, inputStream.getType())
                 .setParallelism(sinkParallelism);
-    }
-
-    private static void validateSampleConfig(
-            int localSampleSize, int globalSampleSize, int rangeNum, int sinkParallelism) {
-        if (globalSampleSize < rangeNum) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "The global sample size %d should be greater than rangeNum %d.",
-                            globalSampleSize, rangeNum));
-        }
-        if (sinkParallelism * localSampleSize < globalSampleSize) {
-            throw new IllegalArgumentException(
-                    String.format(
-                            "The sum size %d of local sample must be greater than the global sample %d.",
-                            localSampleSize * sinkParallelism, globalSampleSize));
-        }
     }
 
     /** Abstract key from a row data. */

@@ -1062,21 +1062,6 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The size of local sample for sort-compaction.By default,the value is the sink parallelism * 1000.");
-
-    public static final ConfigOption<Integer> SORT_COMPACTION_GLOBAL_SAMPLE_SIZE =
-            key("sort-compaction.global-sample.size")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The size of global sample for sort-compaction.By default,the value is the sink parallelism * 1000.");
-
-    public static final ConfigOption<Integer> SORT_RANGE =
-            key("sort-compaction.range.size")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "The range for sort-compaction.By default,the value is the sink parallelism * 10.");
-
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1149,14 +1134,6 @@ public class CoreOptions implements Serializable {
 
     public Optional<Integer> getLocalSampleSize() {
         return options.getOptional(SORT_COMPACTION_LOCAL_SAMPLE_SIZE);
-    }
-
-    public Optional<Integer> getGlobalSampleSize() {
-        return options.getOptional(SORT_COMPACTION_GLOBAL_SAMPLE_SIZE);
-    }
-
-    public Optional<Integer> getSortRange() {
-        return options.getOptional(SORT_RANGE);
     }
 
     public static FileFormat createFileFormat(

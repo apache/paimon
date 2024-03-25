@@ -564,12 +564,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
         </tr>
         <tr>
-            <td><h5>sort-compaction.global-sample.size</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>The size of global sample for sort-compaction.By default,the value is the sink parallelism * 1000.</td>
-        </tr>
-        <tr>
             <td><h5>sort-compaction.local-sample.size</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Integer</td>
@@ -581,12 +575,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td><p>Enum</p></td>
             <td>The range strategy of sort compaction, the default value is quantity.
 If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
-        </tr>
-        <tr>
-            <td><h5>sort-compaction.range.size</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>The range for sort-compaction.By default,the value is the sink parallelism * 10.</td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>
