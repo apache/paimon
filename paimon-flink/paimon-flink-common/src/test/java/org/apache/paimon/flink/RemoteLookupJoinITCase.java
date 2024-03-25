@@ -67,7 +67,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE DIM (k INT PRIMARY KEY NOT ENFORCED, v INT) WITH ('bucket' = '2', 'continuous.discovery-interval' = '1ms')");
         CloseableIterator<Row> service = streamSqlIter("CALL sys.query_service('default.DIM', 2)");
-        RemoteTableQuery query = new RemoteTableQuery(getPaimonTable("DIM"));
+        RemoteTableQuery query = new RemoteTableQuery(paimonTable("DIM"));
 
         sql("INSERT INTO DIM VALUES (1, 11), (2, 22), (3, 33), (4, 44)");
         Thread.sleep(2000);
@@ -132,7 +132,7 @@ public class RemoteLookupJoinITCase extends CatalogITCaseBase {
     }
 
     private ServiceProxy launchQueryServer(String tableName) throws Throwable {
-        FileStoreTable table = (FileStoreTable) getPaimonTable(tableName);
+        FileStoreTable table = (FileStoreTable) paimonTable(tableName);
         LocalTableQuery query = table.newLocalTableQuery().withIOManager(IOManager.create(path));
         KvQueryServer server =
                 new KvQueryServer(

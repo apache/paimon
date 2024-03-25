@@ -62,7 +62,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
-    private final long schemaId;
+    private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
@@ -74,13 +74,13 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
     public AppendOnlyFileStoreRead(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             RowType rowType,
             FileFormatDiscover formatDiscover,
             FileStorePathFactory pathFactory) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
-        this.schemaId = schemaId;
+        this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
@@ -113,8 +113,11 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             key -> {
-                                TableSchema tableSchema = schemaManager.schema(this.schemaId);
-                                TableSchema dataSchema = schemaManager.schema(key.schemaId);
+                                TableSchema tableSchema = schema;
+                                TableSchema dataSchema =
+                                        key.schemaId == schema.id()
+                                                ? schema
+                                                : schemaManager.schema(key.schemaId);
 
                                 // projection to data schema
                                 int[][] dataProjection =
@@ -131,7 +134,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                 dataSchema.fields());
 
                                 List<Predicate> dataFilters =
-                                        this.schemaId == key.schemaId
+                                        this.schema.id() == key.schemaId
                                                 ? filters
                                                 : SchemaEvolutionUtil.createDataFilters(
                                                         tableSchema.fields(),
@@ -174,6 +177,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                             new RowDataFileRecordReader(
                                     fileIO,
                                     dataFilePathFactory.toPath(file.fileName()),
+                                    file.fileSize(),
                                     bulkFormatMapping.getReaderFactory(),
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),

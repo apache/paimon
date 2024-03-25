@@ -384,36 +384,6 @@ This config option does not affect the default filesystem metastore.</td>
             <td>The number of sorted runs that trigger the stopping of writes, the default value is 'num-sorted-run.compaction-trigger' + 1.</td>
         </tr>
         <tr>
-            <td><h5>orc.bloom.filter.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>A comma-separated list of columns for which to create a bloom filter when writing.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.bloom.filter.fpp</h5></td>
-            <td style="word-wrap: break-word;">0.05</td>
-            <td>Double</td>
-            <td>Define the default false positive probability for bloom filters.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.column.encoding.direct</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>Comma-separated list of fields for which dictionary encoding is to be skipped in orc.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.dictionary.key.threshold</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>Integer</td>
-            <td>If the number of distinct keys in a dictionary is greater than this fraction of the total number of non-null rows, turn off dictionary encoding in orc.  Use 1 to always use dictionary encoding.</td>
-        </tr>
-        <tr>
-            <td><h5>orc.write.batch-size</h5></td>
-            <td style="word-wrap: break-word;">1024</td>
-            <td>Integer</td>
-            <td>write batch size for orc.</td>
-        </tr>
-        <tr>
             <td><h5>page-size</h5></td>
             <td style="word-wrap: break-word;">64 kb</td>
             <td>MemorySize</td>
@@ -592,6 +562,13 @@ This config option does not affect the default filesystem metastore.</td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>Duration</td>
             <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
+        </tr>
+        <tr>
+            <td><h5>sort-compaction.range-strategy</h5></td>
+            <td style="word-wrap: break-word;">QUANTITY</td>
+            <td><p>Enum</p></td>
+            <td>The range strategy of sort compaction, the default value is quantity.
+If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, the config can be set to size.<br /><br />Possible values:<ul><li>"SIZE"</li><li>"QUANTITY"</li></ul></td>
         </tr>
         <tr>
             <td><h5>sort-engine</h5></td>

@@ -35,6 +35,7 @@ import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.CatalogEnvironment;
 import org.apache.paimon.types.RowType;
@@ -75,7 +76,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     public KeyValueFileStore(
             FileIO fileIO,
             SchemaManager schemaManager,
-            long schemaId,
+            TableSchema schema,
             boolean crossPartitionUpdate,
             CoreOptions options,
             RowType partitionType,
@@ -86,7 +87,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
             MergeFunctionFactory<KeyValue> mfFactory,
             String tableName,
             CatalogEnvironment catalogEnvironment) {
-        super(fileIO, schemaManager, schemaId, options, partitionType, catalogEnvironment);
+        super(fileIO, schemaManager, schema, options, partitionType, catalogEnvironment);
         this.crossPartitionUpdate = crossPartitionUpdate;
         this.bucketKeyType = bucketKeyType;
         this.keyType = keyType;
@@ -121,8 +122,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     public KeyValueFileStoreRead newRead() {
         return new KeyValueFileStoreRead(
                 options,
-                schemaManager,
-                schemaId,
+                schema,
                 keyType,
                 valueType,
                 newKeyComparator(),
@@ -134,7 +134,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return KeyValueFileReaderFactory.builder(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 keyType,
                 valueType,
                 FileFormatDiscover.of(options),
@@ -162,7 +162,7 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
         return new KeyValueFileStoreWrite(
                 fileIO,
                 schemaManager,
-                schemaId,
+                schema,
                 commitUser,
                 keyType,
                 valueType,
@@ -221,14 +221,16 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 bucketFilter,
                 snapshotManager(),
                 schemaManager,
-                schemaId,
+                schema,
                 keyValueFieldsExtractor,
                 manifestFileFactory(forWrite),
                 manifestListFactory(forWrite),
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName);
+                branchName,
+                options.deletionVectorsEnabled(),
+                options.mergeEngine());
     }
 
     @Override

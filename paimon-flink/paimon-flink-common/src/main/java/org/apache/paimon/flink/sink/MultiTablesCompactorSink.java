@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
 import org.apache.paimon.options.Options;
 
@@ -87,8 +86,7 @@ public class MultiTablesCompactorSink implements Serializable {
             DataStream<RowData> input, String commitUser, Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming =
-                StreamExecutionEnvironmentUtils.getConfiguration(env)
-                                .get(ExecutionOptions.RUNTIME_MODE)
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
         SingleOutputStreamOperator<MultiTableCommittable> written =
@@ -112,7 +110,7 @@ public class MultiTablesCompactorSink implements Serializable {
     protected DataStreamSink<?> doCommit(
             DataStream<MultiTableCommittable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;

@@ -19,6 +19,7 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.io.IOException;
@@ -35,22 +36,22 @@ public class JdbcCatalogLock implements CatalogLock {
     private final JdbcClientPool connections;
     private final long checkMaxSleep;
     private final long acquireTimeout;
-    private final String catalogName;
+    private final String catalogKey;
 
     public JdbcCatalogLock(
             JdbcClientPool connections,
-            String catalogName,
+            String catalogKey,
             long checkMaxSleep,
             long acquireTimeout) {
         this.connections = connections;
         this.checkMaxSleep = checkMaxSleep;
         this.acquireTimeout = acquireTimeout;
-        this.catalogName = catalogName;
+        this.catalogKey = catalogKey;
     }
 
     @Override
     public <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception {
-        String lockUniqueName = String.format("%s.%s.%s", catalogName, database, table);
+        String lockUniqueName = String.format("%s.%s.%s", catalogKey, database, table);
         lock(lockUniqueName);
         try {
             return callable.call();
@@ -86,26 +87,11 @@ public class JdbcCatalogLock implements CatalogLock {
         // Do nothing
     }
 
-    /** Create a jdbc lock factory. */
-    public static LockFactory createFactory(
-            JdbcClientPool connections, String catalogName, Map<String, String> conf) {
-        return new JdbcCatalogLockFactory(connections, catalogName, conf);
-    }
-
-    private static class JdbcCatalogLockFactory implements LockFactory {
+    /** Jdbc catalog lock factory. */
+    public static class JdbcCatalogLockFactory implements LockFactory {
 
         private static final long serialVersionUID = 1L;
-        private static final String IDENTIFIER = "jdbc";
-        private final JdbcClientPool connections;
-        private final String catalogName;
-        private final Map<String, String> conf;
-
-        public JdbcCatalogLockFactory(
-                JdbcClientPool connections, String catalogName, Map<String, String> conf) {
-            this.connections = connections;
-            this.catalogName = catalogName;
-            this.conf = conf;
-        }
+        public static final String IDENTIFIER = "jdbc";
 
         @Override
         public String identifier() {
@@ -114,8 +100,24 @@ public class JdbcCatalogLock implements CatalogLock {
 
         @Override
         public CatalogLock create(LockContext context) {
+            JdbcLockContext lockContext = (JdbcLockContext) context;
             return new JdbcCatalogLock(
-                    connections, catalogName, checkMaxSleep(conf), acquireTimeout(conf));
+                    lockContext.connections,
+                    lockContext.catalogKey,
+                    checkMaxSleep(lockContext.conf.toMap()),
+                    acquireTimeout(lockContext.conf.toMap()));
+        }
+    }
+
+    static class JdbcLockContext implements LockContext {
+        private final JdbcClientPool connections;
+        private final String catalogKey;
+        private final Options conf;
+
+        public JdbcLockContext(JdbcClientPool connections, String catalogKey, Options conf) {
+            this.connections = connections;
+            this.catalogKey = catalogKey;
+            this.conf = conf;
         }
     }
 

@@ -26,6 +26,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
@@ -55,7 +56,6 @@ import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
 import static org.apache.paimon.jdbc.JdbcUtils.execute;
 import static org.apache.paimon.jdbc.JdbcUtils.insertProperties;
 import static org.apache.paimon.jdbc.JdbcUtils.updateTable;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 
 /* This file is based on source code from the Iceberg Project (http://iceberg.apache.org/), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -71,24 +71,20 @@ public class JdbcCatalog extends AbstractCatalog {
 
     private final JdbcClientPool connections;
     private final String catalogKey;
-    private final Map<String, String> options;
+    private final Options options;
     private final String warehouse;
 
-    protected JdbcCatalog(
-            FileIO fileIO, String catalogKey, Map<String, String> config, String warehouse) {
-        super(fileIO);
+    protected JdbcCatalog(FileIO fileIO, String catalogKey, Options options, String warehouse) {
+        super(fileIO, options);
         this.catalogKey = catalogKey;
-        this.options = config;
+        this.options = options;
         this.warehouse = warehouse;
         Preconditions.checkNotNull(options, "Invalid catalog properties: null");
         this.connections =
                 new JdbcClientPool(
-                        Integer.parseInt(
-                                config.getOrDefault(
-                                        CatalogOptions.CLIENT_POOL_SIZE.key(),
-                                        CatalogOptions.CLIENT_POOL_SIZE.defaultValue().toString())),
+                        options.get(CatalogOptions.CLIENT_POOL_SIZE),
                         options.get(CatalogOptions.URI.key()),
-                        options);
+                        options.toMap());
         try {
             initializeCatalogTablesIfNeed();
         } catch (SQLException e) {
@@ -135,7 +131,7 @@ public class JdbcCatalog extends AbstractCatalog {
 
         // if lock enabled, Check and create distributed lock table.
         if (lockEnabled()) {
-            JdbcUtils.createDistributedLockTable(connections);
+            JdbcUtils.createDistributedLockTable(connections, options);
         }
     }
 
@@ -347,15 +343,8 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockFactory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(JdbcCatalogLock.createFactory(connections, catalogKey, options))
-                : Optional.empty();
-    }
-
-    private boolean lockEnabled() {
-        return Boolean.parseBoolean(
-                options.getOrDefault(LOCK_ENABLED.key(), LOCK_ENABLED.defaultValue().toString()));
+    public Optional<CatalogLock.LockContext> lockContext() {
+        return Optional.of(new JdbcCatalogLock.JdbcLockContext(connections, catalogKey, options));
     }
 
     private Lock lock(Identifier identifier) {
@@ -364,7 +353,10 @@ public class JdbcCatalog extends AbstractCatalog {
         }
         JdbcCatalogLock lock =
                 new JdbcCatalogLock(
-                        connections, catalogKey, checkMaxSleep(options), acquireTimeout(options));
+                        connections,
+                        catalogKey,
+                        checkMaxSleep(options.toMap()),
+                        acquireTimeout(options.toMap()));
         return Lock.fromCatalog(lock, identifier);
     }
 

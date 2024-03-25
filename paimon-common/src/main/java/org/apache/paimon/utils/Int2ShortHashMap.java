@@ -19,6 +19,8 @@
 package org.apache.paimon.utils;
 
 import it.unimi.dsi.fastutil.ints.Int2ShortOpenHashMap;
+import it.unimi.dsi.fastutil.ints.IntArrayList;
+import it.unimi.dsi.fastutil.shorts.ShortArrayList;
 
 /** Int to short hash map. */
 public class Int2ShortHashMap {
@@ -27,6 +29,10 @@ public class Int2ShortHashMap {
 
     public Int2ShortHashMap() {
         this.map = new Int2ShortOpenHashMap();
+    }
+
+    public Int2ShortHashMap(int capacity) {
+        this.map = new Int2ShortOpenHashMap(capacity);
     }
 
     public void put(int key, short value) {
@@ -43,5 +49,29 @@ public class Int2ShortHashMap {
 
     public int size() {
         return map.size();
+    }
+
+    public static Builder builder() {
+        return new Builder();
+    }
+
+    /** Builder of {@link Int2ShortHashMap}. */
+    public static class Builder {
+
+        private final IntArrayList keyList = new IntArrayList();
+        private final ShortArrayList valueList = new ShortArrayList();
+
+        public void put(int key, short value) {
+            keyList.add(key);
+            valueList.add(value);
+        }
+
+        public Int2ShortHashMap build() {
+            Int2ShortHashMap map = new Int2ShortHashMap(keyList.size());
+            for (int i = 0; i < keyList.size(); i++) {
+                map.put(keyList.getInt(i), valueList.getShort(i));
+            }
+            return map;
+        }
     }
 }

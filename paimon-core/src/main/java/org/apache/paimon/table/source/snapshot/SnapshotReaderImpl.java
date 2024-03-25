@@ -19,6 +19,7 @@
 package org.apache.paimon.table.source.snapshot;
 
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.CoreOptions.MergeEngine;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.RecordComparator;
@@ -63,6 +64,7 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
@@ -73,6 +75,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private final FileStoreScan scan;
     private final TableSchema tableSchema;
     private final CoreOptions options;
+    private final MergeEngine mergeEngine;
     private final boolean deletionVectors;
     private final SnapshotManager snapshotManager;
     private final ConsumerManager consumerManager;
@@ -100,6 +103,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         this.scan = scan;
         this.tableSchema = tableSchema;
         this.options = options;
+        this.mergeEngine = options.mergeEngine();
         this.deletionVectors = options.deletionVectorsEnabled();
         this.snapshotManager = snapshotManager;
         this.consumerManager =
@@ -402,8 +406,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         if (lazyPartitionComparator == null) {
             lazyPartitionComparator =
                     CodeGenUtils.newRecordComparator(
-                            tableSchema.logicalPartitionType().getFieldTypes(),
-                            "PartitionComparator");
+                            tableSchema.logicalPartitionType().getFieldTypes());
         }
         return lazyPartitionComparator;
     }
@@ -436,7 +439,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
         String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
 
         // append only or deletionVectors files can be returned
-        if (tableSchema.primaryKeys().isEmpty() || deletionVectors) {
+        if (tableSchema.primaryKeys().isEmpty() || deletionVectors || mergeEngine == FIRST_ROW) {
             return makeRawTableFiles(bucketPath, dataFiles);
         }
 

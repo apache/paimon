@@ -21,6 +21,7 @@ package org.apache.paimon.jdbc;
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.CatalogOptions;
+import org.apache.paimon.options.Options;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
@@ -55,8 +56,11 @@ public class JdbcCatalogTest extends CatalogTestBase {
         properties.put(JdbcCatalog.PROPERTY_PREFIX + "password", "password");
         properties.put(CatalogOptions.WAREHOUSE.key(), warehouse);
         properties.put(CatalogOptions.LOCK_ENABLED.key(), "true");
+        properties.put(CatalogOptions.LOCK_TYPE.key(), "jdbc");
         properties.putAll(props);
-        JdbcCatalog catalog = new JdbcCatalog(fileIO, "test-jdbc-catalog", properties, warehouse);
+        JdbcCatalog catalog =
+                new JdbcCatalog(
+                        fileIO, "test-jdbc-catalog", Options.fromMap(properties), warehouse);
         assertThat(catalog.warehouse()).isEqualTo(warehouse);
         return catalog;
     }

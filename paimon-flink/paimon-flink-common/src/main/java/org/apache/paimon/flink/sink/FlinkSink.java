@@ -20,7 +20,6 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.TagCreationMode;
-import org.apache.paimon.flink.utils.StreamExecutionEnvironmentUtils;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -53,7 +52,6 @@ import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
 
-import static org.apache.flink.configuration.ClusterOptions.ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
 import static org.apache.paimon.flink.FlinkConnectorOptions.CHANGELOG_PRODUCER_FULL_COMPACTION_TRIGGER_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_AUTO_TAG_FOR_SAVEPOINT;
@@ -190,8 +188,7 @@ public abstract class FlinkSink<T> implements Serializable {
             DataStream<T> input, String commitUser, @Nullable Integer parallelism) {
         StreamExecutionEnvironment env = input.getExecutionEnvironment();
         boolean isStreaming =
-                StreamExecutionEnvironmentUtils.getConfiguration(env)
-                                .get(ExecutionOptions.RUNTIME_MODE)
+                env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                         == RuntimeExecutionMode.STREAMING;
 
         boolean writeOnly = table.coreOptions().writeOnly();
@@ -222,7 +219,7 @@ public abstract class FlinkSink<T> implements Serializable {
 
     protected DataStreamSink<?> doCommit(DataStream<Committable> written, String commitUser) {
         StreamExecutionEnvironment env = written.getExecutionEnvironment();
-        ReadableConfig conf = StreamExecutionEnvironmentUtils.getConfiguration(env);
+        ReadableConfig conf = env.getConfiguration();
         CheckpointConfig checkpointConfig = env.getCheckpointConfig();
         boolean isStreaming =
                 conf.get(ExecutionOptions.RUNTIME_MODE) == RuntimeExecutionMode.STREAMING;
@@ -263,25 +260,16 @@ public abstract class FlinkSink<T> implements Serializable {
                         .setMaxParallelism(1);
         Options options = Options.fromMap(table.options());
         configureGlobalCommitter(
-                committed,
-                options.get(SINK_COMMITTER_CPU),
-                options.get(SINK_COMMITTER_MEMORY),
-                conf);
+                committed, options.get(SINK_COMMITTER_CPU), options.get(SINK_COMMITTER_MEMORY));
         return committed.addSink(new DiscardingSink<>()).name("end").setParallelism(1);
     }
 
     public static void configureGlobalCommitter(
             SingleOutputStreamOperator<?> committed,
             double cpuCores,
-            @Nullable MemorySize heapMemory,
-            ReadableConfig conf) {
+            @Nullable MemorySize heapMemory) {
         if (heapMemory == null) {
             return;
-        }
-
-        if (!conf.get(ENABLE_FINE_GRAINED_RESOURCE_MANAGEMENT)) {
-            throw new RuntimeException(
-                    "To support the 'sink.committer-cpu' and 'sink.committer-memory' configurations, you must enable fine-grained resource management. Please set 'cluster.fine-grained-resource-management.enabled' to 'true' in your Flink configuration.");
         }
 
         SlotSharingGroup slotSharingGroup =

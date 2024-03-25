@@ -28,8 +28,6 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.format.parquet.reader.ColumnReader;
 import org.apache.paimon.format.parquet.reader.ParquetDecimalVector;
 import org.apache.paimon.format.parquet.reader.ParquetTimestampVector;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
@@ -87,16 +85,15 @@ public class ParquetReaderFactory implements FormatReaderFactory {
     }
 
     @Override
-    public ParquetReader createReader(FileIO fileIO, Path filePath) throws IOException {
-        final long splitOffset = 0;
-        final long splitLength = fileIO.getFileSize(filePath);
-
+    public ParquetReader createReader(FormatReaderFactory.Context context) throws IOException {
         ParquetReadOptions.Builder builder =
-                ParquetReadOptions.builder().withRange(splitOffset, splitOffset + splitLength);
+                ParquetReadOptions.builder().withRange(0, context.fileSize());
         setReadOptions(builder);
 
         ParquetFileReader reader =
-                new ParquetFileReader(ParquetInputFile.fromPath(fileIO, filePath), builder.build());
+                new ParquetFileReader(
+                        ParquetInputFile.fromPath(context.fileIO(), context.filePath()),
+                        builder.build());
         MessageType fileSchema = reader.getFileMetaData().getSchema();
         MessageType requestedSchema = clipParquetSchema(fileSchema);
         reader.setRequestedSchema(requestedSchema);
@@ -106,12 +103,6 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         Pool<ParquetReaderBatch> poolOfBatches = createPoolOfBatches(requestedSchema);
 
         return new ParquetReader(reader, requestedSchema, reader.getRecordCount(), poolOfBatches);
-    }
-
-    @Override
-    public RecordReader<InternalRow> createReader(FileIO fileIO, Path file, int poolSize)
-            throws IOException {
-        throw new UnsupportedOperationException();
     }
 
     private void setReadOptions(ParquetReadOptions.Builder builder) {

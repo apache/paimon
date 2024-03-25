@@ -39,6 +39,7 @@ import org.apache.spark.sql.catalyst.catalog.SessionCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
 import org.apache.spark.sql.connector.catalog.CatalogUtils;
+import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
@@ -316,18 +317,22 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
         return (SupportsNamespaces) sessionCatalog;
     }
 
+    private FunctionCatalog asFunctionCatalog() {
+        return (FunctionCatalog) sessionCatalog;
+    }
+
     @Override
     public Identifier[] listFunctions(String[] namespace) throws NoSuchNamespaceException {
         if (namespace.length == 0 || isSystemNamespace(namespace) || namespaceExists(namespace)) {
             return new Identifier[0];
         }
 
-        throw new NoSuchNamespaceException(namespace);
+        return asFunctionCatalog().listFunctions(namespace);
     }
 
     @Override
     public UnboundFunction loadFunction(Identifier ident) throws NoSuchFunctionException {
-        throw new NoSuchFunctionException(ident);
+        return asFunctionCatalog().loadFunction(ident);
     }
 
     private static boolean isSystemNamespace(String[] namespace) {

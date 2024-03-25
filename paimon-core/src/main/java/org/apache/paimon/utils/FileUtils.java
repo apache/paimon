@@ -19,17 +19,18 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 
+import javax.annotation.Nullable;
+
 import java.io.FileNotFoundException;
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.ForkJoinPool;
 import java.util.concurrent.ForkJoinWorkerThread;
 import java.util.stream.Stream;
@@ -68,18 +69,6 @@ public class FileUtils {
             scanIoForkJoinPool = createForkJoinPool("paimon-scan-io", parallelism);
         }
         return scanIoForkJoinPool;
-    }
-
-    public static <T> List<T> readListFromFile(
-            FileIO fileIO,
-            Path path,
-            ObjectSerializer<T> serializer,
-            FormatReaderFactory readerFactory)
-            throws IOException {
-        List<T> result = new ArrayList<>();
-        createFormatReader(fileIO, readerFactory, path)
-                .forEachRemaining(row -> result.add(serializer.fromRow(row)));
-        return result;
     }
 
     /**
@@ -143,8 +132,12 @@ public class FileUtils {
     }
 
     public static RecordReader<InternalRow> createFormatReader(
-            FileIO fileIO, FormatReaderFactory format, Path file) throws IOException {
+            FileIO fileIO, FormatReaderFactory format, Path file, @Nullable Long fileSize)
+            throws IOException {
         checkExists(fileIO, file);
-        return format.createReader(fileIO, file);
+        if (fileSize == null) {
+            fileSize = fileIO.getFileSize(file);
+        }
+        return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
     }
 }

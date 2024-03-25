@@ -30,6 +30,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.apache.paimon.io.DataFileTestUtils.fromMinMax;
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,7 +51,8 @@ public class SplitGeneratorTest {
                 minSequence,
                 maxSequence,
                 0,
-                0);
+                0,
+                0L);
     }
 
     @Test
@@ -107,14 +109,14 @@ public class SplitGeneratorTest {
         Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
         assertThat(
                         toNames(
-                                new MergeTreeSplitGenerator(comparator, 100, 2, false)
+                                new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3", "5"), Collections.singletonList("6"));
 
         assertThat(
                         toNames(
-                                new MergeTreeSplitGenerator(comparator, 100, 30, false)
+                                new MergeTreeSplitGenerator(comparator, 100, 30, false, DEDUPLICATE)
                                         .splitForBatch(files)))
                 .containsExactlyInAnyOrder(
                         Arrays.asList("1", "2", "4", "3"),

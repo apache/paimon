@@ -58,7 +58,7 @@ ALTER TABLE my_table SET TBLPROPERTIES (
 ALTER TABLE my_table SET PROPERTIES write_buffer_size = '256 MB';
 ```
 
-> NOTE: Versions below Trino 368 do not support changing/adding table properties.
+> NOTE: Versions below Trino 427 do not support changing/adding table properties.
 
 {{< /tab >}}
 

@@ -162,7 +162,7 @@ public interface FileEntry {
         for (ManifestFileMeta file : manifestFiles) {
             Future<List<ManifestEntry>> future =
                     CompletableFuture.supplyAsync(
-                            () -> manifestFile.read(file.fileName()),
+                            () -> manifestFile.read(file.fileName(), file.fileSize()),
                             FileUtils.COMMON_IO_FORK_JOIN_POOL);
             result.add(
                     () -> {

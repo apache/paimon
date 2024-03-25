@@ -177,6 +177,10 @@ public abstract class HiveCatalogITCaseBase {
         Path tablePath = new Path(path, "test_db2.db/t");
         assertThat(tablePath.getFileSystem().exists(tablePath)).isTrue();
         assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
+                .hasRootCauseInstanceOf(ValidationException.class)
+                .hasRootCauseMessage("Cannot drop a database which is currently in use.");
+        tEnv.executeSql("USE test_db");
+        assertThatThrownBy(() -> tEnv.executeSql("DROP DATABASE test_db2").await())
                 .hasRootCauseInstanceOf(DatabaseNotEmptyException.class)
                 .hasRootCauseMessage("Database test_db2 in catalog my_hive is not empty.");
 
@@ -931,6 +935,32 @@ public abstract class HiveCatalogITCaseBase {
                         "2\t20\t2023-10-17",
                         "3\t30\t2023-10-17",
                         "4\t40\t2023-10-17");
+    }
+
+    @Test
+    public void testDeletePartitionForTag() throws Exception {
+        tEnv.executeSql(
+                "CREATE TABLE t (\n"
+                        + "    k INT,\n"
+                        + "    v BIGINT,\n"
+                        + "    PRIMARY KEY (k) NOT ENFORCED\n"
+                        + ") WITH (\n"
+                        + "    'bucket' = '2',\n"
+                        + "    'metastore.tag-to-partition' = 'dt'\n"
+                        + ")");
+        tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
+        tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await();
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
+
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-16", "dt=2023-10-17");
+
+        tEnv.executeSql("CALL sys.delete_tag('test_db.t', '2023-10-16')");
+        assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
+                .containsExactlyInAnyOrder("dt=2023-10-17");
+
+        assertThat(hiveShell.executeQuery("SELECT k, v FROM t WHERE dt='2023-10-16'")).isEmpty();
     }
 
     @Test

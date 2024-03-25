@@ -65,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.SortedMap;
 import java.util.function.BiConsumer;
 
 import static org.apache.paimon.CoreOptions.PATH;
@@ -156,7 +157,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
-                coreOptions(), newSnapshotReader(), DefaultValueAssigner.create(tableSchema));
+                tableSchema.primaryKeys().size() > 0,
+                coreOptions(),
+                newSnapshotReader(),
+                DefaultValueAssigner.create(tableSchema));
     }
 
     @Override
@@ -427,11 +431,25 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
+        Snapshot snapshot = null;
+        if (snapshotManager.snapshotExists(fromSnapshotId)) {
+            snapshot = snapshotManager.snapshot(fromSnapshotId);
+        } else {
+            SortedMap<Snapshot, List<String>> tags = tagManager().tags();
+            for (Snapshot snap : tags.keySet()) {
+                if (snap.id() == fromSnapshotId) {
+                    snapshot = snap;
+                    break;
+                } else if (snap.id() > fromSnapshotId) {
+                    break;
+                }
+            }
+        }
         checkArgument(
-                snapshotManager.snapshotExists(fromSnapshotId),
+                snapshot != null,
                 "Cannot create tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
-        createTag(tagName, snapshotManager.snapshot(fromSnapshotId));
+        createTag(tagName, snapshot);
     }
 
     @Override
@@ -447,7 +465,12 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
 
     @Override
     public void deleteTag(String tagName) {
-        tagManager().deleteTag(tagName, store().newTagDeletion(), snapshotManager());
+        tagManager()
+                .deleteTag(
+                        tagName,
+                        store().newTagDeletion(),
+                        snapshotManager(),
+                        store().createTagCallbacks());
     }
 
     @Override

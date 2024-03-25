@@ -28,7 +28,6 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -108,20 +107,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(FileFormatType.ORC)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
-
-    public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
-            key("orc.bloom.filter.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "A comma-separated list of columns for which to create a bloom filter when writing.");
-
-    public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
-            key("orc.bloom.filter.fpp")
-                    .doubleType()
-                    .defaultValue(0.05)
-                    .withDescription(
-                            "Define the default false positive probability for bloom filters.");
 
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
@@ -746,12 +731,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
-    public static final ConfigOption<Integer> ORC_WRITE_BATCH_SIZE =
-            key("orc.write.batch-size")
-                    .intType()
-                    .defaultValue(1024)
-                    .withDescription("write batch size for orc.");
-
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
                     .stringType()
@@ -1003,22 +982,6 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Turn off the dictionary encoding for all fields in parquet.");
 
-    public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
-            key("orc.column.encoding.direct")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
-
-    public static final ConfigOption<Integer> ORC_DICTIONARY_KEY_THRESHOLD =
-            key("orc.dictionary.key.threshold")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "If the number of distinct keys in a dictionary is greater than this "
-                                    + "fraction of the total number of non-null rows, turn off "
-                                    + "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
-
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
                     .stringType()
@@ -1084,6 +1047,14 @@ public class CoreOptions implements Serializable {
                             "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
                                     + " vectors are generated when data is written, which marks the data for deletion."
                                     + " During read operations, by applying these index files, merging can be avoided.");
+    public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
+            key("sort-compaction.range-strategy")
+                    .enumType(RangeStrategy.class)
+                    .defaultValue(RangeStrategy.QUANTITY)
+                    .withDescription(
+                            "The range strategy of sort compaction, the default value is quantity.\n"
+                                    + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
+                                    + "the config can be set to size.");
 
     private final Options options;
 
@@ -1149,6 +1120,10 @@ public class CoreOptions implements Serializable {
 
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public boolean sortBySize() {
+        return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
     }
 
     public static FileFormat createFileFormat(
@@ -1632,10 +1607,6 @@ public class CoreOptions implements Serializable {
         return result;
     }
 
-    public int orcWriteBatch() {
-        return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
-    }
-
     public boolean localMergeEnabled() {
         return options.get(LOCAL_MERGE_BUFFER_SIZE) != null;
     }
@@ -2103,41 +2074,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the way of making up time precision for sequence field. */
-    public enum SequenceAutoPadding implements DescribedEnum {
-        ROW_KIND_FLAG(
-                "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
-
-        private final String value;
-        private final String description;
-
-        SequenceAutoPadding(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public static SequenceAutoPadding fromString(String s) {
-            return OptionsUtils.convertToEnum(s, SequenceAutoPadding.class);
-        }
-    }
-
     /** The mode for tag creation. */
     public enum TagCreationMode implements DescribedEnum {
         NONE("none", "No automatically created tags."),
@@ -2244,6 +2180,12 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    /** Specifies range strategy. */
+    public enum RangeStrategy {
+        SIZE,
+        QUANTITY
     }
 
     /** Specifies the log consistency mode for table. */

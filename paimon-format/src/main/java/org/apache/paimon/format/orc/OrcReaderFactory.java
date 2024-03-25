@@ -24,10 +24,10 @@ import org.apache.paimon.data.columnar.ColumnarRow;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
 import org.apache.paimon.data.columnar.VectorizedColumnBatch;
 import org.apache.paimon.format.FormatReaderFactory;
+import org.apache.paimon.format.OrcFormatReaderContext;
 import org.apache.paimon.format.fs.HadoopReadOnlyFileSystem;
 import org.apache.paimon.format.orc.filter.OrcFilters;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader.RecordIterator;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowType;
@@ -88,23 +88,23 @@ public class OrcReaderFactory implements FormatReaderFactory {
     // ------------------------------------------------------------------------
 
     @Override
-    public OrcVectorizedReader createReader(FileIO fileIO, Path file) throws IOException {
-        return createReader(fileIO, file, 1);
-    }
-
-    @Override
-    public OrcVectorizedReader createReader(FileIO fileIO, Path file, int poolSize)
+    public OrcVectorizedReader createReader(FormatReaderFactory.Context context)
             throws IOException {
+        int poolSize =
+                context instanceof OrcFormatReaderContext
+                        ? ((OrcFormatReaderContext) context).poolSize()
+                        : 1;
         Pool<OrcReaderBatch> poolOfBatches = createPoolOfBatches(poolSize);
+
         RecordReader orcReader =
                 createRecordReader(
                         hadoopConfigWrapper.getHadoopConfig(),
                         schema,
                         conjunctPredicates,
-                        fileIO,
-                        file,
+                        context.fileIO(),
+                        context.filePath(),
                         0,
-                        fileIO.getFileSize(file));
+                        context.fileSize());
         return new OrcVectorizedReader(orcReader, poolOfBatches);
     }
 
