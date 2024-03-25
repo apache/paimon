@@ -52,6 +52,7 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -150,6 +151,34 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
             if (sortedExpected.equals(sortedActual)) {
                 break;
             }
+            Thread.sleep(1000);
+        }
+    }
+
+    protected void waitForOptions(Map<String, String> expected, FileStoreTable table)
+            throws Exception {
+
+        // wait for table options to become our expected options
+        Map<String, String> expectedOptions = new HashMap<>(expected);
+        expectedOptions.put("path", table.options().get("path"));
+        while (true) {
+            if (table.options().size() == expectedOptions.size()) {
+                boolean result =
+                        table.options().entrySet().stream()
+                                .allMatch(
+                                        entry -> {
+                                            Object key = entry.getKey();
+                                            Object value1 = entry.getValue();
+                                            Object value2 = expectedOptions.get(key);
+                                            return expectedOptions.containsKey(key)
+                                                    && Objects.equals(value1, value2);
+                                        });
+                if (result) {
+                    break;
+                }
+            }
+
+            table = table.copyWithLatestSchema();
             Thread.sleep(1000);
         }
     }

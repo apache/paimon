@@ -1093,8 +1093,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action2);
 
-        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
-        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
+        FileStoreTable table = getFileStoreTable();
+        waitForOptions(tableConfig, table);
     }
 
     @Test
@@ -1274,6 +1274,8 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
                         .build();
 
         assertThatCode(action::build).doesNotThrowAnyException();
-        assertThat(action.fileStoreTable().options().get(BUCKET.key())).isEqualTo("1");
+
+        FileStoreTable table = getFileStoreTable();
+        waitForOptions(Collections.singletonMap(BUCKET.key(), "1"), table);
     }
 }
