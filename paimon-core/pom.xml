@@ -33,7 +33,6 @@ under the License.
 
     <properties>
         <frocksdbjni.version>6.20.3-ververica-2.0</frocksdbjni.version>
-        <RoaringBitmap.version>1.0.1</RoaringBitmap.version>
     </properties>
 
     <dependencies>
@@ -62,12 +61,6 @@ under the License.
             <artifactId>frocksdbjni</artifactId>
             <version>${frocksdbjni.version}</version>
             <scope>provided</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.roaringbitmap</groupId>
-            <artifactId>RoaringBitmap</artifactId>
-            <version>${RoaringBitmap.version}</version>
         </dependency>
 
         <!-- test dependencies -->
