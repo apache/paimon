@@ -155,14 +155,12 @@ public class MySqlSyncDatabaseAction extends SyncDatabaseActionBase {
                             true);
             try {
                 table = (FileStoreTable) catalog.getTable(identifier);
-                table = copyOptionsWithoutBucket(table);
                 Supplier<String> errMsg =
                         incompatibleMessage(table.schema(), tableInfo, identifier);
                 if (shouldMonitorTable(table.schema(), fromMySql, errMsg)) {
+                    table = alterTableOptions(identifier, table);
                     tables.add(table);
                     monitoredTables.addAll(tableInfo.identifiers());
-                    // Update the latest options to schema
-                    toOptionsChange(identifier, table.options());
                 } else {
                     excludedTables.addAll(tableInfo.identifiers());
                 }
