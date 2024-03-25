@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.jdbc.JdbcCatalogFactory;
 import org.apache.paimon.jdbc.JdbcCatalogLock;
 import org.apache.paimon.jdbc.JdbcClientPool;
@@ -36,18 +37,15 @@ public class LockContextUtils {
 
     private static final Logger LOG = LoggerFactory.getLogger(FileSystemCatalog.class);
 
-    private static JdbcClientPool connections;
-
     public static Optional<CatalogLock.LockContext> lockContext(
-            Options catalogOptions, String catalogKey) {
-        String lockType = catalogOptions.get(CatalogOptions.LOCK_TYPE);
-        if (lockType == null) {
+            ClientPool.ClientPoolImpl clientPool, Options catalogOptions, String catalogKey) {
+        if (clientPool == null) {
             return Optional.of(new AbstractCatalog.OptionLockContext(catalogOptions));
         }
+        String lockType = catalogOptions.get(CatalogOptions.LOCK_TYPE);
         switch (lockType) {
             case JdbcCatalogFactory.IDENTIFIER:
-                //  Try init jdbc connections.
-                tryInitializeJdbcConnections(catalogOptions);
+                JdbcClientPool connections = (JdbcClientPool) clientPool;
                 return Optional.of(
                         new JdbcCatalogLock.JdbcLockContext(
                                 connections, catalogKey, catalogOptions));
@@ -57,27 +55,44 @@ public class LockContextUtils {
         }
     }
 
-    private static void tryInitializeJdbcConnections(Options catalogOptions) {
-        if (connections == null) {
-            connections =
-                    new JdbcClientPool(
-                            catalogOptions.get(CatalogOptions.CLIENT_POOL_SIZE),
-                            catalogOptions.get(CatalogOptions.URI.key()),
-                            catalogOptions.toMap());
-            try {
-                JdbcUtils.createDistributedLockTable(connections, catalogOptions);
-            } catch (SQLException e) {
-                throw new RuntimeException("Cannot initialize JDBC distributed lock.", e);
-            } catch (InterruptedException e) {
-                throw new RuntimeException("Interrupted in call to initialize", e);
-            }
+    public static ClientPool.ClientPoolImpl tryInitializeClientPool(Options catalogOptions) {
+        String lockType = catalogOptions.get(CatalogOptions.LOCK_TYPE);
+        if (lockType == null) {
+            return null;
+        }
+        switch (lockType) {
+            case JdbcCatalogFactory.IDENTIFIER:
+                JdbcClientPool connections =
+                        new JdbcClientPool(
+                                catalogOptions.get(CatalogOptions.CLIENT_POOL_SIZE),
+                                catalogOptions.get(CatalogOptions.URI.key()),
+                                catalogOptions.toMap());
+                try {
+                    JdbcUtils.createDistributedLockTable(connections, catalogOptions);
+                } catch (SQLException e) {
+                    throw new RuntimeException("Cannot initialize JDBC distributed lock.", e);
+                } catch (InterruptedException e) {
+                    throw new RuntimeException("Interrupted in call to initialize", e);
+                }
+                return connections;
+            default:
+                LOG.warn("Unsupported lock type:" + lockType);
+                return null;
         }
     }
 
-    public static void close() {
-        if (connections != null && !connections.isClosed()) {
-            connections.close();
-            connections = null;
+    public static void close(ClientPool.ClientPoolImpl clientPool) {
+        if (clientPool == null) {
+            return;
         }
+        if (clientPool instanceof JdbcClientPool) {
+            JdbcClientPool connections = (JdbcClientPool) clientPool;
+            if (!connections.isClosed()) {
+                connections.close();
+            }
+        } else {
+            clientPool.close();
+        }
+        clientPool = null;
     }
 }

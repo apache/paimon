@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -46,6 +47,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(FileSystemCatalog.class);
 
     private final Path warehouse;
+
+    private ClientPool.ClientPoolImpl clientPool;
 
     public FileSystemCatalog(FileIO fileIO, Path warehouse) {
         super(fileIO);
@@ -159,7 +162,10 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public Optional<CatalogLock.LockContext> lockContext() {
-        return LockContextUtils.lockContext(catalogOptions, "filesystem");
+        if (clientPool == null) {
+            this.clientPool = LockContextUtils.tryInitializeClientPool(catalogOptions);
+        }
+        return LockContextUtils.lockContext(this.clientPool, catalogOptions, "filesystem");
     }
 
     @Override
@@ -194,7 +200,7 @@ public class FileSystemCatalog extends AbstractCatalog {
 
     @Override
     public void close() throws Exception {
-        LockContextUtils.close();
+        LockContextUtils.close(clientPool);
     }
 
     @Override
