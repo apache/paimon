@@ -24,7 +24,6 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import com.ververica.cdc.debezium.utils.JdbcUrlUtils;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -65,8 +64,8 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
 
         // test tinyInt1isBit compatibility and url building
-        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "tinyInt1isBit", "false");
-        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "useSSL", "false");
+        mySqlConfig.put(MySqlActionUtils.JDBC_PROPERTIES_PREFIX + "tinyInt1isBit", "false");
+        mySqlConfig.put(MySqlActionUtils.JDBC_PROPERTIES_PREFIX + "useSSL", "false");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)
@@ -124,7 +123,7 @@ public class MySqlCdcTypeMappingITCase extends MySqlActionITCaseBase {
     public void testConflictTinyInt1NotBool() {
         Map<String, String> mySqlConfig = getBasicMySqlConfig();
         mySqlConfig.put("database-name", "tinyint1_not_bool_test");
-        mySqlConfig.put(JdbcUrlUtils.PROPERTIES_PREFIX + "tinyInt1isBit", "true");
+        mySqlConfig.put(MySqlActionUtils.JDBC_PROPERTIES_PREFIX + "tinyInt1isBit", "true");
 
         MySqlSyncDatabaseAction action =
                 syncDatabaseActionBuilder(mySqlConfig)

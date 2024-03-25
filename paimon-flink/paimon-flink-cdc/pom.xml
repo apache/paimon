@@ -34,14 +34,13 @@ under the License.
     <name>Paimon : Flink : CDC</name>
 
     <properties>
-        <flink.version>1.17.2</flink.version>
-        <flink.cdc.version>2.4.2</flink.cdc.version>
-        <flink.mongodb.cdc.version>2.4.1</flink.mongodb.cdc.version>
+        <flink.version>1.18.1</flink.version>
+        <flink.cdc.version>3.0.0</flink.cdc.version>
         <avro.version>1.11.1</avro.version>
         <geometry.version>2.2.0</geometry.version>
         <json-path.version>2.9.0</json-path.version>
-        <mongodb.testcontainers.version>1.19.1</mongodb.testcontainers.version>
-        <flink.connector.pulsar.version>4.0.0-1.17</flink.connector.pulsar.version>
+        <flink.connector.pulsar.version>4.1.0-1.18</flink.connector.pulsar.version>
+        <flink.connector.kafka.version>3.1.0-1.18</flink.connector.kafka.version>
     </properties>
 
     <dependencies>
@@ -92,7 +91,7 @@ under the License.
         <dependency>
             <groupId>org.apache.flink</groupId>
             <artifactId>flink-connector-kafka</artifactId>
-            <version>${flink.version}</version>
+            <version>${flink.connector.kafka.version}</version>
             <scope>provided</scope>
         </dependency>
 
@@ -103,11 +102,10 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
-
         <dependency>
             <groupId>com.ververica</groupId>
             <artifactId>flink-connector-mongodb-cdc</artifactId>
-            <version>${flink.mongodb.cdc.version}</version>
+            <version>${flink.cdc.version}</version>
             <scope>provided</scope>
             <exclusions>
                 <exclusion>
@@ -240,7 +238,7 @@ under the License.
         <dependency>
             <groupId>org.testcontainers</groupId>
             <artifactId>mongodb</artifactId>
-            <version>${mongodb.testcontainers.version}</version>
+            <version>${testcontainers.version}</version>
             <scope>test</scope>
         </dependency>
 

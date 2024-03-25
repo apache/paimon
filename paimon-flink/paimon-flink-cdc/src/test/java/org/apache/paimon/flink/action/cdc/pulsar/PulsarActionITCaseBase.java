@@ -52,7 +52,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_SERVICE_URL;
 import static org.apache.flink.connector.pulsar.source.PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME;
 import static org.apache.flink.connector.pulsar.source.enumerator.topic.TopicNameUtils.topicName;
@@ -147,7 +146,6 @@ public class PulsarActionITCaseBase extends CdcActionITCaseBase {
     protected Map<String, String> getBasicPulsarConfig() {
         Map<String, String> config = new HashMap<>();
         config.put(PULSAR_SERVICE_URL.key(), PULSAR_CONTAINER.getPulsarBrokerUrl());
-        config.put(PULSAR_ADMIN_URL.key(), PULSAR_CONTAINER.getHttpServiceUrl());
         config.put(PULSAR_SUBSCRIPTION_NAME.key(), "paimon-tests");
         return config;
     }

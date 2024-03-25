@@ -156,7 +156,6 @@ public class SyncJobHandler {
                         PULSAR_CONF,
                         PulsarActionUtils.VALUE_FORMAT,
                         PulsarOptions.PULSAR_SERVICE_URL,
-                        PulsarOptions.PULSAR_ADMIN_URL,
                         PulsarSourceOptions.PULSAR_SUBSCRIPTION_NAME);
                 checkOneRequiredOption(
                         cdcSourceConfig,

@@ -25,6 +25,7 @@ import org.apache.flink.api.common.serialization.SimpleStringSchema;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.description.Description;
 import org.apache.flink.connector.pulsar.common.config.PulsarClientFactory;
 import org.apache.flink.connector.pulsar.source.PulsarSource;
 import org.apache.flink.connector.pulsar.source.PulsarSourceBuilder;
@@ -57,7 +58,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.regex.Pattern;
 
-import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_ADMIN_URL;
+import static org.apache.flink.configuration.description.TextElement.code;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAMS;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PARAM_MAP;
 import static org.apache.flink.connector.pulsar.common.config.PulsarOptions.PULSAR_AUTH_PLUGIN_CLASS_NAME;
@@ -162,12 +163,26 @@ public class PulsarActionUtils {
                     .defaultValue(true)
                     .withDescription("To specify the boundedness of a stream.");
 
+    // lower versions of pulsar connector need this option
+    static final ConfigOption<String> PULSAR_ADMIN_URL =
+            ConfigOptions.key("pulsar.admin.adminUrl")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "The Pulsar service HTTP URL for the admin endpoint. For example, %s, or %s for TLS.",
+                                            code("http://my-broker.example.com:8080"),
+                                            code("https://my-broker.example.com:8443"))
+                                    .build());
+
     public static PulsarSource<String> buildPulsarSource(Configuration pulsarConfig) {
         PulsarSourceBuilder<String> pulsarSourceBuilder = PulsarSource.builder();
 
         // the minimum setup
         pulsarSourceBuilder
                 .setServiceUrl(pulsarConfig.get(PULSAR_SERVICE_URL))
+                // to be compatible with lower versions
                 .setAdminUrl(pulsarConfig.get(PULSAR_ADMIN_URL))
                 .setSubscriptionName(pulsarConfig.get(PULSAR_SUBSCRIPTION_NAME))
                 .setDeserializationSchema(new SimpleStringSchema());

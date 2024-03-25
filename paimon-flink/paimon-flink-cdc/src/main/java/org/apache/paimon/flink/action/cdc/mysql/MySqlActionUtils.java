@@ -32,7 +32,6 @@ import com.ververica.cdc.connectors.mysql.source.offset.BinlogOffsetBuilder;
 import com.ververica.cdc.connectors.mysql.table.StartupOptions;
 import com.ververica.cdc.debezium.JsonDebeziumDeserializationSchema;
 import com.ververica.cdc.debezium.table.DebeziumOptions;
-import com.ververica.cdc.debezium.utils.JdbcUrlUtils;
 import org.apache.flink.configuration.ConfigOption;
 import org.apache.flink.configuration.ConfigOptions;
 import org.apache.flink.configuration.Configuration;
@@ -68,6 +67,8 @@ public class MySqlActionUtils {
                     .defaultValue(true)
                     .withDescription(
                             "Whether capture the scan the newly added tables or not, by default is true.");
+
+    public static final String JDBC_PROPERTIES_PREFIX = "jdbc.properties.";
 
     static Connection getConnection(Configuration mySqlConfig, Map<String, String> jdbcProperties)
             throws Exception {
@@ -238,7 +239,7 @@ public class MySqlActionUtils {
     private static Map<String, String> getJdbcProperties(
             TypeMapping typeMapping, Configuration mySqlConfig) {
         Map<String, String> jdbcProperties =
-                convertToPropertiesPrefixKey(mySqlConfig.toMap(), JdbcUrlUtils.PROPERTIES_PREFIX);
+                convertToPropertiesPrefixKey(mySqlConfig.toMap(), JDBC_PROPERTIES_PREFIX);
 
         if (typeMapping.containsMode(TINYINT1_NOT_BOOL)) {
             String tinyInt1isBit = jdbcProperties.get("tinyInt1isBit");
