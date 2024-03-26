@@ -64,7 +64,6 @@ import java.util.Set;
 import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.CoreOptions.MergeEngine.FIRST_ROW;
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
@@ -278,18 +277,24 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withPartition(partition)
                                 .withBucket(bucket)
                                 .isStreaming(isStreaming);
-                List<List<DataFileMeta>> splitGroups =
+                List<SplitGenerator.SplitGroup> splitGroups =
                         isStreaming
                                 ? splitGenerator.splitForStreaming(bucketFiles)
                                 : splitGenerator.splitForBatch(bucketFiles);
-                for (List<DataFileMeta> dataFiles : splitGroups) {
-                    builder.withDataFiles(dataFiles)
-                            .rawFiles(convertToRawFiles(partition, bucket, dataFiles));
-                    if (deletionVectors) {
-                        IndexFileMeta deletionIndexFile =
-                                indexFileHandler
+
+                IndexFileMeta deletionIndexFile =
+                        deletionVectors
+                                ? indexFileHandler
                                         .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
-                                        .orElse(null);
+                                        .orElse(null)
+                                : null;
+                for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
+                    List<DataFileMeta> dataFiles = splitGroup.files;
+                    builder.withDataFiles(dataFiles);
+                    if (splitGroup.rawConvertible) {
+                        builder.rawFiles(convertToRawFiles(partition, bucket, dataFiles));
+                    }
+                    if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
                     }
@@ -370,8 +375,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
-                                .isStreaming(isStreaming)
-                                .rawFiles(convertToRawFiles(part, bucket, data));
+                                .isStreaming(isStreaming);
                 if (deletionVectors) {
                     IndexFileMeta beforeDeletionIndex =
                             indexFileHandler
@@ -437,21 +441,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
     private List<RawFile> convertToRawFiles(
             BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
         String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
-
-        // append only or deletionVectors files can be returned
-        if (tableSchema.primaryKeys().isEmpty() || deletionVectors || mergeEngine == FIRST_ROW) {
-            return makeRawTableFiles(bucketPath, dataFiles);
-        }
-
-        int maxLevel = options.numLevels() - 1;
-        if (dataFiles.stream().map(DataFileMeta::level).allMatch(l -> l == maxLevel)) {
-            return makeRawTableFiles(bucketPath, dataFiles);
-        }
-
-        return Collections.emptyList();
-    }
-
-    private List<RawFile> makeRawTableFiles(String bucketPath, List<DataFileMeta> dataFiles) {
         return dataFiles.stream()
                 .map(f -> makeRawTableFile(bucketPath, f))
                 .collect(Collectors.toList());
