@@ -20,12 +20,10 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data
 import org.apache.paimon.disk.IOManager
-import org.apache.paimon.operation.FileHook
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.source.{AbstractDataTableRead, ReadBuilder, Split}
+import org.apache.paimon.table.source.{ReadBuilder, Split}
 
-import org.apache.spark.sql.Utils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 

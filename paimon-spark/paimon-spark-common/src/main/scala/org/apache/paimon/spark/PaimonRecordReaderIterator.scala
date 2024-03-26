@@ -61,6 +61,7 @@ case class PaimonRecordReaderIterator(reader: RecordReader[PaimonInternalRow])
       }
     } finally {
       reader.close()
+      Utils.unsetInputFileName()
     }
   }
 
