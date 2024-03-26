@@ -181,13 +181,21 @@ public abstract class SynchronizationActionBase extends ActionBase {
         Map<String, String> withoutBucket = new HashMap<>(tableConfig);
         withoutBucket.remove(CoreOptions.BUCKET.key());
 
+        // check and copy the table options
+        FileStoreTable copiedTable = table.copy(withoutBucket);
+
+        // alter the table options
         Map<String, String> oldOptions = table.options();
         List<SchemaChange> optionChanges =
                 withoutBucket.entrySet().stream()
                         .filter(
                                 entry ->
+                                        !CoreOptions.getImmutableOptionKeys()
+                                                .contains(entry.getKey()))
+                        .filter(
+                                entry ->
                                         !Objects.equals(
-                                                entry.getValue(), oldOptions.get(entry.getKey())))
+                                                oldOptions.get(entry.getKey()), entry.getValue()))
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 
@@ -199,7 +207,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
             throw new RuntimeException("This is unexpected.", e);
         }
 
-        return table.copy(withoutBucket);
+        return copiedTable;
     }
 
     @Override
