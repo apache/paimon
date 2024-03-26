@@ -112,7 +112,7 @@ public class FileIndexPredicate implements Closeable {
         this.reader.close();
     }
 
-    /** Predicate test. */
+    /** Predicate test worker. */
     private static class FileIndexPredicateWorker implements PredicateVisitor<Boolean> {
 
         private final String columnName;

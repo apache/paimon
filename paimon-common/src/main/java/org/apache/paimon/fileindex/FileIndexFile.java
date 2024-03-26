@@ -85,7 +85,7 @@ public final class FileIndexFile {
 
             writeHead(indexType, bodyInfo);
 
-            // writeBody(body);
+            // writeBody
             dataOutputStream.write(body);
         }
 

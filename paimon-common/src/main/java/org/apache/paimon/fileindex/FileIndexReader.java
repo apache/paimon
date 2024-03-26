@@ -99,11 +99,11 @@ public interface FileIndexReader extends FunctionVisitor<Boolean> {
 
     @Override
     default Boolean visitAnd(List<Boolean> children) {
-        return true;
+        throw new UnsupportedOperationException("Should not invoke this");
     }
 
     @Override
     default Boolean visitOr(List<Boolean> children) {
-        return true;
+        throw new UnsupportedOperationException("Should not invoke this");
     }
 }
