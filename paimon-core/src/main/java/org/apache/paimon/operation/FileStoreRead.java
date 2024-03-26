@@ -23,7 +23,6 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.source.DataSplit;
 
 import java.io.IOException;
-import java.util.List;
 
 /**
  * Read operation which provides {@link RecordReader} creation.
@@ -33,8 +32,6 @@ import java.util.List;
 public interface FileStoreRead<T> {
 
     FileStoreRead<T> withFilter(Predicate predicate);
-
-    FileStoreRead<T> withFileHooks(List<FileHook> fileHooks);
 
     /** Create a {@link RecordReader} from split. */
     RecordReader<T> createReader(DataSplit split) throws IOException;

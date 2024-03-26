@@ -65,7 +65,7 @@ import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreRead} implementation for {@link KeyValueFileStore}. */
-public class KeyValueFileStoreRead extends AbstractFileStoreRead<KeyValue> {
+public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private final TableSchema tableSchema;
     private final FileIO fileIO;

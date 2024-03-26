@@ -52,9 +52,7 @@ public abstract class KeyValueTableRead extends AbstractDataTableRead<KeyValue> 
 
     @Override
     public final RecordReader<InternalRow> reader(Split split) throws IOException {
-        RecordReader<KeyValue> recordReader =
-                read.withFileHooks(hooks).createReader((DataSplit) split);
-        return new RowDataRecordReader(recordReader);
+        return new RowDataRecordReader(read.createReader((DataSplit) split));
     }
 
     protected abstract RecordReader.RecordIterator<InternalRow> rowDataRecordIteratorFromKv(

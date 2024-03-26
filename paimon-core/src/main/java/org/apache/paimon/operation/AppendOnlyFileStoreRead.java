@@ -56,7 +56,7 @@ import java.util.Map;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
 /** {@link FileStoreRead} for {@link AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreRead extends AbstractFileStoreRead<InternalRow> {
+public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreRead.class);
 
@@ -182,8 +182,7 @@ public class AppendOnlyFileStoreRead extends AbstractFileStoreRead<InternalRow> 
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),
                                     PartitionUtils.create(
-                                            bulkFormatMapping.getPartitionPair(), partition),
-                                    fileHooks));
+                                            bulkFormatMapping.getPartitionPair(), partition)));
         }
 
         return ConcatRecordReader.create(suppliers);

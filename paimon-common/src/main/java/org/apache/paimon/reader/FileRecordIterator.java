@@ -18,6 +18,7 @@
 
 package org.apache.paimon.reader;
 
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.Filter;
 
 import javax.annotation.Nullable;
@@ -30,7 +31,7 @@ import java.util.function.Function;
  *
  * @param <T> The type of the record.
  */
-public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterator<T> {
+public interface FileRecordIterator<T> extends RecordReader.RecordIterator<T> {
 
     /**
      * Get the row position of the row returned by {@link RecordReader.RecordIterator#next}.
@@ -39,13 +40,21 @@ public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterat
      */
     long returnedPosition();
 
+    /** @return the file path */
+    Path filePath();
+
     @Override
-    default <R> RecordWithPositionIterator<R> transform(Function<T, R> function) {
-        RecordWithPositionIterator<T> thisIterator = this;
-        return new RecordWithPositionIterator<R>() {
+    default <R> FileRecordIterator<R> transform(Function<T, R> function) {
+        FileRecordIterator<T> thisIterator = this;
+        return new FileRecordIterator<R>() {
             @Override
             public long returnedPosition() {
                 return thisIterator.returnedPosition();
+            }
+
+            @Override
+            public Path filePath() {
+                return thisIterator.filePath();
             }
 
             @Nullable
@@ -66,12 +75,17 @@ public interface RecordWithPositionIterator<T> extends RecordReader.RecordIterat
     }
 
     @Override
-    default RecordWithPositionIterator<T> filter(Filter<T> filter) {
-        RecordWithPositionIterator<T> thisIterator = this;
-        return new RecordWithPositionIterator<T>() {
+    default FileRecordIterator<T> filter(Filter<T> filter) {
+        FileRecordIterator<T> thisIterator = this;
+        return new FileRecordIterator<T>() {
             @Override
             public long returnedPosition() {
                 return thisIterator.returnedPosition();
+            }
+
+            @Override
+            public Path filePath() {
+                return thisIterator.filePath();
             }
 
             @Nullable

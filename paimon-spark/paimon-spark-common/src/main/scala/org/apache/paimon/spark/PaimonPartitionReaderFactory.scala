@@ -40,32 +40,12 @@ case class PaimonPartitionReaderFactory(readBuilder: ReadBuilder) extends Partit
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: SparkInputPartition =>
-        val tableRead = readBuilder.newRead().withIOManager(ioManager)
-        tableRead match {
-          case dataTableRead: AbstractDataTableRead[_] =>
-            addFileHook(dataTableRead)
-          case _ =>
-        }
         val readFunc: Split => RecordReader[data.InternalRow] =
-          (split: Split) => tableRead.createReader(split)
+          (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
         PaimonPartitionReader(readFunc, paimonInputPartition, row)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }
-  }
-
-  private def addFileHook(tableRead: AbstractDataTableRead[_]): Unit = {
-    tableRead.withFileHook(
-      new FileHook(
-        FileHook.ReaderTrigger.OPEN_FILE,
-        (fileName: String) => Utils.setInputFileName(fileName)
-      ))
-
-    tableRead.withFileHook(
-      new FileHook(
-        FileHook.ReaderTrigger.CLOSE_FILE,
-        (_: String) => Utils.unsetInputFileName()
-      ))
   }
 
   override def equals(obj: Any): Boolean = {
