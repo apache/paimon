@@ -24,12 +24,14 @@ import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.BatchWriteBuilder
 import org.apache.paimon.types.RowType
 import org.apache.paimon.utils.{FileStorePathFactory, RowDataPartitionComputer}
+
 import org.apache.spark.sql.Row
 import org.apache.spark.sql.catalyst.{CatalystTypeConverters, InternalRow}
 import org.apache.spark.sql.connector.catalog.SupportsPartitionManagement
 import org.apache.spark.sql.types.StructType
 
-import java.util.{Collections, UUID, Map => JMap}
+import java.util.{Collections, Map => JMap, UUID}
+
 import scala.collection.JavaConverters._
 
 trait PaimonPartitionManagement extends SupportsPartitionManagement {
