@@ -35,7 +35,7 @@ public class DataFilePathFactoryTest {
     public void testNoPartition() {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        new Path(tempDir + "/bucket=123"),
+                        new Path(tempDir + "/bucket-123"),
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
         String uuid = pathFactory.uuid();
 
@@ -59,7 +59,7 @@ public class DataFilePathFactoryTest {
     public void testWithPartition() {
         DataFilePathFactory pathFactory =
                 new DataFilePathFactory(
-                        new Path(tempDir + "/dt=20211224/bucket=123"),
+                        new Path(tempDir + "/dt=20211224/bucket-123"),
                         CoreOptions.FILE_FORMAT.defaultValue().toString());
         String uuid = pathFactory.uuid();
 
