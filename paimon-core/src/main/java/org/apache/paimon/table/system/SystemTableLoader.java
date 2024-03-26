@@ -59,7 +59,7 @@ public class SystemTableLoader {
         Path location = dataTable.location();
         switch (type.toLowerCase()) {
             case MANIFESTS:
-                return new ManifestsTable(fileIO, location, dataTable);
+                return new ManifestsTable(dataTable);
             case SNAPSHOTS:
                 return new SnapshotsTable(fileIO, location, dataTable);
             case OPTIONS:

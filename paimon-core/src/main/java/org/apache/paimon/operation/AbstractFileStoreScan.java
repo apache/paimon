@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.manifest.FileEntry;
@@ -277,7 +278,7 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                                 ? "partition "
                                         + FileStorePathFactory.getPartitionComputer(
                                                         partitionType,
-                                                        FileStorePathFactory.PARTITION_DEFAULT_NAME
+                                                        CoreOptions.PARTITION_DEFAULT_NAME
                                                                 .defaultValue())
                                                 .generatePartValues(file.partition())
                                 : "table";
