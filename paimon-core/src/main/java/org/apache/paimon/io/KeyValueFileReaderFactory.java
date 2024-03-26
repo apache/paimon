@@ -21,6 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
@@ -125,24 +126,25 @@ public class KeyValueFileReaderFactory {
                                 key -> formatSupplier.get())
                         : formatSupplier.get();
         Path filePath = pathFactory.toPath(fileName);
-        RecordReader<KeyValue> recordReader =
-                new KeyValueDataFileRecordReader(
+
+        RecordReader<InternalRow> fileRecordReader =
+                new FileRecordReader(
                         bulkFormatMapping.getReaderFactory(),
                         orcPoolSize == null
                                 ? new FormatReaderContext(fileIO, filePath, fileSize)
                                 : new OrcFormatReaderContext(
                                         fileIO, filePath, fileSize, orcPoolSize),
-                        keyType,
-                        valueType,
-                        level,
                         bulkFormatMapping.getIndexMapping(),
                         bulkFormatMapping.getCastMapping(),
                         PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+
         Optional<DeletionVector> deletionVector = dvFactory.create(fileName);
         if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            recordReader = new ApplyDeletionVectorReader<>(recordReader, deletionVector.get());
+            fileRecordReader =
+                    new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
         }
-        return recordReader;
+
+        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, level);
     }
 
     public static Builder builder(

@@ -23,6 +23,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
 import org.apache.paimon.fs.FileIOFinder;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
@@ -57,9 +58,31 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucket;
 import static org.apache.paimon.table.sink.KeyAndBucketExtractor.bucketKeyHashCode;
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** Tests for {@link AppendOnlyFileStoreTable}. */
 public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
+
+    @Test
+    public void testReadDeletedFiles() throws Exception {
+        writeData();
+        FileStoreTable table = createFileStoreTable();
+        List<Split> splits = toSplits(table.newSnapshotReader().read().dataSplits());
+        TableRead read = table.newRead();
+
+        // delete one file
+        DataSplit split = (DataSplit) splits.get(0);
+        Path path =
+                table.store()
+                        .pathFactory()
+                        .createDataFilePathFactory(split.partition(), split.bucket())
+                        .toPath(split.dataFiles().get(0).fileName());
+        table.fileIO().deleteQuietly(path);
+
+        // read
+        assertThatThrownBy(() -> getResult(read, splits, BATCH_ROW_TO_STRING))
+                .hasMessageContaining("snapshot expires too fast");
+    }
 
     @Test
     public void testBatchReadWrite() throws Exception {

@@ -23,10 +23,11 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.RowDataFileRecordReader;
+import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
@@ -174,11 +175,12 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             final BinaryRow partition = split.partition();
             suppliers.add(
                     () ->
-                            new RowDataFileRecordReader(
-                                    fileIO,
-                                    dataFilePathFactory.toPath(file.fileName()),
-                                    file.fileSize(),
+                            new FileRecordReader(
                                     bulkFormatMapping.getReaderFactory(),
+                                    new FormatReaderContext(
+                                            fileIO,
+                                            dataFilePathFactory.toPath(file.fileName()),
+                                            file.fileSize()),
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),
                                     PartitionUtils.create(

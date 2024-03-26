@@ -134,10 +134,14 @@ public class FileUtils {
     public static RecordReader<InternalRow> createFormatReader(
             FileIO fileIO, FormatReaderFactory format, Path file, @Nullable Long fileSize)
             throws IOException {
-        checkExists(fileIO, file);
-        if (fileSize == null) {
-            fileSize = fileIO.getFileSize(file);
+        try {
+            if (fileSize == null) {
+                fileSize = fileIO.getFileSize(file);
+            }
+            return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
+        } catch (Exception e) {
+            checkExists(fileIO, file);
+            throw e;
         }
-        return format.createReader(new FormatReaderContext(fileIO, file, fileSize));
     }
 }
