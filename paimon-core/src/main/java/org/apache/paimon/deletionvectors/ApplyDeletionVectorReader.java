@@ -18,8 +18,8 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordWithPositionIterator;
 
 import javax.annotation.Nullable;
 
@@ -62,10 +62,10 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
         }
 
         checkArgument(
-                batch instanceof RecordWithPositionIterator,
+                batch instanceof FileRecordIterator,
                 "There is a bug, RecordIterator in ApplyDeletionVectorReader must be RecordWithPositionIterator");
 
-        RecordWithPositionIterator<T> batchWithPosition = (RecordWithPositionIterator<T>) batch;
+        FileRecordIterator<T> batchWithPosition = (FileRecordIterator<T>) batch;
 
         return batchWithPosition.filter(
                 a -> !deletionVector.isDeleted(batchWithPosition.returnedPosition()));

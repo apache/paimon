@@ -28,8 +28,8 @@ import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordWithPositionIterator;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.BloomFilter;
@@ -176,9 +176,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
             KeyValue kv;
             if (valueProcessor.withPosition()) {
-                RecordWithPositionIterator<KeyValue> batch;
-                while ((batch = (RecordWithPositionIterator<KeyValue>) reader.readBatch())
-                        != null) {
+                FileRecordIterator<KeyValue> batch;
+                while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
                     while ((kv = batch.next()) != null) {
                         byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
                         byte[] valueBytes =
