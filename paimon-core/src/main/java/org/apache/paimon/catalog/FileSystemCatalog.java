@@ -18,6 +18,7 @@
 
 package org.apache.paimon.catalog;
 
+import org.apache.paimon.client.ClientPool;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
@@ -35,6 +36,7 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.Callable;
 
 import static org.apache.paimon.catalog.FileSystemCatalogOptions.CASE_SENSITIVE;
@@ -45,6 +47,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     private static final Logger LOG = LoggerFactory.getLogger(FileSystemCatalog.class);
 
     private final Path warehouse;
+
+    private ClientPool.ClientPoolImpl clientPool;
 
     public FileSystemCatalog(FileIO fileIO, Path warehouse) {
         super(fileIO);
@@ -169,6 +173,14 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
+    public Optional<CatalogLock.LockContext> lockContext() {
+        if (clientPool == null) {
+            this.clientPool = LockContextUtils.tryInitializeClientPool(catalogOptions);
+        }
+        return LockContextUtils.lockContext(this.clientPool, catalogOptions, "filesystem");
+    }
+
+    @Override
     public void renameTableImpl(Identifier fromTable, Identifier toTable) {
         Path fromPath = getDataTableLocation(fromTable);
         Path toPath = getDataTableLocation(toTable);
@@ -199,7 +211,9 @@ public class FileSystemCatalog extends AbstractCatalog {
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        LockContextUtils.close(clientPool);
+    }
 
     @Override
     public String warehouse() {

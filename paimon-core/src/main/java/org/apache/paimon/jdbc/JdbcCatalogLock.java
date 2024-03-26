@@ -109,7 +109,8 @@ public class JdbcCatalogLock implements CatalogLock {
         }
     }
 
-    static class JdbcLockContext implements LockContext {
+    /** Jdbc lock context. */
+    public static class JdbcLockContext implements LockContext {
         private final JdbcClientPool connections;
         private final String catalogKey;
         private final Options conf;
