@@ -225,7 +225,16 @@ public final class FileIndexFile {
                                     new BytesInputWrapper(
                                             seekableInputStream,
                                             startEnd.getLeft(),
-                                            startEnd.getRight()));
+                                            startEnd.getRight()))
+                    .map(
+                            stream -> {
+                                try {
+                                    return stream.resetHead();
+                                } catch (IOException e) {
+                                    throw new RuntimeException(
+                                            "Error happens while read column from index file.", e);
+                                }
+                            });
         }
 
         @Override
@@ -311,6 +320,13 @@ public final class FileIndexFile {
         @Override
         public void close() throws IOException {
             // do nothing
+        }
+
+        public BytesInputWrapper resetHead() throws IOException {
+            if (originStream.getPos() != offsetStart) {
+                originStream.seek(offsetStart);
+            }
+            return this;
         }
 
         private int remain() {
