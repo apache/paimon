@@ -33,6 +33,8 @@
 
     <modules>
         <module>paimon-hadoop-shaded</module>
+        <module>paimon-cosn</module>
+        <module>paimon-cosn-impl</module>
         <module>paimon-oss</module>
         <module>paimon-oss-impl</module>
         <module>paimon-s3</module>
@@ -41,6 +43,7 @@
 
     <properties>
         <fs.hadoopshaded.version>3.3.4</fs.hadoopshaded.version>
+        <fs.cos.qcloud.version>3.3.0-8.3.5</fs.cos.qcloud.version>
         <fs.s3.aws.version>1.12.319</fs.s3.aws.version>
         <commons.beanutils.version>1.9.4</commons.beanutils.version>
     </properties>
