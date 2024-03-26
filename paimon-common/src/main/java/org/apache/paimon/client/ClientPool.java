@@ -33,14 +33,23 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** Client pool for using multiple clients to execute actions. */
 public interface ClientPool<C, E extends Exception> {
-    /** Action interface for client. */
+    /** Action interface with return object for client. */
     interface Action<R, C, E extends Exception> {
         R run(C client) throws E;
+    }
+
+    /** Action interface with return void for client. */
+    interface ExecuteAction<C, E extends Exception> {
+        void run(C client) throws E;
     }
 
     <R> R run(Action<R, C, E> action) throws E, InterruptedException;
 
     <R> R run(Action<R, C, E> action, boolean retry) throws E, InterruptedException;
+
+    void execute(ExecuteAction<C, E> action) throws E, InterruptedException;
+
+    void execute(ExecuteAction<C, E> action, boolean retry) throws E, InterruptedException;
 
     /** Default implementation for {@link ClientPool}. */
     abstract class ClientPoolImpl<C, E extends Exception> implements Closeable, ClientPool<C, E> {
@@ -84,6 +93,36 @@ public interface ClientPool<C, E extends Exception> {
                     }
 
                     return action.run(client);
+                }
+
+                throw exc;
+
+            } finally {
+                release(client);
+            }
+        }
+
+        @Override
+        public void execute(ExecuteAction<C, E> action) throws E, InterruptedException {
+            execute(action, retryByDefault);
+        }
+
+        @Override
+        public void execute(ExecuteAction<C, E> action, boolean retry)
+                throws E, InterruptedException {
+            C client = get();
+            try {
+                action.run(client);
+            } catch (Exception exc) {
+                if (retry && isConnectionException(exc)) {
+                    try {
+                        client = reconnect(client);
+                    } catch (Exception ignored) {
+                        // if reconnection throws any exception, rethrow the original failure
+                        throw reconnectExc.cast(exc);
+                    }
+
+                    action.run(client);
                 }
 
                 throw exc;

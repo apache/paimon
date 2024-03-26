@@ -20,6 +20,11 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
+import org.apache.paimon.options.description.Description;
+
+import java.util.concurrent.TimeUnit;
+
+import static org.apache.paimon.options.description.TextElement.text;
 
 /** Options for hive catalog. */
 public final class HiveCatalogOptions {
@@ -51,6 +56,34 @@ public final class HiveCatalogOptions {
                             "Setting the location in properties of hive table/database.\n"
                                     + "If you don't want to access the location by the filesystem of hive when using a object storage such as s3,oss\n"
                                     + "you can set this option to true.\n");
+
+    public static final ConfigOption<Long> CLIENT_POOL_CACHE_EVICTION_INTERVAL_MS =
+            ConfigOptions.key("client-pool-cache.eviction-interval-ms")
+                    .longType()
+                    .defaultValue(TimeUnit.MINUTES.toMillis(5))
+                    .withDescription("Setting the client's pool cache eviction interval(ms).\n");
+
+    public static final ConfigOption<String> CLIENT_POOL_CACHE_KEYS =
+            ConfigOptions.key("client-pool-cache.keys")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription(
+                            Description.builder()
+                                    .text(
+                                            "Specify client cache key, multiple elements separated by commas.")
+                                    .linebreak()
+                                    .list(
+                                            text(
+                                                    "\"ugi\":  the Hadoop UserGroupInformation instance that represents the current user using the cache."))
+                                    .list(
+                                            text(
+                                                    "\"user_name\" similar to UGI but only includes the user's name determined by UserGroupInformation#getUserName."))
+                                    .list(
+                                            text(
+                                                    "\"conf\": name of an arbitrary configuration. "
+                                                            + "The value of the configuration will be extracted from catalog properties and added to the cache key. A conf element should start with a \"conf:\" prefix which is followed by the configuration name. "
+                                                            + "E.g. specifying \"conf:a.b.c\" will add \"a.b.c\" to the key, and so that configurations with different default catalog wouldn't share the same client pool. Multiple conf elements can be specified."))
+                                    .build());
 
     private HiveCatalogOptions() {}
 }

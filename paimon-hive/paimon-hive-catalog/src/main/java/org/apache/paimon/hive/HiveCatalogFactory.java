@@ -24,15 +24,10 @@ import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.ConfigOptions;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 
 /** Factory to create {@link HiveCatalog}. */
 public class HiveCatalogFactory implements CatalogFactory {
-
-    private static final Logger LOG = LoggerFactory.getLogger(HiveCatalogFactory.class);
 
     public static final ConfigOption<String> METASTORE_CLIENT_CLASS =
             ConfigOptions.key("metastore.client.class")
