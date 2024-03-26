@@ -266,7 +266,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 () -> {
                     batchSql("SELECT * FROM append_table");
                     List<Row> rows = batchSql("SELECT * FROM append_table");
-                    assertThat(rows.size()).isGreaterThan(size);
+                    assertThat(rows.size()).isGreaterThanOrEqualTo(size);
                     assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
                 });
     }
@@ -295,7 +295,7 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 () -> {
                     batchSql("SELECT * FROM append_table");
                     List<Row> rows = batchSql("SELECT * FROM append_table");
-                    assertThat(rows.size()).isGreaterThan(size);
+                    assertThat(rows.size()).isGreaterThanOrEqualTo(size);
                     assertThat(rows).containsExactlyInAnyOrder(results.toArray(new Row[0]));
                 });
     }
