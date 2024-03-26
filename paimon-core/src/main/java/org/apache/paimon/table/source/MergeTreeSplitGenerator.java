@@ -62,7 +62,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
 
     @Override
     public List<SplitGroup> splitForBatch(List<DataFileMeta> files) {
-        boolean rawConvertible = files.stream().allMatch(DataFileMeta::rawConvertible);
+        boolean rawConvertible = files.stream().allMatch(this::rawConvertible);
         boolean oneLevel =
                 files.stream().map(DataFileMeta::level).collect(Collectors.toSet()).size() == 1;
 
@@ -102,7 +102,7 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
         return packSplits(sections).stream()
                 .map(
                         f ->
-                                f.size() == 1 && f.get(0).rawConvertible()
+                                f.size() == 1 && rawConvertible(f.get(0))
                                         ? SplitGroup.rawConvertibleGroup(f)
                                         : SplitGroup.nonRawConvertibleGroup(f))
                 .collect(Collectors.toList());
@@ -140,5 +140,10 @@ public class MergeTreeSplitGenerator implements SplitGenerator {
         List<DataFileMeta> files = new ArrayList<>();
         section.forEach(files::addAll);
         return files;
+    }
+
+    private boolean rawConvertible(DataFileMeta dataFileMeta) {
+        return dataFileMeta.level() != 0
+                && dataFileMeta.deleteRowCount().map(count -> count == 0L).orElse(false);
     }
 }
