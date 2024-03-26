@@ -155,8 +155,7 @@ public class HiveCatalog extends AbstractCatalog {
     @Override
     public Optional<CatalogLock.LockContext> lockContext() {
         return Optional.of(
-                new HiveCatalogLock.HiveLockContext(
-                        new SerializableHiveConf(hiveConf), clientClassName, options));
+                new HiveCatalogLock.HiveLockContext(clients, new SerializableHiveConf(hiveConf)));
     }
 
     @Override
