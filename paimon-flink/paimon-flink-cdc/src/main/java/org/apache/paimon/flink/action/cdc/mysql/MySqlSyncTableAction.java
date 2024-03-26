@@ -101,9 +101,10 @@ public class MySqlSyncTableAction extends SyncTableActionBase {
     @Override
     protected MySqlSource<String> buildSource() {
         String tableList =
-                cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME)
-                        + "\\."
-                        + cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME);
+                String.format(
+                        "(%s)\\.(%s)",
+                        cdcSourceConfig.get(MySqlSourceOptions.DATABASE_NAME),
+                        cdcSourceConfig.get(MySqlSourceOptions.TABLE_NAME));
         return MySqlActionUtils.buildMySqlSource(cdcSourceConfig, tableList, typeMapping);
     }
 
