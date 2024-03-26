@@ -1055,7 +1055,6 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");
-        tableConfig.put("sequence.field", "_timestamp");
 
         MySqlSyncTableAction action1 =
                 syncTableActionBuilder(mySqlConfig)
@@ -1096,6 +1095,51 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
 
         FileStoreTable table = getFileStoreTable();
         assertThat(table.options()).containsAllEntriesOf(tableConfig);
+    }
+
+    @Test
+    public void testOptionsChangeInExistingTable() throws Exception {
+        Map<String, String> options = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "1");
+        options.put("sequence.field", "_timestamp");
+
+        createFileStoreTable(
+                RowType.of(
+                        new DataType[] {
+                            DataTypes.INT().notNull(), DataTypes.DATE(), DataTypes.TIMESTAMP(0)
+                        },
+                        new String[] {"pk", "_date", "_timestamp"}),
+                Collections.emptyList(),
+                Collections.singletonList("pk"),
+                options);
+
+        Map<String, String> mySqlConfig = getBasicMySqlConfig();
+        mySqlConfig.put("database-name", DATABASE_NAME);
+        mySqlConfig.put("table-name", "test_exist_options_change");
+        Map<String, String> tableConfig = new HashMap<>();
+        // update immutable options
+        tableConfig.put("sequence.field", "_date");
+        // update existing options
+        tableConfig.put("sink.parallelism", "2");
+        // add new options
+        tableConfig.put("snapshot.expire.limit", "1000");
+
+        MySqlSyncTableAction action =
+                syncTableActionBuilder(mySqlConfig)
+                        .withPrimaryKeys("pk")
+                        .withTableConfig(tableConfig)
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        FileStoreTable table = getFileStoreTable();
+        Map<String, String> expected = new HashMap<>();
+        options.put("bucket", "1");
+        options.put("sink.parallelism", "2");
+        options.put("sequence.field", "_timestamp");
+        options.put("snapshot.expire.limit", "1000");
+
+        assertThat(table.options()).containsAllEntriesOf(expected);
     }
 
     @Test

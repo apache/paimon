@@ -178,24 +178,22 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
         // doesn't support altering bucket here
-        Map<String, String> withoutBucket = new HashMap<>(tableConfig);
-        withoutBucket.remove(CoreOptions.BUCKET.key());
+        Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        dynamicOptions.remove(CoreOptions.BUCKET.key());
 
-        // check and copy the table options
-        FileStoreTable copiedTable = table.copy(withoutBucket);
-
-        // alter the table options
         Map<String, String> oldOptions = table.options();
+        // remove immutable options and options with equal values
+        dynamicOptions
+                .entrySet()
+                .removeIf(
+                        entry ->
+                                CoreOptions.getImmutableOptionKeys().contains(entry.getKey())
+                                        || Objects.equals(
+                                                oldOptions.get(entry.getKey()), entry.getValue()));
+
+        // alter the table dynamic options
         List<SchemaChange> optionChanges =
-                withoutBucket.entrySet().stream()
-                        .filter(
-                                entry ->
-                                        !CoreOptions.getImmutableOptionKeys()
-                                                .contains(entry.getKey()))
-                        .filter(
-                                entry ->
-                                        !Objects.equals(
-                                                oldOptions.get(entry.getKey()), entry.getValue()))
+                dynamicOptions.entrySet().stream()
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 
@@ -207,7 +205,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
             throw new RuntimeException("This is unexpected.", e);
         }
 
-        return copiedTable;
+        return table.copy(dynamicOptions);
     }
 
     @Override
