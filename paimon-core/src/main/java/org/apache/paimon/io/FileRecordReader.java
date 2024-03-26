@@ -24,10 +24,7 @@ import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
 import org.apache.paimon.data.columnar.ColumnarRowIterator;
-import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
@@ -37,25 +34,26 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 
 /** Reads {@link InternalRow} from data files. */
-public class RowDataFileRecordReader implements RecordReader<InternalRow> {
+public class FileRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
 
-    public RowDataFileRecordReader(
-            FileIO fileIO,
-            Path path,
-            long fileSize,
+    public FileRecordReader(
             FormatReaderFactory readerFactory,
+            FormatReaderFactory.Context context,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
             @Nullable PartitionInfo partitionInfo)
             throws IOException {
-        FileUtils.checkExists(fileIO, path);
-        FormatReaderContext context = new FormatReaderContext(fileIO, path, fileSize);
-        this.reader = readerFactory.createReader(context);
+        try {
+            this.reader = readerFactory.createReader(context);
+        } catch (Exception e) {
+            FileUtils.checkExists(context.fileIO(), context.filePath());
+            throw e;
+        }
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
