@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 
@@ -27,9 +28,9 @@ import java.util.List;
  * Read file index from serialized bytes. Return true, means we need to search this file, else means
  * needn't.
  */
-public interface FileIndexFunctionVisitor extends FunctionVisitor<Boolean> {
+public interface FileIndexReader extends FunctionVisitor<Boolean> {
 
-    FileIndexFunctionVisitor recoverFrom(byte[] serializedBytes);
+    FileIndexReader recoverFrom(SeekableInputStream inputStream);
 
     @Override
     default Boolean visitIsNotNull(FieldRef fieldRef) {

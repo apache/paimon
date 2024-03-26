@@ -16,21 +16,28 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.types.DataType;
+import java.util.Random;
 
-/** File index interface. To build a file index. */
-public interface FileIndexer {
+/** Utils for tests. */
+public class RandomUtil {
 
-    FileIndexWriter createWriter();
+    private static final Random RANDOM = new Random();
 
-    FileIndexReader createReader();
+    public static byte[] randomBytes(int length) {
+        byte[] b = new byte[length];
+        RANDOM.nextBytes(b);
+        return b;
+    }
 
-    static FileIndexer create(String type, DataType dataType) {
-        switch (type) {
-            default:
-                throw new RuntimeException("Doesn't support filter type: " + type);
+    public static String randomString(int length) {
+        byte[] buffer = new byte[length];
+
+        for (int i = 0; i < length; i += 1) {
+            buffer[i] = (byte) ('a' + RANDOM.nextInt(26));
         }
+
+        return new String(buffer);
     }
 }
