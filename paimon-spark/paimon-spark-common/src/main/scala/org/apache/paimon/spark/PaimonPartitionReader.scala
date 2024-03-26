@@ -40,7 +40,7 @@ case class PaimonPartitionReader(
 
   private lazy val iterator = {
     val reader = readFunc(split)
-    new RecordReaderIterator[PaimonInternalRow](reader)
+    PaimonRecordReaderIterator(reader)
   }
 
   override def next(): Boolean = {

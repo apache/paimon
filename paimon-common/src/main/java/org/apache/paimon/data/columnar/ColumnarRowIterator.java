@@ -20,8 +20,9 @@ package org.apache.paimon.data.columnar;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.PartitionInfo;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.reader.RecordWithPositionIterator;
 import org.apache.paimon.utils.RecyclableIterator;
 import org.apache.paimon.utils.VectorMappingUtils;
 
@@ -32,8 +33,9 @@ import javax.annotation.Nullable;
  * {@link ColumnarRow#setRowId}.
  */
 public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
-        implements RecordWithPositionIterator<InternalRow> {
+        implements FileRecordIterator<InternalRow> {
 
+    private final Path filePath;
     private final ColumnarRow rowData;
     private final Runnable recycler;
 
@@ -41,8 +43,9 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
     private int nextPos;
     private long nextGlobalPos;
 
-    public ColumnarRowIterator(ColumnarRow rowData, @Nullable Runnable recycler) {
+    public ColumnarRowIterator(Path filePath, ColumnarRow rowData, @Nullable Runnable recycler) {
         super(recycler);
+        this.filePath = filePath;
         this.rowData = rowData;
         this.recycler = recycler;
     }
@@ -74,8 +77,14 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         return nextGlobalPos - 1;
     }
 
+    @Override
+    public Path filePath() {
+        return this.filePath;
+    }
+
     public ColumnarRowIterator copy(ColumnVector[] vectors) {
-        ColumnarRowIterator newIterator = new ColumnarRowIterator(rowData.copy(vectors), recycler);
+        ColumnarRowIterator newIterator =
+                new ColumnarRowIterator(filePath, rowData.copy(vectors), recycler);
         newIterator.reset(num, nextGlobalPos);
         return newIterator;
     }
