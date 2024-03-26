@@ -20,10 +20,12 @@ package org.apache.paimon.spark
 
 import org.apache.paimon.data
 import org.apache.paimon.disk.IOManager
+import org.apache.paimon.operation.FileHook
 import org.apache.paimon.reader.RecordReader
 import org.apache.paimon.spark.SparkUtils.createIOManager
-import org.apache.paimon.table.source.{ReadBuilder, Split}
+import org.apache.paimon.table.source.{AbstractDataTableRead, ReadBuilder, Split}
 
+import org.apache.spark.sql.Utils
 import org.apache.spark.sql.catalyst.InternalRow
 import org.apache.spark.sql.connector.read.{InputPartition, PartitionReader, PartitionReaderFactory}
 
@@ -38,12 +40,32 @@ case class PaimonPartitionReaderFactory(readBuilder: ReadBuilder) extends Partit
   override def createReader(partition: InputPartition): PartitionReader[InternalRow] = {
     partition match {
       case paimonInputPartition: SparkInputPartition =>
+        val tableRead = readBuilder.newRead().withIOManager(ioManager)
+        tableRead match {
+          case dataTableRead: AbstractDataTableRead[_] =>
+            addFileHook(dataTableRead)
+          case _ =>
+        }
         val readFunc: Split => RecordReader[data.InternalRow] =
-          (split: Split) => readBuilder.newRead().withIOManager(ioManager).createReader(split)
+          (split: Split) => tableRead.createReader(split)
         PaimonPartitionReader(readFunc, paimonInputPartition, row)
       case _ =>
         throw new RuntimeException(s"It's not a Paimon input partition, $partition")
     }
+  }
+
+  private def addFileHook(tableRead: AbstractDataTableRead[_]): Unit = {
+    tableRead.withFileHook(
+      new FileHook(
+        FileHook.ReaderTrigger.OPEN_FILE,
+        (fileName: String) => Utils.setInputFileName(fileName)
+      ))
+
+    tableRead.withFileHook(
+      new FileHook(
+        FileHook.ReaderTrigger.CLOSE_FILE,
+        (_: String) => Utils.unsetInputFileName()
+      ))
   }
 
   override def equals(obj: Any): Boolean = {

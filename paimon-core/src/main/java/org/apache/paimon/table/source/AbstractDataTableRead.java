@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.operation.DefaultValueAssigner;
+import org.apache.paimon.operation.FileHook;
 import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateProjectionConverter;
@@ -29,6 +30,8 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.utils.Projection;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 
 /** A {@link InnerTableRead} for data table. */
@@ -41,12 +44,19 @@ public abstract class AbstractDataTableRead<T> implements InnerTableRead {
     private boolean executeFilter = false;
     private Predicate predicate;
 
+    protected final List<FileHook> hooks = new ArrayList<>();
+
     public AbstractDataTableRead(FileStoreRead<T> fileStoreRead, TableSchema schema) {
         this.fileStoreRead = fileStoreRead;
         this.defaultValueAssigner = schema == null ? null : DefaultValueAssigner.create(schema);
     }
 
     public abstract void projection(int[][] projection);
+
+    public TableRead withFileHook(FileHook hook) {
+        hooks.add(hook);
+        return this;
+    }
 
     public abstract RecordReader<InternalRow> reader(Split split) throws IOException;
 

@@ -18,6 +18,7 @@
 
 package org.apache.spark.sql
 
+import org.apache.spark.rdd.InputFileBlockHolder
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.connector.expressions.{FieldReference, NamedReference}
@@ -68,5 +69,13 @@ object Utils {
 
   def bytesToString(size: Long): String = {
     SparkUtils.bytesToString(size)
+  }
+
+  def setInputFileName(inputFileName: String): Unit = {
+    InputFileBlockHolder.set(inputFileName, 0, -1)
+  }
+
+  def unsetInputFileName(): Unit = {
+    InputFileBlockHolder.unset()
   }
 }

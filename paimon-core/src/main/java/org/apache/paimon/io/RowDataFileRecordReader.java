@@ -28,6 +28,7 @@ import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.operation.FileHook;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.utils.FileUtils;
 import org.apache.paimon.utils.ProjectedRow;
@@ -35,14 +36,22 @@ import org.apache.paimon.utils.ProjectedRow;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.function.Consumer;
 
 /** Reads {@link InternalRow} from data files. */
 public class RowDataFileRecordReader implements RecordReader<InternalRow> {
 
+    private final Path path;
     private final RecordReader<InternalRow> reader;
     @Nullable private final int[] indexMapping;
     @Nullable private final PartitionInfo partitionInfo;
     @Nullable private final CastFieldGetter[] castMapping;
+
+    private boolean triggerOpenHooks = false;
+    private final List<Consumer<String>> openFileHooks = new ArrayList<>();
+    private final List<Consumer<String>> closeFileHooks = new ArrayList<>();
 
     public RowDataFileRecordReader(
             FileIO fileIO,
@@ -51,19 +60,33 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
             FormatReaderFactory readerFactory,
             @Nullable int[] indexMapping,
             @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
+            @Nullable PartitionInfo partitionInfo,
+            List<FileHook> hooks)
             throws IOException {
         FileUtils.checkExists(fileIO, path);
+        this.path = path;
         FormatReaderContext context = new FormatReaderContext(fileIO, path, fileSize);
         this.reader = readerFactory.createReader(context);
         this.indexMapping = indexMapping;
         this.partitionInfo = partitionInfo;
         this.castMapping = castMapping;
+        for (FileHook hook : hooks) {
+            if (hook.getTrigger().equals(FileHook.ReaderTrigger.OPEN_FILE)) {
+                openFileHooks.add(hook.getFunction());
+            } else if (hook.getTrigger().equals(FileHook.ReaderTrigger.CLOSE_FILE)) {
+                closeFileHooks.add(hook.getFunction());
+            } else {
+                throw new UnsupportedOperationException(
+                        hook.getTrigger().name() + " is not supported.");
+            }
+        }
     }
 
     @Nullable
     @Override
     public RecordReader.RecordIterator<InternalRow> readBatch() throws IOException {
+        triggerOpenFileHooks();
+
         RecordIterator<InternalRow> iterator = reader.readBatch();
         if (iterator == null) {
             return null;
@@ -94,5 +117,23 @@ public class RowDataFileRecordReader implements RecordReader<InternalRow> {
     @Override
     public void close() throws IOException {
         reader.close();
+        triggerCloseFileHooks();
+    }
+
+    private void triggerOpenFileHooks() {
+        if (!triggerOpenHooks && !openFileHooks.isEmpty()) {
+            for (Consumer<String> func : openFileHooks) {
+                func.accept(path.toUri().toString());
+            }
+            triggerOpenHooks = true;
+        }
+    }
+
+    private void triggerCloseFileHooks() {
+        if (!closeFileHooks.isEmpty()) {
+            for (Consumer<String> func : closeFileHooks) {
+                func.accept(path.toUri().toString());
+            }
+        }
     }
 }

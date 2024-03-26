@@ -18,24 +18,32 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import java.util.function.Consumer;
 
-import java.io.IOException;
-import java.util.List;
+/** file hook. */
+public class FileHook {
 
-/**
- * Read operation which provides {@link RecordReader} creation.
- *
- * @param <T> type of record to read.
- */
-public interface FileStoreRead<T> {
+    /** ReaderTrigger. */
+    public enum ReaderTrigger {
+        OPEN_FILE,
 
-    FileStoreRead<T> withFilter(Predicate predicate);
+        CLOSE_FILE;
+    }
 
-    FileStoreRead<T> withFileHooks(List<FileHook> fileHooks);
+    private final ReaderTrigger trigger;
 
-    /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    private final Consumer<String> function;
+
+    public FileHook(ReaderTrigger trigger, Consumer<String> function) {
+        this.trigger = trigger;
+        this.function = function;
+    }
+
+    public ReaderTrigger getTrigger() {
+        return this.trigger;
+    }
+
+    public Consumer<String> getFunction() {
+        return this.function;
+    }
 }

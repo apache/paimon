@@ -18,24 +18,17 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
-
-import java.io.IOException;
+import java.util.ArrayList;
 import java.util.List;
 
-/**
- * Read operation which provides {@link RecordReader} creation.
- *
- * @param <T> type of record to read.
- */
-public interface FileStoreRead<T> {
+/** abstract file store read. */
+public abstract class AbstractFileStoreRead<T> implements FileStoreRead<T> {
 
-    FileStoreRead<T> withFilter(Predicate predicate);
+    protected List<FileHook> fileHooks = new ArrayList<>();
 
-    FileStoreRead<T> withFileHooks(List<FileHook> fileHooks);
-
-    /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    @Override
+    public FileStoreRead<T> withFileHooks(List<FileHook> fileHooks) {
+        this.fileHooks.addAll(fileHooks);
+        return this;
+    }
 }
