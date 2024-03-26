@@ -56,7 +56,7 @@ import java.util.function.Function;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.io.DataFilePathFactory.BUCKET_PATH_PREFIX;
+import static org.apache.paimon.utils.FileStorePathFactory.BUCKET_PATH_PREFIX;
 
 /**
  * To remove the data files and metadata files that are not used by table (so-called "orphan
