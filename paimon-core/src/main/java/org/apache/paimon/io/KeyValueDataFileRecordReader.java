@@ -20,17 +20,9 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueSerializer;
-import org.apache.paimon.PartitionSettedRow;
-import org.apache.paimon.casting.CastFieldGetter;
-import org.apache.paimon.casting.CastedRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.PartitionInfo;
-import org.apache.paimon.data.columnar.ColumnarRowIterator;
-import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.FileUtils;
-import org.apache.paimon.utils.ProjectedRow;
 
 import javax.annotation.Nullable;
 
@@ -42,27 +34,12 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final RecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
-    @Nullable private final int[] indexMapping;
-    @Nullable private final PartitionInfo partitionInfo;
-    @Nullable private final CastFieldGetter[] castMapping;
 
     public KeyValueDataFileRecordReader(
-            FormatReaderFactory readerFactory,
-            FormatReaderFactory.Context context,
-            RowType keyType,
-            RowType valueType,
-            int level,
-            @Nullable int[] indexMapping,
-            @Nullable CastFieldGetter[] castMapping,
-            @Nullable PartitionInfo partitionInfo)
-            throws IOException {
-        FileUtils.checkExists(context.fileIO(), context.filePath());
-        this.reader = readerFactory.createReader(context);
+            RecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
+        this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
-        this.indexMapping = indexMapping;
-        this.partitionInfo = partitionInfo;
-        this.castMapping = castMapping;
     }
 
     @Nullable
@@ -73,23 +50,6 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             return null;
         }
 
-        if (iterator instanceof ColumnarRowIterator) {
-            iterator = ((ColumnarRowIterator) iterator).mapping(partitionInfo, indexMapping);
-        } else {
-            if (partitionInfo != null) {
-                final PartitionSettedRow partitionSettedRow =
-                        PartitionSettedRow.from(partitionInfo);
-                iterator = iterator.transform(partitionSettedRow::replaceRow);
-            }
-            if (indexMapping != null) {
-                final ProjectedRow projectedRow = ProjectedRow.from(indexMapping);
-                iterator = iterator.transform(projectedRow::replaceRow);
-            }
-        }
-        if (castMapping != null) {
-            final CastedRow castedRow = CastedRow.from(castMapping);
-            iterator = iterator.transform(castedRow::replaceRow);
-        }
         return iterator.transform(
                 internalRow ->
                         internalRow == null
