@@ -181,8 +181,13 @@ public abstract class SynchronizationActionBase extends ActionBase {
         Map<String, String> withoutBucket = new HashMap<>(tableConfig);
         withoutBucket.remove(CoreOptions.BUCKET.key());
 
+        Map<String, String> oldOptions = table.options();
         List<SchemaChange> optionChanges =
                 withoutBucket.entrySet().stream()
+                        .filter(
+                                entry ->
+                                        !Objects.equals(
+                                                entry.getValue(), oldOptions.get(entry.getKey())))
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 

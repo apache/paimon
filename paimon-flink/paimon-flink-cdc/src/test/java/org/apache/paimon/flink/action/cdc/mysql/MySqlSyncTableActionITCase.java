@@ -1055,6 +1055,7 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         Map<String, String> tableConfig = new HashMap<>();
         tableConfig.put("bucket", "1");
         tableConfig.put("sink.parallelism", "1");
+        tableConfig.put("sequence.field", "_timestamp");
 
         MySqlSyncTableAction action1 =
                 syncTableActionBuilder(mySqlConfig)
