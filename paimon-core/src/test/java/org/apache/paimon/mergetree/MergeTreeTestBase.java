@@ -87,6 +87,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
@@ -108,7 +109,7 @@ public abstract class MergeTreeTestBase {
     @BeforeEach
     public void beforeEach() throws IOException {
         path = new Path(tempDir.toString());
-        pathFactory = new FileStorePathFactory(path);
+        pathFactory = createNonPartFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
         Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();

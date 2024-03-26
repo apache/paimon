@@ -64,6 +64,7 @@ import static org.apache.paimon.TestKeyValueGenerator.DEFAULT_ROW_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.KEY_TYPE;
 import static org.apache.paimon.TestKeyValueGenerator.createTestSchemaManager;
 import static org.apache.paimon.stats.StatsTestUtils.convertWithoutSchemaEvolution;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
@@ -279,7 +280,7 @@ public class KeyValueFileReadWriteTest {
             String pathStr, String format, int[][] keyProjection, int[][] valueProjection) {
         Path path = new Path(pathStr);
         FileIO fileIO = FileIOFinder.find(path);
-        FileStorePathFactory pathFactory = new FileStorePathFactory(path);
+        FileStorePathFactory pathFactory = createNonPartFactory(path);
         KeyValueFileReaderFactory.Builder builder =
                 KeyValueFileReaderFactory.builder(
                         fileIO,

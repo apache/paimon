@@ -64,6 +64,7 @@ import java.util.UUID;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.KeyValue.UNKNOWN_SEQUENCE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test {@link LookupLevels}. */
@@ -297,7 +298,7 @@ public class LookupLevelsTest {
         Path path = new Path(tempDir.toUri().toString());
         String identifier = "avro";
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, new FileStorePathFactory(path));
+        pathFactoryMap.put(identifier, createNonPartFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
@@ -319,7 +320,7 @@ public class LookupLevelsTest {
                         keyType,
                         rowType,
                         ignore -> new FlushingFileFormat("avro"),
-                        new FileStorePathFactory(path),
+                        createNonPartFactory(path),
                         new KeyValueFieldsExtractor() {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
