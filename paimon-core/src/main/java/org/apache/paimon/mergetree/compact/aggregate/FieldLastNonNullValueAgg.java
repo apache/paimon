@@ -30,17 +30,42 @@ public class FieldLastNonNullValueAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
-        return (inputField == null) ? accumulator : inputField;
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        if (inputField != null) {
+            this.seq = currentSeq;
+            return inputField;
+        } else {
+            // do not forward the seq.
+            return accumulator;
+        }
     }
 
     @Override
-    public Object retract(Object accumulator, Object retractField) {
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        if (accumulator == null) {
+            if (inputField != null) {
+                // backward the seq
+                this.seq = currentSeq;
+            }
+            return inputField;
+        } else {
+            return accumulator;
+        }
+    }
+
+    @Override
+    public boolean requireSequence() {
+        return true;
+    }
+
+    @Override
+    public Object retract(Object accumulator, Object retractField, Object currentSeq) {
+        this.seq = currentSeq;
         return retractField != null ? null : accumulator;
     }
 }

@@ -22,18 +22,27 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.mergetree.SequenceGenerator;
+import org.apache.paimon.mergetree.SequenceGenerator.Seq;
 import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
+import org.apache.paimon.mergetree.compact.MergeFunctionUtils;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.RowKind;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.Projection;
 
 import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 
+import static org.apache.paimon.mergetree.compact.MergeFunctionUtils.validateSequence;
 import static org.apache.paimon.utils.InternalRowUtils.createFieldGetters;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -44,23 +53,30 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 public class AggregateMergeFunction implements MergeFunction<KeyValue> {
 
     private final InternalRow.FieldGetter[] getters;
+    /**
+     * The aggregator for the fields, if the fields do not contain an aggregation, then its null.
+     */
     private final FieldAggregator[] aggregators;
+
+    /** The sequence generator for the fields. */
+    private final Seq[] sequences;
 
     private KeyValue latestKv;
     private GenericRow row;
     private KeyValue reused;
 
     public AggregateMergeFunction(
-            InternalRow.FieldGetter[] getters, FieldAggregator[] aggregators) {
+            InternalRow.FieldGetter[] getters, FieldAggregator[] aggregators, Seq[] sequences) {
         this.getters = getters;
         this.aggregators = aggregators;
+        this.sequences = sequences;
     }
 
     @Override
     public void reset() {
         this.latestKv = null;
         this.row = new GenericRow(getters.length);
-        Arrays.stream(aggregators).forEach(FieldAggregator::reset);
+        Arrays.stream(aggregators).filter(Objects::nonNull).forEach(FieldAggregator::reset);
     }
 
     @Override
@@ -68,15 +84,65 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         latestKv = kv;
         boolean isRetract =
                 kv.valueKind() != RowKind.INSERT && kv.valueKind() != RowKind.UPDATE_AFTER;
+
         for (int i = 0; i < getters.length; i++) {
-            FieldAggregator fieldAggregator = aggregators[i];
+            @Nullable FieldAggregator fieldAggregator = aggregators[i];
+            @Nullable Seq sequence = sequences[i];
+
+            // handle the sequence field.
+            if (sequence != null && sequence.generator != null && sequence.generator.index() == i) {
+                if (!sequence.isExclusive) {
+                    Long previousSeq = sequence.generator.generate(row);
+                    Long currenSeq = sequence.generator.generate(kv.value());
+                    if (currenSeq != null) {
+                        if (previousSeq == null || currenSeq > previousSeq) {
+                            row.setField(i, getters[i].getFieldOrNull(kv.value()));
+                        }
+                    }
+                }
+
+                continue;
+            }
+            Preconditions.checkNotNull(fieldAggregator, "The fieldAggregator should be present");
+
             Object accumulator = getters[i].getFieldOrNull(row);
             Object inputField = getters[i].getFieldOrNull(kv.value());
-            Object mergedField =
-                    isRetract
-                            ? fieldAggregator.retract(accumulator, inputField)
-                            : fieldAggregator.agg(accumulator, inputField);
-            row.setField(i, mergedField);
+            SequenceGenerator sequenceGenerator = sequence == null ? null : sequence.generator;
+
+            if (sequenceGenerator != null) {
+                Long currenSeq = sequenceGenerator.generate(kv.value());
+                if (currenSeq != null) {
+                    Long previousSeq = sequenceGenerator.generate(row);
+                    if (previousSeq == null || currenSeq >= previousSeq) {
+                        Object seqField =
+                                getters[sequenceGenerator.index()].getFieldOrNull(kv.value());
+                        row.setField(
+                                i,
+                                isRetract
+                                        ? fieldAggregator.retract(accumulator, inputField, seqField)
+                                        : fieldAggregator.agg(accumulator, inputField, seqField));
+                    } else {
+                        Object seqField =
+                                getters[sequenceGenerator.index()].getFieldOrNull(kv.value());
+                        row.setField(
+                                i,
+                                isRetract
+                                        ? fieldAggregator.retract(accumulator, inputField, seqField)
+                                        : fieldAggregator.aggForOldSeq(
+                                                accumulator, inputField, seqField));
+                    }
+                    // UPDATE The exclusive sequence field.
+                    if (fieldAggregator.requireSequence() && fieldAggregator.getSeq() != null) {
+                        row.setField(sequenceGenerator.index(), fieldAggregator.getSeq());
+                    }
+                }
+            } else {
+                row.setField(
+                        i,
+                        isRetract
+                                ? fieldAggregator.retract(accumulator, inputField, null)
+                                : fieldAggregator.agg(accumulator, inputField, null));
+            }
         }
     }
 
@@ -94,11 +160,8 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     public static MergeFunctionFactory<KeyValue> factory(
-            Options conf,
-            List<String> tableNames,
-            List<DataType> tableTypes,
-            List<String> primaryKeys) {
-        return new Factory(conf, tableNames, tableTypes, primaryKeys);
+            Options conf, RowType rowType, List<String> primaryKeys) {
+        return new Factory(conf, rowType, primaryKeys);
     }
 
     private static class Factory implements MergeFunctionFactory<KeyValue> {
@@ -109,29 +172,31 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         private final List<String> tableNames;
         private final List<DataType> tableTypes;
         private final List<String> primaryKeys;
+        private final Map<Integer, SequenceGenerator> fieldSequences;
 
-        private Factory(
-                Options conf,
-                List<String> tableNames,
-                List<DataType> tableTypes,
-                List<String> primaryKeys) {
+        private Factory(Options conf, RowType rowType, List<String> primaryKeys) {
             this.options = new CoreOptions(conf);
-            this.tableNames = tableNames;
-            this.tableTypes = tableTypes;
+            this.tableNames = rowType.getFieldNames();
+            this.tableTypes = rowType.getFieldTypes();
             this.primaryKeys = primaryKeys;
+            this.fieldSequences =
+                    MergeFunctionUtils.getSequenceGenerator(options, tableNames, rowType);
         }
 
         @Override
         public MergeFunction<KeyValue> create(@Nullable int[][] projection) {
             List<String> fieldNames = tableNames;
             List<DataType> fieldTypes = tableTypes;
+            Map<Integer, SequenceGenerator> generators = fieldSequences;
             if (projection != null) {
                 Projection project = Projection.of(projection);
                 fieldNames = project.project(tableNames);
                 fieldTypes = project.project(tableTypes);
+                generators = MergeFunctionUtils.projectSequence(projection, fieldSequences);
             }
 
             FieldAggregator[] fieldAggregators = new FieldAggregator[fieldNames.size()];
+            Map<Integer, Set<Integer>> seq2Field = MergeFunctionUtils.seqIndex2Field(generators);
             for (int i = 0; i < fieldNames.size(); i++) {
                 String fieldName = fieldNames.get(i);
                 DataType fieldType = fieldTypes.get(i);
@@ -139,17 +204,24 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
                 boolean isPrimaryKey = primaryKeys.contains(fieldName);
                 String strAggFunc = options.fieldAggFunc(fieldName);
                 boolean ignoreRetract = options.fieldAggIgnoreRetract(fieldName);
+                // If the field is a sequence field, do not use aggregation.
                 fieldAggregators[i] =
-                        FieldAggregator.createFieldAggregator(
-                                fieldType,
-                                strAggFunc,
-                                ignoreRetract,
-                                isPrimaryKey,
-                                options,
-                                fieldName);
+                        seq2Field.containsKey(i)
+                                ? null
+                                : FieldAggregator.createFieldAggregator(
+                                        fieldType,
+                                        strAggFunc,
+                                        ignoreRetract,
+                                        isPrimaryKey,
+                                        options,
+                                        fieldName);
             }
+            validateSequence(fieldAggregators, generators, fieldNames);
 
-            return new AggregateMergeFunction(createFieldGetters(fieldTypes), fieldAggregators);
+            return new AggregateMergeFunction(
+                    createFieldGetters(fieldTypes),
+                    fieldAggregators,
+                    MergeFunctionUtils.toSeq(generators, fieldAggregators));
         }
     }
 }

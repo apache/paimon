@@ -35,18 +35,35 @@ public class FieldFirstNonNullValueAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object seq) {
         if (!initialized && inputField != null) {
             initialized = true;
+            this.seq = seq;
             return inputField;
         } else {
             return accumulator;
         }
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object seq) {
+        if (inputField != null) {
+            initialized = true;
+            this.seq = seq;
+            return inputField;
+        } else {
+            return accumulator;
+        }
+    }
+
+    @Override
+    public boolean requireSequence() {
+        return true;
     }
 
     @Override

@@ -44,12 +44,22 @@ public class FieldMergeMapAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        this.seq = currentSeq;
+        return agg(accumulator, inputField);
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return agg(accumulator, inputField);
+    }
+
+    private Object agg(Object accumulator, Object inputField) {
         if (accumulator == null || inputField == null) {
             return accumulator == null ? inputField : accumulator;
         }
@@ -73,7 +83,8 @@ public class FieldMergeMapAgg extends FieldAggregator {
     }
 
     @Override
-    public Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField, Object currentSeq) {
+        this.seq = currentSeq;
         if (accumulator == null) {
             return null;
         }

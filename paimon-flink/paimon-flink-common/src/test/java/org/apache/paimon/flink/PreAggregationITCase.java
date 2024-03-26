@@ -1332,6 +1332,22 @@ public class PreAggregationITCase {
         }
 
         @Test
+        public void testAggregate() {
+            sql(
+                    "CREATE TABLE AGG ("
+                            + "k INT, a varchar, g_1 bigINT, "
+                            + " PRIMARY KEY (k) NOT ENFORCED)"
+                            + " WITH ("
+                            + "'merge-engine'='aggregation', "
+                            + "'fields.g_1.sequence-group'='a', "
+                            + "'full-compaction.delta-commits'='1');");
+            sql("INSERT INTO AGG VALUES (1, cast(null as varchar), 4)");
+            sql("INSERT INTO AGG VALUES (1, '2', 2)");
+            sql("INSERT INTO AGG VALUES (1, '3', 3)");
+            assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, "3", 3L));
+        }
+
+        @Test
         @Timeout(60)
         public void testUpdateWithIgnoreRetract() throws Exception {
             sEnv.getConfig()

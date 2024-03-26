@@ -30,17 +30,24 @@ public class FieldLastValueAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        this.seq = currentSeq;
         return inputField;
     }
 
     @Override
-    public Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField, Object sequence) {
+        this.seq = sequence;
         return null;
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return accumulator;
     }
 }

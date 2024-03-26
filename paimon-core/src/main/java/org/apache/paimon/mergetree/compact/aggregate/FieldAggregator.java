@@ -35,6 +35,7 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** abstract class of aggregating a field of a row. */
 public abstract class FieldAggregator implements Serializable {
     protected DataType fieldType;
+    protected Object seq;
 
     public FieldAggregator(DataType dataType) {
         this.fieldType = dataType;
@@ -146,14 +147,24 @@ public abstract class FieldAggregator implements Serializable {
         return new FieldNestedUpdateAgg(arrayType, nestedKey);
     }
 
-    abstract String name();
+    public abstract String name();
 
-    public abstract Object agg(Object accumulator, Object inputField);
+    public abstract Object agg(Object accumulator, Object inputField, Object currentSeq);
+
+    public abstract Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq);
+
+    public Object getSeq() {
+        return seq;
+    }
+
+    public boolean requireSequence() {
+        return false;
+    }
 
     /** reset the aggregator to a clean start state. */
     public void reset() {}
 
-    public Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField, Object sequence) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Aggregate function '%s' does not support retraction,"

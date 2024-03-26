@@ -35,12 +35,22 @@ public class FieldListaggAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        this.seq = currentSeq;
+        return agg(accumulator, inputField);
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return agg(accumulator, inputField);
+    }
+
+    private Object agg(Object accumulator, Object inputField) {
         Object concatenate;
 
         if (inputField == null || accumulator == null) {

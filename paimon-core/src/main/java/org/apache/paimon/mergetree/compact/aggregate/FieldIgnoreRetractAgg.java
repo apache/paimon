@@ -29,13 +29,28 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return aggregator.name();
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
-        return aggregator.agg(accumulator, inputField);
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        return aggregator.agg(accumulator, inputField, currentSeq);
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return aggregator.aggForOldSeq(accumulator, inputField, currentSeq);
+    }
+
+    @Override
+    public Object getSeq() {
+        return aggregator.getSeq();
+    }
+
+    @Override
+    public boolean requireSequence() {
+        return aggregator.requireSequence();
     }
 
     @Override
@@ -44,7 +59,7 @@ public class FieldIgnoreRetractAgg extends FieldAggregator {
     }
 
     @Override
-    public Object retract(Object accumulator, Object retractField) {
+    public Object retract(Object accumulator, Object retractField, Object sequence) {
         return accumulator;
     }
 }

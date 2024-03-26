@@ -203,8 +203,9 @@ public abstract class SortBufferWriteBufferTestBase {
             options.set("fields.value.aggregate-function", "sum");
             return AggregateMergeFunction.factory(
                             options,
-                            Collections.singletonList("value"),
-                            Collections.singletonList(DataTypes.BIGINT()),
+                            new RowType(
+                                    ImmutableList.of(
+                                            new DataField(0, "value", DataTypes.BIGINT()))),
                             Collections.emptyList())
                     .create();
         }
@@ -230,8 +231,9 @@ public abstract class SortBufferWriteBufferTestBase {
             MergeFunctionFactory<KeyValue> aggMergeFunction =
                     AggregateMergeFunction.factory(
                             options,
-                            Collections.singletonList("value"),
-                            Collections.singletonList(DataTypes.BIGINT()),
+                            new RowType(
+                                    ImmutableList.of(
+                                            new DataField(0, "value", DataTypes.BIGINT()))),
                             Collections.emptyList());
             return LookupMergeFunction.wrap(
                             aggMergeFunction,

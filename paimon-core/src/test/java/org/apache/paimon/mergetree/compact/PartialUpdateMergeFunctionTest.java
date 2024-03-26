@@ -324,11 +324,17 @@ public class PartialUpdateMergeFunctionTest {
     @Test
     public void testFirstValue() {
         Options options = new Options();
-        options.set("fields.f1.sequence-group", "f2,f3");
+        options.set("fields.f1.sequence-group", "f2");
         options.set("fields.f2.aggregate-function", "first_value");
-        options.set("fields.f3.aggregate-function", "last_value");
+        options.set("fields.f3.sequence-group", "f4");
+        options.set("fields.f4.aggregate-function", "last_value");
         RowType rowType =
-                RowType.of(DataTypes.INT(), DataTypes.INT(), DataTypes.INT(), DataTypes.INT());
+                RowType.of(
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT(),
+                        DataTypes.INT());
         MergeFunction<KeyValue> func =
                 PartialUpdateMergeFunction.factory(options, rowType, ImmutableList.of("f0"))
                         .create();
@@ -336,11 +342,11 @@ public class PartialUpdateMergeFunctionTest {
         func.reset();
 
         // f7 sequence group 2
-        add(func, 1, 1, 1, 1);
-        add(func, 1, 2, 2, 2);
-        validate(func, 1, 2, 1, 2);
-        add(func, 1, 0, 3, 3);
-        validate(func, 1, 2, 3, 2);
+        add(func, 1, 1, 1, 1, 1);
+        add(func, 1, 2, 2, 2, 2);
+        validate(func, 1, 1, 1, 2, 2);
+        add(func, 1, 0, 0, 3, 3);
+        validate(func, 1, 0, 0, 3, 3);
     }
 
     @Test
@@ -388,7 +394,7 @@ public class PartialUpdateMergeFunctionTest {
 
         // test null
         add(func, 1, 3, null, null, null, null, null, 2);
-        validate(func, 1, 3, 2, null, null, 2, 1, 2);
+        validate(func, 1, 3, 2, null, null, 2, 1, 1);
 
         // test retract
         add(func, 1, 3, 1, 1, 1, 1, 1, 3);

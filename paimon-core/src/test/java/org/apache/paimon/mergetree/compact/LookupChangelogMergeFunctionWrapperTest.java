@@ -22,8 +22,8 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.InternalRow.FieldGetter;
 import org.apache.paimon.lookup.LookupStrategy;
+import org.apache.paimon.mergetree.SequenceGenerator;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
@@ -218,12 +218,13 @@ public class LookupChangelogMergeFunctionWrapperTest {
                         LookupMergeFunction.wrap(
                                 projection ->
                                         new AggregateMergeFunction(
-                                                new FieldGetter[] {
+                                                new InternalRow.FieldGetter[] {
                                                     row -> row.isNullAt(0) ? null : row.getInt(0)
                                                 },
                                                 new FieldAggregator[] {
                                                     new FieldSumAgg(DataTypes.INT())
-                                                }),
+                                                },
+                                                new SequenceGenerator.Seq[1]),
                                 RowType.of(DataTypes.INT()),
                                 RowType.of(DataTypes.INT())),
                         key -> null,

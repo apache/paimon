@@ -68,11 +68,7 @@ public class PrimaryKeyTableUtils {
             case PARTIAL_UPDATE:
                 return PartialUpdateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case AGGREGATE:
-                return AggregateMergeFunction.factory(
-                        conf,
-                        tableSchema.fieldNames(),
-                        rowType.getFieldTypes(),
-                        tableSchema.primaryKeys());
+                return AggregateMergeFunction.factory(conf, rowType, tableSchema.primaryKeys());
             case FIRST_ROW:
                 return FirstRowMergeFunction.factory(
                         new RowType(extractor.keyFields(tableSchema)), rowType, conf);

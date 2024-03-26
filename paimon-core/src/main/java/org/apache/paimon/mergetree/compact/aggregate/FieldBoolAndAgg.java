@@ -30,12 +30,11 @@ public class FieldBoolAndAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
-    @Override
-    public Object agg(Object accumulator, Object inputField) {
+    private Object agg(Object accumulator, Object inputField) {
         Object boolAnd;
 
         if (accumulator == null || inputField == null) {
@@ -50,5 +49,16 @@ public class FieldBoolAndAgg extends FieldAggregator {
             }
         }
         return boolAnd;
+    }
+
+    @Override
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        this.seq = currentSeq;
+        return agg(accumulator, inputField);
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return agg(accumulator, inputField);
     }
 }

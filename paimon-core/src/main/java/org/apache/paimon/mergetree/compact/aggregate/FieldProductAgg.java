@@ -35,12 +35,22 @@ public class FieldProductAgg extends FieldAggregator {
     }
 
     @Override
-    String name() {
+    public String name() {
         return NAME;
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object currentSeq) {
+        this.seq = currentSeq;
+        return agg(accumulator, inputField);
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        return agg(accumulator, inputField);
+    }
+
+    private Object agg(Object accumulator, Object inputField) {
         Object product;
 
         if (accumulator == null || inputField == null) {
@@ -86,7 +96,8 @@ public class FieldProductAgg extends FieldAggregator {
     }
 
     @Override
-    public Object retract(Object accumulator, Object inputField) {
+    public Object retract(Object accumulator, Object inputField, Object sequence) {
+        this.seq = sequence;
         Object product;
 
         if (accumulator == null || inputField == null) {

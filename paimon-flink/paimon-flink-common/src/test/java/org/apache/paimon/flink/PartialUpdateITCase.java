@@ -322,12 +322,57 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
 
         sql("INSERT INTO AGG VALUES (1, 1, 1), (1, 2, 2)");
 
-        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 1, 2));
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 1, 1));
 
         // old sequence
         sql("INSERT INTO AGG VALUES (1, 0, 0)");
 
-        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 0, 2));
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, 0, 0));
+    }
+
+    @Test
+    public void testRequiredSequenceAggregator() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a varchar, b varchar, c varchar, g_1 bigINT, g_2 INT, g_3 INT, "
+                        + " PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.g_2.sequence-group'='b', "
+                        + "'fields.g_3.sequence-group'='c', "
+                        + "'fields.a.aggregate-function'='first_non_null_value',"
+                        + "'fields.b.aggregate-function'='last_non_null_value',"
+                        + "'fields.c.aggregate-function'='last_value');");
+        sql("INSERT INTO AGG VALUES (1, cast(null as varchar), '1', '1', 1, 1, 1)");
+        sql(
+                "INSERT INTO AGG VALUES (1, '1', cast(null as varchar), cast(null as varchar), 4, 4, 4)");
+        assertThat(sql("SELECT * FROM AGG"))
+                .containsExactlyInAnyOrder(Row.of(1, "1", "1", null, 4L, 1, 4));
+        sql("INSERT INTO AGG VALUES (1, '5', '5', '2', 5, 5, 2)");
+        sql("INSERT INTO AGG VALUES (1, '3', '3', '3', 3, 3, 3)");
+        assertThat(sql("SELECT * FROM AGG"))
+                .containsExactlyInAnyOrder(Row.of(1, "3", "5", null, 3L, 5, 4));
+        sql(
+                "INSERT INTO AGG VALUES (1, cast(null as varchar), cast(null as varchar), '5', 2, 6, 5)");
+        assertThat(sql("SELECT * FROM AGG"))
+                .containsExactlyInAnyOrder(Row.of(1, "3", "5", "5", 3L, 5, 5));
+    }
+
+    @Test
+    public void testFirstNotNullForOldSeq() {
+        sql(
+                "CREATE TABLE AGG ("
+                        + "k INT, a varchar, g_1 bigINT, "
+                        + " PRIMARY KEY (k) NOT ENFORCED)"
+                        + " WITH ("
+                        + "'merge-engine'='partial-update', "
+                        + "'fields.g_1.sequence-group'='a', "
+                        + "'fields.a.aggregate-function'='first_non_null_value');");
+        sql("INSERT INTO AGG VALUES (1, '4', 4)");
+        sql("INSERT INTO AGG VALUES (1, cast(null as varchar), 3)");
+        sql("INSERT INTO AGG VALUES (1, '2', 2)");
+        assertThat(sql("SELECT * FROM AGG")).containsExactlyInAnyOrder(Row.of(1, "2", 2L));
     }
 
     @Test

@@ -39,13 +39,26 @@ public class FieldFirstValueAgg extends FieldAggregator {
     }
 
     @Override
-    public Object agg(Object accumulator, Object inputField) {
+    public Object agg(Object accumulator, Object inputField, Object seq) {
         if (!initialized) {
-            initialized = true;
+            this.initialized = true;
+            this.seq = seq;
             return inputField;
         } else {
             return accumulator;
         }
+    }
+
+    @Override
+    public Object aggForOldSeq(Object accumulator, Object inputField, Object currentSeq) {
+        this.initialized = true;
+        this.seq = currentSeq;
+        return inputField;
+    }
+
+    @Override
+    public boolean requireSequence() {
+        return true;
     }
 
     @Override
