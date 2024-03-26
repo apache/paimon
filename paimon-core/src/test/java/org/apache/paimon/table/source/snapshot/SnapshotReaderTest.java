@@ -100,7 +100,7 @@ public class SnapshotReaderTest {
             assertThat(dataSplit.dataFiles()).hasSize(1);
             DataFileMeta meta = dataSplit.dataFiles().get(0);
             String partition = dataSplit.partition().getString(0).toString();
-            assertThat(dataSplit.convertToRawFiles()).isNotPresent();
+            assertThat(dataSplit.convertToRawFiles()).isPresent();
         }
 
         // write another file on level 0

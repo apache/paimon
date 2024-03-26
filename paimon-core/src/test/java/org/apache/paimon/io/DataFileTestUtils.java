@@ -72,10 +72,15 @@ public class DataFileTestUtils {
 
     public static DataFileMeta newFile(
             String name, int level, int minKey, int maxKey, long maxSequence) {
+        return newFile(name, level, minKey, maxKey, maxSequence, 0L);
+    }
+
+    public static DataFileMeta newFile(
+            String name, int level, int minKey, int maxKey, long maxSequence, long deleteRowCount) {
         return new DataFileMeta(
                 name,
                 maxKey - minKey + 1,
-                1,
+                maxKey - minKey + 1,
                 row(minKey),
                 row(maxKey),
                 null,
@@ -84,7 +89,7 @@ public class DataFileTestUtils {
                 maxSequence,
                 0,
                 level,
-                0L);
+                deleteRowCount);
     }
 
     public static BinaryRow row(int i) {
