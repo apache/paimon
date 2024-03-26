@@ -37,7 +37,7 @@ import java.util.Random;
 import java.util.function.BiFunction;
 
 /** Tests for {@link InternalRowToBytesVisitor}. */
-public class InternalRowToBytesVisitorTest {
+public class InternalRowToBytesReaderTest {
 
     private static final Random RANDOM = new Random();
 

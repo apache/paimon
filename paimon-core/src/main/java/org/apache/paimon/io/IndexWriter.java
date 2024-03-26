@@ -18,11 +18,12 @@
 
 package org.apache.paimon.io;
 
+import java.io.ByteArrayOutputStream;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexFile;
 import org.apache.paimon.fileindex.FileIndexer;
-import org.apache.paimon.fileindex.FileIndexPredicateUtil;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.types.DataField;
@@ -93,34 +94,34 @@ public final class IndexWriter {
         if (indexMaintainers.isEmpty()) {
             return;
         }
-        byte[] serializedBytes = getSerializedBytes();
 
-        if (serializedBytes.length > indexSizeInMeta) {
-            resultRow = BinaryRow.EMPTY_ROW;
-            Path path = pathFactory.newIndexPath();
-            try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
-                outputStream.write(serializedBytes);
-            }
-            resultFileName = path.getName();
-        } else {
-            resultRow = new BinaryRow(1);
-            BinaryRowWriter binaryRowWriter = new BinaryRowWriter(resultRow);
-            binaryRowWriter.writeBinary(0, serializedBytes);
-            binaryRowWriter.complete();
-        }
-    }
-
-    public Pair<BinaryRow, String> result() {
-        return indexMaintainers.isEmpty() ? EMPTY_RESULT : Pair.of(resultRow, resultFileName);
-    }
-
-    public byte[] getSerializedBytes() {
         Map<String, byte[]> indexMap = new HashMap<>();
 
         for (IndexMaintainer indexMaintainer : indexMaintainers) {
             indexMap.put(indexMaintainer.getColumnName(), indexMaintainer.serializedBytes());
         }
 
-        return FileIndexPredicateUtil.serializeIndexMap(indexType, indexMap);
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try(FileIndexFile.Writer writer = FileIndexFile.createWriter(baos)) {
+            writer.writeColumnIndex(indexType, indexMap);
+        }
+
+        if (baos.size() > indexSizeInMeta) {
+            resultRow = BinaryRow.EMPTY_ROW;
+            Path path = pathFactory.newIndexPath();
+            try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
+                outputStream.write(baos.toByteArray());
+            }
+            resultFileName = path.getName();
+        } else {
+            resultRow = new BinaryRow(1);
+            BinaryRowWriter binaryRowWriter = new BinaryRowWriter(resultRow);
+            binaryRowWriter.writeBinary(0, baos.toByteArray());
+            binaryRowWriter.complete();
+        }
+    }
+
+    public Pair<BinaryRow, String> result() {
+        return indexMaintainers.isEmpty() ? EMPTY_RESULT : Pair.of(resultRow, resultFileName);
     }
 }

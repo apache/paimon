@@ -52,7 +52,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 16. where b=2 and c=3 and d>5, do not push down
  */
 /** DeletePushDownVisitorTest tests the DeletePushDownVisitor. */
-public class DeletePushDownVisitorTest {
+public class DeletePushDownReaderTest {
 
     @Test
     public void testPrimaryKeyPushDown() {

@@ -21,7 +21,7 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndexPredicateUtil;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.fs.FileIO;
@@ -146,13 +146,12 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     .collect(Collectors.toList());
                     if (!indexFiles.isEmpty()) {
                         // go to secondary index check
-                        if (!FileIndexPredicateUtil.checkPredicate(
-                                dataFilePathFactory.toPath(indexFiles.get(0)),
+                        try (FileIndexPredicate predicate = new FileIndexPredicate(dataFilePathFactory.toPath(indexFiles.get(0)),
                                 fileIO,
-                                dataSchema.logicalRowType(),
-                                PredicateBuilder.and(dataFilters.toArray(new Predicate[0])))) {
-                            // this file does not pass the secondary index check, just skip it.
-                            continue;
+                                dataSchema.logicalRowType())) {
+                            if (!predicate.testPredicate(PredicateBuilder.and(dataFilters.toArray(new Predicate[0])))) {
+                                continue;
+                            }
                         }
                     }
                 }

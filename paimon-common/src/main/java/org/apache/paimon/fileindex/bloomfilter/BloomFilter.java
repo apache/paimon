@@ -18,17 +18,17 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.fileindex.FileIndexFunctionVisitor;
+import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.ObjectToBytesVisitor;
+import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.util.bloom.Key;
 import org.apache.hadoop.util.hash.Hash;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -64,8 +64,8 @@ public class BloomFilter implements FileIndexer {
     }
 
     @Override
-    public FileIndexFunctionVisitor createVisitor() {
-        return new Visitor();
+    public FileIndexReader createReader() {
+        return new Reader();
     }
 
     private class Writer implements FileIndexWriter {
@@ -92,11 +92,11 @@ public class BloomFilter implements FileIndexer {
         }
     }
 
-    private class Visitor implements FileIndexFunctionVisitor {
+    private class Reader implements FileIndexReader {
 
         @Override
-        public FileIndexFunctionVisitor recoverFrom(byte[] serializedBytes) {
-            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(serializedBytes));
+        public Reader recoverFrom(SeekableInputStream seekableInputStream) {
+            DataInputStream dis = new DataInputStream(seekableInputStream);
 
             try {
                 filter.readFields(dis);

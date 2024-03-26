@@ -37,7 +37,7 @@ import java.util.function.BiFunction;
 import java.util.stream.Collectors;
 
 /** Test for InternalRowToSizeVisitor. */
-public class InternalRowToSizeVisitorTest {
+public class InternalRowToSizeReaderTest {
 
     private List<BiFunction<DataGetters, Integer, Integer>> feildSizeCalculator;
 

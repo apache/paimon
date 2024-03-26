@@ -18,9 +18,10 @@
 
 package org.apache.paimon.operation;
 
+import java.io.IOException;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.fileindex.FileIndexPredicateUtil;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -44,7 +45,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate filter;
 
-    private Map<Long, Predicate> dataFilterMapping = new HashMap<>();
+    private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
@@ -117,7 +118,10 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         entry.file().schemaId(),
                         id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
 
-        return FileIndexPredicateUtil.checkPredicate(
-                filterRow.getBinary(0), dataRowType, dataPredicate);
+        try (FileIndexPredicate predicate = new FileIndexPredicate(filterRow.getBinary(0), dataRowType)) {
+            return predicate.testPredicate(dataPredicate);
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking predicate.", e);
+        }
     }
 }

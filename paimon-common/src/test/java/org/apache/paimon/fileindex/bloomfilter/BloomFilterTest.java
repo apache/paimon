@@ -18,7 +18,7 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.fileindex.FileIndexFunctionVisitor;
+import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.types.DataTypes;
 
@@ -39,7 +39,7 @@ public class BloomFilterTest {
 
         BloomFilter filter = new BloomFilter(DataTypes.BYTES());
         FileIndexWriter writer = filter.createWriter();
-        FileIndexFunctionVisitor visitor = filter.createVisitor();
+        FileIndexReader reader = filter.createReader();
         List<byte[]> testData = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {
@@ -49,14 +49,14 @@ public class BloomFilterTest {
         testData.forEach(writer::write);
 
         for (byte[] bytes : testData) {
-            Assertions.assertThat(visitor.visitEqual(null, bytes)).isTrue();
+            Assertions.assertThat(reader.visitEqual(null, bytes)).isTrue();
         }
 
         int errorCount = 0;
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
-            if (visitor.visitEqual(null, ra)) {
+            if (reader.visitEqual(null, ra)) {
                 errorCount++;
             }
         }

@@ -28,7 +28,7 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexFunctionVisitor createVisitor();
+    FileIndexReader createReader();
 
     static FileIndexer create(String type, DataType dataType) {
         switch (type) {
