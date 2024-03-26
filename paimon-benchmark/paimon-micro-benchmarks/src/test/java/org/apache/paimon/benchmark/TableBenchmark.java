@@ -41,8 +41,6 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import static java.util.Collections.singletonList;
-
 /** Base class for table benchmark. */
 public class TableBenchmark {
 
@@ -53,6 +51,11 @@ public class TableBenchmark {
     private final RandomDataGenerator random = new RandomDataGenerator();
 
     protected Table createTable(Options tableOptions, String tableName) throws Exception {
+        return createTable(tableOptions, tableName, Collections.singletonList("k"));
+    }
+
+    protected Table createTable(Options tableOptions, String tableName, List<String> primaryKeys)
+            throws Exception {
         Options catalogOptions = new Options();
         catalogOptions.set(CatalogOptions.WAREHOUSE, tempFile.toUri().toString());
         Catalog catalog = CatalogFactory.createCatalog(CatalogContext.create(catalogOptions));
@@ -66,12 +69,7 @@ public class TableBenchmark {
         }
         tableOptions.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 10);
         Schema schema =
-                new Schema(
-                        fields,
-                        Collections.emptyList(),
-                        singletonList("k"),
-                        tableOptions.toMap(),
-                        "");
+                new Schema(fields, Collections.emptyList(), primaryKeys, tableOptions.toMap(), "");
         Identifier identifier = Identifier.create(database, tableName);
         catalog.createTable(identifier, schema, false);
         return catalog.getTable(identifier);

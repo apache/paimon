@@ -31,7 +31,7 @@ import org.apache.paimon.table.source.Split;
 
 import org.junit.jupiter.api.Test;
 
-import java.util.LinkedHashMap;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -43,20 +43,37 @@ public class TableReadBenchmark extends TableBenchmark {
     private final int rowCount = 1000000;
 
     @Test
-    public void testRead() throws Exception {
-        Map<String, Table> tables = new LinkedHashMap<>();
-        tables.put("orc", prepareData(orc(), "orc"));
-        tables.put("parquet", prepareData(parquet(), "parquet"));
-        tables.put("avro", prepareData(avro(), "avro"));
-
-        innerTest(tables);
+    public void testOrcRead() throws Exception {
+        innerTest(Collections.singletonMap("orc", prepareData(orc(), "orc")));
         /*
          * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
          * Apple M1 Pro
          * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
          * ------------------------------------------------------------------------------------------------
          * OPERATORTEST_read_read-orc            1046 / 1295           2867.3            348.8       1.0X
+         */
+    }
+
+    @Test
+    public void testParquetRead() throws Exception {
+        innerTest(Collections.singletonMap("parquet", prepareData(parquet(), "parquet")));
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
          * OPERATORTEST_read_read-parquet        3076 / 5295            975.4           1025.2       0.3X
+         */
+    }
+
+    @Test
+    public void testAvroRead() throws Exception {
+        innerTest(Collections.singletonMap("avro", prepareData(avro(), "avro")));
+        /*
+         * OpenJDK 64-Bit Server VM 1.8.0_292-b10 on Mac OS X 10.16
+         * Apple M1 Pro
+         * read:                            Best/Avg Time(ms)    Row Rate(K/s)      Per Row(ns)   Relative
+         * ------------------------------------------------------------------------------------------------
          * OPERATORTEST_read_read-avro           4156 / 4362            721.8           1385.5       0.3X
          */
     }
