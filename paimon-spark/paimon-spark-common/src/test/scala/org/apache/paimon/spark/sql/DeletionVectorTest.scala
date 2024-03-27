@@ -101,7 +101,7 @@ class DeletionVectorTest extends PaimonSparkTestBase {
   test("Paimon deletionVector: e2e random write") {
     val bucket = Random.shuffle(Seq("-1", "1", "3")).head
     val changelogProducer = Random.shuffle(Seq("none", "lookup")).head
-    val format = Random.shuffle(Seq("orc", "parquet")).head
+    val format = Random.shuffle(Seq("orc", "parquet", "avro")).head
     val batchSize = Random.nextInt(1024) + 1
 
     val dvTbl = "deletion_vector_tbl"

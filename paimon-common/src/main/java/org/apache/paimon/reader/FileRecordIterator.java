@@ -27,7 +27,8 @@ import java.io.IOException;
 import java.util.function.Function;
 
 /**
- * Wrap {@link RecordReader.RecordIterator} to support returning the record's row position.
+ * Wrap {@link RecordReader.RecordIterator} to support returning the record's row position and file
+ * Path.
  *
  * @param <T> The type of the record.
  */
