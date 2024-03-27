@@ -40,10 +40,7 @@ import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.functions.source.SourceFunction;
 
 import java.time.Duration;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
@@ -181,13 +178,14 @@ public abstract class SynchronizationActionBase extends ActionBase {
         Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
         dynamicOptions.remove(CoreOptions.BUCKET.key());
 
-        Map<String, String> oldOptions = table.options();
         // remove immutable options and options with equal values
+        Map<String, String> oldOptions = table.options();
+        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
         dynamicOptions
                 .entrySet()
                 .removeIf(
                         entry ->
-                                CoreOptions.getImmutableOptionKeys().contains(entry.getKey())
+                                immutableOptionKeys.contains(entry.getKey())
                                         || Objects.equals(
                                                 oldOptions.get(entry.getKey()), entry.getValue()));
 

@@ -1133,13 +1133,11 @@ public class MySqlSyncTableActionITCase extends MySqlActionITCaseBase {
         runActionWithDefaultEnv(action);
 
         FileStoreTable table = getFileStoreTable();
-        Map<String, String> expected = new HashMap<>();
-        options.put("bucket", "1");
-        options.put("sink.parallelism", "2");
-        options.put("sequence.field", "_timestamp");
-        options.put("snapshot.expire.limit", "1000");
 
-        assertThat(table.options()).containsAllEntriesOf(expected);
+        assertThat(table.options().get("bucket")).isEqualTo("1");
+        assertThat(table.options().get("sequence.field")).isEqualTo("_timestamp");
+        assertThat(table.options().get("sink.parallelism")).isEqualTo("2");
+        assertThat(table.options().get("snapshot.expire.limit")).isEqualTo("1000");
     }
 
     @Test
