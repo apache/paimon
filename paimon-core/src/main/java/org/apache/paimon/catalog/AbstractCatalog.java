@@ -83,10 +83,6 @@ public abstract class AbstractCatalog implements Catalog {
         this.tableDefaultOptions =
                 convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
-
-        if (lockEnabled()) {
-            checkArgument(options.contains(LOCK_TYPE), "No lock type when lock is enabled.");
-        }
     }
 
     @Override
