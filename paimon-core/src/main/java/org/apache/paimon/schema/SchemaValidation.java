@@ -474,10 +474,6 @@ public class SchemaValidation {
                 "Deletion vectors mode is only supported for tables with primary keys.");
 
         checkArgument(
-                options.formatType().equals(ORC) || options.formatType().equals(PARQUET),
-                "Deletion vectors mode is only supported for orc or parquet file format now.");
-
-        checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
                         || options.changelogProducer() == ChangelogProducer.LOOKUP,
                 "Deletion vectors mode is only supported for none or lookup changelog producer now.");
