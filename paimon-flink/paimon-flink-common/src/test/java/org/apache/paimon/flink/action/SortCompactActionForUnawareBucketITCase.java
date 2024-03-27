@@ -393,7 +393,8 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
         prepareData(300, 1);
         {
             ArrayList<String> extraCompactionConfig =
-                    Lists.newArrayList("--table_conf", "sort-compaction.local-sample.size=1");
+                    Lists.newArrayList(
+                            "--table_conf", "sort-compaction.local-sample.magnification=1");
             Assertions.assertThatCode(
                             () -> {
                                 createAction(
@@ -407,7 +408,7 @@ public class SortCompactActionForUnawareBucketITCase extends ActionITCaseBase {
                                         .run();
                             })
                     .hasMessage(
-                            "the config sort-compaction.local-sample.size=1 is set too small,greater than or equal to 20 is needed.");
+                            "the config 'sort-compaction.local-sample.magnification=1' should not be set too small,greater than or equal to 20 is needed.");
         }
     }
 

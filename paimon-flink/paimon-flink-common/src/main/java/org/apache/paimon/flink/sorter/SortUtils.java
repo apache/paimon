@@ -99,18 +99,17 @@ public class SortUtils {
                     "The adaptive batch scheduler is not supported. Please set the sink parallelism using the key: "
                             + FlinkConnectorOptions.SINK_PARALLELISM.key());
         }
-        final int localSampleSize =
-                options.getLocalSampleSize().orElseGet(() -> sinkParallelism * 1000);
-        final int globalSampleSize = sinkParallelism * 1000;
-        final int rangeNum = sinkParallelism * 10;
-
-        if (localSampleSize < 20) {
+        int localSampleMagnification = options.getLocalSampleMagnification();
+        if (localSampleMagnification < 20) {
             throw new IllegalArgumentException(
                     String.format(
-                            "the config %s=%d is set too small,greater than or equal to 20 is needed.",
-                            CoreOptions.SORT_COMPACTION_LOCAL_SAMPLE_SIZE.key(), localSampleSize));
+                            "the config '%s=%d' should not be set too small,greater than or equal to 20 is needed.",
+                            CoreOptions.SORT_COMPACTION_SAMPLE_MAGNIFICATION.key(),
+                            localSampleMagnification));
         }
-
+        final int localSampleSize = sinkParallelism * localSampleMagnification;
+        final int globalSampleSize = sinkParallelism * 1000;
+        final int rangeNum = sinkParallelism * 10;
         int keyFieldCount = sortKeyType.getFieldCount();
         int valueFieldCount = valueRowType.getFieldCount();
         final int[] valueProjectionMap = new int[valueFieldCount];

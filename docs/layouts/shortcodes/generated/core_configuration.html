@@ -564,10 +564,10 @@ This config option does not affect the default filesystem metastore.</td>
             <td>In watermarking, if a source remains idle beyond the specified timeout duration, it triggers snapshot advancement and facilitates tag creation.</td>
         </tr>
         <tr>
-            <td><h5>sort-compaction.local-sample.size</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
+            <td><h5>sort-compaction.local-sample.magnification</h5></td>
+            <td style="word-wrap: break-word;">1000</td>
             <td>Integer</td>
-            <td>The size of local sample for sort-compaction.By default,the value is the sink parallelism * 1000.</td>
+            <td>The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.</td>
         </tr>
         <tr>
             <td><h5>sort-compaction.range-strategy</h5></td>
