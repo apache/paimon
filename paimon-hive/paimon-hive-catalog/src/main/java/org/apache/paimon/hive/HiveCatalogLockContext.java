@@ -16,29 +16,35 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.jdbc;
+package org.apache.paimon.hive;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
+import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.options.Options;
 
-/** Factory to create {@link JdbcCatalog}. */
-public class JdbcCatalogFactory implements CatalogFactory {
+/** Hive {@link CatalogLockContext}. */
+public class HiveCatalogLockContext implements CatalogLockContext {
 
-    public static final String IDENTIFIER = "jdbc";
+    private final SerializableHiveConf hiveConf;
+    private final String clientClassName;
+    private final Options options;
 
-    @Override
-    public String identifier() {
-        return IDENTIFIER;
+    public HiveCatalogLockContext(
+            SerializableHiveConf hiveConf, String clientClassName, Options options) {
+        this.hiveConf = hiveConf;
+        this.clientClassName = clientClassName;
+        this.options = options;
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        Options options = context.options();
-        String catalogKey = options.get(JdbcCatalogOptions.CATALOG_KEY);
-        return new JdbcCatalog(fileIO, catalogKey, context.options(), warehouse.toString());
+    public Options options() {
+        return options;
+    }
+
+    public SerializableHiveConf hiveConf() {
+        return hiveConf;
+    }
+
+    public String clientClassName() {
+        return clientClassName;
     }
 }

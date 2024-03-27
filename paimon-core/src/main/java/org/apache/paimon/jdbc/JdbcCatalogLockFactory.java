@@ -18,15 +18,19 @@
 
 package org.apache.paimon.jdbc;
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogFactory;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 
-/** Factory to create {@link JdbcCatalog}. */
-public class JdbcCatalogFactory implements CatalogFactory {
+import java.util.Map;
+
+import static org.apache.paimon.jdbc.JdbcCatalogLock.acquireTimeout;
+import static org.apache.paimon.jdbc.JdbcCatalogLock.checkMaxSleep;
+
+/** Jdbc catalog lock factory. */
+public class JdbcCatalogLockFactory implements CatalogLockFactory {
+
+    private static final long serialVersionUID = 1L;
 
     public static final String IDENTIFIER = "jdbc";
 
@@ -36,9 +40,13 @@ public class JdbcCatalogFactory implements CatalogFactory {
     }
 
     @Override
-    public Catalog create(FileIO fileIO, Path warehouse, CatalogContext context) {
-        Options options = context.options();
-        String catalogKey = options.get(JdbcCatalogOptions.CATALOG_KEY);
-        return new JdbcCatalog(fileIO, catalogKey, context.options(), warehouse.toString());
+    public CatalogLock createLock(CatalogLockContext context) {
+        JdbcCatalogLockContext lockContext = (JdbcCatalogLockContext) context;
+        Map<String, String> optionsMap = lockContext.options().toMap();
+        return new JdbcCatalogLock(
+                lockContext.connections(),
+                lockContext.catalogKey(),
+                checkMaxSleep(optionsMap),
+                acquireTimeout(optionsMap));
     }
 }

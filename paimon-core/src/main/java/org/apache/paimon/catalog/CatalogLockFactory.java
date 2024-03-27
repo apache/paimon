@@ -18,19 +18,12 @@
 
 package org.apache.paimon.catalog;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.factories.Factory;
 
-import java.io.Closeable;
-import java.util.concurrent.Callable;
+import java.io.Serializable;
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
-@Public
-public interface CatalogLock extends Closeable {
+/** Factory to create {@link CatalogLock}. */
+public interface CatalogLockFactory extends Factory, Serializable {
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
-    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+    CatalogLock createLock(CatalogLockContext context);
 }

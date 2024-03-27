@@ -20,7 +20,8 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -344,8 +345,13 @@ public class JdbcCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockContext> lockContext() {
-        return Optional.of(new JdbcCatalogLock.JdbcLockContext(connections, catalogKey, options));
+    public Optional<CatalogLockFactory> defaultLockFactory() {
+        return Optional.of(new JdbcCatalogLockFactory());
+    }
+
+    @Override
+    public Optional<CatalogLockContext> lockContext() {
+        return Optional.of(new JdbcCatalogLockContext(connections, catalogKey, options));
     }
 
     private Lock lock(Identifier identifier) {
