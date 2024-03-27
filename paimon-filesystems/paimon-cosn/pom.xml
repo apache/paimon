@@ -61,7 +61,7 @@
                 <artifactId>maven-dependency-plugin</artifactId>
                 <executions>
                     <execution>
-                        <id>copy-cos-classes</id>
+                        <id>copy-cosn-classes</id>
                         <phase>prepare-package</phase>
                         <goals>
                             <goal>unpack</goal>
