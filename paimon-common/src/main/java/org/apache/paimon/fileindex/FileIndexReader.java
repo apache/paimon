@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
 

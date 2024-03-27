@@ -122,8 +122,8 @@ public final class FileIndexFormat {
             dataOutputStream.writeInt(REDUNDANT_LENGTH);
         }
 
-        private int calculateHeadLength(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
-                throws IOException {
+        private int calculateHeadLength(
+                String indexType, Map<String, Pair<Integer, Integer>> bodyInfo) throws IOException {
             // magic 8 bytes, version 4 bytes, head length 4 bytes,
             // column size 4 bytes, body info start&end 8 bytes per
             // item, redundant length 4 bytes;
@@ -220,8 +220,7 @@ public final class FileIndexFormat {
                                     // read fully until b is full else throw.
                                     while (n < len) {
                                         int count = seekableInputStream.read(b, n, len - n);
-                                        if (count < 0)
-                                            throw new EOFException();
+                                        if (count < 0) throw new EOFException();
                                         n += count;
                                     }
                                 } catch (IOException e) {
