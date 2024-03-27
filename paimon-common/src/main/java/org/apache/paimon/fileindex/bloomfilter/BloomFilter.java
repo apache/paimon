@@ -57,7 +57,6 @@ public class BloomFilter implements FileIndexer {
         return BLOOM_FILTER;
     }
 
-
     @Override
     public FileIndexWriter createWriter() {
         return new Writer();

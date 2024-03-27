@@ -18,10 +18,11 @@
 
 package org.apache.paimon.fileindex;
 
-import java.util.List;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.predicate.FunctionVisitor;
+
+import java.util.List;
 
 /**
  * Read file index from serialized bytes. Return true, means we need to search this file, else means

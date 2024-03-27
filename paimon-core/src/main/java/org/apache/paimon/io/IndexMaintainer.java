@@ -20,7 +20,6 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexWriter;
-import org.apache.paimon.fileindex.FileIndexer;
 
 /** One index maintainer for one column. */
 public class IndexMaintainer {
@@ -29,7 +28,8 @@ public class IndexMaintainer {
     private final FileIndexWriter fileIndexWriter;
     private final InternalRow.FieldGetter getter;
 
-    public IndexMaintainer(String columnName, FileIndexWriter fileIndexWriter, InternalRow.FieldGetter getter) {
+    public IndexMaintainer(
+            String columnName, FileIndexWriter fileIndexWriter, InternalRow.FieldGetter getter) {
         this.columnName = columnName;
         this.fileIndexWriter = fileIndexWriter;
         this.getter = getter;

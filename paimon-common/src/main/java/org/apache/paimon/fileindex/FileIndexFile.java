@@ -18,6 +18,13 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.RowType;
+import org.apache.paimon.utils.IOUtils;
+import org.apache.paimon.utils.Pair;
+
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -30,12 +37,6 @@ import java.io.OutputStream;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
-import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.fs.SeekableInputStream;
-import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IOUtils;
-import org.apache.paimon.utils.Pair;
 
 /** File index file format. Put all column and offset in the header. */
 public final class FileIndexFile {
@@ -225,13 +226,15 @@ public final class FileIndexFile {
                                             seekableInputStream,
                                             startEnd.getLeft(),
                                             startEnd.getRight()))
-                    .map(stream -> {
-                        try {
-                            return stream.resetHead();
-                        } catch (IOException e) {
-                            throw new RuntimeException("Error happens while read column from index file.", e);
-                        }
-                    });
+                    .map(
+                            stream -> {
+                                try {
+                                    return stream.resetHead();
+                                } catch (IOException e) {
+                                    throw new RuntimeException(
+                                            "Error happens while read column from index file.", e);
+                                }
+                            });
         }
 
         @Override

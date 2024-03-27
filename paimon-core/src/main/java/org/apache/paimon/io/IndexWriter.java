@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import java.io.ByteArrayOutputStream;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
@@ -30,6 +29,7 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
 
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -102,7 +102,7 @@ public final class IndexWriter {
         }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try(FileIndexFile.Writer writer = FileIndexFile.createWriter(baos)) {
+        try (FileIndexFile.Writer writer = FileIndexFile.createWriter(baos)) {
             writer.writeColumnIndex(indexType, indexMap);
         }
 
