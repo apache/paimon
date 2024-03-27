@@ -49,10 +49,10 @@ public interface Catalog extends AutoCloseable {
      * Get lock factory from catalog. Lock is used to support multiple concurrent writes on the
      * object store.
      */
-    Optional<CatalogLock.LockFactory> lockFactory();
+    Optional<CatalogLockFactory> lockFactory();
 
     /** Get lock context for lock factory to create a lock. */
-    default Optional<CatalogLock.LockContext> lockContext() {
+    default Optional<CatalogLockContext> lockContext() {
         return Optional.empty();
     }
 

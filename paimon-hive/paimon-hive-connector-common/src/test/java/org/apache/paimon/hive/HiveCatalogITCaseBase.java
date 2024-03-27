@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkCatalog;
 import org.apache.paimon.hive.annotation.Minio;
@@ -695,7 +696,7 @@ public abstract class HiveCatalogITCaseBase {
         tEnv.executeSql("CREATE TABLE t (a INT)");
         Catalog catalog =
                 ((FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get()).catalog();
-        CatalogLock.LockFactory lockFactory = catalog.lockFactory().get();
+        CatalogLockFactory lockFactory = catalog.lockFactory().get();
 
         AtomicInteger count = new AtomicInteger(0);
         List<Thread> threads = new ArrayList<>();
@@ -710,7 +711,8 @@ public abstract class HiveCatalogITCaseBase {
             Thread thread =
                     new Thread(
                             () -> {
-                                CatalogLock lock = lockFactory.create(catalog.lockContext().get());
+                                CatalogLock lock =
+                                        lockFactory.createLock(catalog.lockContext().get());
                                 for (int j = 0; j < 10; j++) {
                                     try {
                                         lock.runWithLock("test_db", "t", unsafeIncrement);

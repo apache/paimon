@@ -19,7 +19,6 @@
 package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.CatalogLock;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.TimeUtils;
 
 import java.io.IOException;
@@ -85,41 +84,6 @@ public class JdbcCatalogLock implements CatalogLock {
     @Override
     public void close() throws IOException {
         // Do nothing
-    }
-
-    /** Jdbc catalog lock factory. */
-    public static class JdbcCatalogLockFactory implements LockFactory {
-
-        private static final long serialVersionUID = 1L;
-        public static final String IDENTIFIER = "jdbc";
-
-        @Override
-        public String identifier() {
-            return IDENTIFIER;
-        }
-
-        @Override
-        public CatalogLock create(LockContext context) {
-            JdbcLockContext lockContext = (JdbcLockContext) context;
-            return new JdbcCatalogLock(
-                    lockContext.connections,
-                    lockContext.catalogKey,
-                    checkMaxSleep(lockContext.conf.toMap()),
-                    acquireTimeout(lockContext.conf.toMap()));
-        }
-    }
-
-    /** Jdbc lock context. */
-    public static class JdbcLockContext implements LockContext {
-        private final JdbcClientPool connections;
-        private final String catalogKey;
-        private final Options conf;
-
-        public JdbcLockContext(JdbcClientPool connections, String catalogKey, Options conf) {
-            this.connections = connections;
-            this.catalogKey = catalogKey;
-            this.conf = conf;
-        }
     }
 
     public static long checkMaxSleep(Map<String, String> conf) {
