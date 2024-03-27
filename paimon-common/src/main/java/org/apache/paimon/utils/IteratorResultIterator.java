@@ -32,7 +32,7 @@ public final class IteratorResultIterator<E> extends RecyclableIterator<E>
 
     private final Iterator<E> records;
     private final Path filePath;
-    private long nextPos;
+    private long nextFilePos;
 
     public IteratorResultIterator(
             final Iterator<E> records,
@@ -42,14 +42,14 @@ public final class IteratorResultIterator<E> extends RecyclableIterator<E>
         super(recycler);
         this.records = records;
         this.filePath = filePath;
-        this.nextPos = pos;
+        this.nextFilePos = pos;
     }
 
     @Nullable
     @Override
     public E next() {
         if (records.hasNext()) {
-            nextPos++;
+            nextFilePos++;
             return records.next();
         } else {
             return null;
@@ -58,7 +58,7 @@ public final class IteratorResultIterator<E> extends RecyclableIterator<E>
 
     @Override
     public long returnedPosition() {
-        return nextPos - 1;
+        return nextFilePos - 1;
     }
 
     @Override
