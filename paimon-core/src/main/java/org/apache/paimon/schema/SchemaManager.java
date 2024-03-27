@@ -129,12 +129,10 @@ public class SchemaManager implements Serializable {
     public void checkTableSchema(TableSchema oldSchema, TableSchema newSchema) {
         boolean isCommon =
                 oldSchema.version() == newSchema.version()
-                        && oldSchema.id() == newSchema.id()
                         && Objects.equals(oldSchema.fields(), newSchema.fields())
                         && oldSchema.highestFieldId() == newSchema.highestFieldId()
                         && Objects.equals(oldSchema.partitionKeys(), newSchema.partitionKeys())
-                        && Objects.equals(oldSchema.primaryKeys(), newSchema.primaryKeys())
-                        && Objects.equals(oldSchema.options(), newSchema.options());
+                        && Objects.equals(oldSchema.primaryKeys(), newSchema.primaryKeys());
 
         if (!isCommon) {
             throw new IllegalStateException(
