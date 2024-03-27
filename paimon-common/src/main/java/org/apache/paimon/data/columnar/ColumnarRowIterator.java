@@ -51,10 +51,6 @@ public class ColumnarRowIterator extends RecyclableIterator<InternalRow>
         this.recycler = recycler;
     }
 
-    /**
-     * Reset the number of rows in the vectorized batch, the start position in this batch and the
-     * global position.
-     */
     public void reset(long nextFilePos) {
         this.num = row.batch().getNumRows();
         this.nextPos = 0;
