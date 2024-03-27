@@ -49,8 +49,6 @@ import static org.apache.paimon.CoreOptions.BUCKET_KEY;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
-import static org.apache.paimon.CoreOptions.FileFormatType.ORC;
-import static org.apache.paimon.CoreOptions.FileFormatType.PARQUET;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN;
 import static org.apache.paimon.CoreOptions.INCREMENTAL_BETWEEN_TIMESTAMP;
 import static org.apache.paimon.CoreOptions.SCAN_FILE_CREATION_TIME_MILLIS;
@@ -472,10 +470,6 @@ public class SchemaValidation {
         checkArgument(
                 !schema.primaryKeys().isEmpty(),
                 "Deletion vectors mode is only supported for tables with primary keys.");
-
-        checkArgument(
-                options.formatType().equals(ORC) || options.formatType().equals(PARQUET),
-                "Deletion vectors mode is only supported for orc or parquet file format now.");
 
         checkArgument(
                 options.changelogProducer() == ChangelogProducer.NONE
