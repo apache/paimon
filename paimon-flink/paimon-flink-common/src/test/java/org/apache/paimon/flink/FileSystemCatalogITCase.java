@@ -22,10 +22,12 @@ import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockContextFactory;
 import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
@@ -191,7 +193,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     /** Lock factory for file system catalog. */
     public static class FileSystemCatalogDummyLockFactory implements CatalogLockFactory {
 
-        private static final String IDENTIFIER = "DUMMY";
+        public static final String IDENTIFIER = "DUMMY";
 
         @Override
         public String identifier() {
@@ -211,6 +213,20 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                 @Override
                 public void close() throws IOException {}
             };
+        }
+    }
+
+    /** Lock context factory for file system catalog. */
+    public static class DummyCatalogLockContextFactory implements CatalogLockContextFactory {
+
+        @Override
+        public String identifier() {
+            return FileSystemCatalogDummyLockFactory.IDENTIFIER;
+        }
+
+        @Override
+        public CatalogLockContext createLockContext(Options lockOptions) {
+            return CatalogLockContext.fromOptions(lockOptions);
         }
     }
 }

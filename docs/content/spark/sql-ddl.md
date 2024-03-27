@@ -49,9 +49,15 @@ spark-sql ... \
 ```
 
 You can define any default table options with the prefix `spark.sql.catalog.paimon.table-default.` for tables created in the catalog.
+The FileSystem catalog supports jdbc lock and can take effect through the following configuration:
+
+> ```shell
+> 'lock.uri' = 'jdbc:mysql://<host>:<port>/<databaseName>'
+> 'lock.jdbc.user' = '...',
+> 'lock.jdbc.password' = '...',
+> ```
 
 After `spark-sql` is started, you can switch to the `default` database of the `paimon` catalog with the following SQL.
-
 ```sql
 USE paimon.default;
 ```

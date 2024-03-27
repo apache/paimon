@@ -3,7 +3,7 @@ title: "SQL DDL"
 weight: 2
 type: docs
 aliases:
-- /flink/sql-ddl.html
+  - /flink/sql-ddl.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -51,6 +51,14 @@ USE CATALOG my_catalog;
 
 You can define any default table options with the prefix `table-default.` for tables created in the catalog.
 
+The FileSystem catalog supports jdbc lock and can take effect through the following configuration:
+
+> ```shell
+> 'lock.uri' = 'jdbc:mysql://<host>:<port>/<databaseName>'
+> 'lock.jdbc.user' = '...',
+> 'lock.jdbc.password' = '...',
+> ```
+
 ### Creating Hive Catalog
 
 By using Paimon Hive catalog, changes to the catalog will directly affect the corresponding Hive metastore. Tables created in such catalog can also be accessed directly from Hive.
@@ -68,7 +76,7 @@ The following Flink SQL registers and uses a Paimon Hive catalog named `my_hive`
 
 If your Hive requires security authentication such as Kerberos, LDAP, Ranger or you want the paimon table to be managed
 by Apache Atlas(Setting 'hive.metastore.event.listeners' in hive-site.xml). You can specify the hive-conf-dir and
-hadoop-conf-dir parameter to the hive-site.xml file path. 
+hadoop-conf-dir parameter to the hive-site.xml file path.
 
 ```sql
 CREATE CATALOG my_hive WITH (
@@ -105,8 +113,8 @@ If you want to see a partitioned table in Hive and also synchronize newly create
 
 #### Adding Parameters to a Hive Table
 
-Using the table option facilitates the convenient definition of Hive table parameters. 
-Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table. 
+Using the table option facilitates the convenient definition of Hive table parameters.
+Parameters prefixed with `hive.` will be automatically defined in the `TBLPROPERTIES` of the Hive table.
 For instance, using the option `hive.table.owner=Jon` will automatically add the parameter `table.owner=Jon` to the table properties during the creation process.
 
 #### Setting Location in Properties
@@ -155,17 +163,17 @@ You can define any default table options with the prefix `table-default.` for ta
 After use Paimon catalog, you can create and drop tables. Tables created in Paimon Catalogs are managed by the catalog.
 When the table is dropped from catalog, its table files will also be deleted.
 
-The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named 
+The following SQL assumes that you have registered and are using a Paimon catalog. It creates a managed table named
 `my_table` with five columns in the catalog's `default` database, where `dt`, `hh` and `user_id` are the primary keys.
 
 ```sql
 CREATE TABLE my_table (
-    user_id BIGINT,
-    item_id BIGINT,
-    behavior STRING,
-    dt STRING,
-    hh STRING,
-    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+                        user_id BIGINT,
+                        item_id BIGINT,
+                        behavior STRING,
+                        dt STRING,
+                        hh STRING,
+                        PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
 ```
 
@@ -173,12 +181,12 @@ You can create partitioned table:
 
 ```sql
 CREATE TABLE my_table (
-    user_id BIGINT,
-    item_id BIGINT,
-    behavior STRING,
-    dt STRING,
-    hh STRING,
-    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+                        user_id BIGINT,
+                        item_id BIGINT,
+                        behavior STRING,
+                        dt STRING,
+                        hh STRING,
+                        PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) PARTITIONED BY (dt, hh);
 ```
 
@@ -220,48 +228,48 @@ We can specify the primary key or partition when use `CREATE TABLE AS SELECT`, f
 /* For streaming mode, you need to enable the checkpoint. */
 
 CREATE TABLE my_table (
-    user_id BIGINT,
-    item_id BIGINT
+                        user_id BIGINT,
+                        item_id BIGINT
 );
 CREATE TABLE my_table_as AS SELECT * FROM my_table;
 
 /* partitioned table */
 CREATE TABLE my_table_partition (
-     user_id BIGINT,
-     item_id BIGINT,
-     behavior STRING,
-     dt STRING,
-     hh STRING
+                                  user_id BIGINT,
+                                  item_id BIGINT,
+                                  behavior STRING,
+                                  dt STRING,
+                                  hh STRING
 ) PARTITIONED BY (dt, hh);
 CREATE TABLE my_table_partition_as WITH ('partition' = 'dt') AS SELECT * FROM my_table_partition;
-    
+
 /* change options */
 CREATE TABLE my_table_options (
-       user_id BIGINT,
-       item_id BIGINT
+                                user_id BIGINT,
+                                item_id BIGINT
 ) WITH ('file.format' = 'orc');
 CREATE TABLE my_table_options_as WITH ('file.format' = 'parquet') AS SELECT * FROM my_table_options;
 
 /* primary key */
 CREATE TABLE my_table_pk (
-      user_id BIGINT,
-      item_id BIGINT,
-      behavior STRING,
-      dt STRING,
-      hh STRING,
-      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+                           user_id BIGINT,
+                           item_id BIGINT,
+                           behavior STRING,
+                           dt STRING,
+                           hh STRING,
+                           PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
 CREATE TABLE my_table_pk_as WITH ('primary-key' = 'dt,hh') AS SELECT * FROM my_table_pk;
 
 
 /* primary key + partition */
 CREATE TABLE my_table_all (
-      user_id BIGINT,
-      item_id BIGINT,
-      behavior STRING,
-      dt STRING,
-      hh STRING,
-      PRIMARY KEY (dt, hh, user_id) NOT ENFORCED 
+                            user_id BIGINT,
+                            item_id BIGINT,
+                            behavior STRING,
+                            dt STRING,
+                            hh STRING,
+                            PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 ) PARTITIONED BY (dt, hh);
 CREATE TABLE my_table_all_as WITH ('primary-key' = 'dt,hh', 'partition' = 'dt') AS SELECT * FROM my_table_all;
 ```
@@ -272,12 +280,12 @@ To create a table with the same schema, partition, and table properties as anoth
 
 ```sql
 CREATE TABLE my_table (
-    user_id BIGINT,
-    item_id BIGINT,
-    behavior STRING,
-    dt STRING,
-    hh STRING,
-    PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
+                        user_id BIGINT,
+                        item_id BIGINT,
+                        behavior STRING,
+                        dt STRING,
+                        hh STRING,
+                        PRIMARY KEY (dt, hh, user_id) NOT ENFORCED
 );
 
 CREATE TABLE my_table_like LIKE my_table;

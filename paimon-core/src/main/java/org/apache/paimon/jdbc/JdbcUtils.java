@@ -30,6 +30,7 @@ import java.sql.PreparedStatement;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.sql.SQLIntegrityConstraintViolationException;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.Properties;
 import java.util.function.Consumer;
@@ -224,6 +225,18 @@ public class JdbcUtils {
     static final String LOCK_ID = "lock_id";
     static final String ACQUIRED_AT = "acquired_at";
     static final String EXPIRE_TIME = "expire_time_seconds";
+
+    public static Map<String, String> extractJdbcConfigurationToMap(
+            Map<String, String> properties, String prefix) {
+        Map<String, String> result = new HashMap<>();
+        properties.forEach(
+                (key, value) -> {
+                    if (key.startsWith(prefix)) {
+                        result.put(key.substring(prefix.length()), value);
+                    }
+                });
+        return result;
+    }
 
     public static Properties extractJdbcConfiguration(
             Map<String, String> properties, String prefix) {

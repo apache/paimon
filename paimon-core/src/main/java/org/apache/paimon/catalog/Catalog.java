@@ -60,6 +60,11 @@ public interface Catalog extends AutoCloseable {
      */
     Optional<CatalogLockFactory> lockFactory();
 
+    /** Get lock context factory for lock factory to create a lock. */
+    default Optional<CatalogLockContextFactory> lockContextFactory() {
+        return Optional.empty();
+    }
+
     /** Get lock context for lock factory to create a lock. */
     default Optional<CatalogLockContext> lockContext() {
         return Optional.empty();

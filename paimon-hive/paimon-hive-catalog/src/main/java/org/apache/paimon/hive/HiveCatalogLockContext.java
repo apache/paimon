@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogLockContext;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.utils.HadoopUtils;
 
 /** Hive {@link CatalogLockContext}. */
 public class HiveCatalogLockContext implements CatalogLockContext {
@@ -27,6 +28,15 @@ public class HiveCatalogLockContext implements CatalogLockContext {
     private final SerializableHiveConf hiveConf;
     private final String clientClassName;
     private final Options options;
+
+    public HiveCatalogLockContext(Options options) {
+        this.hiveConf =
+                new SerializableHiveConf(
+                        HiveCatalog.createHiveConf(
+                                options, HadoopUtils.getHadoopConfiguration(options)));
+        this.clientClassName = options.get(HiveCatalogFactory.METASTORE_CLIENT_CLASS);
+        this.options = options;
+    }
 
     public HiveCatalogLockContext(
             SerializableHiveConf hiveConf, String clientClassName, Options options) {

@@ -53,6 +53,7 @@ import java.util.stream.Collectors;
 import static org.apache.paimon.options.CatalogOptions.LINEAGE_META;
 import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
 import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
+import static org.apache.paimon.options.CatalogOptions.METASTORE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -62,6 +63,7 @@ public abstract class AbstractCatalog implements Catalog {
     public static final String DB_SUFFIX = ".db";
     protected static final String TABLE_DEFAULT_OPTION_PREFIX = "table-default.";
     protected static final String DB_LOCATION_PROP = "location";
+    protected static final String LOCK_PROP_PREFIX = "lock.";
 
     protected final FileIO fileIO;
     protected final Map<String, String> tableDefaultOptions;
@@ -113,6 +115,31 @@ public abstract class AbstractCatalog implements Catalog {
 
     public Optional<CatalogLockFactory> defaultLockFactory() {
         return Optional.empty();
+    }
+
+    @Override
+    public Optional<CatalogLockContextFactory> lockContextFactory() {
+        String lock = catalogOptions.get(LOCK_TYPE);
+        if (lock == null) {
+            return Optional.empty();
+        }
+        return Optional.of(
+                FactoryUtil.discoverFactory(
+                        AbstractCatalog.class.getClassLoader(),
+                        CatalogLockContextFactory.class,
+                        lock));
+    }
+
+    public Options extractLockConfiguration(Map<String, String> properties) {
+        Map<String, String> result = new HashMap<>();
+        result.put(METASTORE.key(), properties.get(METASTORE.key()));
+        properties.forEach(
+                (key, value) -> {
+                    if (key.startsWith(LOCK_PROP_PREFIX)) {
+                        result.put(key.substring(LOCK_PROP_PREFIX.length()), value);
+                    }
+                });
+        return Options.fromMap(result);
     }
 
     @Override

@@ -20,3 +20,7 @@ org.apache.paimon.flink.FlinkLineageITCase$TestingMemoryLineageMetaFactory
 
 # Catalog lock factory
 org.apache.paimon.flink.FileSystemCatalogITCase$FileSystemCatalogDummyLockFactory
+
+
+# Catalog lock context factory
+org.apache.paimon.flink.FileSystemCatalogITCase$DummyCatalogLockContextFactory
