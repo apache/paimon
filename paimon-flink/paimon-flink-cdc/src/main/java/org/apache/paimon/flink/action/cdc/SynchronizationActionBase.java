@@ -44,6 +44,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.TagCreationMode.WATERMARK;
@@ -178,11 +179,23 @@ public abstract class SynchronizationActionBase extends ActionBase {
 
     protected FileStoreTable alterTableOptions(Identifier identifier, FileStoreTable table) {
         // doesn't support altering bucket here
-        Map<String, String> withoutBucket = new HashMap<>(tableConfig);
-        withoutBucket.remove(CoreOptions.BUCKET.key());
+        Map<String, String> dynamicOptions = new HashMap<>(tableConfig);
+        dynamicOptions.remove(CoreOptions.BUCKET.key());
 
+        // remove immutable options and options with equal values
+        Map<String, String> oldOptions = table.options();
+        Set<String> immutableOptionKeys = CoreOptions.getImmutableOptionKeys();
+        dynamicOptions
+                .entrySet()
+                .removeIf(
+                        entry ->
+                                immutableOptionKeys.contains(entry.getKey())
+                                        || Objects.equals(
+                                                oldOptions.get(entry.getKey()), entry.getValue()));
+
+        // alter the table dynamic options
         List<SchemaChange> optionChanges =
-                withoutBucket.entrySet().stream()
+                dynamicOptions.entrySet().stream()
                         .map(entry -> SchemaChange.setOption(entry.getKey(), entry.getValue()))
                         .collect(Collectors.toList());
 
@@ -194,7 +207,7 @@ public abstract class SynchronizationActionBase extends ActionBase {
             throw new RuntimeException("This is unexpected.", e);
         }
 
-        return table.copy(withoutBucket);
+        return table.copy(dynamicOptions);
     }
 
     @Override
