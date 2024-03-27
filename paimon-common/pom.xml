@@ -285,12 +285,6 @@ under the License.
                                         <exclude>org.codehaus.commons.compiler.properties</exclude>
                                     </excludes>
                                 </filter>
-                                <filter>
-                                    <artifact>org.roaringbitmap:RoaringBitmap</artifact>
-                                    <includes>
-                                        <include>**</include>
-                                    </includes>
-                                </filter>
                             </filters>
                             <relocations>
                                 <relocation>
