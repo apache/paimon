@@ -20,6 +20,8 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogLock;
 import org.apache.paimon.client.ClientPool;
+import org.apache.paimon.hive.pool.CachedClientPool;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.hadoop.hive.conf.HiveConf;
@@ -131,13 +133,20 @@ public class HiveCatalogLock implements CatalogLock {
             HiveLockContext hiveLockContext = (HiveLockContext) context;
             HiveConf conf = hiveLockContext.hiveConf.conf();
             return new HiveCatalogLock(
-                    hiveLockContext.clients, checkMaxSleep(conf), acquireTimeout(conf));
+                    creatClients(conf, hiveLockContext.options, hiveLockContext.clientClassName),
+                    checkMaxSleep(conf),
+                    acquireTimeout(conf));
         }
 
         @Override
         public String identifier() {
             return LOCK_IDENTIFIER;
         }
+    }
+
+    public static ClientPool<IMetaStoreClient, TException> creatClients(
+            HiveConf conf, Options options, String clientClassName) {
+        return new CachedClientPool(conf, options, clientClassName);
     }
 
     public static long checkMaxSleep(HiveConf conf) {
@@ -157,13 +166,15 @@ public class HiveCatalogLock implements CatalogLock {
     }
 
     static class HiveLockContext implements LockContext {
-        private final ClientPool<IMetaStoreClient, TException> clients;
         private final SerializableHiveConf hiveConf;
+        private final String clientClassName;
+        private final Options options;
 
         public HiveLockContext(
-                ClientPool<IMetaStoreClient, TException> clients, SerializableHiveConf hiveConf) {
-            this.clients = clients;
+                SerializableHiveConf hiveConf, String clientClassName, Options options) {
             this.hiveConf = hiveConf;
+            this.clientClassName = clientClassName;
+            this.options = options;
         }
     }
 }
