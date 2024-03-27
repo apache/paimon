@@ -40,6 +40,7 @@ import org.apache.paimon.utils.InternalRowUtils;
 
 import javax.annotation.Nullable;
 
+/** The sequence generator. */
 public class SequenceGenerator {
 
     private final int index;
