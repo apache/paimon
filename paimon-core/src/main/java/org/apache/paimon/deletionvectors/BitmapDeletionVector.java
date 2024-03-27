@@ -18,7 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
-import org.roaringbitmap.RoaringBitmap;
+import org.apache.paimon.utils.RoaringBitmap32;
 
 import java.io.ByteArrayOutputStream;
 import java.io.DataInput;
@@ -26,20 +26,20 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 
 /**
- * A {@link DeletionVector} based on {@link RoaringBitmap}, it only supports files with row count
- * not exceeding {@link Integer#MAX_VALUE}.
+ * A {@link DeletionVector} based on {@link RoaringBitmap32}, it only supports files with row count
+ * not exceeding {@link RoaringBitmap32#MAX_VALUE}.
  */
 public class BitmapDeletionVector implements DeletionVector {
 
     public static final int MAGIC_NUMBER = 1581511376;
 
-    private final RoaringBitmap roaringBitmap;
+    private final RoaringBitmap32 roaringBitmap;
 
     BitmapDeletionVector() {
-        roaringBitmap = new RoaringBitmap();
+        roaringBitmap = new RoaringBitmap32();
     }
 
-    private BitmapDeletionVector(RoaringBitmap roaringBitmap) {
+    private BitmapDeletionVector(RoaringBitmap32 roaringBitmap) {
         this.roaringBitmap = roaringBitmap;
     }
 
@@ -71,7 +71,6 @@ public class BitmapDeletionVector implements DeletionVector {
         try (ByteArrayOutputStream bos = new ByteArrayOutputStream();
                 DataOutputStream dos = new DataOutputStream(bos)) {
             dos.writeInt(MAGIC_NUMBER);
-            roaringBitmap.runOptimize();
             roaringBitmap.serialize(dos);
             return bos.toByteArray();
         } catch (Exception e) {
@@ -80,13 +79,13 @@ public class BitmapDeletionVector implements DeletionVector {
     }
 
     public static DeletionVector deserializeFromDataInput(DataInput bis) throws IOException {
-        RoaringBitmap roaringBitmap = new RoaringBitmap();
+        RoaringBitmap32 roaringBitmap = new RoaringBitmap32();
         roaringBitmap.deserialize(bis);
         return new BitmapDeletionVector(roaringBitmap);
     }
 
     private void checkPosition(long position) {
-        if (position > Integer.MAX_VALUE) {
+        if (position > RoaringBitmap32.MAX_VALUE) {
             throw new IllegalArgumentException(
                     "The file has too many rows, RoaringBitmap32 only supports files with row count not exceeding 2147483647.");
         }
