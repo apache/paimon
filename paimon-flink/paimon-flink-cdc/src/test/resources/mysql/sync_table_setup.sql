@@ -309,6 +309,13 @@ CREATE TABLE test_options_change (
    PRIMARY KEY (pk)
 );
 
+CREATE TABLE test_exist_options_change (
+    pk INT,
+    _date DATE,
+    _timestamp TIMESTAMP,
+    PRIMARY KEY (pk)
+);
+
 -- ################################################################################
 --  testSyncShard
 -- ################################################################################
