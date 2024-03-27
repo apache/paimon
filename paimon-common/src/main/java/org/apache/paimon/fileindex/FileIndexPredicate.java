@@ -44,8 +44,8 @@ import java.util.stream.Collectors;
 /** Utils to check secondary index (e.g. bloom filter) predicate. */
 public class FileIndexPredicate implements Closeable {
 
-    private final FileIndexFile.Reader reader;
-    private final Map<String, FileIndexPredicateWorker> cacheTester = new HashMap<>();
+    private final FileIndexFormat.Reader reader;
+    private final Map<String, FileIndexFieldPredicate> fieldPredicates = new HashMap<>();
 
     public FileIndexPredicate(Path path, FileIO fileIO, RowType fileRowType) throws IOException {
         this(fileIO.newInputStream(path), fileRowType);
@@ -56,7 +56,7 @@ public class FileIndexPredicate implements Closeable {
     }
 
     public FileIndexPredicate(SeekableInputStream inputStream, RowType fileRowType) {
-        this.reader = FileIndexFile.createReader(inputStream, fileRowType);
+        this.reader = FileIndexFormat.createReader(inputStream, fileRowType);
     }
 
     public boolean testPredicate(@Nullable Predicate filePredicate) {
@@ -66,19 +66,19 @@ public class FileIndexPredicate implements Closeable {
 
         Set<String> requredFieldNames = getRequiredNames(filePredicate);
 
-        List<FileIndexPredicateWorker> testWorkers =
+        List<FileIndexFieldPredicate> testWorkers =
                 requredFieldNames.stream()
                         .map(
                                 cname ->
-                                        cacheTester.computeIfAbsent(
+                                        fieldPredicates.computeIfAbsent(
                                                 cname,
                                                 k ->
-                                                        new FileIndexPredicateWorker(
+                                                        new FileIndexFieldPredicate(
                                                                 cname,
                                                                 reader.readColumnIndex(cname))))
                         .collect(Collectors.toList());
 
-        for (FileIndexPredicateWorker testWorker : testWorkers) {
+        for (FileIndexFieldPredicate testWorker : testWorkers) {
             if (!testWorker.test(filePredicate)) {
                 return false;
             }
@@ -113,12 +113,12 @@ public class FileIndexPredicate implements Closeable {
     }
 
     /** Predicate test worker. */
-    private static class FileIndexPredicateWorker implements PredicateVisitor<Boolean> {
+    private static class FileIndexFieldPredicate implements PredicateVisitor<Boolean> {
 
         private final String columnName;
         private final FileIndexReader fileIndexReader;
 
-        public FileIndexPredicateWorker(String columnName, FileIndexReader fileIndexReader) {
+        public FileIndexFieldPredicate(String columnName, FileIndexReader fileIndexReader) {
             this.columnName = columnName;
             this.fileIndexReader = fileIndexReader;
         }

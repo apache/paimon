@@ -34,15 +34,15 @@ import java.util.Random;
 import static org.apache.paimon.utils.RandomUtil.randomBytes;
 import static org.apache.paimon.utils.RandomUtil.randomString;
 
-/** Test for {@link FileIndexFile}. */
-public class FileIndexFileFormatTest {
+/** Test for {@link FileIndexFormat}. */
+public class FileIndexFormatFormatTest {
 
     private static final Random RANDOM = new Random();
 
     @Test
     public void testWriteRead() throws IOException {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        FileIndexFile.Writer writer = FileIndexFile.createWriter(baos);
+        FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
 
         String type = randomString(RANDOM.nextInt(100));
         Map<String, byte[]> indexes = new HashMap<>();
@@ -55,8 +55,8 @@ public class FileIndexFileFormatTest {
 
         byte[] indexBytes = baos.toByteArray();
 
-        FileIndexFile.Reader reader =
-                FileIndexFile.createReader(
+        FileIndexFormat.Reader reader =
+                FileIndexFormat.createReader(
                         new ByteArraySeekableStream(indexBytes), RowType.builder().build());
 
         for (String s : indexes.keySet()) {
