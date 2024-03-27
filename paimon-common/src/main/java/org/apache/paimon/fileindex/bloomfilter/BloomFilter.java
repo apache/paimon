@@ -18,18 +18,17 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import java.io.ByteArrayInputStream;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.ObjectToBytesVisitor;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 
 import org.apache.hadoop.util.bloom.Key;
 import org.apache.hadoop.util.hash.Hash;
 
+import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;

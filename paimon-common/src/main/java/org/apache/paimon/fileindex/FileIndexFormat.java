@@ -38,49 +38,47 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** File index file format. Put all column and offset in the header.
- *
+/**
+ * File index file format. Put all column and offset in the header.
  *
  * <pre>
-  _______________________________________    _____________________
- ｜     magic    ｜version｜head length ｜
- ｜-------------------------------------｜
- ｜   index type        ｜body info size｜
- ｜-------------------------------------｜
- ｜ column name 1 ｜start pos ｜length  ｜
- ｜-------------------------------------｜            HEAD
- ｜ column name 2 ｜start pos ｜length  ｜
- ｜-------------------------------------｜
- ｜ column name 3 ｜start pos ｜length  ｜
- ｜-------------------------------------｜
- ｜                 ...                 ｜
- ｜-------------------------------------｜
- ｜                 ...                 ｜
- ｜-------------------------------------｜
- ｜  redundant length ｜redundant bytes ｜
- ｜-------------------------------------｜    ---------------------
- ｜                BODY                 ｜
- ｜                BODY                 ｜
- ｜                BODY                 ｜             BODY
- ｜                BODY                 ｜
- ｜_____________________________________｜    _____________________
-
- magic:                            8 bytes long
- version:                          4 bytes int
- head length:                      4 bytes int
- index type:                       var bytes utf (length + bytes)
- body info size:                   4 bytes int (how many column items below)
- column name:                      var bytes utf
- start pos:                        4 bytes int
- length:                           4 bytes int
- redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
- redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
- BODY:                             column bytes + column bytes + column bytes + .......
-
+ * _______________________________________    _____________________
+ * ｜     magic    ｜version｜head length ｜
+ * ｜-------------------------------------｜
+ * ｜   index type        ｜body info size｜
+ * ｜-------------------------------------｜
+ * ｜ column name 1 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜            HEAD
+ * ｜ column name 2 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜ column name 3 ｜start pos ｜length  ｜
+ * ｜-------------------------------------｜
+ * ｜                 ...                 ｜
+ * ｜-------------------------------------｜
+ * ｜                 ...                 ｜
+ * ｜-------------------------------------｜
+ * ｜  redundant length ｜redundant bytes ｜
+ * ｜-------------------------------------｜    ---------------------
+ * ｜                BODY                 ｜
+ * ｜                BODY                 ｜
+ * ｜                BODY                 ｜             BODY
+ * ｜                BODY                 ｜
+ * ｜_____________________________________｜    _____________________
+ *
+ * magic:                            8 bytes long
+ * version:                          4 bytes int
+ * head length:                      4 bytes int
+ * index type:                       var bytes utf (length + bytes)
+ * body info size:                   4 bytes int (how many column items below)
+ * column name:                      var bytes utf
+ * start pos:                        4 bytes int
+ * length:                           4 bytes int
+ * redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
+ * redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
+ * BODY:                             column bytes + column bytes + column bytes + .......
+ *
  * </pre>
- *
- *
- * */
+ */
 public final class FileIndexFormat {
 
     private static final long MAGIC = 1493475289347502L;
@@ -164,8 +162,8 @@ public final class FileIndexFormat {
             dataOutputStream.writeInt(REDUNDANT_LENGTH);
         }
 
-        private int calculateHeadLength(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
-                throws IOException {
+        private int calculateHeadLength(
+                String indexType, Map<String, Pair<Integer, Integer>> bodyInfo) throws IOException {
             // magic 8 bytes, version 4 bytes, head length 4 bytes,
             // column size 4 bytes, body info start&end 8 bytes per
             // item, redundant length 4 bytes;
@@ -221,7 +219,7 @@ public final class FileIndexFormat {
                 dataInputStream.readFully(head);
 
                 try (DataInputStream dataInput =
-                             new DataInputStream(new ByteArrayInputStream(head))) {
+                        new DataInputStream(new ByteArrayInputStream(head))) {
                     this.type = dataInput.readUTF();
                     int columnSize = dataInput.readInt();
                     for (int i = 0; i < columnSize; i++) {
@@ -262,8 +260,7 @@ public final class FileIndexFormat {
                                     // read fully until b is full else throw.
                                     while (n < len) {
                                         int count = seekableInputStream.read(b, n, len - n);
-                                        if (count < 0)
-                                            throw new EOFException();
+                                        if (count < 0) throw new EOFException();
                                         n += count;
                                     }
                                 } catch (IOException e) {
