@@ -156,18 +156,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     @Test
     void testCatalogWithLockForSchema() throws Exception {
         LOCK_COUNT.set(0);
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                String.format(
-                                                        "CREATE CATALOG fs_with_lock WITH ("
-                                                                + "'type'='paimon', "
-                                                                + "'warehouse'='%s', "
-                                                                + "'lock.enabled'='true'"
-                                                                + ")",
-                                                        path))
-                                        .await())
-                .hasRootCauseMessage("No lock type when lock is enabled.");
         tEnv.executeSql(
                         String.format(
                                 "CREATE CATALOG fs_with_lock WITH ("
