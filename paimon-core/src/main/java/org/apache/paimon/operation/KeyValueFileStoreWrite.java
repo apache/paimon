@@ -195,6 +195,7 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
 
         return new MergeTreeWriter(
                 bufferSpillable(),
+                options.writeBufferSpillDiskSize(),
                 options.localSortMaxNumFileHandles(),
                 options.spillCompression(),
                 ioManager,

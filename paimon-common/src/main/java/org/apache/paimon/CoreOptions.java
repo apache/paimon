@@ -309,6 +309,13 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
+    public static final ConfigOption<MemorySize> WRITE_BUFFER_MAX_DISK_SIZE =
+            key("write-buffer.max-disk-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.MAX_VALUE)
+                    .withDescription(
+                            "The max disk to use for write buffer spill. This only work when the write buffer spill is enabled");
+
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             key("write-buffer-spillable")
                     .booleanType()
@@ -1254,6 +1261,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public MemorySize writeBufferSpillDiskSize() {
+        return options.get(WRITE_BUFFER_MAX_DISK_SIZE);
     }
 
     public boolean useWriteBufferForAppend() {

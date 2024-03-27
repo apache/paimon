@@ -420,6 +420,7 @@ public abstract class MergeTreeTestBase {
         MergeTreeWriter writer =
                 new MergeTreeWriter(
                         false,
+                        MemorySize.ofKibiBytes(10),
                         128,
                         "lz4",
                         null,
