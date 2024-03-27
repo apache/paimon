@@ -39,7 +39,6 @@ import java.util.concurrent.Callable;
 
 import static org.apache.paimon.options.CatalogOptions.LOCK_ACQUIRE_TIMEOUT;
 import static org.apache.paimon.options.CatalogOptions.LOCK_CHECK_MAX_SLEEP;
-import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Hive {@link CatalogLock}. */
 public class HiveCatalogLock implements CatalogLock {
@@ -114,28 +113,6 @@ public class HiveCatalogLock implements CatalogLock {
         this.client.close();
     }
 
-    /** Catalog lock factory for hive. */
-    public static class HiveCatalogLockFactory implements LockFactory {
-
-        private static final long serialVersionUID = 1L;
-
-        @Override
-        public CatalogLock create(LockContext context) {
-            checkArgument(context instanceof HiveLockContext);
-            HiveLockContext hiveLockContext = (HiveLockContext) context;
-            HiveConf conf = hiveLockContext.hiveConf.conf();
-            return new HiveCatalogLock(
-                    HiveCatalog.createClient(conf, hiveLockContext.clientClassName),
-                    checkMaxSleep(conf),
-                    acquireTimeout(conf));
-        }
-
-        @Override
-        public String identifier() {
-            return LOCK_IDENTIFIER;
-        }
-    }
-
     public static long checkMaxSleep(HiveConf conf) {
         return TimeUtils.parseDuration(
                         conf.get(
@@ -150,15 +127,5 @@ public class HiveCatalogLock implements CatalogLock {
                                 LOCK_ACQUIRE_TIMEOUT.key(),
                                 TimeUtils.getStringInMillis(LOCK_ACQUIRE_TIMEOUT.defaultValue())))
                 .toMillis();
-    }
-
-    static class HiveLockContext implements LockContext {
-        private final SerializableHiveConf hiveConf;
-        private final String clientClassName;
-
-        public HiveLockContext(SerializableHiveConf hiveConf, String clientClassName) {
-            this.hiveConf = hiveConf;
-            this.clientClassName = clientClassName;
-        }
     }
 }

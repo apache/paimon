@@ -21,6 +21,8 @@ package org.apache.paimon.flink;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -154,18 +156,6 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     @Test
     void testCatalogWithLockForSchema() throws Exception {
         LOCK_COUNT.set(0);
-        assertThatThrownBy(
-                        () ->
-                                tEnv.executeSql(
-                                                String.format(
-                                                        "CREATE CATALOG fs_with_lock WITH ("
-                                                                + "'type'='paimon', "
-                                                                + "'warehouse'='%s', "
-                                                                + "'lock.enabled'='true'"
-                                                                + ")",
-                                                        path))
-                                        .await())
-                .hasRootCauseMessage("No lock type when lock is enabled.");
         tEnv.executeSql(
                         String.format(
                                 "CREATE CATALOG fs_with_lock WITH ("
@@ -203,7 +193,8 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     }
 
     /** Lock factory for file system catalog. */
-    public static class FileSystemCatalogDummyLockFactory implements CatalogLock.LockFactory {
+    public static class FileSystemCatalogDummyLockFactory implements CatalogLockFactory {
+
         private static final String IDENTIFIER = "DUMMY";
 
         @Override
@@ -212,7 +203,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         }
 
         @Override
-        public CatalogLock create(CatalogLock.LockContext context) {
+        public CatalogLock createLock(CatalogLockContext context) {
             return new CatalogLock() {
                 @Override
                 public <T> T runWithLock(String database, String table, Callable<T> callable)

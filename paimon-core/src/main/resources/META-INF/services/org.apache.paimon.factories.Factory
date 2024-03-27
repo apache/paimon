@@ -15,4 +15,4 @@
 
 org.apache.paimon.catalog.FileSystemCatalogFactory
 org.apache.paimon.jdbc.JdbcCatalogFactory
-org.apache.paimon.jdbc.JdbcCatalogLock$JdbcCatalogLockFactory
+org.apache.paimon.jdbc.JdbcCatalogLockFactory

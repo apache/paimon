@@ -23,7 +23,8 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
-import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -77,15 +78,12 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.hadoop.hive.conf.HiveConf.ConfVars.METASTOREWAREHOUSE;
-import static org.apache.paimon.hive.HiveCatalogLock.LOCK_IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogLock.acquireTimeout;
 import static org.apache.paimon.hive.HiveCatalogLock.checkMaxSleep;
 import static org.apache.paimon.hive.HiveCatalogOptions.HADOOP_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.HIVE_CONF_DIR;
 import static org.apache.paimon.hive.HiveCatalogOptions.IDENTIFIER;
 import static org.apache.paimon.hive.HiveCatalogOptions.LOCATION_IN_PROPERTIES;
-import static org.apache.paimon.options.CatalogOptions.LOCK_ENABLED;
-import static org.apache.paimon.options.CatalogOptions.LOCK_TYPE;
 import static org.apache.paimon.options.CatalogOptions.TABLE_TYPE;
 import static org.apache.paimon.options.OptionsUtils.convertToPropertiesPrefixKey;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
@@ -93,6 +91,7 @@ import static org.apache.paimon.utils.StringUtils.isNullOrWhitespaceOnly;
 
 /** A catalog implementation for Hive. */
 public class HiveCatalog extends AbstractCatalog {
+
     private static final Logger LOG = LoggerFactory.getLogger(HiveCatalog.class);
 
     // Reserved properties
@@ -149,10 +148,15 @@ public class HiveCatalog extends AbstractCatalog {
     }
 
     @Override
-    public Optional<CatalogLock.LockContext> lockContext() {
+    public Optional<CatalogLockFactory> defaultLockFactory() {
+        return Optional.of(new HiveCatalogLockFactory());
+    }
+
+    @Override
+    public Optional<CatalogLockContext> lockContext() {
         return Optional.of(
-                new HiveCatalogLock.HiveLockContext(
-                        new SerializableHiveConf(hiveConf), clientClassName));
+                new HiveCatalogLockContext(
+                        new SerializableHiveConf(hiveConf), clientClassName, catalogOptions));
     }
 
     @Override
@@ -635,7 +639,7 @@ public class HiveCatalog extends AbstractCatalog {
             try (InputStream inputStream = hiveSite.getFileSystem(hadoopConf).open(hiveSite)) {
                 hiveConf.addResource(inputStream, hiveSite.toString());
                 // trigger a read from the conf to avoid input stream is closed
-                isEmbeddedMetastore(hiveConf);
+                hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS);
             } catch (IOException e) {
                 throw new RuntimeException(
                         "Failed to load hive-site.xml from specified path:" + hiveSite, e);
@@ -654,10 +658,6 @@ public class HiveCatalog extends AbstractCatalog {
             }
             return hiveConf;
         }
-    }
-
-    public static boolean isEmbeddedMetastore(HiveConf hiveConf) {
-        return isNullOrWhitespaceOnly(hiveConf.getVar(HiveConf.ConfVars.METASTOREURIS));
     }
 
     public static Catalog createHiveCatalog(CatalogContext context) {
@@ -679,14 +679,6 @@ public class HiveCatalog extends AbstractCatalog {
             fileIO.checkOrMkdirs(warehouse);
         } catch (IOException e) {
             throw new UncheckedIOException(e);
-        }
-
-        /** Hive catalog only support hive lock. */
-        if (options.getOptional(LOCK_ENABLED).orElse(false)) {
-            Optional<String> lockType = options.getOptional(LOCK_TYPE);
-            if (!lockType.isPresent()) {
-                options.set(LOCK_TYPE, LOCK_IDENTIFIER);
-            }
         }
         return new HiveCatalog(
                 fileIO,

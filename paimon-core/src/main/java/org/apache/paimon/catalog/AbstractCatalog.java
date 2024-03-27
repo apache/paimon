@@ -83,26 +83,31 @@ public abstract class AbstractCatalog implements Catalog {
         this.tableDefaultOptions =
                 convertToPropertiesPrefixKey(options.toMap(), TABLE_DEFAULT_OPTION_PREFIX);
         this.catalogOptions = options;
+    }
 
-        if (lockEnabled()) {
-            checkArgument(options.contains(LOCK_TYPE), "No lock type when lock is enabled.");
+    @Override
+    public Optional<CatalogLockFactory> lockFactory() {
+        if (!lockEnabled()) {
+            return Optional.empty();
         }
+
+        String lock = catalogOptions.get(LOCK_TYPE);
+        if (lock == null) {
+            return defaultLockFactory();
+        }
+
+        return Optional.of(
+                FactoryUtil.discoverFactory(
+                        AbstractCatalog.class.getClassLoader(), CatalogLockFactory.class, lock));
+    }
+
+    public Optional<CatalogLockFactory> defaultLockFactory() {
+        return Optional.empty();
     }
 
     @Override
-    public Optional<CatalogLock.LockFactory> lockFactory() {
-        return lockEnabled()
-                ? Optional.of(
-                        FactoryUtil.discoverFactory(
-                                AbstractCatalog.class.getClassLoader(),
-                                CatalogLock.LockFactory.class,
-                                catalogOptions.get(LOCK_TYPE)))
-                : Optional.empty();
-    }
-
-    @Override
-    public Optional<CatalogLock.LockContext> lockContext() {
-        return Optional.of(new OptionLockContext(catalogOptions));
+    public Optional<CatalogLockContext> lockContext() {
+        return Optional.of(CatalogLockContext.fromOptions(catalogOptions));
     }
 
     protected boolean lockEnabled() {
@@ -491,13 +496,5 @@ public abstract class AbstractCatalog implements Catalog {
                 String.format(
                         "The value of %s property should be %s.",
                         CoreOptions.AUTO_CREATE.key(), Boolean.FALSE));
-    }
-
-    static class OptionLockContext implements CatalogLock.LockContext {
-        private final Options catalogOptions;
-
-        public OptionLockContext(Options catalogOptions) {
-            this.catalogOptions = catalogOptions;
-        }
     }
 }
