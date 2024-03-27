@@ -145,7 +145,7 @@ public class FileSystemCatalog extends AbstractCatalog {
                 lockFactory()
                         .map(
                                 fac ->
-                                        fac.create(
+                                        fac.createLock(
                                                 lockContext()
                                                         .orElseThrow(
                                                                 () ->

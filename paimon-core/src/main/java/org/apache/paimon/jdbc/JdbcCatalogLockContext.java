@@ -16,21 +16,34 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.catalog;
+package org.apache.paimon.jdbc;
 
-import org.apache.paimon.annotation.Public;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.options.Options;
 
-import java.io.Closeable;
-import java.util.concurrent.Callable;
+/** Jdbc lock context. */
+public class JdbcCatalogLockContext implements CatalogLockContext {
 
-/**
- * An interface that allows source and sink to use global lock to some transaction-related things.
- *
- * @since 0.4.0
- */
-@Public
-public interface CatalogLock extends Closeable {
+    private final JdbcClientPool connections;
+    private final String catalogKey;
+    private final Options options;
 
-    /** Run with catalog lock. The caller should tell catalog the database and table name. */
-    <T> T runWithLock(String database, String table, Callable<T> callable) throws Exception;
+    public JdbcCatalogLockContext(JdbcClientPool connections, String catalogKey, Options options) {
+        this.connections = connections;
+        this.catalogKey = catalogKey;
+        this.options = options;
+    }
+
+    @Override
+    public Options options() {
+        return options;
+    }
+
+    public JdbcClientPool connections() {
+        return connections;
+    }
+
+    public String catalogKey() {
+        return catalogKey;
+    }
 }

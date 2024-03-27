@@ -14,6 +14,4 @@
 # limitations under the License.
 
 org.apache.paimon.hive.HiveCatalogFactory
-
-# Hive catalog lock factory
-org.apache.paimon.hive.HiveCatalogLock$HiveCatalogLockFactory
+org.apache.paimon.hive.HiveCatalogLockFactory
