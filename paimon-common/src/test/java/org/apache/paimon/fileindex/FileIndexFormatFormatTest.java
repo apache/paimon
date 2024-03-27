@@ -19,7 +19,6 @@
 package org.apache.paimon.fileindex;
 
 import org.apache.paimon.fs.ByteArraySeekableStream;
-import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.types.RowType;
 
 import org.assertj.core.api.Assertions;
@@ -60,11 +59,7 @@ public class FileIndexFormatFormatTest {
                         new ByteArraySeekableStream(indexBytes), RowType.builder().build());
 
         for (String s : indexes.keySet()) {
-            SeekableInputStream seekableInputStream =
-                    reader.readColumnInputStream(s).orElseThrow(RuntimeException::new);
-            byte[] b = new byte[seekableInputStream.available()];
-            int i = seekableInputStream.read(b);
-            Assertions.assertThat(i).isEqualTo(b.length);
+            byte[] b = reader.readColumnInputStream(s).orElseThrow(RuntimeException::new);
             Assertions.assertThat(b).containsExactly(indexes.get(s));
         }
     }
