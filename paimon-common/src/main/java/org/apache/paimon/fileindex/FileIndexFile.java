@@ -97,7 +97,7 @@ public final class FileIndexFile {
             for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
                 Integer startPosition = baos.size();
                 baos.write(entry.getValue());
-                bodyInfo.put(entry.getKey(), Pair.of(startPosition, baos.size() - 1));
+                bodyInfo.put(entry.getKey(), Pair.of(startPosition, baos.size() - startPosition));
             }
 
             return baos.toByteArray();
@@ -122,7 +122,7 @@ public final class FileIndexFile {
             for (Map.Entry<String, Pair<Integer, Integer>> entry : bodyInfo.entrySet()) {
                 dataOutputStream.writeUTF(entry.getKey());
                 dataOutputStream.writeInt(entry.getValue().getLeft() + headLength);
-                dataOutputStream.writeInt(entry.getValue().getRight() + headLength);
+                dataOutputStream.writeInt(entry.getValue().getRight());
             }
             // writeRedundantLength
             dataOutputStream.writeInt(REDUNDANT_LENGTH);
@@ -254,11 +254,11 @@ public final class FileIndexFile {
 
         private int position;
 
-        public BytesInputWrapper(SeekableInputStream originStream, int offsetStart, int offsetEnd) {
+        public BytesInputWrapper(SeekableInputStream originStream, int offsetStart, int length) {
             this.originStream = originStream;
             this.offsetStart = offsetStart;
             this.position = offsetStart;
-            this.offsetEnd = offsetEnd;
+            this.offsetEnd = offsetStart + length - 1;
         }
 
         @Override
