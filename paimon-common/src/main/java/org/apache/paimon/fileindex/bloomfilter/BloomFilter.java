@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import java.io.ByteArrayInputStream;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
@@ -94,8 +95,8 @@ public class BloomFilter implements FileIndexer {
     private class Reader implements FileIndexReader {
 
         @Override
-        public Reader recoverFrom(SeekableInputStream seekableInputStream) {
-            DataInputStream dis = new DataInputStream(seekableInputStream);
+        public Reader recoverFrom(byte[] serializedBytes) {
+            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(serializedBytes));
 
             try {
                 filter.readFields(dis);

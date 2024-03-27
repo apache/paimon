@@ -38,8 +38,50 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 
-/** File index file format. Put all column and offset in the header. */
-public final class FileIndexFile {
+/** File index file format. Put all column and offset in the header.
+ *
+ *
+ * <pre>
+  _______________________________________    _____________________
+ ｜     magic    ｜version｜head length ｜
+ ｜-------------------------------------｜
+ ｜   index type        ｜body info size｜
+ ｜-------------------------------------｜
+ ｜ column name 1 ｜start pos ｜length  ｜
+ ｜-------------------------------------｜            HEAD
+ ｜ column name 2 ｜start pos ｜length  ｜
+ ｜-------------------------------------｜
+ ｜ column name 3 ｜start pos ｜length  ｜
+ ｜-------------------------------------｜
+ ｜                 ...                 ｜
+ ｜-------------------------------------｜
+ ｜                 ...                 ｜
+ ｜-------------------------------------｜
+ ｜  redundant length ｜redundant bytes ｜
+ ｜-------------------------------------｜    ---------------------
+ ｜                BODY                 ｜
+ ｜                BODY                 ｜
+ ｜                BODY                 ｜             BODY
+ ｜                BODY                 ｜
+ ｜_____________________________________｜    _____________________
+
+ magic:                            8 bytes long
+ version:                          4 bytes int
+ head length:                      4 bytes int
+ index type:                       var bytes utf (length + bytes)
+ body info size:                   4 bytes int (how many column items below)
+ column name:                      var bytes utf
+ start pos:                        4 bytes int
+ length:                           4 bytes int
+ redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
+ redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
+ BODY:                             column bytes + column bytes + column bytes + .......
+
+ * </pre>
+ *
+ *
+ * */
+public final class FileIndexFormat {
 
     private static final long MAGIC = 1493475289347502L;
 
@@ -81,26 +123,20 @@ public final class FileIndexFile {
                 throws IOException {
 
             Map<String, Pair<Integer, Integer>> bodyInfo = new HashMap<>();
-            byte[] body = constructBody(bytesMap, bodyInfo);
+
+            // construct body
+            ByteArrayOutputStream baos = new ByteArrayOutputStream(256);
+            for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
+                int startPosition = baos.size();
+                baos.write(entry.getValue());
+                bodyInfo.put(entry.getKey(), Pair.of(startPosition, baos.size() - startPosition));
+            }
+            byte[] body = baos.toByteArray();
 
             writeHead(indexType, bodyInfo);
 
             // writeBody
             dataOutputStream.write(body);
-        }
-
-        private byte[] constructBody(
-                Map<String, byte[]> bytesMap, Map<String, Pair<Integer, Integer>> bodyInfo)
-                throws IOException {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-
-            for (Map.Entry<String, byte[]> entry : bytesMap.entrySet()) {
-                Integer startPosition = baos.size();
-                baos.write(entry.getValue());
-                bodyInfo.put(entry.getKey(), Pair.of(startPosition, baos.size() - 1));
-            }
-
-            return baos.toByteArray();
         }
 
         private void writeHead(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
@@ -122,13 +158,13 @@ public final class FileIndexFile {
             for (Map.Entry<String, Pair<Integer, Integer>> entry : bodyInfo.entrySet()) {
                 dataOutputStream.writeUTF(entry.getKey());
                 dataOutputStream.writeInt(entry.getValue().getLeft() + headLength);
-                dataOutputStream.writeInt(entry.getValue().getRight() + headLength);
+                dataOutputStream.writeInt(entry.getValue().getRight());
             }
             // writeRedundantLength
             dataOutputStream.writeInt(REDUNDANT_LENGTH);
         }
 
-        int calculateHeadLength(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
+        private int calculateHeadLength(String indexType, Map<String, Pair<Integer, Integer>> bodyInfo)
                 throws IOException {
             // magic 8 bytes, version 4 bytes, head length 4 bytes,
             // column size 4 bytes, body info start&end 8 bytes per
@@ -160,10 +196,6 @@ public final class FileIndexFile {
         private final Map<String, DataField> fields = new HashMap<>();
         private final String type;
 
-        public Map<String, Pair<Integer, Integer>> getHeader() {
-            return header;
-        }
-
         public Reader(SeekableInputStream seekableInputStream, RowType fileRowType) {
             this.seekableInputStream = seekableInputStream;
             DataInputStream dataInputStream = new DataInputStream(seekableInputStream);
@@ -189,7 +221,7 @@ public final class FileIndexFile {
                 dataInputStream.readFully(head);
 
                 try (DataInputStream dataInput =
-                        new DataInputStream(new ByteArrayInputStream(head))) {
+                             new DataInputStream(new ByteArrayInputStream(head))) {
                     this.type = dataInput.readUTF();
                     int columnSize = dataInput.readInt();
                     for (int i = 0; i < columnSize; i++) {
@@ -210,127 +242,40 @@ public final class FileIndexFile {
 
             return readColumnInputStream(columnName)
                     .map(
-                            inputStream ->
+                            serializedBytes ->
                                     FileIndexer.create(type, fields.get(columnName).type())
                                             .createReader()
-                                            .recoverFrom(inputStream))
+                                            .recoverFrom(serializedBytes))
                     .orElse(null);
         }
 
         @VisibleForTesting
-        Optional<SeekableInputStream> readColumnInputStream(String columnName) {
+        Optional<byte[]> readColumnInputStream(String columnName) {
             return Optional.ofNullable(header.getOrDefault(columnName, null))
                     .map(
-                            startEnd ->
-                                    new BytesInputWrapper(
-                                            seekableInputStream,
-                                            startEnd.getLeft(),
-                                            startEnd.getRight()))
-                    .map(
-                            stream -> {
+                            startAndLength -> {
+                                byte[] b = new byte[startAndLength.getRight()];
                                 try {
-                                    return stream.resetHead();
+                                    seekableInputStream.seek(startAndLength.getLeft());
+                                    int n = 0;
+                                    int len = b.length;
+                                    // read fully until b is full else throw.
+                                    while (n < len) {
+                                        int count = seekableInputStream.read(b, n, len - n);
+                                        if (count < 0)
+                                            throw new EOFException();
+                                        n += count;
+                                    }
                                 } catch (IOException e) {
-                                    throw new RuntimeException(
-                                            "Error happens while read column from index file.", e);
+                                    throw new RuntimeException(e);
                                 }
+                                return b;
                             });
         }
 
         @Override
         public void close() throws IOException {
             IOUtils.closeQuietly(seekableInputStream);
-        }
-    }
-
-    /** Wrap the origin stream with offset start and end. */
-    static class BytesInputWrapper extends SeekableInputStream {
-
-        private final SeekableInputStream originStream;
-        // include
-        private final int offsetStart;
-        // include
-        private final int offsetEnd;
-
-        private int position;
-
-        public BytesInputWrapper(SeekableInputStream originStream, int offsetStart, int offsetEnd) {
-            this.originStream = originStream;
-            this.offsetStart = offsetStart;
-            this.position = offsetStart;
-            this.offsetEnd = offsetEnd;
-        }
-
-        @Override
-        public int read() throws IOException {
-            if (remain() == 0) {
-                throw new EOFException();
-            }
-            position++;
-            return originStream.read();
-        }
-
-        @Override
-        public int read(byte[] b) throws IOException {
-            return read(b, 0, b.length);
-        }
-
-        @Override
-        public int read(byte[] b, int off, int len) throws IOException {
-            if (remain() == 0) {
-                throw new EOFException();
-            }
-            int read = originStream.read(b, off, Math.min(len, remain()));
-            position += read;
-            return read;
-        }
-
-        @Override
-        public void seek(long desired) throws IOException {
-            if (offsetStart + desired > offsetEnd) {
-                throw new EOFException();
-            }
-            originStream.seek(desired + offsetStart);
-            position = (int) desired + offsetStart;
-        }
-
-        @Override
-        public long getPos() throws IOException {
-            return position - offsetStart;
-        }
-
-        @Override
-        public long skip(long n) throws IOException {
-            if (n <= 0) {
-                throw new IllegalArgumentException("skip bytes should greater than 0.");
-            }
-            if (remain() == 0) {
-                throw new EOFException();
-            }
-            int skipped = (int) originStream.skip(Math.min(n, remain()));
-            position += skipped;
-            return skipped;
-        }
-
-        @Override
-        public int available() throws IOException {
-            return remain();
-        }
-
-        @Override
-        public void close() throws IOException {
-            // do nothing
-        }
-
-        public BytesInputWrapper resetHead() throws IOException {
-            if (originStream.getPos() != offsetStart) {
-                originStream.seek(offsetStart);
-            }
-            return this;
-        }
-
-        private int remain() {
-            return offsetEnd - position + 1;
         }
     }
 }

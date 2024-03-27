@@ -21,7 +21,7 @@ package org.apache.paimon.io;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndexFile;
+import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
@@ -102,7 +102,7 @@ public final class IndexWriter {
         }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (FileIndexFile.Writer writer = FileIndexFile.createWriter(baos)) {
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
             writer.writeColumnIndex(indexType, indexMap);
         }
 
