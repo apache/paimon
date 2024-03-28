@@ -221,7 +221,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
         List<IndexManifestEntry> appendHashIndexFiles = new ArrayList<>();
-        List<IndexManifestEntry> appendDvIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> compactDvIndexFiles = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
                 appendTableFiles,
@@ -229,7 +229,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactTableFiles,
                 compactChangelog,
                 appendHashIndexFiles,
-                appendDvIndexFiles);
+                compactDvIndexFiles);
         try {
             List<SimpleFileEntry> appendSimpleEntries = SimpleFileEntry.from(appendTableFiles);
             if (!ignoreEmptyCommit
@@ -272,7 +272,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
             if (!compactTableFiles.isEmpty()
                     || !compactChangelog.isEmpty()
-                    || !appendDvIndexFiles.isEmpty()) {
+                    || !compactDvIndexFiles.isEmpty()) {
                 // Optimization for common path.
                 // Step 2:
                 // Add appendChanges to the manifest entries read above and check for conflicts.
@@ -294,7 +294,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                         tryCommit(
                                 compactTableFiles,
                                 compactChangelog,
-                                appendDvIndexFiles,
+                                compactDvIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -360,7 +360,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         List<ManifestEntry> compactTableFiles = new ArrayList<>();
         List<ManifestEntry> compactChangelog = new ArrayList<>();
         List<IndexManifestEntry> appendHashIndexFiles = new ArrayList<>();
-        List<IndexManifestEntry> appendDvIndexFiles = new ArrayList<>();
+        List<IndexManifestEntry> compactDvIndexFiles = new ArrayList<>();
         collectChanges(
                 committable.fileCommittables(),
                 appendTableFiles,
@@ -368,7 +368,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 compactTableFiles,
                 compactChangelog,
                 appendHashIndexFiles,
-                appendDvIndexFiles);
+                compactDvIndexFiles);
 
         if (!appendChangelog.isEmpty() || !compactChangelog.isEmpty()) {
             StringBuilder warnMessage =
@@ -437,12 +437,12 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 generatedSnapshot += 1;
             }
 
-            if (!compactTableFiles.isEmpty() || !appendDvIndexFiles.isEmpty()) {
+            if (!compactTableFiles.isEmpty() || !compactDvIndexFiles.isEmpty()) {
                 attempts +=
                         tryCommit(
                                 compactTableFiles,
                                 Collections.emptyList(),
-                                appendDvIndexFiles,
+                                compactDvIndexFiles,
                                 committable.identifier(),
                                 committable.watermark(),
                                 committable.logOffsets(),
@@ -565,7 +565,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             List<ManifestEntry> compactTableFiles,
             List<ManifestEntry> compactChangelog,
             List<IndexManifestEntry> appendHashIndexFiles,
-            List<IndexManifestEntry> appendDvIndexFiles) {
+            List<IndexManifestEntry> compactDvIndexFiles) {
         for (CommitMessage message : commitMessages) {
             CommitMessageImpl commitMessage = (CommitMessageImpl) message;
             commitMessage
@@ -606,7 +606,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                                         f));
                                         break;
                                     case DELETION_VECTORS_INDEX:
-                                        appendDvIndexFiles.add(
+                                        compactDvIndexFiles.add(
                                                 new IndexManifestEntry(
                                                         FileKind.ADD,
                                                         commitMessage.partition(),
