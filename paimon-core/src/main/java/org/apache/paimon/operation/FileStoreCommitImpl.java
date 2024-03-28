@@ -455,7 +455,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
-                                null,
+                                mustConflictCheck(),
                                 branchName,
                                 null);
                 generatedSnapshot += 1;
@@ -551,7 +551,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 null,
                 Collections.emptyMap(),
                 Snapshot.CommitKind.ANALYZE,
-                null,
+                noConflictCheck(),
                 branchName,
                 statsFileName);
     }
@@ -720,7 +720,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     logOffsets,
                     Snapshot.CommitKind.OVERWRITE,
                     latestSnapshot,
-                    null,
+                    mustConflictCheck(),
                     branchName,
                     null)) {
                 break;
@@ -1211,16 +1211,20 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         }
     }
 
-    private interface ConflictCheck {
-
+    /** Should do conflict check. */
+    interface ConflictCheck {
         boolean shouldCheck(long latestSnapshot);
     }
 
-    private static ConflictCheck hasConflictChecked(@Nullable Long checkedLatestSnapshotId) {
+    static ConflictCheck hasConflictChecked(@Nullable Long checkedLatestSnapshotId) {
         return latestSnapshot -> !Objects.equals(latestSnapshot, checkedLatestSnapshotId);
     }
 
-    private static ConflictCheck noConflictCheck() {
+    static ConflictCheck noConflictCheck() {
         return latestSnapshot -> false;
+    }
+
+    static ConflictCheck mustConflictCheck() {
+        return latestSnapshot -> true;
     }
 }
