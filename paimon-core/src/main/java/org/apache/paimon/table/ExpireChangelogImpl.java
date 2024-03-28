@@ -19,9 +19,7 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.Changelog;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.ConsumerManager;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
@@ -32,8 +30,6 @@ import org.slf4j.LoggerFactory;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.util.HashSet;
-import java.util.List;
-import java.util.function.Predicate;
 
 /** Cleanup the changelog in changelog directory. */
 public class ExpireChangelogImpl implements ExpireSnapshots {
@@ -144,8 +140,6 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
             LOG.debug("Changelog expire range is [" + earliestId + ", " + endExclusiveId + ")");
         }
 
-        List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
-
         for (long id = earliestId; id < endExclusiveId; id++) {
             if (LOG.isDebugEnabled()) {
                 LOG.debug("Ready to delete changelog files from snapshot #" + id);
@@ -156,27 +150,10 @@ public class ExpireChangelogImpl implements ExpireSnapshots {
                 snapshotDeletion.deleteAddedDataFiles(changelog.changelogManifestList());
                 snapshotDeletion.cleanUnusedManifestList(
                         changelog.changelogManifestList(), new HashSet<>());
-            } else if (changelog.deltaManifestList() != null) {
-                Predicate<ManifestEntry> skipper;
-                try {
-                    skipper = snapshotDeletion.dataFileSkipper(taggedSnapshots, id);
-                } catch (Exception e) {
-                    LOG.info(
-                            String.format(
-                                    "Skip cleaning data files of snapshot '%s' due to failed to build skipping set.",
-                                    id),
-                            e);
-                    continue;
-                }
-                snapshotDeletion.cleanUnusedDataFiles(changelog.deltaManifestList(), skipper);
-                snapshotDeletion.cleanUnusedManifestList(
-                        changelog.deltaManifestList(), new HashSet<>());
             }
 
             snapshotManager.fileIO().deleteQuietly(snapshotManager.longLivedChangelogPath(id));
         }
-
-        // List<Snapshot> taggedSnapshots = tagManager.taggedSnapshots();
 
         if (cleanEmptyDirectories) {
             snapshotDeletion.cleanDataDirectories();

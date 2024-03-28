@@ -188,14 +188,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                 continue;
             }
 
-            if (changelogDecoupled) {
-                if (snapshot.changelogManifestList() != null
-                        || snapshot.commitKind() != Snapshot.CommitKind.APPEND) {
-                    snapshotDeletion.cleanUnusedDataFiles(snapshot, skipper);
-                }
-            } else {
-                snapshotDeletion.cleanUnusedDataFiles(snapshot, skipper);
-            }
+            snapshotDeletion.cleanUnusedDataFiles(snapshot, skipper);
         }
 
         // delete changelog files
@@ -243,21 +236,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.changelogRecordCount(),
                                     snapshot.watermark());
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, false);
-                } else if (snapshot.commitKind() == Snapshot.CommitKind.APPEND) {
-                    changelog =
-                            new Changelog(
-                                    id,
-                                    snapshot.schemaId(),
-                                    snapshot.deltaManifestList(),
-                                    null,
-                                    snapshot.commitKind(),
-                                    snapshot.timeMillis(),
-                                    snapshot.deltaRecordCount(),
-                                    snapshot.watermark());
-                    snapshotDeletion.cleanUnusedManifestList(
-                            snapshot.baseManifestList(), skippingSet);
-                    snapshotDeletion.cleanUnusedIndexManifests(snapshot, skippingSet);
-                    snapshotDeletion.cleanUnusedStatisticsManifests(snapshot, skippingSet);
                 } else {
                     // no changelog
                     changelog =

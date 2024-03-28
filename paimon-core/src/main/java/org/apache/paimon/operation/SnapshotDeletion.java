@@ -128,7 +128,6 @@ public class SnapshotDeletion extends FileDeletionBase {
         dataFileToDelete.forEach(
                 (path, pair) -> {
                     ManifestEntry entry = pair.getLeft();
-                    System.out.println("delete: " + path);
                     // check whether we should skip the data file
                     if (!skipper.test(entry)) {
                         // delete data files
