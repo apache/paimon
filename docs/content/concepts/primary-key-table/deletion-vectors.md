@@ -42,11 +42,10 @@ Generally speaking, in this mode, we can get a huge improvement in read performa
 
 By specifying `'deletion-vectors.enabled' = 'true'`, the Deletion Vectors mode can be enabled.
 
-{{< hint warning >}}
-Considerations:
+## Limitation
+
 - Only primary key table supports this feature.
 - `changelog-producer` needs to be `none` or `lookup`.
 - `changelog-producer.lookup-wait` can't be `false`.
-- `merge-engine` can't be `first-row`, because there is no old data's deletion in it, deletion vectors are not needed.
+- `merge-engine` can't be `first-row`, because the read of first-row is already no merging, deletion vectors are not needed.
 - This mode will filter the data in level-0, so when using time travel to read `APPEND` snapshot, there will be data delay.
-{{< /hint >}}
