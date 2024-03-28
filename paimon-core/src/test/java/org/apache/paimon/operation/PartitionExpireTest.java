@@ -55,8 +55,6 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
-import java.util.stream.Collectors;
-import java.util.stream.LongStream;
 
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_CHECK_INTERVAL;
 import static org.apache.paimon.CoreOptions.PARTITION_EXPIRATION_TIME;
@@ -214,17 +212,20 @@ public class PartitionExpireTest {
         Thread.sleep(5000);
         commit.commit(successCommits - 1, commitMessages.get(successCommits - 1));
         notCommitted.remove((long) (successCommits - 1));
-        commit.close();
 
         // check whether partition expire is triggered
         Snapshot snapshot = table.snapshotManager().latestSnapshot();
         assertThat(snapshot.commitKind()).isEqualTo(Snapshot.CommitKind.OVERWRITE);
 
-        // check filter
-        Set<Long> toBeFiltered =
-                LongStream.range(0, preparedCommits).boxed().collect(Collectors.toSet());
-        assertThat(commit.filterCommitted(toBeFiltered))
-                .containsExactlyInAnyOrderElementsOf(notCommitted);
+        // filterAndCommit
+        Map<Long, List<CommitMessage>> allCommits = new HashMap<>();
+        for (int i = 0; i < preparedCommits; i++) {
+            allCommits.put((long) i, commitMessages.get(i));
+        }
+
+        // no exception here
+        commit.filterAndCommit(allCommits);
+        commit.close();
     }
 
     private List<String> read() throws IOException {

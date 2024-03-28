@@ -205,6 +205,14 @@ public class FileStoreCommitImpl implements FileStoreCommit {
 
     @Override
     public void commit(ManifestCommittable committable, Map<String, String> properties) {
+        commit(committable, properties, false);
+    }
+
+    @Override
+    public void commit(
+            ManifestCommittable committable,
+            Map<String, String> properties,
+            boolean checkAppendFiles) {
         if (LOG.isDebugEnabled()) {
             LOG.debug("Ready to commit\n" + committable.toString());
         }
@@ -244,7 +252,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                 // This optimization is mainly used to decrease the number of times we read from
                 // files.
                 latestSnapshot = snapshotManager.latestSnapshot(branchName);
-                if (latestSnapshot != null) {
+                if (latestSnapshot != null && checkAppendFiles) {
                     // it is possible that some partitions only have compact changes,
                     // so we need to contain all changes
                     baseEntries.addAll(
@@ -264,7 +272,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.APPEND,
-                                safeLatestSnapshotId,
+                                noConflictCheck(),
                                 branchName,
                                 null);
                 generatedSnapshot += 1;
@@ -299,7 +307,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                                 committable.watermark(),
                                 committable.logOffsets(),
                                 Snapshot.CommitKind.COMPACT,
-                                safeLatestSnapshotId,
+                                hasConflictChecked(safeLatestSnapshotId),
                                 branchName,
                                 null);
                 generatedSnapshot += 1;
@@ -634,7 +642,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             @Nullable Long watermark,
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
-            @Nullable Long safeLatestSnapshotId,
+            ConflictCheck conflictCheck,
             String branchName,
             @Nullable String statsFileName) {
         int cnt = 0;
@@ -650,7 +658,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     logOffsets,
                     commitKind,
                     latestSnapshot,
-                    safeLatestSnapshotId,
+                    conflictCheck,
                     branchName,
                     statsFileName)) {
                 break;
@@ -731,7 +739,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             Map<Integer, Long> logOffsets,
             Snapshot.CommitKind commitKind,
             @Nullable Snapshot latestSnapshot,
-            @Nullable Long safeLatestSnapshotId,
+            ConflictCheck conflictCheck,
             String branchName,
             @Nullable String newStatsFileName) {
         long newSnapshotId =
@@ -752,7 +760,7 @@ public class FileStoreCommitImpl implements FileStoreCommit {
             }
         }
 
-        if (latestSnapshot != null && !Objects.equals(latestSnapshot.id(), safeLatestSnapshotId)) {
+        if (latestSnapshot != null && conflictCheck.shouldCheck(latestSnapshot.id())) {
             // latestSnapshotId is different from the snapshot id we've checked for conflicts,
             // so we have to check again
             noConflictsOrFail(latestSnapshot.commitUser(), latestSnapshot, tableFiles);
@@ -1201,5 +1209,18 @@ public class FileStoreCommitImpl implements FileStoreCommit {
         public int hashCode() {
             return Objects.hash(partition, bucket, level);
         }
+    }
+
+    private interface ConflictCheck {
+
+        boolean shouldCheck(long latestSnapshot);
+    }
+
+    private static ConflictCheck hasConflictChecked(@Nullable Long checkedLatestSnapshotId) {
+        return latestSnapshot -> !Objects.equals(latestSnapshot, checkedLatestSnapshotId);
+    }
+
+    private static ConflictCheck noConflictCheck() {
+        return latestSnapshot -> false;
     }
 }
