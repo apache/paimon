@@ -18,8 +18,23 @@
 
 package org.apache.paimon.flink.action.cdc.kafka;
 
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
+
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+
+import java.util.Arrays;
+import java.util.Collections;
+import java.util.List;
+import java.util.Map;
+import java.util.Properties;
+
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
+import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
 
 /** IT cases for {@link KafkaSyncTableAction}. */
 public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCase {
@@ -102,5 +117,49 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
     @Timeout(60)
     public void testAllTypesWithSchema() throws Exception {
         testAllTypesWithSchemaImpl(DEBEZIUM);
+    }
+
+    @Test
+    @Timeout(60)
+    public void testMessageWithNullValue() throws Exception {
+        final String topic = "test_null_value";
+        createTestTopic(topic, 1, 1);
+
+        List<String> lines = readLines("kafka/debezium/table/nullvalue/debezium-data-1.txt");
+        writeRecordsToKafka(topic, lines);
+
+        // write null value
+        Properties producerProperties = getStandardProps();
+        producerProperties.setProperty("retries", "0");
+        producerProperties.put(
+                "key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        producerProperties.put(
+                "value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
+        KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(producerProperties);
+        kafkaProducer.send(new ProducerRecord<>(topic, null));
+        kafkaProducer.close();
+
+        lines = readLines("kafka/debezium/table/nullvalue/debezium-data-2.txt");
+        writeRecordsToKafka(topic, lines);
+
+        Map<String, String> kafkaConfig = getBasicKafkaConfig();
+        kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
+        kafkaConfig.put(TOPIC.key(), topic);
+        KafkaSyncTableAction action =
+                syncTableActionBuilder(kafkaConfig)
+                        .withPrimaryKeys("id")
+                        .withTableConfig(getBasicTableConfig())
+                        .build();
+        runActionWithDefaultEnv(action);
+
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.STRING().notNull(), DataTypes.STRING()},
+                        new String[] {"id", "value"});
+        waitForResult(
+                Arrays.asList("+I[1, A]", "+I[2, B]"),
+                getFileStoreTable(tableName),
+                rowType,
+                Collections.singletonList("id"));
     }
 }
