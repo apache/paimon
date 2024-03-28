@@ -148,7 +148,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValueFilter() throws Exception {
+    public void testFilterBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         // 0 <= hr <= 999
         List<KeyValue> data = generateData(100, random.nextInt(1000));
@@ -180,7 +180,7 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValuePartitionFilter() throws Exception {
+    public void testFilterPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         List<KeyValue> data = generateData(100, Math.abs(random.nextInt(1000)));
         writeData(data, "0", 0);
