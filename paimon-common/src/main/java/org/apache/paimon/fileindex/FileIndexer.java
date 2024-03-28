@@ -18,7 +18,10 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.fileindex.bloomfilter.BloomFilter;
 import org.apache.paimon.types.DataType;
+
+import static org.apache.paimon.fileindex.bloomfilter.BloomFilter.BLOOM_FILTER;
 
 /** File index interface. To build a file index. */
 public interface FileIndexer {
@@ -29,6 +32,8 @@ public interface FileIndexer {
 
     static FileIndexer create(String type, DataType dataType) {
         switch (type) {
+            case BLOOM_FILTER:
+                return new BloomFilter(dataType);
             default:
                 throw new RuntimeException("Doesn't support filter type: " + type);
         }
