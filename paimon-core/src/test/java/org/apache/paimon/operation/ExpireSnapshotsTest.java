@@ -41,6 +41,7 @@ import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -450,7 +451,8 @@ public class ExpireSnapshotsTest {
         assertThat(actual).isEqualTo(expected);
     }
 
-    @Test
+    @RepeatedTest(10)
+    //    @Test
     public void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();

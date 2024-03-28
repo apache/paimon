@@ -101,6 +101,8 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.COMPACTION_MAX_FILE_NUM;
 import static org.apache.paimon.CoreOptions.CONSUMER_IGNORE_PROGRESS;
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
@@ -843,8 +845,8 @@ public abstract class FileStoreTableTestBase {
             Options options = new Options();
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
-            options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MIN, 5);
-            options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 5);
+            options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
+            options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
             table.copy(options.toMap()).newCommit("").expireSnapshots();
         }
 
@@ -1143,6 +1145,8 @@ public abstract class FileStoreTableTestBase {
         options.put(SNAPSHOT_EXPIRE_EXECUTION_MODE.key(), ExpireExecutionMode.ASYNC.toString());
         options.put(SNAPSHOT_NUM_RETAINED_MIN.key(), "1");
         options.put(SNAPSHOT_NUM_RETAINED_MAX.key(), "1");
+        options.put(CHANGELOG_NUM_RETAINED_MIN.key(), "1");
+        options.put(CHANGELOG_NUM_RETAINED_MAX.key(), "1");
         options.put(SNAPSHOT_EXPIRE_LIMIT.key(), "2");
 
         TableCommitImpl commit = table.copy(options).newCommit(commitUser);

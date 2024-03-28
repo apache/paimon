@@ -303,6 +303,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     public ExpireSnapshots newExpireChangelog() {
         return new ExpireChangelogImpl(
                 snapshotManager(),
+                tagManager(),
                 store().newSnapshotDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories());
     }

@@ -192,6 +192,7 @@ public class TestFileStore extends KeyValueFileStore {
             boolean snapshotExpireCleanEmptyDirectories) {
         return new ExpireChangelogImpl(
                         snapshotManager(),
+                        new TagManager(fileIO, options.path()),
                         newSnapshotDeletion(),
                         snapshotExpireCleanEmptyDirectories)
                 .retainMin(numRetainedMin)
@@ -633,11 +634,13 @@ public class TestFileStore extends KeyValueFileStore {
                             pathFactory.bucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
+        System.out.println("snapshot: " + snapshotId + result.toString());
+
         return result;
     }
 
     private static Set<Path> getChangelogFileInUse(
-            long snapshotId,
+            long changelogId,
             SnapshotManager snapshotManager,
             FileStoreScan scan,
             FileIO fileIO,
@@ -645,11 +648,11 @@ public class TestFileStore extends KeyValueFileStore {
             ManifestList manifestList) {
         Set<Path> result = new HashSet<>();
 
-        Path snapshotPath = snapshotManager.longLivedChangelogPath(snapshotId);
-        Changelog changelog = Changelog.fromPath(fileIO, snapshotPath);
+        Path changelogPath = snapshotManager.longLivedChangelogPath(changelogId);
+        Changelog changelog = Changelog.fromPath(fileIO, changelogPath);
 
-        // snapshot file
-        result.add(snapshotPath);
+        // changelog file
+        result.add(changelogPath);
 
         // manifest lists
         if (changelog.changelogManifestList() != null) {
@@ -675,6 +678,7 @@ public class TestFileStore extends KeyValueFileStore {
                             pathFactory.bucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
+        System.out.println("changelog: " + changelogId + result.toString());
         return result;
     }
 
