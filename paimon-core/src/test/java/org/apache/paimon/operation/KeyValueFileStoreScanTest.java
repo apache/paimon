@@ -152,16 +152,16 @@ public class KeyValueFileStoreScanTest {
         ThreadLocalRandom random = ThreadLocalRandom.current();
         // 0 <= hr <= 999
         List<KeyValue> data = generateData(100, random.nextInt(1000));
-        writeData(data, 0);
+        writeData(data, "0", 0);
         // 1000 <= hr <= 1999
         data = generateData(100, random.nextInt(1000) + 1000);
-        writeData(data, 1);
+        writeData(data, "0", 1);
         // 2000 <= hr <= 2999
         data = generateData(100, random.nextInt(1000) + 2000);
-        writeData(data, 2);
+        writeData(data, "0", 2);
         // 3000 <= hr <= 3999
         data = generateData(100, random.nextInt(1000) + 3000);
-        Snapshot snapshot = writeData(data, 3);
+        Snapshot snapshot = writeData(data, "0", 3);
 
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
@@ -188,7 +188,7 @@ public class KeyValueFileStoreScanTest {
         writeData(data, "1", 0);
         data = generateData(100, Math.abs(random.nextInt(1000)) + 2000);
         writeData(data, "2", 0);
-        generateData(100, Math.abs(random.nextInt(1000)) + 3000);
+        data = generateData(100, Math.abs(random.nextInt(1000)) + 3000);
         Snapshot snapshot = writeData(data, "3", 0);
 
         KeyValueFileStoreScan scan = store.newScan();
@@ -199,7 +199,7 @@ public class KeyValueFileStoreScanTest {
         scan.withSnapshot(snapshot.id());
         scan.withValueFilter(
                 new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
-                        .between(1, 1000, 2000));
+                        .between(1, 1000, 1999));
 
         List<ManifestEntry> filesFiltered = scan.plan().files();
 
