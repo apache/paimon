@@ -209,6 +209,9 @@ Apache Software Foundation License 2.0
 --------------------------------------
 
 paimon-common/src/main/java/org/apache/paimon/fs/Path.java
+paimon-common/src/main/java/org/apache/paimon/filter/bloomfilter/HadoopDynamicBloomFilter.java
+paimon-common/src/main/java/org/apache/paimon/filter/bloomfilter/HadoopBloomFilter.java
+paimon-common/src/main/java/org/apache/paimon/filter/bloomfilter/HadoopFilter.java
 from http://hadoop.apache.org/ version 2.10.2
 
 paimon-common/src/main/java/org/apache/paimon/lookup/hash/HashLookupStoreWriter.java
