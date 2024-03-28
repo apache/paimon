@@ -45,6 +45,7 @@ import org.apache.paimon.types.VarCharType;
 import java.util.Optional;
 import java.util.function.Function;
 
+/** Fast hash for number type. */
 public class FastHashForNumber implements DataTypeVisitor<Optional<Function<Object, Long>>> {
 
     public static final FastHashForNumber INSTANCE = new FastHashForNumber();
