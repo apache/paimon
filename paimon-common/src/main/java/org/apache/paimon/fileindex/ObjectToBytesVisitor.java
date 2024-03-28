@@ -18,9 +18,12 @@
 
 package org.apache.paimon.fileindex;
 
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.function.Function;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.DataGetters;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.InternalArray;
 import org.apache.paimon.data.InternalMap;
@@ -31,6 +34,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -47,10 +51,6 @@ import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.types.TinyIntType;
 import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
-
-import java.util.Arrays;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 /** Convert different type object to bytes. */
 public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, byte[]>> {
@@ -148,8 +148,9 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     @Override
     public Function<Object, byte[]> visit(ArrayType arrayType) {
-        BiFunction<DataGetters, Integer, byte[]> function =
-                arrayType.getElementType().accept(InternalRowToBytesVisitor.INSTANCE);
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(arrayType.getElementType());
+        Function<Object, byte[]> converter = arrayType.getElementType().accept(this);
         return o -> {
             if (o == null) {
                 return NULL_BYTES;
@@ -158,7 +159,7 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
             int count = 0;
             byte[][] bytes = new byte[internalArray.size()][];
             for (int i = 0; i < internalArray.size(); i++) {
-                bytes[i] = function.apply(internalArray, i);
+                bytes[i] = converter.apply(elementGetter.getElementOrNull(internalArray, i));
                 count += bytes[i].length;
             }
 
@@ -174,18 +175,19 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     @Override
     public Function<Object, byte[]> visit(MultisetType multisetType) {
-        BiFunction<DataGetters, Integer, byte[]> function =
-                multisetType.getElementType().accept(InternalRowToBytesVisitor.INSTANCE);
+        InternalArray.ElementGetter elementGetter =
+                InternalArray.createElementGetter(multisetType.getElementType());
+        Function<Object, byte[]> converter = multisetType.getElementType().accept(this);
         return o -> {
             if (o == null) {
                 return NULL_BYTES;
             }
             InternalMap map = (InternalMap) o;
-
             int count = 0;
             byte[][] bytes = new byte[map.size()][];
+            InternalArray keyArray = map.keyArray();
             for (int i = 0; i < map.size(); i++) {
-                bytes[i] = function.apply(map.keyArray(), i);
+                bytes[i] = converter.apply(elementGetter.getElementOrNull(keyArray, i));
                 count += bytes[i].length;
             }
 
@@ -201,10 +203,13 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     @Override
     public Function<Object, byte[]> visit(MapType mapType) {
-        BiFunction<DataGetters, Integer, byte[]> keyFunction =
-                mapType.getKeyType().accept(new InternalRowToBytesVisitor());
-        BiFunction<DataGetters, Integer, byte[]> valueFunction =
-                mapType.getValueType().accept(new InternalRowToBytesVisitor());
+        InternalArray.ElementGetter keyElementGetter =
+                InternalArray.createElementGetter(mapType.getKeyType());
+        Function<Object, byte[]> keyConverter = mapType.getKeyType().accept(this);
+
+        InternalArray.ElementGetter valueElementGetter =
+                InternalArray.createElementGetter(mapType.getValueType());
+        Function<Object, byte[]> valueConverter = mapType.getValueType().accept(this);
 
         return o -> {
             if (o == null) {
@@ -214,14 +219,17 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
             int count = 0;
             byte[][] keyBytes = new byte[map.size()][];
+            InternalArray keyArray = map.keyArray();
             for (int i = 0; i < map.size(); i++) {
-                keyBytes[i] = keyFunction.apply(map.keyArray(), i);
+                keyBytes[i] = keyConverter.apply(keyElementGetter.getElementOrNull(keyArray, i));
                 count += keyBytes[i].length;
             }
 
             byte[][] valueBytes = new byte[map.size()][];
+            InternalArray valueArray = map.valueArray();
             for (int i = 0; i < map.size(); i++) {
-                valueBytes[i] = valueFunction.apply(map.valueArray(), i);
+                valueBytes[i] =
+                        valueConverter.apply(valueElementGetter.getElementOrNull(valueArray, i));
                 count += valueBytes[i].length;
             }
 
@@ -239,8 +247,13 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
 
     @Override
     public Function<Object, byte[]> visit(RowType rowType) {
-        BiFunction<DataGetters, Integer, byte[]> function =
-                rowType.accept(new InternalRowToBytesVisitor());
+        List<DataField> fieldList = rowType.getFields();
+        List<InternalRow.FieldGetter> getters = new ArrayList<>();
+        List<Function<Object, byte[]>> converters = new ArrayList<>();
+        for (int i = 0; i < fieldList.size(); i++) {
+            getters.add(InternalRow.createFieldGetter(fieldList.get(i).type(), i));
+            converters.add(fieldList.get(i).type().accept(this));
+        }
         return o -> {
             if (o == null) {
                 return NULL_BYTES;
@@ -250,7 +263,7 @@ public class ObjectToBytesVisitor implements DataTypeVisitor<Function<Object, by
             int count = 0;
             byte[][] bytes = new byte[rowType.getFieldCount()][];
             for (int i = 0; i < rowType.getFieldCount(); i++) {
-                bytes[i] = function.apply(secondRow, i);
+                bytes[i] = converters.get(i).apply(getters.get(i).getFieldOrNull(secondRow));
                 count += bytes[i].length;
             }
 
