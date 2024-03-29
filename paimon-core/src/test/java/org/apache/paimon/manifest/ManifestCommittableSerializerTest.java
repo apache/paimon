@@ -91,6 +91,7 @@ public class ManifestCommittableSerializerTest {
     public static NewFilesIncrement randomNewFilesIncrement() {
         return new NewFilesIncrement(
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
+                Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)),
                 Arrays.asList(newFile(ID.incrementAndGet(), 0), newFile(ID.incrementAndGet(), 0)));
     }
 

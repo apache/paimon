@@ -69,6 +69,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Nullable private final FieldsComparator userDefinedSeqComparator;
 
     private final LinkedHashSet<DataFileMeta> newFiles;
+    private final LinkedHashSet<DataFileMeta> deletedFiles;
     private final LinkedHashSet<DataFileMeta> newFilesChangelog;
     private final LinkedHashMap<String, DataFileMeta> compactBefore;
     private final LinkedHashSet<DataFileMeta> compactAfter;
@@ -107,12 +108,14 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         this.userDefinedSeqComparator = userDefinedSeqComparator;
 
         this.newFiles = new LinkedHashSet<>();
+        this.deletedFiles = new LinkedHashSet<>();
         this.newFilesChangelog = new LinkedHashSet<>();
         this.compactBefore = new LinkedHashMap<>();
         this.compactAfter = new LinkedHashSet<>();
         this.compactChangelog = new LinkedHashSet<>();
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
+            deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
             newFilesChangelog.addAll(increment.newFilesIncrement().changelogFiles());
             increment
                     .compactIncrement()
@@ -253,7 +256,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     private CommitIncrement drainIncrement() {
         NewFilesIncrement newFilesIncrement =
                 new NewFilesIncrement(
-                        new ArrayList<>(newFiles), new ArrayList<>(newFilesChangelog));
+                        new ArrayList<>(newFiles),
+                        new ArrayList<>(deletedFiles),
+                        new ArrayList<>(newFilesChangelog));
         CompactIncrement compactIncrement =
                 new CompactIncrement(
                         new ArrayList<>(compactBefore.values()),
@@ -261,6 +266,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
                         new ArrayList<>(compactChangelog));
 
         newFiles.clear();
+        deletedFiles.clear();
         newFilesChangelog.clear();
         compactBefore.clear();
         compactAfter.clear();
@@ -305,7 +311,9 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
+        delete.addAll(deletedFiles);
         newFiles.clear();
+        deletedFiles.clear();
 
         for (DataFileMeta file : newFilesChangelog) {
             writerFactory.deleteFile(file.fileName(), file.level());

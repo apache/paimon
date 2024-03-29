@@ -86,7 +86,8 @@ public class FileMetaUtils {
         return new CommitMessageImpl(
                 partition,
                 0,
-                new NewFilesIncrement(dataFileMetas, Collections.emptyList()),
+                new NewFilesIncrement(
+                        dataFileMetas, Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }

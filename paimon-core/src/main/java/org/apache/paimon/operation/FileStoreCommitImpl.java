@@ -574,6 +574,13 @@ public class FileStoreCommitImpl implements FileStoreCommit {
                     .forEach(m -> appendTableFiles.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
                     .newFilesIncrement()
+                    .deletedFiles()
+                    .forEach(
+                            m ->
+                                    appendTableFiles.add(
+                                            makeEntry(FileKind.DELETE, commitMessage, m)));
+            commitMessage
+                    .newFilesIncrement()
                     .changelogFiles()
                     .forEach(m -> appendChangelog.add(makeEntry(FileKind.ADD, commitMessage, m)));
             commitMessage
