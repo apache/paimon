@@ -22,6 +22,7 @@ import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 
 import java.io.Closeable;
 import java.io.IOException;
@@ -57,9 +58,10 @@ public interface RowBuffer {
             IOManager ioManager,
             MemorySegmentPool memoryPool,
             AbstractRowDataSerializer<InternalRow> serializer,
-            boolean spillable) {
+            boolean spillable,
+            MemorySize maxDiskSize) {
         if (spillable) {
-            return new ExternalBuffer(ioManager, memoryPool, serializer);
+            return new ExternalBuffer(ioManager, memoryPool, serializer, maxDiskSize);
         } else {
             return new InMemoryBuffer(memoryPool, serializer);
         }

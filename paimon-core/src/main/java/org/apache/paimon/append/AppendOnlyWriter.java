@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -76,6 +77,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final IOManager ioManager;
 
     private MemorySegmentPool memorySegmentPool;
+    private MemorySize maxDiskSize;
 
     public AppendOnlyWriter(
             FileIO fileIO,
@@ -92,7 +94,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
-            FieldStatsCollector.Factory[] statsCollectors) {
+            FieldStatsCollector.Factory[] statsCollectors,
+            MemorySize maxDiskSize) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -109,9 +112,12 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.fileCompression = fileCompression;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
+        this.maxDiskSize = maxDiskSize;
 
         this.sinkWriter =
-                useWriteBuffer ? new BufferedSinkWriter(spillable) : new DirectSinkWriter();
+                useWriteBuffer
+                        ? new BufferedSinkWriter(spillable, maxDiskSize)
+                        : new DirectSinkWriter();
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
@@ -205,7 +211,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             trySyncLatestCompaction(true);
 
             sinkWriter.close();
-            sinkWriter = new BufferedSinkWriter(true);
+            sinkWriter = new BufferedSinkWriter(true, maxDiskSize);
             sinkWriter.setMemoryPool(memorySegmentPool);
         }
     }
@@ -370,10 +376,13 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
         private final boolean spillable;
 
+        private final MemorySize maxDiskSize;
+
         private RowBuffer writeBuffer;
 
-        private BufferedSinkWriter(boolean spillable) {
+        private BufferedSinkWriter(boolean spillable, MemorySize maxDiskSize) {
             this.spillable = spillable;
+            this.maxDiskSize = maxDiskSize;
         }
 
         @Override
@@ -429,7 +438,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                             ioManager,
                             memoryPool,
                             new InternalRowSerializer(writeSchema),
-                            spillable);
+                            spillable,
+                            maxDiskSize);
         }
 
         @Override

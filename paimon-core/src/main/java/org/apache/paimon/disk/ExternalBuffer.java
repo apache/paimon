@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ public class ExternalBuffer implements RowBuffer {
     private final MemorySegmentPool pool;
     private final BinaryRowSerializer binaryRowSerializer;
     private final InMemoryBuffer inMemoryBuffer;
+    private final MemorySize maxDiskSize;
 
     // The size of each segment
     private final int segmentSize;
@@ -57,9 +59,13 @@ public class ExternalBuffer implements RowBuffer {
     private boolean addCompleted;
 
     ExternalBuffer(
-            IOManager ioManager, MemorySegmentPool pool, AbstractRowDataSerializer<?> serializer) {
+            IOManager ioManager,
+            MemorySegmentPool pool,
+            AbstractRowDataSerializer<?> serializer,
+            MemorySize maxDiskSize) {
         this.ioManager = ioManager;
         this.pool = pool;
+        this.maxDiskSize = maxDiskSize;
 
         this.binaryRowSerializer =
                 serializer instanceof BinaryRowSerializer
@@ -90,7 +96,16 @@ public class ExternalBuffer implements RowBuffer {
     @Override
     public boolean flushMemory() throws IOException {
         spill();
-        return true;
+        return getDiskUsage() < maxDiskSize.getBytes();
+    }
+
+    private long getDiskUsage() {
+        long bytes = 0;
+
+        for (ChannelWithMeta spillChannelID : spilledChannelIDs) {
+            bytes += spillChannelID.getSize();
+        }
+        return bytes;
     }
 
     @Override
