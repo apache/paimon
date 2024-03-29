@@ -41,7 +41,7 @@ public class ByteArraySeekableStreamTest {
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
             int position = RANDOM.nextInt(bl);
-            int length = RANDOM.nextInt(Math.max(b.length - position - 1, 1));
+            int length = RANDOM.nextInt(Math.max(b.length - position - 1, 0));
             byte[] expected = new byte[length];
             System.arraycopy(b, position, expected, 0, length);
 
