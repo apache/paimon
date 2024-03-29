@@ -34,12 +34,17 @@ public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScann
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long earliestSnapshotId = snapshotManager.earliestLongLivedChangelogId();
-        if (earliestSnapshotId == null) {
+        Long earliestChangelogId = snapshotManager.earliestLongLivedChangelogId();
+
+        Long earliestId =
+                earliestChangelogId == null
+                        ? snapshotManager.earliestSnapshotId()
+                        : earliestChangelogId;
+        if (earliestId == null) {
             return new NoSnapshot();
         }
         // We should return the specified snapshot as next snapshot to indicate to scan delta data
         // from it. If the snapshotId < earliestSnapshotId, start from the earliest.
-        return new NextSnapshot(Math.max(startingSnapshotId, earliestSnapshotId));
+        return new NextSnapshot(Math.max(startingSnapshotId, earliestId));
     }
 }
