@@ -19,6 +19,7 @@
 package org.apache.paimon.fs;
 
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -31,7 +32,7 @@ public class ByteArraySeekableStreamTest {
 
     private static final Random RANDOM = new Random();
 
-    @Test
+    @RepeatedTest(10)
     public void testBasic() throws IOException {
         int bl = 100000;
         byte[] b = randomBytes(bl);
@@ -41,7 +42,7 @@ public class ByteArraySeekableStreamTest {
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
             int position = RANDOM.nextInt(bl);
-            int length = RANDOM.nextInt(b.length - position - 1);
+            int length = RANDOM.nextInt(Math.max(b.length - position - 1, 1));
             byte[] expected = new byte[length];
             System.arraycopy(b, position, expected, 0, length);
 
@@ -55,7 +56,11 @@ public class ByteArraySeekableStreamTest {
             int position = RANDOM.nextInt(bl);
             byteArraySeekableStream.seek(position);
             for (int j = 0; j < 100; j++) {
-                Assertions.assertThat(b[position + j])
+                int testPosition = position + j;
+                if (testPosition >= b.length) {
+                    break;
+                }
+                Assertions.assertThat(b[testPosition])
                         .isEqualTo((byte) byteArraySeekableStream.read());
             }
         }
