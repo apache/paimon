@@ -233,25 +233,35 @@ public class SnapshotManager implements Serializable {
         return latestId;
     }
 
+    private Snapshot changelogOrSnapshot(long snapshotId) {
+        if (longLivedChangelogExists(snapshotId)) {
+            return changelog(snapshotId);
+        } else {
+            return snapshot(snapshotId);
+        }
+    }
+
     /**
      * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot may be
      * returned if all snapshots are equal to or later than the timestamp mills.
      */
     public @Nullable Long earlierThanTimeMills(long timestampMills) {
-        Long earliest = earliestSnapshotId();
+        Long changelogEarliest = earliestLongLivedChangelogId();
+        Long earliestSnapshot = earliestSnapshotId();
+        Long earliest = changelogEarliest == null ? earliestSnapshot : changelogEarliest;
         Long latest = latestSnapshotId();
 
         if (earliest == null || latest == null) {
             return null;
         }
 
-        if (snapshot(earliest).timeMillis() >= timestampMills) {
+        if (changelogOrSnapshot(earliest).timeMillis() >= timestampMills) {
             return earliest - 1;
         }
 
         while (earliest < latest) {
             long mid = (earliest + latest + 1) / 2;
-            if (snapshot(mid).timeMillis() < timestampMills) {
+            if (changelogOrSnapshot(mid).timeMillis() < timestampMills) {
                 earliest = mid;
             } else {
                 latest = mid - 1;

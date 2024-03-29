@@ -230,11 +230,19 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     id,
                                     snapshot.schemaId(),
                                     null,
+                                    null,
                                     snapshot.changelogManifestList(),
+                                    null,
+                                    snapshot.commitUser(),
+                                    snapshot.commitIdentifier(),
                                     snapshot.commitKind(),
                                     snapshot.timeMillis(),
+                                    snapshot.logOffsets(),
+                                    snapshot.totalRecordCount(),
+                                    null,
                                     snapshot.changelogRecordCount(),
-                                    snapshot.watermark());
+                                    snapshot.watermark(),
+                                    null);
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, false);
                 } else {
                     // no changelog
@@ -244,10 +252,18 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.schemaId(),
                                     null,
                                     null,
+                                    null,
+                                    snapshot.indexManifest(),
+                                    snapshot.commitUser(),
+                                    snapshot.commitIdentifier(),
                                     snapshot.commitKind(),
                                     snapshot.timeMillis(),
-                                    0L,
-                                    snapshot.watermark());
+                                    snapshot.logOffsets(),
+                                    snapshot.changelogRecordCount(),
+                                    snapshot.totalRecordCount(),
+                                    snapshot.changelogRecordCount(),
+                                    snapshot.watermark(),
+                                    snapshot.statistics());
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
                 }
                 try {

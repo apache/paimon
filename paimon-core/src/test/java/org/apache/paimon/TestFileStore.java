@@ -634,7 +634,6 @@ public class TestFileStore extends KeyValueFileStore {
                             pathFactory.bucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
-        System.out.println("snapshot: " + snapshotId + result.toString());
 
         return result;
     }
@@ -659,14 +658,9 @@ public class TestFileStore extends KeyValueFileStore {
             result.add(pathFactory.toManifestListPath(changelog.changelogManifestList()));
         }
 
-        if (changelog.deltaManifestList() != null) {
-            result.add(pathFactory.toManifestListPath(changelog.deltaManifestList()));
-        }
-
         // manifests
         List<ManifestFileMeta> manifests = new ArrayList<>();
         manifests.addAll(changelog.changelogManifests(manifestList));
-        manifests.addAll(changelog.deltaManifests(manifestList));
 
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
@@ -678,7 +672,6 @@ public class TestFileStore extends KeyValueFileStore {
                             pathFactory.bucketPath(entry.partition(), entry.bucket()),
                             entry.file().fileName()));
         }
-        System.out.println("changelog: " + changelogId + result.toString());
         return result;
     }
 

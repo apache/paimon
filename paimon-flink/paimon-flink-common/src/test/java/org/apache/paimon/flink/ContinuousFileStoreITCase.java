@@ -594,4 +594,46 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
                                         DateTimeUtils.toInternal(timestamp, 0), 0)));
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c"));
     }
+
+    @Test
+    public void testScanFromChangelog() throws Exception {
+        batchSql(
+                "CREATE TABLE IF NOT EXISTS T3 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)\n"
+                        + " WITH ('changelog-producer'='input', 'bucket' = '1', \n"
+                        + " 'snapshot.num-retained.max' = '2',\n"
+                        + " 'snapshot.num-retained.min' = '1',\n"
+                        + " 'changelog.num-retained.max' = '3',\n"
+                        + " 'changelog.num-retained.min' = '1'\n"
+                        + ")");
+
+        batchSql("INSERT INTO T3 VALUES ('1', '2', '3')");
+        batchSql("INSERT INTO T3 VALUES ('4', '5', '6')");
+        batchSql("INSERT INTO T3 VALUES ('7', '8', '9')");
+        BlockingIterator<Row, Row> iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 0));
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("1", "2", "3"), Row.of("4", "5", "6"), Row.of("7", "8", "9"));
+        iterator.close();
+
+        batchSql("INSERT INTO T3 VALUES ('10', '11', '12')");
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 0));
+        assertThat(iterator.collect(3))
+                .containsExactlyInAnyOrder(
+                        Row.of("4", "5", "6"), Row.of("7", "8", "9"), Row.of("10", "11", "12"));
+        iterator.close();
+
+        iterator =
+                BlockingIterator.of(
+                        streamSqlIter(
+                                "SELECT * FROM T3 /*+ OPTIONS('scan.snapshot-id'='%s') */", 4));
+        assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of("10", "11", "12"));
+        iterator.close();
+    }
 }

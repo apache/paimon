@@ -34,7 +34,7 @@ public class ContinuousFromSnapshotStartingScanner extends AbstractStartingScann
 
     @Override
     public Result scan(SnapshotReader snapshotReader) {
-        Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
+        Long earliestSnapshotId = snapshotManager.earliestLongLivedChangelogId();
         if (earliestSnapshotId == null) {
             return new NoSnapshot();
         }
