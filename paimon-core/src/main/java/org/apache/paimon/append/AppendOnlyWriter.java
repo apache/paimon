@@ -34,7 +34,6 @@ import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.statistics.FieldStatsCollector;
-import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommitIncrement;
 import org.apache.paimon.utils.IOUtils;
@@ -124,8 +123,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     @Override
     public void write(InternalRow rowData) throws Exception {
         Preconditions.checkArgument(
-                rowData.getRowKind() == RowKind.INSERT,
-                "Append-only writer can only accept insert row kind, but current row kind is: %s",
+                rowData.getRowKind().isAdd(),
+                "Append-only writer can only accept insert or update_after row kind, but current row kind is: %s",
                 rowData.getRowKind());
         boolean success = sinkWriter.write(rowData);
         if (!success) {

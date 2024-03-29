@@ -995,7 +995,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         kafkaConfig.put(TOPIC.key(), topic);
 
         Map<String, String> tableConfig = getBasicTableConfig();
-        tableConfig.put(CoreOptions.DEDUPLICATE_IGNORE_DELETE.key(), String.valueOf(ignoreDelete));
+        tableConfig.put(CoreOptions.IGNORE_DELETE.key(), String.valueOf(ignoreDelete));
 
         KafkaSyncTableAction action =
                 syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();

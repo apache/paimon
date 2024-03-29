@@ -70,7 +70,8 @@ public abstract class MemoryFileStoreWrite<T> extends AbstractFileStoreWrite<T> 
                 indexFactory,
                 deletionVectorsMaintainerFactory,
                 tableName,
-                options.writeMaxWritersToSpill());
+                options.writeMaxWritersToSpill(),
+                options.ignoreDelete());
         this.options = options;
         this.cacheManager = new CacheManager(options.lookupCacheMaxMemory());
     }

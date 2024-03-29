@@ -208,4 +208,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             }
         }
     }
+
+    @Override
+    protected boolean skipData(InternalRow data) {
+        return ignoreDelete && data.getRowKind().isRetract();
+    }
 }

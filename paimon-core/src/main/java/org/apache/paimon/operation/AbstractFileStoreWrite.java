@@ -67,6 +67,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
     private final int writerNumberMax;
     @Nullable private final IndexMaintainer.Factory<T> indexFactory;
     @Nullable private final DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory;
+    protected final boolean ignoreDelete;
 
     @Nullable protected IOManager ioManager;
 
@@ -87,7 +88,8 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
             @Nullable IndexMaintainer.Factory<T> indexFactory,
             @Nullable DeletionVectorsMaintainer.Factory deletionVectorsMaintainerFactory,
             String tableName,
-            int writerNumberMax) {
+            int writerNumberMax,
+            boolean ignoreDelete) {
         this.commitUser = commitUser;
         this.snapshotManager = snapshotManager;
         this.scan = scan;
@@ -96,6 +98,7 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
         this.writers = new HashMap<>();
         this.tableName = tableName;
         this.writerNumberMax = writerNumberMax;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Override
@@ -122,12 +125,18 @@ public abstract class AbstractFileStoreWrite<T> implements FileStoreWrite<T> {
 
     @Override
     public void write(BinaryRow partition, int bucket, T data) throws Exception {
+        if (skipData(data)) {
+            return;
+        }
+
         WriterContainer<T> container = getWriterWrapper(partition, bucket);
         container.writer.write(data);
         if (container.indexMaintainer != null) {
             container.indexMaintainer.notifyNewRecord(data);
         }
     }
+
+    protected abstract boolean skipData(T data);
 
     @Override
     public void compact(BinaryRow partition, int bucket, boolean fullCompaction) throws Exception {

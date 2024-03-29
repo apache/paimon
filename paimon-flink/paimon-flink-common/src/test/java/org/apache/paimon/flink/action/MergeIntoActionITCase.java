@@ -557,7 +557,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                                     put(
                                             CoreOptions.MERGE_ENGINE.key(),
                                             CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
-                                    put(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE.key(), "true");
+                                    put(CoreOptions.IGNORE_DELETE.key(), "true");
                                 }
                             }
                         }));

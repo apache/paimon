@@ -67,7 +67,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     public static final String SEQUENCE_GROUP = "sequence-group";
 
     private final InternalRow.FieldGetter[] getters;
-    private final boolean ignoreDelete;
     private final Map<Integer, SequenceGenerator> fieldSequences;
     private final boolean fieldSequenceEnabled;
     private final Map<Integer, FieldAggregator> fieldAggregators;
@@ -80,12 +79,10 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     protected PartialUpdateMergeFunction(
             InternalRow.FieldGetter[] getters,
-            boolean ignoreDelete,
             Map<Integer, SequenceGenerator> fieldSequences,
             Map<Integer, FieldAggregator> fieldAggregators,
             boolean fieldSequenceEnabled) {
         this.getters = getters;
-        this.ignoreDelete = ignoreDelete;
         this.fieldSequences = fieldSequences;
         this.fieldAggregators = fieldAggregators;
         this.fieldSequenceEnabled = fieldSequenceEnabled;
@@ -104,12 +101,8 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
 
-        // ignore delete?
+        // ignore or retract?
         if (kv.valueKind().isRetract()) {
-            if (ignoreDelete) {
-                return;
-            }
-
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);
                 return;
@@ -120,7 +113,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
                             "\n",
                             "By default, Partial update can not accept delete records,"
                                     + " you can choose one of the following solutions:",
-                            "1. Configure 'partial-update.ignore-delete' to ignore delete records.",
+                            "1. Configure 'ignore-delete' to ignore delete records.",
                             "2. Configure 'sequence-group's to retract partial columns.");
 
             throw new IllegalArgumentException(msg);
@@ -232,14 +225,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
         private static final long serialVersionUID = 1L;
 
-        private final boolean ignoreDelete;
         private final List<DataType> tableTypes;
         private final Map<Integer, SequenceGenerator> fieldSequences;
 
         private final Map<Integer, FieldAggregator> fieldAggregators;
 
         private Factory(Options options, RowType rowType, List<String> primaryKeys) {
-            this.ignoreDelete = options.get(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE);
             this.tableTypes = rowType.getFieldTypes();
 
             List<String> fieldNames = rowType.getFieldNames();
@@ -325,14 +316,12 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(Projection.of(projection).project(tableTypes)),
-                        ignoreDelete,
                         projectedSequences,
                         projectedAggregators,
                         !fieldSequences.isEmpty());
             } else {
                 return new PartialUpdateMergeFunction(
                         createFieldGetters(tableTypes),
-                        ignoreDelete,
                         fieldSequences,
                         fieldAggregators,
                         !fieldSequences.isEmpty());

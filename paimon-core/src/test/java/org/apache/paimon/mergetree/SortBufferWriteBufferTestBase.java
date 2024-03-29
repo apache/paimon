@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordComparator;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
@@ -177,7 +176,6 @@ public abstract class SortBufferWriteBufferTestBase {
         @Override
         protected MergeFunction<KeyValue> createMergeFunction() {
             Options options = new Options();
-            options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
             return PartialUpdateMergeFunction.factory(
                             options, RowType.of(DataTypes.BIGINT()), ImmutableList.of("key"))
                     .create();
@@ -258,8 +256,7 @@ public abstract class SortBufferWriteBufferTestBase {
         protected MergeFunction<KeyValue> createMergeFunction() {
             return FirstRowMergeFunction.factory(
                             new RowType(Lists.list(new DataField(0, "f0", new IntType()))),
-                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))),
-                            new Options())
+                            new RowType(Lists.list(new DataField(1, "f1", new BigIntType()))))
                     .create();
         }
     }

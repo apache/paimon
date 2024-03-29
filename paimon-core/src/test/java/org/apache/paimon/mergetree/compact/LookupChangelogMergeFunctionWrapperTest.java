@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -308,8 +307,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                         new RowType(
                                                 Lists.list(new DataField(0, "f0", new IntType()))),
                                         new RowType(
-                                                Lists.list(new DataField(1, "f1", new IntType()))),
-                                        false),
+                                                Lists.list(new DataField(1, "f1", new IntType())))),
                         highLevel::contains);
 
         // Without level-0
@@ -377,7 +375,6 @@ public class LookupChangelogMergeFunctionWrapperTest {
     @Test
     public void testPartialUpdateIgnoreDelete() {
         Options options = new Options();
-        options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
         LookupChangelogMergeFunctionWrapper function =
                 new LookupChangelogMergeFunctionWrapper(
                         LookupMergeFunction.wrap(

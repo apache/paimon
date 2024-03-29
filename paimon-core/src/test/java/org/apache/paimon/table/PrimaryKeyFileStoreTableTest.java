@@ -747,7 +747,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                             conf.set(
                                     CoreOptions.MERGE_ENGINE,
                                     CoreOptions.MergeEngine.PARTIAL_UPDATE);
-                            conf.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
+                            conf.set(CoreOptions.IGNORE_DELETE, true);
                         });
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
