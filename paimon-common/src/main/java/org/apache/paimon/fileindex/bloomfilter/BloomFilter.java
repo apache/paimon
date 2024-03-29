@@ -55,7 +55,7 @@ public class BloomFilter implements FileIndexer {
 
     public BloomFilter(DataType type) {
         this.converter = type.accept(ObjectToBytesVisitor.INSTANCE);
-        hashFunction = type.accept(FastHashForNumber.INSTANCE);
+        this.hashFunction = type.accept(FastHashForNumber.INSTANCE);
     }
 
     public String name() {
