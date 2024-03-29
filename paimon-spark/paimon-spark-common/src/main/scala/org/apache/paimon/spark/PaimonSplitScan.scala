@@ -16,16 +16,21 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.commands
+package org.apache.paimon.spark
 
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.types.RowType
+import org.apache.paimon.table.Table
+import org.apache.paimon.table.source.{DataSplit, Split}
 
-private[spark] trait WithFileStoreTable {
+import org.apache.spark.sql.connector.read.{Batch, Scan}
+import org.apache.spark.sql.types.StructType
 
-  def table: FileStoreTable
+/** For internal use only. */
+case class PaimonSplitScan(table: Table, dataSplits: Array[DataSplit]) extends Scan {
 
-  def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
+  override def readSchema(): StructType = SparkTypeUtils.fromPaimonRowType(table.rowType())
 
-  def rowType: RowType = table.rowType()
+  override def toBatch: Batch = {
+    PaimonBatch(dataSplits.asInstanceOf[Array[Split]], table.newReadBuilder)
+  }
+
 }

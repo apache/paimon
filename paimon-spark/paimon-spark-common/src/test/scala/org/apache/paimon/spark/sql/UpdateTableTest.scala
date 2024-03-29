@@ -26,15 +26,86 @@ import org.assertj.core.api.Assertions.{assertThat, assertThatThrownBy}
 
 class UpdateTableTest extends PaimonSparkTestBase {
 
-  test(s"test update append only table") {
+  import testImplicits._
+
+  test(s"Paimon Update: append-only table") {
     spark.sql(s"""
                  |CREATE TABLE T (id INT, name STRING, dt STRING)
                  |""".stripMargin)
 
-    spark.sql("INSERT INTO T VALUES (1, 'a', '11'), (2, 'b', '22')")
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
 
-    assertThatThrownBy(() => spark.sql("UPDATE T SET name = 'a_new' WHERE id = 1"))
-      .hasMessageContaining("Only support to update table with primary keys.")
+    spark.sql("UPDATE T SET name = 'a_new' WHERE id = 1")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a_new", "2024"), (2, "b", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    val snapshotManager = loadTable("T").snapshotManager()
+    var lastSnapshotId = snapshotManager.latestSnapshotId()
+    spark.sql("UPDATE T SET name = concat(name, '2') WHERE id % 2 == 0")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a_new", "2024"), (2, "b2", "2024"), (3, "c", "2025"), (4, "d2", "2025")).toDF()
+    )
+    assertThat(lastSnapshotId + 1).isEqualTo(snapshotManager.latestSnapshotId())
+
+    lastSnapshotId = snapshotManager.latestSnapshotId()
+    spark.sql("UPDATE T SET name = 'empty_commit' WHERE id > 100")
+    // no data need to be updated, it's an empty commit.
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a_new", "2024"), (2, "b2", "2024"), (3, "c", "2025"), (4, "d2", "2025")).toDF()
+    )
+    assertThat(lastSnapshotId).isEqualTo(snapshotManager.latestSnapshotId())
+  }
+
+  test(s"Paimon Update: append-only table with partition") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    spark.sql("UPDATE T SET name = concat(name, '2') WHERE dt <= '2024'")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a2", "2024"), (2, "b2", "2024"), (3, "c", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("UPDATE T SET name = concat(name, '3') WHERE dt = '2025' and id % 2 == 1")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a2", "2024"), (2, "b2", "2024"), (3, "c3", "2025"), (4, "d", "2025")).toDF()
+    )
+
+    spark.sql("UPDATE T SET name = concat(name, '4') WHERE id % 2 == 0")
+    checkAnswer(
+      spark.sql("SELECT * FROM T ORDER BY id"),
+      Seq((1, "a2", "2024"), (2, "b24", "2024"), (3, "c3", "2025"), (4, "d4", "2025")).toDF()
+    )
+  }
+
+  test("Paimon Update: append-only table, condition contains subquery") {
+    spark.sql(s"""
+                 |CREATE TABLE T (id INT, name STRING, dt STRING) PARTITIONED BY (dt)
+                 |""".stripMargin)
+
+    spark.sql("""
+                |INSERT INTO T
+                |VALUES (1, 'a', '2024'), (2, 'b', '2024'), (3, 'c', '2025'), (4, 'd', '2025')
+                |""".stripMargin)
+
+    Seq(1, 2).toDF("id").createOrReplaceTempView("updated_ids")
+    assertThatThrownBy(
+      () => spark.sql("UPDATE T set name = 'in_new' WHERE id IN (SELECT * FROM updated_ids)"))
+      .hasMessageContaining("Subqueries are not supported")
   }
 
   CoreOptions.MergeEngine.values().foreach {

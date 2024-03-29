@@ -21,7 +21,6 @@ package org.apache.paimon.spark.commands
 import org.apache.paimon.options.Options
 import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor
 import org.apache.paimon.spark.{InsertInto, SparkTable}
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper.convertConditionToPaimonPredicate
 import org.apache.paimon.spark.leafnode.PaimonLeafRunnableCommand
 import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable

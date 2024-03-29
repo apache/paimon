@@ -24,6 +24,7 @@ import org.apache.paimon.types.RowType
 
 import org.apache.spark.sql.SparkSession
 import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
+import org.apache.spark.sql.catalyst.analysis.Resolver
 import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
 import org.apache.spark.sql.internal.SQLConf
@@ -100,35 +101,37 @@ trait ExpressionHelper extends PredicateHelper {
       throw new UnsupportedOperationException(
         s"Unsupported update expression: $other, only support update with PrimitiveType and StructType.")
   }
-}
 
-object ExpressionHelper {
-
-  case class FakeLogicalPlan(exprs: Seq[Expression], children: Seq[LogicalPlan])
-    extends LogicalPlan {
-    override def output: Seq[Attribute] = Nil
-
-    override protected def withNewChildrenInternal(
-        newChildren: IndexedSeq[LogicalPlan]): FakeLogicalPlan = copy(children = newChildren)
-  }
-
-  def resolveFilter(spark: SparkSession, plan: LogicalPlan, where: String): Expression = {
-    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(where)
+  def resolveFilter(spark: SparkSession, plan: LogicalPlan, conditionSql: String): Expression = {
+    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(conditionSql)
     val filter = Filter(unResolvedExpression, plan)
     spark.sessionState.analyzer.execute(filter) match {
       case filter: Filter => filter.condition
-      case _ => throw new RuntimeException(s"Could not resolve expression $where in plan: $plan")
+      case _ =>
+        throw new RuntimeException(s"Could not resolve expression $conditionSql in plan: $plan")
     }
   }
 
-  def onlyHasPartitionPredicate(
+  def isPredicatePartitionColumnsOnly(
+      condition: Expression,
+      partitionColumns: Seq[String],
+      resolver: Resolver
+  ): Boolean = {
+    condition.references.forall(r => partitionColumns.exists(resolver(r.name, _)))
+  }
+
+  /**
+   * A valid predicate should meet two requirements: 1) This predicate only contains partition
+   * columns. 2) This predicate doesn't contain subquery.
+   */
+  def isValidPredicate(
       spark: SparkSession,
       expr: Expression,
       partitionCols: Array[String]): Boolean = {
-    val resolvedNameEquals = spark.sessionState.analyzer.resolver
+    val resolver = spark.sessionState.analyzer.resolver
     splitConjunctivePredicates(expr).forall(
       e =>
-        e.references.forall(r => partitionCols.exists(resolvedNameEquals(r.name, _))) &&
+        isPredicatePartitionColumnsOnly(e, partitionCols, resolver) &&
           !SubqueryExpression.hasSubquery(expr))
   }
 
@@ -148,12 +151,16 @@ object ExpressionHelper {
     val predicates = filters.map(converter.convert)
     PredicateBuilder.and(predicates: _*)
   }
+}
 
-  def splitConjunctivePredicates(condition: Expression): Seq[Expression] = {
-    condition match {
-      case And(cond1, cond2) =>
-        splitConjunctivePredicates(cond1) ++ splitConjunctivePredicates(cond2)
-      case other => other :: Nil
-    }
+object ExpressionHelper {
+
+  case class FakeLogicalPlan(exprs: Seq[Expression], children: Seq[LogicalPlan])
+    extends LogicalPlan {
+    override def output: Seq[Attribute] = Nil
+
+    override protected def withNewChildrenInternal(
+        newChildren: IndexedSeq[LogicalPlan]): FakeLogicalPlan = copy(children = newChildren)
   }
+
 }

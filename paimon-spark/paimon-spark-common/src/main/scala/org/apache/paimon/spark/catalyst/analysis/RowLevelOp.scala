@@ -18,28 +18,63 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.CoreOptions.MergeEngine
+import org.apache.paimon.AppendOnlyFileStore
+import org.apache.paimon.CoreOptions.{MERGE_ENGINE, MergeEngine}
+import org.apache.paimon.options.Options
+import org.apache.paimon.spark.catalyst.analysis.RowLevelOp.{AppendTable, PrimaryKeyTable}
+import org.apache.paimon.table.Table
 
 sealed trait RowLevelOp {
-  val supportedMergeEngine: Seq[MergeEngine]
+
+  val name: String = this.getClass.getSimpleName
+
+  protected val supportedMergeEngine: Seq[MergeEngine]
+
+  protected val supportedTable: Seq[String]
+
+  def checkValidity(table: Table): Unit = {
+    if (!supportedTable.contains(table.getClass.getSimpleName)) {
+      throw new UnsupportedOperationException(s"Only support to $name table with primary keys.")
+    }
+
+    val mergeEngine = Options.fromMap(table.options).get(MERGE_ENGINE)
+    if (!supportedMergeEngine.contains(mergeEngine)) {
+      throw new UnsupportedOperationException(
+        s"merge engine $mergeEngine can not support $name, currently only ${supportedMergeEngine
+            .mkString(", ")} can support $name.")
+    }
+  }
 }
 
 case object Delete extends RowLevelOp {
-  override def toString: String = "delete"
 
   override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
+
+  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable)
+
 }
 
 case object Update extends RowLevelOp {
-  override def toString: String = "update"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+
+  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable, AppendTable)
+
 }
 
 case object MergeInto extends RowLevelOp {
-  override def toString: String = "merge into"
 
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
+
+  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable)
+
+}
+
+object RowLevelOp {
+
+  val AppendTable = "AppendOnlyFileStoreTable"
+  val PrimaryKeyTable = "PrimaryKeyFileStoreTable"
+
 }

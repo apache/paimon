@@ -30,7 +30,7 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
   override def apply(plan: LogicalPlan): LogicalPlan = {
     plan.resolveOperators {
       case d @ DeleteFromTable(PaimonRelation(table), condition) if d.resolved =>
-        checkPaimonTable(table)
+        checkPaimonTable(table.getTable)
 
         DeleteFromPaimonTableCommand(table, d)
     }

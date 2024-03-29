@@ -46,7 +46,7 @@ trait PaimonMergeIntoBase
         val v2Table = relation.table.asInstanceOf[SparkTable]
         val targetOutput = relation.output
 
-        checkPaimonTable(v2Table)
+        checkPaimonTable(v2Table.getTable)
         checkCondition(merge.mergeCondition)
         merge.matchedActions.flatMap(_.condition).foreach(checkCondition)
         merge.notMatchedActions.flatMap(_.condition).foreach(checkCondition)
