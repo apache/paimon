@@ -18,18 +18,17 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import java.io.DataInput;
+import java.io.DataOutput;
+import java.io.IOException;
+import java.util.Collection;
+import java.util.List;
 import org.apache.hadoop.classification.InterfaceAudience;
 import org.apache.hadoop.classification.InterfaceStability;
 import org.apache.hadoop.io.Writable;
 import org.apache.hadoop.util.bloom.HashFunction;
 import org.apache.hadoop.util.bloom.Key;
 import org.apache.hadoop.util.hash.Hash;
-
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.IOException;
-import java.util.Collection;
-import java.util.List;
 
 /* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -91,12 +90,29 @@ public abstract class HadoopFilter implements Writable {
     public abstract boolean add(Key key);
 
     /**
+     * Adds a key (byte[]) to <i>this</i> filter.
+     *
+     * @param hash64 The hash to add.
+     * @return {@code true} if the value did not previously exist in the filter (is a new record).
+     *     Note, that a false positive may occur.
+     */
+    public abstract boolean addHash(long hash64);
+
+    /**
      * Determines wether a specified key belongs to <i>this</i> filter.
      *
      * @param key The key to test.
      * @return boolean True if the specified key belongs to <i>this</i> filter. False otherwise.
      */
     public abstract boolean membershipTest(Key key);
+
+    /**
+     * Determines wether a specified key belongs to <i>this</i> filter.
+     *
+     * @param hash64 The hash to test.
+     * @return boolean True if the specified key belongs to <i>this</i> filter. False otherwise.
+     */
+    public abstract boolean membershipTest(long hash64);
 
     /**
      * Peforms a logical AND between <i>this</i> filter and a specified filter.

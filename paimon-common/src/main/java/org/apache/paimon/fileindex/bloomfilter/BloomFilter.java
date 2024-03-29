@@ -18,22 +18,22 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
+import java.io.DataInputStream;
+import java.io.DataOutputStream;
+import java.io.IOException;
+import java.util.Optional;
+import java.util.function.Function;
+import org.apache.hadoop.util.bloom.Key;
+import org.apache.hadoop.util.hash.Hash;
+import org.apache.paimon.fileindex.FastHashForNumber;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fileindex.ObjectToBytesVisitor;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
-
-import org.apache.hadoop.util.bloom.Key;
-import org.apache.hadoop.util.hash.Hash;
-
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
-import java.util.function.Function;
 
 /** Bloom filter for secondary index. */
 public class BloomFilter implements FileIndexer {
@@ -49,8 +49,12 @@ public class BloomFilter implements FileIndexer {
 
     private final Function<Object, byte[]> converter;
 
+    private final Optional<Function<Object, Long>> hashFunction;
+
+
     public BloomFilter(DataType type) {
-        converter = type.accept(ObjectToBytesVisitor.INSTANCE);
+        this.converter = type.accept(ObjectToBytesVisitor.INSTANCE);
+        hashFunction = type.accept(FastHashForNumber.INSTANCE);
     }
 
     public String name() {
@@ -69,10 +73,18 @@ public class BloomFilter implements FileIndexer {
 
     private class Writer implements FileIndexWriter {
 
+
+        private Writer() {
+        }
+
         @Override
         public void write(Object key) {
-            filterKey.set(converter.apply(key), 1.0);
-            filter.add(filterKey);
+            if (hashFunction.isPresent()) {
+                filter.addHash(hashFunction.get().apply(key));
+            } else {
+                filterKey.set(converter.apply(key), 1.0);
+                filter.add(filterKey);
+            }
         }
 
         @Override
@@ -107,8 +119,12 @@ public class BloomFilter implements FileIndexer {
 
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object key) {
-            filterKey.set(converter.apply(key), 1.0);
-            return filter.membershipTest(filterKey);
+            if (hashFunction.isPresent()) {
+                return filter.membershipTest(hashFunction.get().apply(key));
+            } else {
+                filterKey.set(converter.apply(key), 1.0);
+                return filter.membershipTest(filterKey);
+            }
         }
     }
 }

@@ -18,13 +18,12 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.hadoop.classification.InterfaceAudience;
-import org.apache.hadoop.classification.InterfaceStability;
-import org.apache.hadoop.util.bloom.Key;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
+import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.hadoop.util.bloom.Key;
 
 /* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -79,6 +78,7 @@ public class HadoopDynamicBloomFilter extends HadoopFilter {
 
         HadoopBloomFilter bf = getActiveStandardBF();
 
+        // get or advance
         if (bf == null) {
             addRow();
             bf = matrix[matrix.length - 1];
@@ -86,6 +86,25 @@ public class HadoopDynamicBloomFilter extends HadoopFilter {
         }
 
         if (bf.add(key)) {
+            currentNbRecord++;
+            return true;
+        }
+
+        return false;
+    }
+
+    @Override
+    public boolean addHash(long hash64) {
+        HadoopBloomFilter bf = getActiveStandardBF();
+
+        // get or advance
+        if (bf == null) {
+            addRow();
+            bf = matrix[matrix.length - 1];
+            currentNbRecord = 0;
+        }
+
+        if (bf.addHash(hash64)) {
             currentNbRecord++;
             return true;
         }
@@ -121,6 +140,17 @@ public class HadoopDynamicBloomFilter extends HadoopFilter {
 
         for (int i = 0; i < matrix.length; i++) {
             if (matrix[i].membershipTest(key)) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    @Override
+    public boolean membershipTest(long hash64) {
+        for (int i = 0; i < matrix.length; i++) {
+            if (matrix[i].membershipTest(hash64)) {
                 return true;
             }
         }

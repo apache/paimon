@@ -18,14 +18,13 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.hadoop.classification.InterfaceAudience;
-import org.apache.hadoop.classification.InterfaceStability;
-import org.apache.hadoop.util.bloom.Key;
-
 import java.io.DataInput;
 import java.io.DataOutput;
 import java.io.IOException;
 import java.util.BitSet;
+import org.apache.hadoop.classification.InterfaceAudience;
+import org.apache.hadoop.classification.InterfaceStability;
+import org.apache.hadoop.util.bloom.Key;
 
 /* This file is based on source code from the Hadoop Project (https://hadoop.apache.org//), licensed by the Apache
  * Software Foundation (ASF) under the Apache License, Version 2.0. See the NOTICE file distributed with this work for
@@ -88,6 +87,24 @@ public class HadoopBloomFilter extends HadoopFilter {
     }
 
     @Override
+    public boolean addHash(long hash64) {
+        boolean newRecord = false;
+        int hash1 = (int) hash64 % vectorSize;
+        int hash2 = (int) (hash64 >>> 32);
+        for (int i = 0; i < nbHash; i++) {
+            int hash = (hash1 + (i * hash2)) % vectorSize ;
+            if (hash < 0) {
+                hash = ~hash;
+            }
+            if (!bits.get(hash)) {
+                newRecord = true;
+                bits.set(hash);
+            }
+        }
+        return newRecord;
+    }
+
+    @Override
     public void and(HadoopFilter filter) {
         if (filter == null
                 || !(filter instanceof HadoopBloomFilter)
@@ -113,6 +130,23 @@ public class HadoopBloomFilter extends HadoopFilter {
             }
         }
         return true;
+    }
+
+    @Override
+    public boolean membershipTest(long hash64) {
+        int hash1 = (int) hash64;
+        int hash2 = (int) (hash64 >>> 32);
+        for (int i = 0; i < nbHash; i++) {
+            int hash = (hash1 + (i * hash2))%vectorSize ;
+            if (hash < 0) {
+                hash = ~hash;
+            }
+            if (!bits.get(hash)) {
+                return false;
+            }
+        }
+
+        return false;
     }
 
     @Override
