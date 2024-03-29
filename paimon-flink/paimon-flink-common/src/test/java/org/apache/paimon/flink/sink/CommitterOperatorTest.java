@@ -303,6 +303,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     0,
                                                     new NewFilesIncrement(
                                                             Collections.emptyList(),
+                                                            Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
                                                             Collections.emptyList(),
@@ -319,6 +320,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     0,
                                                     new NewFilesIncrement(
                                                             Collections.emptyList(),
+                                                            Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
                                                             Collections.emptyList(),
@@ -333,6 +335,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
                                                     new NewFilesIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
@@ -368,6 +371,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     0,
                                                     new NewFilesIncrement(
                                                             Collections.emptyList(),
+                                                            Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
                                                             Collections.emptyList(),
@@ -384,6 +388,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     0,
                                                     new NewFilesIncrement(
                                                             Collections.emptyList(),
+                                                            Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(
                                                             Collections.emptyList(),
@@ -398,6 +403,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
                                                     new NewFilesIncrement(
+                                                            Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
                                                     new CompactIncrement(

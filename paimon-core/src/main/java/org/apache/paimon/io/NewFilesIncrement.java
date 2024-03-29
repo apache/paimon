@@ -27,19 +27,29 @@ import java.util.stream.Collectors;
 public class NewFilesIncrement {
 
     private final List<DataFileMeta> newFiles;
+    private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> changelogFiles;
 
-    public NewFilesIncrement(List<DataFileMeta> newFiles, List<DataFileMeta> changelogFiles) {
+    public NewFilesIncrement(
+            List<DataFileMeta> newFiles,
+            List<DataFileMeta> deletedFiles,
+            List<DataFileMeta> changelogFiles) {
         this.newFiles = newFiles;
+        this.deletedFiles = deletedFiles;
         this.changelogFiles = changelogFiles;
     }
 
     public static NewFilesIncrement emptyIncrement() {
-        return new NewFilesIncrement(Collections.emptyList(), Collections.emptyList());
+        return new NewFilesIncrement(
+                Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 
     public List<DataFileMeta> newFiles() {
         return newFiles;
+    }
+
+    public List<DataFileMeta> deletedFiles() {
+        return deletedFiles;
     }
 
     public List<DataFileMeta> changelogFiles() {
