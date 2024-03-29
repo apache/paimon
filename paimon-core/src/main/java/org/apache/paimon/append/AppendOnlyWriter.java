@@ -29,7 +29,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -235,8 +235,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     }
 
     private CommitIncrement drainIncrement() {
-        NewFilesIncrement newFilesIncrement =
-                new NewFilesIncrement(
+        DataIncrement dataIncrement =
+                new DataIncrement(
                         new ArrayList<>(newFiles),
                         new ArrayList<>(deletedFiles),
                         Collections.emptyList());
@@ -251,7 +251,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         compactBefore.clear();
         compactAfter.clear();
 
-        return new CommitIncrement(newFilesIncrement, compactIncrement);
+        return new CommitIncrement(dataIncrement, compactIncrement);
     }
 
     @Override

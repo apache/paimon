@@ -19,21 +19,21 @@
 package org.apache.paimon.utils;
 
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 
 /** Changes to commit. */
 public class CommitIncrement {
 
-    private final NewFilesIncrement newFilesIncrement;
+    private final DataIncrement dataIncrement;
     private final CompactIncrement compactIncrement;
 
-    public CommitIncrement(NewFilesIncrement newFilesIncrement, CompactIncrement compactIncrement) {
-        this.newFilesIncrement = newFilesIncrement;
+    public CommitIncrement(DataIncrement dataIncrement, CompactIncrement compactIncrement) {
+        this.dataIncrement = dataIncrement;
         this.compactIncrement = compactIncrement;
     }
 
-    public NewFilesIncrement newFilesIncrement() {
-        return newFilesIncrement;
+    public DataIncrement newFilesIncrement() {
+        return dataIncrement;
     }
 
     public CompactIncrement compactIncrement() {
@@ -42,6 +42,6 @@ public class CommitIncrement {
 
     @Override
     public String toString() {
-        return newFilesIncrement.toString() + "\n" + compactIncrement;
+        return dataIncrement.toString() + "\n" + compactIncrement;
     }
 }

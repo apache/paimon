@@ -26,7 +26,7 @@ import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.flink.utils.TestingMetricUtils;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestCommittableSerializer;
 import org.apache.paimon.table.FileStoreTable;
@@ -301,7 +301,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
@@ -318,7 +318,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
@@ -334,7 +334,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
@@ -369,7 +369,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
@@ -386,7 +386,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),
@@ -402,7 +402,7 @@ public class CommitterOperatorTest extends CommitterOperatorTestBase {
                                             new CommitMessageImpl(
                                                     BinaryRow.EMPTY_ROW,
                                                     0,
-                                                    new NewFilesIncrement(
+                                                    new DataIncrement(
                                                             Collections.emptyList(),
                                                             Collections.emptyList(),
                                                             Collections.emptyList()),

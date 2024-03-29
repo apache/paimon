@@ -22,12 +22,12 @@ import org.apache.paimon.data.serializer.VersionedSerializer;
 import org.apache.paimon.index.IndexFileMetaSerializer;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMetaSerializer;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
 import org.apache.paimon.io.IndexIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -116,7 +116,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         return new CommitMessageImpl(
                 deserializeBinaryRow(view),
                 view.readInt(),
-                new NewFilesIncrement(
+                new DataIncrement(
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view)),

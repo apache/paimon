@@ -21,8 +21,8 @@ package org.apache.paimon.index;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.CompactIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.IndexIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.StreamTableCommit;
@@ -111,7 +111,7 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         return new CommitMessageImpl(
                 partition,
                 bucket,
-                new NewFilesIncrement(
+                new DataIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
