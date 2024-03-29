@@ -24,13 +24,13 @@ import java.util.Objects;
 import java.util.stream.Collectors;
 
 /** Newly created data files and changelog files. */
-public class NewFilesIncrement {
+public class DataIncrement {
 
     private final List<DataFileMeta> newFiles;
     private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> changelogFiles;
 
-    public NewFilesIncrement(
+    public DataIncrement(
             List<DataFileMeta> newFiles,
             List<DataFileMeta> deletedFiles,
             List<DataFileMeta> changelogFiles) {
@@ -39,8 +39,8 @@ public class NewFilesIncrement {
         this.changelogFiles = changelogFiles;
     }
 
-    public static NewFilesIncrement emptyIncrement() {
-        return new NewFilesIncrement(
+    public static DataIncrement emptyIncrement() {
+        return new DataIncrement(
                 Collections.emptyList(), Collections.emptyList(), Collections.emptyList());
     }
 
@@ -69,7 +69,7 @@ public class NewFilesIncrement {
             return false;
         }
 
-        NewFilesIncrement that = (NewFilesIncrement) o;
+        DataIncrement that = (DataIncrement) o;
         return Objects.equals(newFiles, that.newFiles)
                 && Objects.equals(changelogFiles, that.changelogFiles);
     }

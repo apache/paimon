@@ -230,7 +230,7 @@ public class DataFileMeta {
      *   <li>Paimon 0.2
      *       <ul>
      *         <li>Stores changelog files for {@link CoreOptions.ChangelogProducer#INPUT}. Changelog
-     *             files are moved to {@link NewFilesIncrement} since Paimon 0.3.
+     *             files are moved to {@link DataIncrement} since Paimon 0.3.
      *       </ul>
      * </ul>
      */

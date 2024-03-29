@@ -27,8 +27,8 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
-import org.apache.paimon.io.NewFilesIncrement;
 import org.apache.paimon.io.RollingFileWriter;
 import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
@@ -254,8 +254,8 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     }
 
     private CommitIncrement drainIncrement() {
-        NewFilesIncrement newFilesIncrement =
-                new NewFilesIncrement(
+        DataIncrement dataIncrement =
+                new DataIncrement(
                         new ArrayList<>(newFiles),
                         new ArrayList<>(deletedFiles),
                         new ArrayList<>(newFilesChangelog));
@@ -272,7 +272,7 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
         compactAfter.clear();
         compactChangelog.clear();
 
-        return new CommitIncrement(newFilesIncrement, compactIncrement);
+        return new CommitIncrement(dataIncrement, compactIncrement);
     }
 
     private void updateCompactResult(CompactResult result) {
