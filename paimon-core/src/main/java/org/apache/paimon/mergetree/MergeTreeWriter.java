@@ -311,7 +311,6 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
 
         // delete temporary files
         List<DataFileMeta> delete = new ArrayList<>(newFiles);
-        delete.addAll(deletedFiles);
         newFiles.clear();
         deletedFiles.clear();
 
