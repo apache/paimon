@@ -66,6 +66,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final CompactManager compactManager;
     private final boolean forceCompact;
     private final List<DataFileMeta> newFiles;
+    private final List<DataFileMeta> deletedFiles;
     private final List<DataFileMeta> compactBefore;
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
@@ -101,6 +102,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactManager = compactManager;
         this.forceCompact = forceCompact;
         this.newFiles = new ArrayList<>();
+        this.deletedFiles = new ArrayList<>();
         this.compactBefore = new ArrayList<>();
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
@@ -113,6 +115,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
         if (increment != null) {
             newFiles.addAll(increment.newFilesIncrement().newFiles());
+            deletedFiles.addAll(increment.newFilesIncrement().deletedFiles());
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
@@ -233,7 +236,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
     private CommitIncrement drainIncrement() {
         NewFilesIncrement newFilesIncrement =
-                new NewFilesIncrement(new ArrayList<>(newFiles), Collections.emptyList());
+                new NewFilesIncrement(
+                        new ArrayList<>(newFiles),
+                        new ArrayList<>(deletedFiles),
+                        Collections.emptyList());
         CompactIncrement compactIncrement =
                 new CompactIncrement(
                         new ArrayList<>(compactBefore),
@@ -241,6 +247,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                         Collections.emptyList());
 
         newFiles.clear();
+        deletedFiles.clear();
         compactBefore.clear();
         compactAfter.clear();
 

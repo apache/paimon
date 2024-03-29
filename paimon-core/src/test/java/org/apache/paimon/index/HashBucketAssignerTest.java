@@ -111,7 +111,8 @@ public class HashBucketAssignerTest extends PrimaryKeyTableTestBase {
         return new CommitMessageImpl(
                 partition,
                 bucket,
-                new NewFilesIncrement(Collections.emptyList(), Collections.emptyList()),
+                new NewFilesIncrement(
+                        Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()),
                 new IndexIncrement(Collections.singletonList(file)));

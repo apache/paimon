@@ -75,6 +75,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
         serializeBinaryRow(obj.partition(), view);
         view.writeInt(obj.bucket());
         dataFileSerializer.serializeList(message.newFilesIncrement().newFiles(), view);
+        dataFileSerializer.serializeList(message.newFilesIncrement().deletedFiles(), view);
         dataFileSerializer.serializeList(message.newFilesIncrement().changelogFiles(), view);
         dataFileSerializer.serializeList(message.compactIncrement().compactBefore(), view);
         dataFileSerializer.serializeList(message.compactIncrement().compactAfter(), view);
@@ -116,6 +117,7 @@ public class CommitMessageSerializer implements VersionedSerializer<CommitMessag
                 deserializeBinaryRow(view),
                 view.readInt(),
                 new NewFilesIncrement(
+                        dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view),
                         dataFileSerializer.deserializeList(view)),
                 new CompactIncrement(
