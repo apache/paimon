@@ -24,6 +24,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.flink.api.common.JobStatus;
 import org.apache.flink.configuration.CheckpointingOptions;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.configuration.RestartStrategyOptions;
 import org.apache.flink.configuration.StateBackendOptions;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.core.execution.SavepointFormatType;
@@ -149,6 +150,19 @@ public class SinkSavepointITCase extends AbstractTestBase {
         tEnv.getConfig()
                 .getConfiguration()
                 .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        tEnv.getConfig()
+                .getConfiguration()
+                .set(RestartStrategyOptions.RESTART_STRATEGY, "fixed-delay");
+        tEnv.getConfig()
+                .getConfiguration()
+                .set(
+                        RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_ATTEMPTS,
+                        Integer.MAX_VALUE);
+        tEnv.getConfig()
+                .getConfiguration()
+                .set(
+                        RestartStrategyOptions.RESTART_STRATEGY_FIXED_DELAY_DELAY,
+                        Duration.ofSeconds(1));
 
         String createCatalogSql =
                 String.join(
