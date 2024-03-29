@@ -40,8 +40,8 @@ public class ByteArraySeekableStreamTest {
         Assertions.assertThat(byteArraySeekableStream.available()).isEqualTo(b.length);
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
-            int position = RANDOM.nextInt(bl);
-            int length = RANDOM.nextInt(Math.max(b.length - position - 1, 0));
+            int position = RANDOM.nextInt(bl - 1);
+            int length = RANDOM.nextInt(b.length - position - 1);
             byte[] expected = new byte[length];
             System.arraycopy(b, position, expected, 0, length);
 
