@@ -103,7 +103,7 @@ public class ExternalBuffer implements RowBuffer {
         long bytes = 0;
 
         for (ChannelWithMeta spillChannelID : spilledChannelIDs) {
-            bytes += spillChannelID.getSize();
+            bytes += spillChannelID.getNumEstimatedBytes();
         }
         return bytes;
     }
@@ -153,6 +153,7 @@ public class ExternalBuffer implements RowBuffer {
         BufferFileWriter writer = ioManager.createBufferFileWriter(channel);
         int numRecordBuffers = inMemoryBuffer.getNumRecordBuffers();
         ArrayList<MemorySegment> segments = inMemoryBuffer.getRecordBufferSegments();
+        long numEstimatedBytes = 0;
         try {
             // spill in memory buffer in zero-copy.
             for (int i = 0; i < numRecordBuffers; i++) {
@@ -162,6 +163,7 @@ public class ExternalBuffer implements RowBuffer {
                                 ? inMemoryBuffer.getNumBytesInLastBuffer()
                                 : segment.size();
                 writer.writeBlock(Buffer.create(segment, bufferSize));
+                numEstimatedBytes += bufferSize;
             }
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
@@ -177,7 +179,8 @@ public class ExternalBuffer implements RowBuffer {
                 new ChannelWithMeta(
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
-                        inMemoryBuffer.getNumBytesInLastBuffer()));
+                        inMemoryBuffer.getNumBytesInLastBuffer(),
+                        numEstimatedBytes));
 
         inMemoryBuffer.reset();
     }

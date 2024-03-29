@@ -202,7 +202,11 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
             }
         }
 
-        return new ChannelWithMeta(mergedChannelID, numBlocksWritten, numBytesInLastBlock);
+        return new ChannelWithMeta(
+                mergedChannelID,
+                numBlocksWritten,
+                numBytesInLastBlock,
+                output.getNumCompressedBytes());
     }
 
     // -------------------------------------------------------------------------------------------

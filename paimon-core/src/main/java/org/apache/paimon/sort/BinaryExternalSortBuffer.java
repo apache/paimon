@@ -168,7 +168,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         long bytes = 0;
 
         for (ChannelWithMeta spillChannelID : spillChannelIDs) {
-            bytes += spillChannelID.getSize();
+            bytes += spillChannelID.getNumEstimatedBytes();
         }
         return bytes;
     }
@@ -265,7 +265,9 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             throw e;
         }
 
-        spillChannelIDs.add(new ChannelWithMeta(channel, blockCount, bytesInLastBuffer));
+        spillChannelIDs.add(
+                new ChannelWithMeta(
+                        channel, blockCount, bytesInLastBuffer, output.getNumCompressedBytes()));
         inMemorySortBuffer.clear();
     }
 }

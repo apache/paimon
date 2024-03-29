@@ -35,6 +35,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.DataType;
@@ -600,7 +601,8 @@ public class AppendOnlyWriterTest {
                         spillable,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
-                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()));
+                                options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
+                        MemorySize.MAX_VALUE);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

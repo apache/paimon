@@ -170,7 +170,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                         new HeapMemorySegmentPool(
                                 coreOptions.writeBufferSize() / 2, coreOptions.pageSize()),
                         new InternalRowSerializer(table.rowType()),
-                        true);
+                        true,
+                        coreOptions.writeBufferSpillDiskSize());
     }
 
     public void bootstrapKey(InternalRow value) throws IOException {
