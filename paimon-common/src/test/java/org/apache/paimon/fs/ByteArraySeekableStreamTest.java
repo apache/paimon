@@ -40,7 +40,7 @@ public class ByteArraySeekableStreamTest {
         Assertions.assertThat(byteArraySeekableStream.available()).isEqualTo(b.length);
 
         for (int i = 0; i < RANDOM.nextInt(1000); i++) {
-            int position = RANDOM.nextInt(bl);
+            int position = RANDOM.nextInt(bl - 1);
             int length = RANDOM.nextInt(b.length - position - 1);
             byte[] expected = new byte[length];
             System.arraycopy(b, position, expected, 0, length);
@@ -55,7 +55,11 @@ public class ByteArraySeekableStreamTest {
             int position = RANDOM.nextInt(bl);
             byteArraySeekableStream.seek(position);
             for (int j = 0; j < 100; j++) {
-                Assertions.assertThat(b[position + j])
+                int testPosition = position + j;
+                if (testPosition >= b.length) {
+                    break;
+                }
+                Assertions.assertThat(b[testPosition])
                         .isEqualTo((byte) byteArraySeekableStream.read());
             }
         }
