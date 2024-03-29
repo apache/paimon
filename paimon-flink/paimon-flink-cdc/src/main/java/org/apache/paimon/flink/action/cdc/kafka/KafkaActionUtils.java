@@ -83,9 +83,12 @@ public class KafkaActionUtils {
                     Pattern.compile(kafkaConfig.get(KafkaConnectorOptions.TOPIC_PATTERN)));
         }
 
-        kafkaSourceBuilder
-                .setValueOnlyDeserializer(new SimpleStringSchema())
-                .setGroupId(kafkaPropertiesGroupId(kafkaConfig));
+        KafkaValueOnlyDeserializationSchemaWrapper<String> schema =
+                new KafkaValueOnlyDeserializationSchemaWrapper<>(new SimpleStringSchema());
+        kafkaSourceBuilder.setDeserializer(schema);
+
+        kafkaSourceBuilder.setGroupId(kafkaPropertiesGroupId(kafkaConfig));
+
         Properties properties = createKafkaProperties(kafkaConfig);
 
         StartupMode startupMode =
