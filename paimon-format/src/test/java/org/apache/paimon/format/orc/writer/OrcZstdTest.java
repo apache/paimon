@@ -145,12 +145,10 @@ class OrcZstdTest {
         try (ZstdCodec zstdCodec = new ZstdCodec()) {
             // write bytes to heap buffer.
             assertTrue(zstdCodec.compress(in, out, null, zstdCodec.getDefaultOptions()));
-            int position = out.position();
             out.flip();
             // copy heap buffer to direct buffer.
-            directOut.put(out.array());
+            directOut.put(out);
             directOut.flip();
-            directOut.limit(position);
 
             zstdCodec.decompress(directOut, directResult);
 
