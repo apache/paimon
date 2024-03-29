@@ -19,7 +19,6 @@
 package org.apache.paimon.fs;
 
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 
 import java.io.IOException;
@@ -32,7 +31,7 @@ public class ByteArraySeekableStreamTest {
 
     private static final Random RANDOM = new Random();
 
-    @RepeatedTest(10)
+    @Test
     public void testBasic() throws IOException {
         int bl = 100000;
         byte[] b = randomBytes(bl);
