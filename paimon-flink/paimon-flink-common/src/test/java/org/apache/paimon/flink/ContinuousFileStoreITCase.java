@@ -29,6 +29,7 @@ import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 import org.apache.flink.table.api.StatementSet;
 import org.apache.flink.table.api.ValidationException;
 import org.apache.flink.types.Row;
+import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -549,19 +550,20 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() {
+    public void testIgnoreDelete() throws Exception {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
+        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
-
+        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
         sql("DELETE FROM ignore_delete WHERE pk = 1");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
-
         sql("INSERT INTO ignore_delete VALUES (1, 'B')");
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
+
+        assertThat(iterator.collect(2))
+                .containsExactlyInAnyOrder(
+                        Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
+        iterator.close();
     }
 
     @Test

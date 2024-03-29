@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.types.DataField;
@@ -38,6 +39,7 @@ import javax.annotation.Nullable;
 
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -157,6 +159,23 @@ public class MergeIntoAction extends TableActionBase {
                 table.rowType().getFields().stream()
                         .map(DataField::name)
                         .collect(Collectors.toList());
+    }
+
+    /**
+     * The {@link CoreOptions.MergeEngine}s will process -U/-D records in different ways, but we
+     * want these records to be sunk directly. This method is a workaround which disables merge
+     * engine settings and force compaction.
+     */
+    private void changeIgnoreMergeEngine() {
+        if (CoreOptions.fromMap(table.options()).mergeEngine()
+                != CoreOptions.MergeEngine.DEDUPLICATE) {
+            Map<String, String> dynamicOptions = new HashMap<>();
+            dynamicOptions.put(
+                    CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.DEDUPLICATE.toString());
+            // force compaction
+            dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
+            table = ((FileStoreTable) table).internalCopyWithoutCheck(dynamicOptions);
+        }
     }
 
     public MergeIntoAction withTargetAlias(String targetAlias) {

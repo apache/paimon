@@ -52,7 +52,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         + " WITH ('merge-engine'='partial-update');",
                 "CREATE TABLE IF NOT EXISTS dwd_orders ("
                         + "OrderID INT, OrderNumber INT, PersonID INT, LastName STRING, FirstName STRING, Age INT, PRIMARY KEY (OrderID) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='partial-update', 'partial-update.ignore-delete'='true');",
+                        + " WITH ('merge-engine'='partial-update', 'ignore-delete'='true');",
                 "CREATE TABLE IF NOT EXISTS ods_orders (OrderID INT, OrderNumber INT, PersonID INT, PRIMARY KEY (OrderID) NOT ENFORCED) WITH ('changelog-producer'='input', 'continuous.discovery-interval'='1s');",
                 "CREATE TABLE IF NOT EXISTS dim_persons (PersonID INT, LastName STRING, FirstName STRING, Age INT, PRIMARY KEY (PersonID) NOT ENFORCED) WITH ('changelog-producer'='input', 'continuous.discovery-interval'='1s');");
     }
@@ -407,5 +407,31 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT COUNT(*) FROM TEST")).containsExactlyInAnyOrder(Row.of(1L));
         insert1.close();
         insert2.close();
+    }
+
+    @Test
+    public void testIgnoreDelete() throws Exception {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a INT, g INT) WITH ("
+                        + " 'merge-engine' = 'partial-update',"
+                        + " 'ignore-delete' = 'true',"
+                        + " 'fields.a.aggregate-function' = 'sum',"
+                        + " 'fields.g.sequence-group'='a')");
+
+        String id =
+                TestValuesTableFactory.registerData(
+                        Arrays.asList(
+                                Row.ofKind(RowKind.INSERT, 1, 10, 1),
+                                Row.ofKind(RowKind.DELETE, 1, 10, 2),
+                                Row.ofKind(RowKind.INSERT, 1, 20, 3)));
+        streamSqlIter(
+                        "CREATE TEMPORARY TABLE input (pk INT PRIMARY KEY NOT ENFORCED, a INT, g INT) "
+                                + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
+                                + "'changelog-mode' = 'I,D')",
+                        id)
+                .close();
+        sEnv.executeSql("INSERT INTO ignore_delete SELECT * FROM input").await();
+
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, 30, 3));
     }
 }

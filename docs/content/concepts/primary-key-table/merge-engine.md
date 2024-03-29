@@ -38,7 +38,7 @@ result in strange behavior. When the input is out of order, we recommend that yo
 
 `deduplicate` merge engine is the default merge engine. Paimon will only keep the latest record and throw away other records with the same primary keys.
 
-Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.
+Specifically, if the latest record is a `DELETE` record, all records with the same primary keys will be deleted.  You can config `ignore-delete` to ignore it.
 
 ## Partial Update
 
@@ -59,7 +59,7 @@ For streaming queries, `partial-update` merge engine must be used together with 
 
 {{< hint info >}}
 By default, Partial update can not accept delete records, you can choose one of the following solutions:
-- Configure 'partial-update.ignore-delete' to ignore delete records.
+- Configure 'ignore-delete' to ignore delete records.
 - Configure 'sequence-group's to retract partial columns.
   {{< /hint >}}
 
@@ -328,7 +328,7 @@ By specifying `'merge-engine' = 'first-row'`, users can keep the first row of th
 {{< hint info >}}
 1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "concepts/primary-key-table/changelog-producer" >}}).
 2. You can not specify `sequence.field`.
-3. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `first-row.ignore-delete` to ignore these two kinds records.
+3. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
    {{< /hint >}}
 
 This is of great help in replacing log deduplication in streaming computation.

@@ -110,7 +110,7 @@ public class FirstRowITCase extends CatalogITCaseBase {
         sql(
                 "CREATE TABLE IF NOT EXISTS T1 ("
                         + "a INT, b INT, c STRING, PRIMARY KEY (a) NOT ENFORCED)"
-                        + " WITH ('merge-engine'='first-row', 'first-row.ignore-delete' = 'true',"
+                        + " WITH ('merge-engine'='first-row', 'ignore-delete' = 'true',"
                         + " 'changelog-producer' = 'lookup');");
 
         List<Row> input =
