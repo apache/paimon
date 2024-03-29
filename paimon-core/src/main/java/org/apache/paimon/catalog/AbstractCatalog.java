@@ -205,7 +205,7 @@ public abstract class AbstractCatalog implements Catalog {
     @Override
     public void dropTable(Identifier identifier, boolean ignoreIfNotExists)
             throws TableNotExistException {
-        dropTable(identifier, ignoreIfNotExists, false);
+        dropTable(identifier, ignoreIfNotExists, true);
     }
 
     @Override
@@ -381,6 +381,16 @@ public abstract class AbstractCatalog implements Catalog {
      * @return The catalog warehouse path.
      */
     public abstract String warehouse();
+
+    /**
+     * Get the trash path for the catalog if exists. The default trash path is `warehouse` +
+     * "/.Trash".
+     *
+     * @return The catalog trash path.
+     */
+    public String trashPath() {
+        return warehouse() + "/.Trash";
+    }
 
     public Map<String, String> options() {
         return catalogOptions.toMap();

@@ -139,7 +139,7 @@ public class FileSystemCatalog extends AbstractCatalog {
                             fileIO.rename(
                                     path,
                                     new Path(
-                                            trash(),
+                                            trashPath(),
                                             identifier.getDatabaseName()
                                                     + ".db/"
                                                     + identifier.getObjectName())));
@@ -209,9 +209,5 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public boolean caseSensitive() {
         return catalogOptions.get(CASE_SENSITIVE);
-    }
-
-    public String trash() {
-        return warehouse + "/.Trash";
     }
 }

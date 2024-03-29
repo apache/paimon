@@ -71,4 +71,22 @@ abstract class DDLTestBase extends PaimonSparkTestBase {
         }
     }
   }
+
+  test("Paimon DDL: drop table not purge") {
+    withTable(tableName0) {
+      spark.sql(s"CREATE TABLE $tableName0 (a INT) USING parquet")
+      spark.sql(s"INSERT INTO $tableName0 VALUES (1)")
+      spark.sql(s"DROP TABLE $tableName0")
+      assert(tableInTrash(tableName0))
+    }
+  }
+
+  test("Paimon DDL: drop table purge") {
+    withTable(tableName0) {
+      spark.sql(s"CREATE TABLE $tableName0 (a INT) USING parquet")
+      spark.sql(s"INSERT INTO $tableName0 VALUES (1)")
+      spark.sql(s"DROP TABLE $tableName0 PURGE")
+      assert(tableInTrash(tableName0) === false)
+    }
+  }
 }

@@ -20,6 +20,7 @@ package org.apache.paimon.hive;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaChange;
@@ -61,7 +62,10 @@ public class HiveCatalogTest extends CatalogTestBase {
     @BeforeEach
     public void setUp() throws Exception {
         super.setUp();
-        HiveConf hiveConf = new HiveConf();
+        HiveConf hiveConf =
+                HiveCatalog.createHiveConf(
+                        null, HADOOP_CONF_DIR, HadoopUtils.getHadoopConfiguration(new Options()));
+        hiveConf.set("fs.defaultFS", warehouse);
         String jdoConnectionURL = "jdbc:derby:memory:" + UUID.randomUUID();
         hiveConf.setVar(METASTORECONNECTURLKEY, jdoConnectionURL + ";create=true");
         HiveMetaStoreClient metaStoreClient = new HiveMetaStoreClient(hiveConf);
@@ -269,5 +273,12 @@ public class HiveCatalogTest extends CatalogTestBase {
         } catch (Exception e) {
             fail("Test failed due to exception: " + e.getMessage());
         }
+    }
+
+    @Override
+    protected Path trashPath(String database, String table) {
+        return new Path(
+                System.getenv("HOME"),
+                ".Trash/Current" + tempFile.toString() + "/" + database + ".db/" + table);
     }
 }

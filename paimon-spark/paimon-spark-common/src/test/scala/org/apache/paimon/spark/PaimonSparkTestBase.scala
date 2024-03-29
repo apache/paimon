@@ -36,6 +36,7 @@ import org.scalactic.source.Position
 import org.scalatest.Tag
 
 import java.io.File
+import java.nio.file.Files
 
 import scala.util.Random
 
@@ -117,5 +118,9 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
       Some(spark.sessionState.catalogManager.currentCatalog),
       Some(SparkIdentifier.of(Array(this.dbName0), tableName))
     )
+  }
+
+  protected def tableInTrash(tableName: String): Boolean = {
+    Files.exists(new File(tempDBDir, s".Trash/$dbName0.db/$tableName").toPath)
   }
 }

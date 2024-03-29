@@ -51,7 +51,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 /** Base test class of paimon catalog in {@link Catalog}. */
 public abstract class CatalogTestBase {
 
-    @TempDir java.nio.file.Path tempFile;
+    @TempDir protected java.nio.file.Path tempFile;
     protected String warehouse;
     protected FileIO fileIO;
     protected Catalog catalog;
@@ -359,12 +359,33 @@ public abstract class CatalogTestBase {
 
     @Test
     public void testDropTable() throws Exception {
+        testDropTableImpl(true);
+    }
+
+    @Test
+    public void testDropTableNotPurge() throws Exception {
+        testDropTableImpl(false);
+    }
+
+    protected Path trashPath(String database, String table) {
+        return new Path(warehouse, ".Trash/" + database + ".db/" + table);
+    }
+
+    private void testDropTableImpl(boolean ifPurge) throws Exception {
         catalog.createDatabase("test_db", false);
 
         // Drop table deletes the table when it exists
         Identifier identifier = Identifier.create("test_db", "table_to_drop");
         catalog.createTable(identifier, DEFAULT_TABLE_SCHEMA, false);
-        catalog.dropTable(identifier, false);
+        if (ifPurge) {
+            catalog.dropTable(identifier, true);
+            // Dropped table should not be in trash
+            assertThat(fileIO.exists(trashPath("test_db", "table_to_drop"))).isFalse();
+        } else {
+            catalog.dropTable(identifier, true, false);
+            // Dropped table should be in trash
+            assertThat(fileIO.exists(trashPath("test_db", "table_to_drop"))).isTrue();
+        }
         boolean exists = catalog.tableExists(identifier);
         assertThat(exists).isFalse();
 
