@@ -278,7 +278,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
                 readLines(
                         String.format("kafka/%s/table/startupmode/%s-data-1.txt", format, format));
         try {
-            writeRecordsToKafka(topic, lines);
+            writeRecordsToKafka(topic, lines, true);
         } catch (Exception e) {
             throw new Exception(String.format("Failed to write %s data to Kafka.", format), e);
         }

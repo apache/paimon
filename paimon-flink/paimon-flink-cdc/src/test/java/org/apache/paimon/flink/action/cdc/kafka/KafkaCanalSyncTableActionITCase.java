@@ -719,7 +719,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
-            writeRecordsToKafka(topic, lines);
+            writeRecordsToKafka(topic, lines, true);
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }
@@ -764,7 +764,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
         // ---------- Write the Canal json into Kafka -------------------
         List<String> lines = readLines("kafka/canal/table/startupmode/canal-data-1.txt");
         try {
-            writeRecordsToKafka(topic, lines);
+            writeRecordsToKafka(topic, lines, true);
         } catch (Exception e) {
             throw new Exception("Failed to write canal data to Kafka.", e);
         }

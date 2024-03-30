@@ -34,6 +34,7 @@ import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
+import org.apache.kafka.clients.producer.RecordMetadata;
 import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.AfterEach;
@@ -63,6 +64,7 @@ import java.util.Properties;
 import java.util.Timer;
 import java.util.TimerTask;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -278,6 +280,10 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     }
 
     void writeRecordsToKafka(String topic, List<String> lines) throws Exception {
+        writeRecordsToKafka(topic, lines, false);
+    }
+
+    void writeRecordsToKafka(String topic, List<String> lines, boolean wait) throws Exception {
         Properties producerProperties = getStandardProps();
         producerProperties.setProperty("retries", "0");
         producerProperties.put(
@@ -289,7 +295,11 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
             try {
                 JsonNode jsonNode = objectMapper.readTree(lines.get(i));
                 if (!StringUtils.isEmpty(lines.get(i))) {
-                    kafkaProducer.send(new ProducerRecord<>(topic, lines.get(i)));
+                    Future<RecordMetadata> sendFuture =
+                            kafkaProducer.send(new ProducerRecord<>(topic, lines.get(i)));
+                    if (wait) {
+                        sendFuture.get();
+                    }
                 }
             } catch (Exception e) {
                 // ignore
