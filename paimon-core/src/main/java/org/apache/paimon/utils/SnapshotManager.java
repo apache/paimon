@@ -245,10 +245,15 @@ public class SnapshotManager implements Serializable {
      * Returns the latest snapshot earlier than the timestamp mills. A non-existent snapshot may be
      * returned if all snapshots are equal to or later than the timestamp mills.
      */
-    public @Nullable Long earlierThanTimeMills(long timestampMills) {
-        Long changelogEarliest = earliestLongLivedChangelogId();
+    public @Nullable Long earlierThanTimeMills(long timestampMills, boolean startFromChangelog) {
         Long earliestSnapshot = earliestSnapshotId();
-        Long earliest = changelogEarliest == null ? earliestSnapshot : changelogEarliest;
+        Long earliest;
+        if (startFromChangelog) {
+            Long earliestChangelog = earliestLongLivedChangelogId();
+            earliest = earliestChangelog == null ? earliestSnapshot : earliestChangelog;
+        } else {
+            earliest = earliestSnapshot;
+        }
         Long latest = latestSnapshotId();
 
         if (earliest == null || latest == null) {

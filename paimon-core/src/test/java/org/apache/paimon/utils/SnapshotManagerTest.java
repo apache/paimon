@@ -86,7 +86,7 @@ public class SnapshotManagerTest {
                 // pick a random time equal to one of the snapshots
                 time = millis.get(random.nextInt(numSnapshots));
             }
-            Long actual = snapshotManager.earlierThanTimeMills(time);
+            Long actual = snapshotManager.earlierThanTimeMills(time, false);
 
             if (millis.get(numSnapshots - 1) < time) {
                 assertThat(actual).isEqualTo(firstSnapshotId + numSnapshots - 1);

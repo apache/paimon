@@ -66,7 +66,8 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(3).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, timestamp, false, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
@@ -80,7 +81,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, System.currentTimeMillis());
+                        snapshotManager, System.currentTimeMillis(), false, false);
         assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
@@ -100,7 +101,8 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(1).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, timestamp, false, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         // next snapshot
@@ -155,20 +157,20 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
 
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(3).timeMillis());
+                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), false, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(2).timeMillis());
+                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), false, false);
 
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(2);
 
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.changelog(1).timeMillis());
+                        snapshotManager, snapshotManager.changelog(1).timeMillis(), false, false);
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(1);
 
