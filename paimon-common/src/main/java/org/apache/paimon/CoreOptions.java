@@ -310,7 +310,7 @@ public class CoreOptions implements Serializable {
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
     public static final ConfigOption<MemorySize> WRITE_BUFFER_MAX_DISK_SIZE =
-            key("write-buffer.max-disk-size")
+            key("write-buffer-spill.max-disk-size")
                     .memoryType()
                     .defaultValue(MemorySize.MAX_VALUE)
                     .withDescription(
