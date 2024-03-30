@@ -21,7 +21,6 @@ package org.apache.paimon.table.source.snapshot;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
@@ -117,6 +116,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         FileStoreTable table =
                 createFileStoreTable(
                         true,
@@ -128,7 +128,6 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
                                         + "/"
                                         + UUID.randomUUID()));
         SnapshotManager snapshotManager = table.snapshotManager();
-        ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
@@ -157,20 +156,20 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
 
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), false, false);
+                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), true, true);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), false, false);
+                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), true, true);
 
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(2);
 
         scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, snapshotManager.changelog(1).timeMillis(), false, false);
+                        snapshotManager, snapshotManager.changelog(1).timeMillis(), true, true);
         assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
                 .isEqualTo(1);
 

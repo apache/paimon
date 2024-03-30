@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.Changelog;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
@@ -386,6 +387,10 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
             case DELTA:
                 return snapshot.deltaManifests(manifestList);
             case CHANGELOG:
+                if (snapshot instanceof Changelog) {
+                    return snapshot.changelogManifests(manifestList);
+                }
+
                 if (snapshot.version() > Snapshot.TABLE_STORE_02_VERSION) {
                     return snapshot.changelogManifests(manifestList);
                 }

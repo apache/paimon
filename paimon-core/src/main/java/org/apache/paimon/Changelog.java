@@ -39,7 +39,7 @@ import java.util.Map;
  */
 public class Changelog extends Snapshot {
 
-    private static final int CURRENT_VERSION = 3;
+    private static final int CURRENT_VERSION = 1;
 
     public Changelog(
             long id,
