@@ -20,9 +20,10 @@ package org.apache.paimon.spark.sql
 
 import org.apache.paimon.spark.PaimonHiveTestBase
 
+import org.apache.spark.sql.{Row, SparkSession}
 import org.junit.jupiter.api.Assertions
 
-class DDLWithHiveCatalogTest extends PaimonHiveTestBase {
+abstract class DDLWithHiveCatalogTestBase extends PaimonHiveTestBase {
 
   test("Paimon DDL with hive catalog: create database with location and comment") {
     Seq("spark_catalog", paimonHiveCatalogName).foreach {
@@ -64,6 +65,44 @@ class DDLWithHiveCatalogTest extends PaimonHiveTestBase {
         }
     }
   }
+
+  test("Paimon DDL with hive catalog: set default database") {
+    var reusedSpark = spark
+
+    Seq("paimon", "spark_catalog", paimonHiveCatalogName).foreach {
+      catalogName =>
+        {
+          val dbName = s"${catalogName}_default_db"
+          val tblName = s"${dbName}_tbl"
+
+          reusedSpark.sql(s"use $catalogName")
+          reusedSpark.sql(s"create database $dbName")
+          reusedSpark.sql(s"use $dbName")
+          reusedSpark.sql(s"create table $tblName (id int, name string, dt string) using paimon")
+          reusedSpark.stop()
+
+          reusedSpark = SparkSession
+            .builder()
+            .master("local[2]")
+            .config(sparkConf)
+            .config("spark.sql.defaultCatalog", catalogName)
+            .config(s"spark.sql.catalog.$catalogName.defaultDatabase", dbName)
+            .getOrCreate()
+
+          if (catalogName.equals("spark_catalog") && !supportDefaultDatabaseWithSessionCatalog) {
+            checkAnswer(reusedSpark.sql("show tables").select("tableName"), Nil)
+            reusedSpark.sql(s"use $dbName")
+          }
+          checkAnswer(reusedSpark.sql("show tables").select("tableName"), Row(tblName) :: Nil)
+
+          reusedSpark.sql(s"drop table $tblName")
+        }
+    }
+
+    reusedSpark.stop()
+  }
+
+  def supportDefaultDatabaseWithSessionCatalog = true
 
   def getDatabaseLocation(dbName: String): String = {
     spark

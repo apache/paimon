@@ -68,6 +68,12 @@ Flink connector options for paimon.
 
 {{< generated/flink_connector_configuration >}}
 
+### SparkCatalogOptions
+
+Spark catalog options for paimon.
+
+{{< generated/spark_catalog_configuration >}}
+
 ### SparkConnectorOptions
 
 Spark connector options for paimon.

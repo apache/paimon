@@ -54,6 +54,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.spark.SparkCatalogOptions.DEFAULT_DATABASE;
 import static org.apache.paimon.spark.SparkTypeUtils.toPaimonType;
 
 /** Spark {@link TableCatalog} for paimon. */
@@ -65,6 +66,8 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     protected Catalog catalog = null;
 
+    private String defaultDatabase;
+
     @Override
     public void initialize(String name, CaseInsensitiveStringMap options) {
         this.catalogName = name;
@@ -73,6 +76,8 @@ public class SparkCatalog extends SparkBaseCatalog {
                         Options.fromMap(options),
                         SparkSession.active().sessionState().newHadoopConf());
         this.catalog = CatalogFactory.createCatalog(catalogContext);
+        this.defaultDatabase =
+                options.getOrDefault(DEFAULT_DATABASE.key(), DEFAULT_DATABASE.defaultValue());
         if (!catalog.databaseExists(defaultNamespace()[0])) {
             try {
                 createNamespace(defaultNamespace(), new HashMap<>());
@@ -88,7 +93,7 @@ public class SparkCatalog extends SparkBaseCatalog {
 
     @Override
     public String[] defaultNamespace() {
-        return new String[] {Catalog.DEFAULT_DATABASE};
+        return new String[] {defaultDatabase};
     }
 
     @Override
