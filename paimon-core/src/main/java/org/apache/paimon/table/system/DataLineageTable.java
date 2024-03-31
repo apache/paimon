@@ -22,9 +22,9 @@ import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
+import org.apache.paimon.lineage.DataLineageEntity;
 import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.lineage.LineageMetaFactory;
-import org.apache.paimon.lineage.TableLineageEntity;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
@@ -34,6 +34,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
@@ -55,12 +56,13 @@ import java.util.function.BiFunction;
 
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
-/** Base lineage table for source and sink table lineage. */
-public abstract class TableLineageTable implements ReadonlyTable {
+/** Base lineage table for source and sink data lineage. */
+public abstract class DataLineageTable implements ReadonlyTable {
+
     protected final LineageMetaFactory lineageMetaFactory;
     protected final Options options;
 
-    protected TableLineageTable(LineageMetaFactory lineageMetaFactory, Options options) {
+    protected DataLineageTable(LineageMetaFactory lineageMetaFactory, Options options) {
         this.lineageMetaFactory = lineageMetaFactory;
         this.options = options;
     }
@@ -87,32 +89,33 @@ public abstract class TableLineageTable implements ReadonlyTable {
         fields.add(new DataField(0, "database_name", new VarCharType(VarCharType.MAX_LENGTH)));
         fields.add(new DataField(1, "table_name", new VarCharType(VarCharType.MAX_LENGTH)));
         fields.add(new DataField(2, "job_name", new VarCharType(VarCharType.MAX_LENGTH)));
-        fields.add(new DataField(3, "create_time", new TimestampType()));
+        fields.add(new DataField(3, "barrier_id", new BigIntType()));
+        fields.add(new DataField(4, "snapshot_id", new BigIntType()));
+        fields.add(new DataField(5, "create_time", new TimestampType()));
         return new RowType(fields);
     }
 
     @Override
     public List<String> primaryKeys() {
-        return Arrays.asList("database_name", "table_name", "job_name");
+        return Arrays.asList("database_name", "table_name", "job_name", "barrier_id");
     }
 
-    /** Table lineage read with lineage meta query. */
-    protected static class TableLineageRead implements InnerTableRead {
+    /** Data lineage read with lineage meta query. */
+    protected static class DataLineageRead implements InnerTableRead {
         private final LineageMetaFactory lineageMetaFactory;
         private final Options options;
-        private final BiFunction<LineageMeta, Predicate, Iterator<TableLineageEntity>>
-                tableLineageQuery;
+        private final BiFunction<LineageMeta, Predicate, Iterator<DataLineageEntity>>
+                dataLineageQuery;
         @Nullable private Predicate predicate;
         private int[][] projection;
 
-        protected TableLineageRead(
+        protected DataLineageRead(
                 LineageMetaFactory lineageMetaFactory,
                 Options options,
-                BiFunction<LineageMeta, Predicate, Iterator<TableLineageEntity>>
-                        tableLineageQuery) {
+                BiFunction<LineageMeta, Predicate, Iterator<DataLineageEntity>> dataLineageQuery) {
             this.lineageMetaFactory = lineageMetaFactory;
             this.options = options;
-            this.tableLineageQuery = tableLineageQuery;
+            this.dataLineageQuery = dataLineageQuery;
             this.predicate = null;
         }
 
@@ -136,11 +139,11 @@ public abstract class TableLineageTable implements ReadonlyTable {
         @Override
         public RecordReader<InternalRow> createReader(Split split) throws IOException {
             try (LineageMeta lineageMeta = lineageMetaFactory.create(() -> options)) {
-                Iterator<TableLineageEntity> tableLineages =
-                        tableLineageQuery.apply(lineageMeta, predicate);
+                Iterator<DataLineageEntity> dataLineages =
+                        dataLineageQuery.apply(lineageMeta, predicate);
                 return new IteratorRecordReader<>(
                         Iterators.transform(
-                                tableLineages,
+                                dataLineages,
                                 entity -> {
                                     checkNotNull(entity);
                                     GenericRow row =
@@ -148,6 +151,8 @@ public abstract class TableLineageTable implements ReadonlyTable {
                                                     BinaryString.fromString(entity.getDatabase()),
                                                     BinaryString.fromString(entity.getTable()),
                                                     BinaryString.fromString(entity.getJob()),
+                                                    entity.getBarrierId(),
+                                                    entity.getSnapshotId(),
                                                     entity.getCreateTime());
                                     if (projection != null) {
                                         return ProjectedRow.from(projection).replaceRow(row);

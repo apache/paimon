@@ -18,7 +18,9 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.lineage.DataLineageEntity;
+import org.apache.paimon.lineage.DataLineageEntityImpl;
 import org.apache.paimon.lineage.LineageMeta;
 import org.apache.paimon.lineage.LineageMetaFactory;
 import org.apache.paimon.lineage.TableLineageEntity;
@@ -114,6 +116,40 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
         assertThat(sourceTableRow.getField("job_name")).isEqualTo("select_t_job");
     }
 
+    @Test
+    public void testDataLineage() throws Exception {
+
+        List<Row> sinkTableRows = new ArrayList<>();
+        try (CloseableIterator<Row> iterator =
+                tEnv.executeSql("SELECT * FROM sys.sink_data_lineage").collect()) {
+            while (iterator.hasNext()) {
+                sinkTableRows.add(iterator.next());
+            }
+        }
+        assertThat(sinkTableRows.size()).isEqualTo(1);
+        Row sinkTableRow = sinkTableRows.get(0);
+        assertThat(sinkTableRow.getField("database_name")).isEqualTo("default");
+        assertThat(sinkTableRow.getField("table_name")).isEqualTo("T");
+        assertThat(sinkTableRow.getField("job_name")).isEqualTo("t_job");
+        assertThat(sinkTableRow.getField("barrier_id")).isEqualTo(1L);
+        assertThat(sinkTableRow.getField("snapshot_id")).isEqualTo(2L);
+
+        List<Row> sourceTableRows = new ArrayList<>();
+        try (CloseableIterator<Row> iterator =
+                tEnv.executeSql("SELECT * FROM sys.source_data_lineage").collect()) {
+            while (iterator.hasNext()) {
+                sourceTableRows.add(iterator.next());
+            }
+        }
+        assertThat(sourceTableRows.size()).isEqualTo(1);
+        Row sourceTableRow = sourceTableRows.get(0);
+        assertThat(sourceTableRow.getField("database_name")).isEqualTo("default");
+        assertThat(sourceTableRow.getField("table_name")).isEqualTo("T");
+        assertThat(sourceTableRow.getField("job_name")).isEqualTo("t_job");
+        assertThat(sinkTableRow.getField("barrier_id")).isEqualTo(1L);
+        assertThat(sinkTableRow.getField("snapshot_id")).isEqualTo(2L);
+    }
+
     private static String getTableLineageKey(TableLineageEntity entity) {
         return String.format("%s.%s.%s", entity.getDatabase(), entity.getTable(), entity.getJob());
     }
@@ -135,6 +171,15 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
     /** Throwing specific exception in each method. */
     private static class TestingMemoryLineageMeta implements LineageMeta {
+
+        DataLineageEntity dataLineageEntity =
+                new DataLineageEntityImpl(
+                        "default",
+                        "T",
+                        "t_job",
+                        1,
+                        2,
+                        Timestamp.fromEpochMillis(System.currentTimeMillis()));
 
         @Override
         public void saveSourceTableLineage(TableLineageEntity entity) {
@@ -187,7 +232,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         @Override
         public Iterator<DataLineageEntity> sourceDataLineages(@Nullable Predicate predicate) {
-            throw new UnsupportedOperationException();
+            return Collections.singletonList(dataLineageEntity).iterator();
         }
 
         @Override
@@ -197,7 +242,7 @@ public class FlinkLineageITCase extends CatalogITCaseBase {
 
         @Override
         public Iterator<DataLineageEntity> sinkDataLineages(@Nullable Predicate predicate) {
-            throw new UnsupportedOperationException();
+            return Collections.singletonList(dataLineageEntity).iterator();
         }
 
         @Override

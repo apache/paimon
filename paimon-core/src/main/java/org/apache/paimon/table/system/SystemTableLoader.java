@@ -45,8 +45,10 @@ import static org.apache.paimon.table.system.OptionsTable.OPTIONS;
 import static org.apache.paimon.table.system.PartitionsTable.PARTITIONS;
 import static org.apache.paimon.table.system.ReadOptimizedTable.READ_OPTIMIZED;
 import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
+import static org.apache.paimon.table.system.SinkDataLineageTable.SINK_DATA_LINEAGE;
 import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
+import static org.apache.paimon.table.system.SourceDataLineageTable.SOURCE_DATA_LINEAGE;
 import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
@@ -116,6 +118,24 @@ public class SystemTableLoader {
                                     "Lineage meta should be configured for catalog with %s",
                                     LINEAGE_META.key()));
                     return new SinkTableLineageTable(lineageMetaFactory, catalogOptions);
+                }
+            case SOURCE_DATA_LINEAGE:
+                {
+                    checkNotNull(
+                            lineageMetaFactory,
+                            String.format(
+                                    "Lineage meta should be configured for catalog with %s",
+                                    LINEAGE_META.key()));
+                    return new SourceDataLineageTable(lineageMetaFactory, catalogOptions);
+                }
+            case SINK_DATA_LINEAGE:
+                {
+                    checkNotNull(
+                            lineageMetaFactory,
+                            String.format(
+                                    "Lineage meta should be configured for catalog with %s",
+                                    LINEAGE_META.key()));
+                    return new SinkDataLineageTable(lineageMetaFactory, catalogOptions);
                 }
             default:
                 return null;
