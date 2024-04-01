@@ -1251,9 +1251,7 @@ public class CoreOptions implements Serializable {
 
     public boolean changelogLifecycleDecoupled() {
         return changelogNumRetainMax() > snapshotNumRetainMax()
-                || options.get(CHANGELOG_TIME_RETAINED)
-                                .compareTo(options.get(SNAPSHOT_TIME_RETAINED))
-                        > 0
+                || changelogTimeRetain().compareTo(snapshotTimeRetain()) > 0
                 || changelogNumRetainMin() > snapshotNumRetainMin();
     }
 
