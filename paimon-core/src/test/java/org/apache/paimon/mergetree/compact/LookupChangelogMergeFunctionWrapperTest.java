@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.InternalRow;
@@ -27,7 +26,6 @@ import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.FieldAggregator;
 import org.apache.paimon.mergetree.compact.aggregate.FieldSumAgg;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.IntType;
@@ -38,7 +36,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
@@ -308,8 +305,7 @@ public class LookupChangelogMergeFunctionWrapperTest {
                                         new RowType(
                                                 Lists.list(new DataField(0, "f0", new IntType()))),
                                         new RowType(
-                                                Lists.list(new DataField(1, "f1", new IntType()))),
-                                        false),
+                                                Lists.list(new DataField(1, "f1", new IntType())))),
                         highLevel::contains);
 
         // Without level-0
@@ -372,31 +368,5 @@ public class LookupChangelogMergeFunctionWrapperTest {
         assertThat(changelogs).hasSize(0);
         kv = result.result();
         assertThat(kv).isNull();
-    }
-
-    @Test
-    public void testPartialUpdateIgnoreDelete() {
-        Options options = new Options();
-        options.set(CoreOptions.PARTIAL_UPDATE_IGNORE_DELETE, true);
-        LookupChangelogMergeFunctionWrapper function =
-                new LookupChangelogMergeFunctionWrapper(
-                        LookupMergeFunction.wrap(
-                                PartialUpdateMergeFunction.factory(
-                                        options,
-                                        DataTypes.ROW(DataTypes.INT()),
-                                        Collections.singletonList("f0")),
-                                RowType.of(DataTypes.INT()),
-                                RowType.of(DataTypes.INT())),
-                        key -> null,
-                        EQUALISER,
-                        false,
-                        LookupStrategy.CHANGELOG_ONLY,
-                        null);
-
-        function.reset();
-        function.add(new KeyValue().replace(row(1), 1, DELETE, row(1)).setLevel(2));
-        ChangelogResult result = function.getResult();
-        assertThat(result).isNotNull();
-        assertThat(result.result()).isNull();
     }
 }

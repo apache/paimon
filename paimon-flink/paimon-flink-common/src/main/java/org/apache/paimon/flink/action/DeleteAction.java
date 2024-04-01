@@ -46,7 +46,6 @@ public class DeleteAction extends TableActionBase {
             String filter,
             Map<String, String> catalogConfig) {
         super(warehouse, databaseName, tableName, catalogConfig);
-        changeIgnoreMergeEngine();
         this.filter = filter;
     }
 

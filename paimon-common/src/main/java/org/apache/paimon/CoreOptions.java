@@ -255,23 +255,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
-    public static final ConfigOption<Boolean> DEDUPLICATE_IGNORE_DELETE =
-            key("deduplicate.ignore-delete")
+    public static final ConfigOption<Boolean> IGNORE_DELETE =
+            key("ignore-delete")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in deduplicate mode.");
-
-    public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
-            key("partial-update.ignore-delete")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in partial-update mode.");
-
-    public static final ConfigOption<Boolean> FIRST_ROW_IGNORE_DELETE =
-            key("first-row.ignore-delete")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in first-row mode.");
+                    .withDeprecatedKeys(
+                            "first-row.ignore-delete",
+                            "deduplicate.ignore-delete",
+                            "partial-update.ignore-delete")
+                    .withDescription("Whether to ignore delete records.");
 
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
@@ -1273,6 +1265,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public boolean ignoreDelete() {
+        return options.get(IGNORE_DELETE);
     }
 
     public SortEngine sortEngine() {
