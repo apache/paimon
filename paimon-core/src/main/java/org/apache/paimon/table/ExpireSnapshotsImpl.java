@@ -243,7 +243,6 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.changelogRecordCount(),
                                     snapshot.watermark(),
                                     null);
-                    commitChangelog(changelog);
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, false);
                 } else {
                     // no changelog
@@ -265,9 +264,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.changelogRecordCount(),
                                     snapshot.watermark(),
                                     snapshot.statistics());
-                    commitChangelog(changelog);
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
                 }
+                commitChangelog(changelog);
             } else {
                 snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
             }
