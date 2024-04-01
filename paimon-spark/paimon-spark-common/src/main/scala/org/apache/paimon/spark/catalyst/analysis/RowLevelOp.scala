@@ -26,7 +26,7 @@ import org.apache.paimon.table.Table
 
 sealed trait RowLevelOp {
 
-  val name: String = this.getClass.getSimpleName
+  val name: String = this.getClass.getSimpleName.stripSuffix("$")
 
   protected val supportedMergeEngine: Seq[MergeEngine]
 
