@@ -116,6 +116,8 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         Options options = new Options();
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
         options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MIN, 10);
         options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
         FileStoreTable table =
                 createFileStoreTable(
