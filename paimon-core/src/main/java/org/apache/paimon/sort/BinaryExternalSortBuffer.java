@@ -272,7 +272,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
         spillChannelIDs.add(
                 new ChannelWithMeta(
-                        channel, blockCount, bytesInLastBuffer, output.getChannel().getSize()));
+                        channel, blockCount, bytesInLastBuffer, output.getWriteBytes()));
         inMemorySortBuffer.clear();
     }
 }

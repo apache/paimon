@@ -158,6 +158,7 @@ public class ExternalBuffer implements RowBuffer {
         BufferFileWriter writer = ioManager.createBufferFileWriter(channel);
         int numRecordBuffers = inMemoryBuffer.getNumRecordBuffers();
         ArrayList<MemorySegment> segments = inMemoryBuffer.getRecordBufferSegments();
+        long writeBytes;
         try {
             // spill in memory buffer in zero-copy.
             for (int i = 0; i < numRecordBuffers; i++) {
@@ -168,6 +169,7 @@ public class ExternalBuffer implements RowBuffer {
                                 : segment.size();
                 writer.writeBlock(Buffer.create(segment, bufferSize));
             }
+            writeBytes = writer.getSize();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
@@ -183,7 +185,7 @@ public class ExternalBuffer implements RowBuffer {
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
                         inMemoryBuffer.getNumBytesInLastBuffer(),
-                        writer.getSize()));
+                        writeBytes));
 
         inMemoryBuffer.reset();
     }
