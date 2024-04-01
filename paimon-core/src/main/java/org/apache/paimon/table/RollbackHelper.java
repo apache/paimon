@@ -156,9 +156,6 @@ public class RollbackHelper {
             if (changelog.changelogManifestList() != null) {
                 snapshotDeletion.deleteAddedDataFiles(changelog.changelogManifestList());
             }
-            if (changelog.deltaManifestList() != null) {
-                snapshotDeletion.deleteAddedDataFiles(changelog.deltaManifestList());
-            }
         }
 
         // delete directories

@@ -243,6 +243,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.changelogRecordCount(),
                                     snapshot.watermark(),
                                     null);
+                    commitChangelog(changelog);
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, false);
                 } else {
                     // no changelog
@@ -264,13 +265,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
                                     snapshot.changelogRecordCount(),
                                     snapshot.watermark(),
                                     snapshot.statistics());
+                    commitChangelog(changelog);
                     snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
-                }
-                try {
-                    snapshotManager.commitChangelog(changelog, id);
-                    snapshotManager.commitLongLivedChangelogLatestHint(id);
-                } catch (IOException e) {
-                    throw new UncheckedIOException(e);
                 }
             } else {
                 snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
@@ -280,6 +276,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
 
         writeEarliestHint(endExclusiveId);
         return (int) (endExclusiveId - beginInclusiveId);
+    }
+
+    private void commitChangelog(Changelog changelog) {
+        try {
+            snapshotManager.commitChangelog(changelog, changelog.id());
+            snapshotManager.commitLongLivedChangelogLatestHint(changelog.id());
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
     }
 
     private void writeEarliestHint(long earliest) {

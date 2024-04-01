@@ -33,13 +33,12 @@ import java.util.Map;
 /**
  * The metadata of changelog. It generates from the snapshot file during expiration. So that the
  * changelog of the table can outlive the snapshot's lifecycle. A table's changelog can come from
- * two source:
+ * one source:
  * <li>The changelog file. Eg: from the changelog-producer = 'input'
- * <li>The delta files in the APPEND commits when the changelog-producer = 'none'
  */
 public class Changelog extends Snapshot {
 
-    private static final int CURRENT_VERSION = 1;
+    private static final int CURRENT_VERSION = Snapshot.CURRENT_VERSION;
 
     public Changelog(
             long id,

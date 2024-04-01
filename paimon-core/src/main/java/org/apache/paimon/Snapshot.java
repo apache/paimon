@@ -69,7 +69,7 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     public static final int TABLE_STORE_02_VERSION = 1;
-    private static final int CURRENT_VERSION = 3;
+    protected static final int CURRENT_VERSION = 3;
 
     protected static final String FIELD_VERSION = "version";
     protected static final String FIELD_ID = "id";
