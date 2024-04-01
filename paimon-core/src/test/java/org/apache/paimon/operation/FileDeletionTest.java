@@ -60,6 +60,7 @@ import java.util.Map;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.stream.Collectors;
 
+import static org.apache.paimon.operation.FileStoreCommitImpl.mustConflictCheck;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.assertPathNotExists;
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
@@ -729,7 +730,7 @@ public class FileDeletionTest {
                         Collections.emptyMap(),
                         Snapshot.CommitKind.APPEND,
                         store.snapshotManager().latestSnapshot(),
-                        null,
+                        mustConflictCheck(),
                         DEFAULT_MAIN_BRANCH,
                         null);
     }

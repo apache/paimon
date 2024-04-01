@@ -154,11 +154,6 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public Set<Long> filterCommitted(Set<Long> commitIdentifiers) {
-        return commit.filterCommitted(commitIdentifiers);
-    }
-
-    @Override
     public void commit(List<CommitMessage> commitMessages) {
         checkCommitted();
         commit(COMMIT_IDENTIFIER, commitMessages);
@@ -198,13 +193,13 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(Collections.singletonList(committable));
+        commitMultiple(Collections.singletonList(committable), false);
     }
 
-    public void commitMultiple(List<ManifestCommittable> committables) {
+    public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
-                commit.commit(committable, new HashMap<>());
+                commit.commit(committable, new HashMap<>(), checkAppendFiles);
             }
             if (!committables.isEmpty()) {
                 expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);
@@ -253,7 +248,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .collect(Collectors.toList());
         if (retryCommittables.size() > 0) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables);
+            commitMultiple(retryCommittables, true);
         }
         return retryCommittables.size();
     }

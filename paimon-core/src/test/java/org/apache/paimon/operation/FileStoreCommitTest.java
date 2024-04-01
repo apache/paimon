@@ -65,6 +65,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Predicate;
@@ -174,8 +175,7 @@ public class FileStoreCommitTest {
         Path firstSnapshotPath = snapshotManager.snapshotPath(Snapshot.FIRST_SNAPSHOT_ID);
         LocalFileIO.create().deleteQuietly(firstSnapshotPath);
         // this test succeeds if this call does not fail
-        store.newCommit(UUID.randomUUID().toString())
-                .filterCommitted(Collections.singletonList(new ManifestCommittable(999)));
+        store.newCommit(UUID.randomUUID().toString()).filterCommitted(Collections.singleton(999L));
     }
 
     @Test
@@ -194,12 +194,7 @@ public class FileStoreCommitTest {
         }
 
         // all commit identifiers should be filtered out
-        List<ManifestCommittable> remaining =
-                store.newCommit(user)
-                        .filterCommitted(
-                                commitIdentifiers.stream()
-                                        .map(ManifestCommittable::new)
-                                        .collect(Collectors.toList()));
+        Set<Long> remaining = store.newCommit(user).filterCommitted(commitIdentifiers);
         assertThat(remaining).isEmpty();
     }
 
@@ -557,9 +552,17 @@ public class FileStoreCommitTest {
             assertThatThrownBy(
                             () ->
                                     store.newCommit()
-                                            .commit(committables.get(0), Collections.emptyMap()))
+                                            .commit(
+                                                    committables.get(0),
+                                                    Collections.emptyMap(),
+                                                    true))
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("Give up committing.");
+        }
+
+        // commit without check, should pass
+        for (int i = 0; i < 3; i++) {
+            store.newCommit().commit(committables.get(0), Collections.emptyMap());
         }
     }
 
