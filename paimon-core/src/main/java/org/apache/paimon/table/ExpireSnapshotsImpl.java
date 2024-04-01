@@ -222,53 +222,9 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
+            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, !changelogDecoupled);
             if (changelogDecoupled) {
-                Changelog changelog;
-                if (snapshot.changelogManifestList() != null) {
-                    changelog =
-                            new Changelog(
-                                    id,
-                                    snapshot.schemaId(),
-                                    null,
-                                    null,
-                                    snapshot.changelogManifestList(),
-                                    null,
-                                    snapshot.commitUser(),
-                                    snapshot.commitIdentifier(),
-                                    snapshot.commitKind(),
-                                    snapshot.timeMillis(),
-                                    snapshot.logOffsets(),
-                                    snapshot.totalRecordCount(),
-                                    null,
-                                    snapshot.changelogRecordCount(),
-                                    snapshot.watermark(),
-                                    null);
-                    snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, false);
-                } else {
-                    // no changelog
-                    changelog =
-                            new Changelog(
-                                    id,
-                                    snapshot.schemaId(),
-                                    null,
-                                    null,
-                                    null,
-                                    snapshot.indexManifest(),
-                                    snapshot.commitUser(),
-                                    snapshot.commitIdentifier(),
-                                    snapshot.commitKind(),
-                                    snapshot.timeMillis(),
-                                    snapshot.logOffsets(),
-                                    snapshot.changelogRecordCount(),
-                                    snapshot.totalRecordCount(),
-                                    snapshot.changelogRecordCount(),
-                                    snapshot.watermark(),
-                                    snapshot.statistics());
-                    snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
-                }
-                commitChangelog(changelog);
-            } else {
-                snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, true);
+                commitChangelog(new Changelog(snapshot));
             }
             snapshotManager.fileIO().deleteQuietly(snapshotManager.snapshotPath(id));
         }

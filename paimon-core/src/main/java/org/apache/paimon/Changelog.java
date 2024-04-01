@@ -38,43 +38,25 @@ import java.util.Map;
  */
 public class Changelog extends Snapshot {
 
-    private static final int CURRENT_VERSION = Snapshot.CURRENT_VERSION;
-
-    public Changelog(
-            long id,
-            long schemaId,
-            String baseManifestList,
-            String deltaManifestList,
-            @Nullable String changelogManifestList,
-            @Nullable String indexManifest,
-            String commitUser,
-            long commitIdentifier,
-            CommitKind commitKind,
-            long timeMillis,
-            Map<Integer, Long> logOffsets,
-            @Nullable Long totalRecordCount,
-            @Nullable Long deltaRecordCount,
-            @Nullable Long changelogRecordCount,
-            @Nullable Long watermark,
-            @Nullable String statistics) {
+    public Changelog(Snapshot snapshot) {
         this(
-                CURRENT_VERSION,
-                id,
-                schemaId,
-                baseManifestList,
-                deltaManifestList,
-                changelogManifestList,
-                indexManifest,
-                commitUser,
-                commitIdentifier,
-                commitKind,
-                timeMillis,
-                logOffsets,
-                totalRecordCount,
-                deltaRecordCount,
-                changelogRecordCount,
-                watermark,
-                statistics);
+                snapshot.version(),
+                snapshot.id(),
+                snapshot.schemaId(),
+                snapshot.baseManifestList(),
+                snapshot.deltaManifestList(),
+                snapshot.changelogManifestList(),
+                snapshot.indexManifest(),
+                snapshot.commitUser(),
+                snapshot.commitIdentifier(),
+                snapshot.commitKind(),
+                snapshot.timeMillis(),
+                snapshot.logOffsets(),
+                snapshot.totalRecordCount(),
+                snapshot.deltaRecordCount(),
+                snapshot.changelogRecordCount(),
+                snapshot.watermark(),
+                snapshot.statistics());
     }
 
     @JsonCreator

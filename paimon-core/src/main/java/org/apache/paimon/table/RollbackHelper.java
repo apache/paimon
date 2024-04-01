@@ -82,10 +82,6 @@ public class RollbackHelper {
         }
 
         for (Changelog changelog : cleanedChangelogs) {
-            if (changelog.deltaManifestList() != null) {
-                snapshotDeletion.cleanUnusedManifestList(
-                        changelog.deltaManifestList(), new HashSet<>());
-            }
             if (changelog.changelogManifestList() != null) {
                 snapshotDeletion.cleanUnusedManifestList(
                         changelog.changelogManifestList(), new HashSet<>());

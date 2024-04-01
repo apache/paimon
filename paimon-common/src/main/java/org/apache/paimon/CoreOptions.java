@@ -194,22 +194,21 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MIN =
             key("changelog.num-retained.min")
                     .intType()
-                    .defaultValue(10)
+                    .noDefaultValue()
                     .withDescription(
                             "The minimum number of completed changelog to retain. Should be greater than or equal to 1.");
 
-    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MAX =
             key("changelog.num-retained.max")
                     .intType()
-                    .defaultValue(Integer.MAX_VALUE)
+                    .noDefaultValue()
                     .withDescription(
                             "The maximum number of completed changelog to retain. Should be greater than or equal to the minimum number.");
 
     public static final ConfigOption<Duration> CHANGELOG_TIME_RETAINED =
             key("changelog.time-retained")
                     .durationType()
-                    .defaultValue(Duration.ofHours(1))
+                    .noDefaultValue()
                     .withDescription("The maximum time of completed changelog to retain.");
 
     public static final ConfigOption<ExpireExecutionMode> SNAPSHOT_EXPIRE_EXECUTION_MODE =
@@ -1228,22 +1227,23 @@ public class CoreOptions implements Serializable {
     }
 
     public int changelogNumRetainMin() {
-        return options.get(CHANGELOG_NUM_RETAINED_MIN);
+        return options.getOptional(CHANGELOG_NUM_RETAINED_MIN)
+                .orElse(options.get(SNAPSHOT_NUM_RETAINED_MIN));
     }
 
     public int changelogNumRetainMax() {
-        return options.get(CHANGELOG_NUM_RETAINED_MAX);
+        return options.getOptional(CHANGELOG_NUM_RETAINED_MAX)
+                .orElse(options.get(SNAPSHOT_NUM_RETAINED_MAX));
     }
 
     public Duration changelogTimeRetain() {
-        return options.get(CHANGELOG_TIME_RETAINED);
+        return options.getOptional(CHANGELOG_TIME_RETAINED)
+                .orElse(options.get(SNAPSHOT_TIME_RETAINED));
     }
 
     public boolean changelogLifecycleDecoupled() {
         return changelogNumRetainMax() > snapshotNumRetainMax()
-                || options.get(CHANGELOG_TIME_RETAINED)
-                                .compareTo(options.get(SNAPSHOT_TIME_RETAINED))
-                        > 0
+                || changelogTimeRetain().compareTo(snapshotTimeRetain()) > 0
                 || changelogNumRetainMin() > snapshotNumRetainMin();
     }
 
