@@ -18,34 +18,14 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
 import org.apache.paimon.spark.SparkFilterConverter
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
-import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression, PredicateHelper}
+import org.apache.spark.sql.catalyst.expressions.PredicateHelper
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
-
-import java.io.IOException
 
 /** Helper trait for all paimon commands. */
 trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
-
-  protected def convertConditionToPaimonPredicate(
-      condition: Expression,
-      output: Seq[Attribute]): Predicate = {
-    val converter = new SparkFilterConverter(table.rowType)
-    val filters = normalizeExprs(Seq(condition), output)
-      .flatMap(splitConjunctivePredicates(_).map {
-        f =>
-          translateFilter(f, supportNestedPredicatePushdown = true).getOrElse(
-            throw new RuntimeException("Exec update failed:" +
-              s" cannot translate expression to source filter: $f"))
-      })
-      .toArray
-    val predicates = filters.map(converter.convert)
-    PredicateBuilder.and(predicates: _*)
-  }
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`

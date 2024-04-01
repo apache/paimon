@@ -18,9 +18,14 @@
 
 package org.apache.paimon.spark.catalyst.analysis.expressions
 
+import org.apache.paimon.predicate.{Predicate, PredicateBuilder}
+import org.apache.paimon.spark.SparkFilterConverter
+import org.apache.paimon.types.RowType
+
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper}
-import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
+import org.apache.spark.sql.Utils.{normalizeExprs, translateFilter}
+import org.apache.spark.sql.catalyst.expressions.{Alias, And, Attribute, Cast, Expression, GetStructField, Literal, PredicateHelper, SubqueryExpression}
+import org.apache.spark.sql.catalyst.plans.logical.{Filter, LogicalPlan}
 import org.apache.spark.sql.internal.SQLConf
 import org.apache.spark.sql.types.{DataType, NullType}
 
@@ -105,5 +110,50 @@ object ExpressionHelper {
 
     override protected def withNewChildrenInternal(
         newChildren: IndexedSeq[LogicalPlan]): FakeLogicalPlan = copy(children = newChildren)
+  }
+
+  def resolveFilter(spark: SparkSession, plan: LogicalPlan, where: String): Expression = {
+    val unResolvedExpression = spark.sessionState.sqlParser.parseExpression(where)
+    val filter = Filter(unResolvedExpression, plan)
+    spark.sessionState.analyzer.execute(filter) match {
+      case filter: Filter => filter.condition
+      case _ => throw new RuntimeException(s"Could not resolve expression $where in plan: $plan")
+    }
+  }
+
+  def onlyHasPartitionPredicate(
+      spark: SparkSession,
+      expr: Expression,
+      partitionCols: Array[String]): Boolean = {
+    val resolvedNameEquals = spark.sessionState.analyzer.resolver
+    splitConjunctivePredicates(expr).forall(
+      e =>
+        e.references.forall(r => partitionCols.exists(resolvedNameEquals(r.name, _))) &&
+          !SubqueryExpression.hasSubquery(expr))
+  }
+
+  def convertConditionToPaimonPredicate(
+      condition: Expression,
+      output: Seq[Attribute],
+      rowType: RowType): Predicate = {
+    val converter = new SparkFilterConverter(rowType)
+    val filters = normalizeExprs(Seq(condition), output)
+      .flatMap(splitConjunctivePredicates(_).map {
+        f =>
+          translateFilter(f, supportNestedPredicatePushdown = true).getOrElse(
+            throw new RuntimeException("Exec update failed:" +
+              s" cannot translate expression to source filter: $f"))
+      })
+      .toArray
+    val predicates = filters.map(converter.convert)
+    PredicateBuilder.and(predicates: _*)
+  }
+
+  def splitConjunctivePredicates(condition: Expression): Seq[Expression] = {
+    condition match {
+      case And(cond1, cond2) =>
+        splitConjunctivePredicates(cond1) ++ splitConjunctivePredicates(cond2)
+      case other => other :: Nil
+    }
   }
 }
