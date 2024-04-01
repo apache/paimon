@@ -390,6 +390,41 @@ public class ExpireSnapshotsTest {
         store.assertCleaned();
     }
 
+    @Test
+    public void testChangelogOutLivedSnapshot() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(10, allData, snapshotPositions);
+        ExpireSnapshots snapshot = store.newExpire(1, 2, Long.MAX_VALUE, true, true);
+        ExpireSnapshots changelog = store.newChangelogExpire(1, 3, Long.MAX_VALUE, true);
+        // expire twice to check for idempotence
+        snapshot.expire();
+        snapshot.expire();
+
+        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int earliestSnapshotId = snapshotManager.earliestSnapshotId().intValue();
+        int latestLongLivedChangelogId = snapshotManager.latestLongLivedChangelogId().intValue();
+        int earliestLongLivedChangelogId =
+                snapshotManager.earliestLongLivedChangelogId().intValue();
+
+        // 2 snapshot in /snapshot
+        assertThat(latestSnapshotId - earliestSnapshotId).isEqualTo(1);
+        assertThat(earliestLongLivedChangelogId).isEqualTo(1);
+        // The changelog id and snapshot id is continuous
+        assertThat(earliestSnapshotId - latestLongLivedChangelogId).isEqualTo(1);
+
+        changelog.expire();
+        changelog.expire();
+
+        assertThat(snapshotManager.latestSnapshotId().intValue()).isEqualTo(latestSnapshotId);
+        assertThat(snapshotManager.earliestSnapshotId().intValue()).isEqualTo(earliestSnapshotId);
+        assertThat(snapshotManager.latestLongLivedChangelogId())
+                .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
+        assertThat(snapshotManager.earliestLongLivedChangelogId())
+                .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
+        store.assertCleaned();
+    }
+
     private TestFileStore createStore() {
         ThreadLocalRandom random = ThreadLocalRandom.current();
 

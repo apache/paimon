@@ -295,6 +295,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 store().newSnapshotDeletion(),
                 store().newTagManager(),
+                coreOptions().snapshotExpireCleanEmptyDirectories(),
+                coreOptions().changelogLifecycleDecoupled());
+    }
+
+    @Override
+    public ExpireSnapshots newExpireChangelog() {
+        return new ExpireChangelogImpl(
+                snapshotManager(),
+                tagManager(),
+                store().newSnapshotDeletion(),
                 coreOptions().snapshotExpireCleanEmptyDirectories());
     }
 
@@ -308,17 +318,27 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
+            boolean changelogDecoupled = options.changelogLifecycleDecoupled();
+            ExpireSnapshots expireChangelog =
+                    newExpireChangelog()
+                            .maxDeletes(options.snapshotExpireLimit())
+                            .retainMin(options.changelogNumRetainMin())
+                            .retainMax(options.changelogNumRetainMax());
             ExpireSnapshots expireSnapshots =
                     newExpireSnapshots()
                             .retainMax(options.snapshotNumRetainMax())
                             .retainMin(options.snapshotNumRetainMin())
                             .maxDeletes(options.snapshotExpireLimit());
             long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
+            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
             snapshotExpire =
-                    () ->
-                            expireSnapshots
-                                    .olderThanMills(System.currentTimeMillis() - snapshotTimeRetain)
-                                    .expire();
+                    () -> {
+                        long current = System.currentTimeMillis();
+                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
+                        if (changelogDecoupled) {
+                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
+                        }
+                    };
         }
 
         return new TableCommitImpl(

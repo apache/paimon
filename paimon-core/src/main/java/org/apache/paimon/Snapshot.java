@@ -69,25 +69,25 @@ public class Snapshot {
     public static final long FIRST_SNAPSHOT_ID = 1;
 
     public static final int TABLE_STORE_02_VERSION = 1;
-    private static final int CURRENT_VERSION = 3;
+    protected static final int CURRENT_VERSION = 3;
 
-    private static final String FIELD_VERSION = "version";
-    private static final String FIELD_ID = "id";
-    private static final String FIELD_SCHEMA_ID = "schemaId";
-    private static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
-    private static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
-    private static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
-    private static final String FIELD_INDEX_MANIFEST = "indexManifest";
-    private static final String FIELD_COMMIT_USER = "commitUser";
-    private static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
-    private static final String FIELD_COMMIT_KIND = "commitKind";
-    private static final String FIELD_TIME_MILLIS = "timeMillis";
-    private static final String FIELD_LOG_OFFSETS = "logOffsets";
-    private static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
-    private static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
-    private static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
-    private static final String FIELD_WATERMARK = "watermark";
-    private static final String FIELD_STATISTICS = "statistics";
+    protected static final String FIELD_VERSION = "version";
+    protected static final String FIELD_ID = "id";
+    protected static final String FIELD_SCHEMA_ID = "schemaId";
+    protected static final String FIELD_BASE_MANIFEST_LIST = "baseManifestList";
+    protected static final String FIELD_DELTA_MANIFEST_LIST = "deltaManifestList";
+    protected static final String FIELD_CHANGELOG_MANIFEST_LIST = "changelogManifestList";
+    protected static final String FIELD_INDEX_MANIFEST = "indexManifest";
+    protected static final String FIELD_COMMIT_USER = "commitUser";
+    protected static final String FIELD_COMMIT_IDENTIFIER = "commitIdentifier";
+    protected static final String FIELD_COMMIT_KIND = "commitKind";
+    protected static final String FIELD_TIME_MILLIS = "timeMillis";
+    protected static final String FIELD_LOG_OFFSETS = "logOffsets";
+    protected static final String FIELD_TOTAL_RECORD_COUNT = "totalRecordCount";
+    protected static final String FIELD_DELTA_RECORD_COUNT = "deltaRecordCount";
+    protected static final String FIELD_CHANGELOG_RECORD_COUNT = "changelogRecordCount";
+    protected static final String FIELD_WATERMARK = "watermark";
+    protected static final String FIELD_STATISTICS = "statistics";
 
     // version of snapshot
     // null for paimon <= 0.2

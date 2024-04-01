@@ -100,6 +100,9 @@ public interface Table extends Serializable {
     @Experimental
     ExpireSnapshots newExpireSnapshots();
 
+    @Experimental
+    ExpireSnapshots newExpireChangelog();
+
     // =============== Read & Write Operations ==================
 
     /** Returns a new read builder. */

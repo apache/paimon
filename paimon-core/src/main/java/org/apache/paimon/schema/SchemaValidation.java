@@ -46,6 +46,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET_KEY;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.FIELDS_PREFIX;
 import static org.apache.paimon.CoreOptions.FULL_COMPACTION_DELTA_COMMITS;
@@ -120,6 +122,15 @@ public class SchemaValidation {
                 SNAPSHOT_NUM_RETAINED_MIN.key()
                         + " should not be larger than "
                         + SNAPSHOT_NUM_RETAINED_MAX.key());
+
+        checkArgument(
+                options.changelogNumRetainMin() > 0,
+                CHANGELOG_NUM_RETAINED_MIN.key() + " should be at least 1");
+        checkArgument(
+                options.changelogNumRetainMin() <= options.changelogNumRetainMax(),
+                CHANGELOG_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + CHANGELOG_NUM_RETAINED_MAX.key());
 
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.

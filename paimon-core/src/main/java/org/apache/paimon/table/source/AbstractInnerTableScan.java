@@ -119,7 +119,10 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             Optional<Consumer> consumer = consumerManager.consumer(consumerId);
             if (consumer.isPresent()) {
                 return new ContinuousFromSnapshotStartingScanner(
-                        snapshotManager, consumer.get().nextSnapshot());
+                        snapshotManager,
+                        consumer.get().nextSnapshot(),
+                        options.changelogProducer() != ChangelogProducer.NONE,
+                        options.changelogLifecycleDecoupled());
             }
         }
 
@@ -145,7 +148,11 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
             case FROM_TIMESTAMP:
                 Long startupMillis = options.scanTimestampMills();
                 return isStreaming
-                        ? new ContinuousFromTimestampStartingScanner(snapshotManager, startupMillis)
+                        ? new ContinuousFromTimestampStartingScanner(
+                                snapshotManager,
+                                startupMillis,
+                                options.changelogProducer() != ChangelogProducer.NONE,
+                                options.changelogLifecycleDecoupled())
                         : new StaticFromTimestampStartingScanner(snapshotManager, startupMillis);
             case FROM_FILE_CREATION_TIME:
                 Long fileCreationTimeMills = options.scanFileCreationTimeMills();
@@ -154,7 +161,10 @@ public abstract class AbstractInnerTableScan implements InnerTableScan {
                 if (options.scanSnapshotId() != null) {
                     return isStreaming
                             ? new ContinuousFromSnapshotStartingScanner(
-                                    snapshotManager, options.scanSnapshotId())
+                                    snapshotManager,
+                                    options.scanSnapshotId(),
+                                    options.changelogProducer() != ChangelogProducer.NONE,
+                                    options.changelogLifecycleDecoupled())
                             : new StaticFromSnapshotStartingScanner(
                                     snapshotManager, options.scanSnapshotId());
                 } else {

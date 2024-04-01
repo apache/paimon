@@ -207,6 +207,7 @@ public class FileDeletionTest {
 
         // check after expiring
         store.newExpire(1, 1, Long.MAX_VALUE).expire();
+
         assertPathNotExists(fileIO, pathFactory.bucketPath(partition, 0));
         assertPathExists(fileIO, pathFactory.bucketPath(partition, 1));
     }

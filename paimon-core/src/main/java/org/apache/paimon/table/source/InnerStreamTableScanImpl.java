@@ -37,6 +37,7 @@ import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
 import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.NextSnapshotFetcher;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
@@ -56,6 +57,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
+    private final NextSnapshotFetcher nextSnapshotProvider;
 
     private boolean initialized = false;
     private StartingScanner startingScanner;
@@ -77,6 +79,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
+        this.nextSnapshotProvider =
+                new NextSnapshotFetcher(
+                        snapshotManager,
+                        options.changelogLifecycleDecoupled(),
+                        options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
     }
 
     @Override
@@ -164,23 +171,10 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 throw new EndOfScanException();
             }
 
-            if (!snapshotManager.snapshotExists(nextSnapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-                if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
-                    throw new OutOfRangeException(
-                            String.format(
-                                    "The snapshot with id %d has expired. You can: "
-                                            + "1. increase the snapshot expiration time. "
-                                            + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
-                                    nextSnapshotId));
-                }
-                LOG.debug(
-                        "Next snapshot id {} does not exist, wait for the snapshot generation.",
-                        nextSnapshotId);
+            Snapshot snapshot = nextSnapshotProvider.getNextSnapshot(nextSnapshotId);
+            if (snapshot == null) {
                 return SnapshotNotExistPlan.INSTANCE;
             }
-
-            Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
             if (boundedChecker.shouldEndInput(snapshot)) {
                 throw new EndOfScanException();
