@@ -124,7 +124,7 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
 
         writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-1.txt");
         // write null value
-        KAFKA_PRODUCER.send(new ProducerRecord<>(topic, null));
+        kafkaProducer.send(new ProducerRecord<>(topic, null));
         writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-2.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();

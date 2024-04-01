@@ -229,7 +229,7 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
         writeRecordsToKafka(
-                topic, "kafka/%s/table/startupmode/%s-data-1.txt", true, format, format);
+                topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");

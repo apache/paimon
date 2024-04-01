@@ -653,7 +653,7 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
     public void testStarUpOptionLatest() throws Exception {
         final String topic = "start_up_latest";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/canal/table/startupmode/canal-data-1.txt", true);
+        writeRecordsToKafka(topic, true, "kafka/canal/table/startupmode/canal-data-1.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "canal-json");

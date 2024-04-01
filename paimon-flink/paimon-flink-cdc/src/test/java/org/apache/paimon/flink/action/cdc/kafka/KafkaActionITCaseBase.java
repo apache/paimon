@@ -81,9 +81,9 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     private static final Network NETWORK = Network.newNetwork();
     private static final int ZK_TIMEOUT_MILLIS = 30000;
 
-    protected static KafkaProducer<String, String> KAFKA_PRODUCER;
-    private static KafkaConsumer<String, String> KAFKA_CONSUMER;
-    private static AdminClient ADMIN_CLIENT;
+    protected static KafkaProducer<String, String> kafkaProducer;
+    private static KafkaConsumer<String, String> kafkaConsumer;
+    private static AdminClient adminClient;
 
     // Timer for scheduling logging task if the test hangs
     private final Timer loggingTimer = new Timer("Debug Logging Timer");
@@ -120,7 +120,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         producerProperties.put(
                 ProducerConfig.VALUE_SERIALIZER_CLASS_CONFIG,
                 StringSerializer.class.getCanonicalName());
-        KAFKA_PRODUCER = new KafkaProducer<>(producerProperties);
+        kafkaProducer = new KafkaProducer<>(producerProperties);
 
         // create KafkaConsumer
         Properties consumerProperties = getStandardProps();
@@ -131,18 +131,18 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         consumerProperties.setProperty(
                 ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG,
                 StringDeserializer.class.getCanonicalName());
-        KAFKA_CONSUMER = new KafkaConsumer<>(consumerProperties);
+        kafkaConsumer = new KafkaConsumer<>(consumerProperties);
 
         // create AdminClient
-        ADMIN_CLIENT = AdminClient.create(getStandardProps());
+        adminClient = AdminClient.create(getStandardProps());
     }
 
     @AfterAll
     public static void afterAll() {
         // Close Kafka objects
-        KAFKA_PRODUCER.close();
-        KAFKA_CONSUMER.close();
-        ADMIN_CLIENT.close();
+        kafkaProducer.close();
+        kafkaConsumer.close();
+        adminClient.close();
     }
 
     @BeforeEach
@@ -171,7 +171,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void deleteTopics() throws ExecutionException, InterruptedException {
-        ADMIN_CLIENT.deleteTopics(ADMIN_CLIENT.listTopics().names().get()).all().get();
+        adminClient.deleteTopics(adminClient.listTopics().names().get()).all().get();
     }
 
     // ------------------------ For Debug Logging Purpose ----------------------------------
@@ -198,11 +198,11 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     private Map<String, TopicDescription> describeExternalTopics() {
         try {
             final List<String> topics =
-                    ADMIN_CLIENT.listTopics().listings().get().stream()
+                    adminClient.listTopics().listings().get().stream()
                             .filter(listing -> !listing.isInternal())
                             .map(TopicListing::name)
                             .collect(Collectors.toList());
-            return ADMIN_CLIENT.describeTopics(topics).all().get();
+            return adminClient.describeTopics(topics).all().get();
         } catch (Exception e) {
             throw new RuntimeException("Failed to list Kafka topics", e);
         }
@@ -220,8 +220,8 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
                                                         new TopicPartition(
                                                                 topic, tpInfo.partition()))));
         final Map<TopicPartition, Long> beginningOffsets =
-                KAFKA_CONSUMER.beginningOffsets(partitions);
-        final Map<TopicPartition, Long> endOffsets = KAFKA_CONSUMER.endOffsets(partitions);
+                kafkaConsumer.beginningOffsets(partitions);
+        final Map<TopicPartition, Long> endOffsets = kafkaConsumer.endOffsets(partitions);
         partitions.forEach(
                 partition ->
                         LOG.info(
@@ -288,7 +288,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         Map<String, Object> properties = new HashMap<>();
         properties.put(CommonClientConfigs.BOOTSTRAP_SERVERS_CONFIG, getBootstrapServers());
         try {
-            ADMIN_CLIENT
+            adminClient
                     .createTopics(
                             Collections.singletonList(
                                     new NewTopic(topic, numPartitions, (short) replicationFactor)))
@@ -305,15 +305,15 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
 
     protected void writeRecordsToKafka(String topic, String resourceDirFormat, Object... args)
             throws Exception {
-        writeRecordsToKafka(topic, resourceDirFormat, false, args);
+        writeRecordsToKafka(topic, false, resourceDirFormat, args);
     }
 
     protected void writeRecordsToKafka(
-            String topic, String resourceDirFormat, boolean wait, Object... args) throws Exception {
+            String topic, boolean wait, String resourceDirFormat, Object... args) throws Exception {
         URL url =
                 KafkaCanalSyncTableActionITCase.class
                         .getClassLoader()
-                        .getResource(String.format(resourceDirFormat, args));
+                        .getResource(String.format(resourceDirFormat, (Object[]) args));
         Files.readAllLines(Paths.get(url.toURI())).stream()
                 .filter(this::isRecordLine)
                 .forEach(r -> send(topic, r, wait));
@@ -329,8 +329,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
     }
 
     private void send(String topic, String record, boolean wait) {
-        Future<RecordMetadata> sendFuture =
-                KAFKA_PRODUCER.send(new ProducerRecord<>(topic, record));
+        Future<RecordMetadata> sendFuture = kafkaProducer.send(new ProducerRecord<>(topic, record));
         if (wait) {
             try {
                 sendFuture.get();
