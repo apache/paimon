@@ -138,3 +138,9 @@ if you haven't enabled checkpointing, Paimon will enable checkpointing by defaul
 ### Job Name
 
 Use `-Dpipeline.name=<job-name>` to set custom synchronization job name.
+
+### table configuration
+
+You can use `--table_conf` to set table properties and some flink job properties (like `sink.parallelism`). If the table is
+created by the cdc job, the table's properties will be equal to the given properties. Otherwise, the job will use the given
+properties to alter table's properties. But note that immutable options (like `merge-engine`) and bucket number won't be altered.
