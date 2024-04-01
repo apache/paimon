@@ -80,7 +80,6 @@ public class AggregateMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
-    @Nullable
     @Override
     public KeyValue getResult() {
         checkNotNull(

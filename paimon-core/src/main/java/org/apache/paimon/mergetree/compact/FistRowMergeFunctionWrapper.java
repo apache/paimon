@@ -56,10 +56,6 @@ public class FistRowMergeFunctionWrapper implements MergeFunctionWrapper<Changel
     public ChangelogResult getResult() {
         reusedResult.reset();
         KeyValue result = mergeFunction.getResult();
-        if (result == null) {
-            return reusedResult;
-        }
-
         if (contains.test(result.key())) {
             // empty
             return reusedResult;

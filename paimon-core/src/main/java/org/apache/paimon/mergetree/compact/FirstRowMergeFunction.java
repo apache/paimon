@@ -56,7 +56,6 @@ public class FirstRowMergeFunction implements MergeFunction<KeyValue> {
         }
     }
 
-    @Nullable
     @Override
     public KeyValue getResult() {
         return first;

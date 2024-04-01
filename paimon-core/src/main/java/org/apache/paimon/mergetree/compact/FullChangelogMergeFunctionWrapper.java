@@ -100,11 +100,11 @@ public class FullChangelogMergeFunctionWrapper implements MergeFunctionWrapper<C
         if (isInitialized) {
             KeyValue merged = mergeFunction.getResult();
             if (topLevelKv == null) {
-                if (merged != null && merged.isAdd()) {
+                if (merged.isAdd()) {
                     reusedResult.addChangelog(replace(reusedAfter, RowKind.INSERT, merged));
                 }
             } else {
-                if (merged == null || !merged.isAdd()) {
+                if (!merged.isAdd()) {
                     reusedResult.addChangelog(replace(reusedBefore, RowKind.DELETE, topLevelKv));
                 } else if (!changelogRowDeduplicate
                         || !valueEqualiser.equals(topLevelKv.value(), merged.value())) {
