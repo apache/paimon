@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.action.cdc;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.FlinkConnectorOptions;
@@ -122,7 +123,7 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
         // Check if table exists before trying to get or create it
         if (catalog.tableExists(identifier)) {
             fileStoreTable = (FileStoreTable) catalog.getTable(identifier);
-            alterTableOptions(identifier, fileStoreTable);
+            fileStoreTable = alterTableOptions(identifier, fileStoreTable);
             try {
                 Schema retrievedSchema = retrieveSchema();
                 computedColumns =
@@ -205,6 +206,11 @@ public abstract class SyncTableActionBase extends SynchronizationActionBase {
                     String.join(",", primaryKeys),
                     String.join(",", actualPrimaryKeys));
         }
+    }
+
+    @VisibleForTesting
+    public FileStoreTable fileStoreTable() {
+        return fileStoreTable;
     }
 
     /** Custom exception to indicate issues with schema retrieval. */

@@ -110,6 +110,8 @@ public class KafkaSchemaITCase extends KafkaActionITCaseBase {
                 syncTableActionBuilder(kafkaConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);
 
+        assertThat(action2.fileStoreTable().options()).containsAllEntriesOf(tableConfig);
+
         FileStoreTable table = getFileStoreTable(tableName);
         assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
