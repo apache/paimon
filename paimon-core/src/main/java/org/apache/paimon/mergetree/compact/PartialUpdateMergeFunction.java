@@ -101,7 +101,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         // refresh key object to avoid reference overwritten
         currentKey = kv.key();
 
-        // ignore or retract?
         if (kv.valueKind().isRetract()) {
             if (fieldSequenceEnabled) {
                 retractWithSequenceGroup(kv);

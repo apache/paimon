@@ -124,7 +124,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     public void write(InternalRow rowData) throws Exception {
         Preconditions.checkArgument(
                 rowData.getRowKind().isAdd(),
-                "Append-only writer can only accept insert or update_after row kind, but current row kind is: %s",
+                "Append-only writer can only accept insert or update_after row kind, but current row kind is: %s. "
+                        + "You can configure 'ignore-delete' to ignore retract records.",
                 rowData.getRowKind());
         boolean success = sinkWriter.write(rowData);
         if (!success) {

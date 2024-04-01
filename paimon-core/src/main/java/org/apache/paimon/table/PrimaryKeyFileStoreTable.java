@@ -200,7 +200,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                     ? row.getRowKind()
                                     : rowKindGenerator.generate(row);
                     return kv.replace(record.primaryKey(), KeyValue.UNKNOWN_SEQUENCE, rowKind, row);
-                });
+                },
+                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
 
     @Override

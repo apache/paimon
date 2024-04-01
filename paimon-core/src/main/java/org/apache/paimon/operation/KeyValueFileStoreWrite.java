@@ -209,11 +209,6 @@ public class KeyValueFileStoreWrite extends MemoryFileStoreWrite<KeyValue> {
                 UserDefinedSeqComparator.create(valueType, options));
     }
 
-    @Override
-    protected boolean skipData(KeyValue data) {
-        return ignoreDelete && data.valueKind().isRetract();
-    }
-
     @VisibleForTesting
     public boolean bufferSpillable() {
         return options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
