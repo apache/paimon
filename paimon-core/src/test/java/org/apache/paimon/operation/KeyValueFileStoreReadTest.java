@@ -319,12 +319,7 @@ public class KeyValueFileStoreReadTest {
         }
 
         @Override
-        @Nullable
         public KeyValue getResult() {
-            if (total == 0) {
-                return null;
-            }
-
             if (reused == null) {
                 reused = new KeyValue();
             }

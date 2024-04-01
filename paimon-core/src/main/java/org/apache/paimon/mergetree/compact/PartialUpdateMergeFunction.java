@@ -73,7 +73,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
 
     private InternalRow currentKey;
     private long latestSequenceNumber;
-    private boolean isEmpty;
     private GenericRow row;
     private KeyValue reused;
 
@@ -93,7 +92,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         this.currentKey = null;
         this.row = new GenericRow(getters.length);
         fieldAggregators.values().forEach(FieldAggregator::reset);
-        this.isEmpty = true;
     }
 
     @Override
@@ -119,7 +117,6 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
         }
 
         latestSequenceNumber = kv.sequenceNumber();
-        isEmpty = false;
         if (fieldSequences.isEmpty()) {
             updateNonNullFields(kv);
         } else {
@@ -203,12 +200,7 @@ public class PartialUpdateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     @Override
-    @Nullable
     public KeyValue getResult() {
-        if (isEmpty) {
-            return null;
-        }
-
         if (reused == null) {
             reused = new KeyValue();
         }

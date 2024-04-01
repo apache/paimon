@@ -41,7 +41,6 @@ public class DeduplicateMergeFunction implements MergeFunction<KeyValue> {
     }
 
     @Override
-    @Nullable
     public KeyValue getResult() {
         return latestKv;
     }
