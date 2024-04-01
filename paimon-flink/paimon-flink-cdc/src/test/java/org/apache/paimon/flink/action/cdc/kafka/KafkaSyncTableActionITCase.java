@@ -268,7 +268,8 @@ public class KafkaSyncTableActionITCase extends KafkaActionITCaseBase {
     public void testStarUpOptionTimestamp(String format) throws Exception {
         final String topic = "start_up_timestamp";
         createTestTopic(topic, 1, 1);
-        writeRecordsToKafka(topic, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
+        writeRecordsToKafka(
+                topic, true, "kafka/%s/table/startupmode/%s-data-1.txt", format, format);
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), format + "-json");
