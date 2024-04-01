@@ -57,6 +57,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     private final FileIOChannel.Enumerator enumerator;
     private final List<ChannelWithMeta> spillChannelIDs;
+    private final MemorySize maxDiskSize;
 
     private int numRecords = 0;
 
@@ -67,7 +68,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             BinaryInMemorySortBuffer inMemorySortBuffer,
             IOManager ioManager,
             int maxNumFileHandles,
-            String compression) {
+            String compression,
+            MemorySize maxDiskSize) {
         this.serializer = serializer;
         this.inMemorySortBuffer = inMemorySortBuffer;
         this.ioManager = ioManager;
@@ -75,6 +77,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
         this.maxNumFileHandles = maxNumFileHandles;
         this.compressionCodecFactory = BlockCompressionFactory.create(compression);
         this.compressionBlockSize = (int) MemorySize.parse("64 kb").getBytes();
+        this.maxDiskSize = maxDiskSize;
         this.merger =
                 new BinaryExternalMerger(
                         ioManager,
@@ -96,14 +99,16 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             long bufferSize,
             int pageSize,
             int maxNumFileHandles,
-            String compression) {
+            String compression,
+            MemorySize maxDiskSize) {
         return create(
                 ioManager,
                 rowType,
                 keyFields,
                 new HeapMemorySegmentPool(bufferSize, pageSize),
                 maxNumFileHandles,
-                compression);
+                compression,
+                maxDiskSize);
     }
 
     public static BinaryExternalSortBuffer create(
@@ -112,7 +117,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             int[] keyFields,
             MemorySegmentPool pool,
             int maxNumFileHandles,
-            String compression) {
+            String compression,
+            MemorySize maxDiskSize) {
         RecordComparator comparator = newRecordComparator(rowType.getFieldTypes(), keyFields);
         BinaryInMemorySortBuffer sortBuffer =
                 BinaryInMemorySortBuffer.createBuffer(
@@ -127,7 +133,8 @@ public class BinaryExternalSortBuffer implements SortBuffer {
                 sortBuffer,
                 ioManager,
                 maxNumFileHandles,
-                compression);
+                compression,
+                maxDiskSize);
     }
 
     @Override
@@ -153,8 +160,22 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public boolean flushMemory() throws IOException {
-        spill();
-        return true;
+        boolean isFull = getDiskUsage() >= maxDiskSize.getBytes();
+        if (isFull) {
+            return false;
+        } else {
+            spill();
+            return true;
+        }
+    }
+
+    private long getDiskUsage() {
+        long bytes = 0;
+
+        for (ChannelWithMeta spillChannelID : spillChannelIDs) {
+            bytes += spillChannelID.getNumBytes();
+        }
+        return bytes;
     }
 
     @VisibleForTesting
@@ -249,7 +270,9 @@ public class BinaryExternalSortBuffer implements SortBuffer {
             throw e;
         }
 
-        spillChannelIDs.add(new ChannelWithMeta(channel, blockCount, bytesInLastBuffer));
+        spillChannelIDs.add(
+                new ChannelWithMeta(
+                        channel, blockCount, bytesInLastBuffer, output.getWriteBytes()));
         inMemorySortBuffer.clear();
     }
 }

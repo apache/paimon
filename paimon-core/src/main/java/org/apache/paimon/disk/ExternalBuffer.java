@@ -26,6 +26,7 @@ import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.utils.MutableObjectIterator;
 
 import org.slf4j.Logger;
@@ -47,6 +48,7 @@ public class ExternalBuffer implements RowBuffer {
     private final MemorySegmentPool pool;
     private final BinaryRowSerializer binaryRowSerializer;
     private final InMemoryBuffer inMemoryBuffer;
+    private final MemorySize maxDiskSize;
 
     // The size of each segment
     private final int segmentSize;
@@ -57,9 +59,13 @@ public class ExternalBuffer implements RowBuffer {
     private boolean addCompleted;
 
     ExternalBuffer(
-            IOManager ioManager, MemorySegmentPool pool, AbstractRowDataSerializer<?> serializer) {
+            IOManager ioManager,
+            MemorySegmentPool pool,
+            AbstractRowDataSerializer<?> serializer,
+            MemorySize maxDiskSize) {
         this.ioManager = ioManager;
         this.pool = pool;
+        this.maxDiskSize = maxDiskSize;
 
         this.binaryRowSerializer =
                 serializer instanceof BinaryRowSerializer
@@ -89,8 +95,22 @@ public class ExternalBuffer implements RowBuffer {
 
     @Override
     public boolean flushMemory() throws IOException {
-        spill();
-        return true;
+        boolean isFull = getDiskUsage() >= maxDiskSize.getBytes();
+        if (isFull) {
+            return false;
+        } else {
+            spill();
+            return true;
+        }
+    }
+
+    private long getDiskUsage() {
+        long bytes = 0;
+
+        for (ChannelWithMeta spillChannelID : spilledChannelIDs) {
+            bytes += spillChannelID.getNumBytes();
+        }
+        return bytes;
     }
 
     @Override
@@ -138,6 +158,7 @@ public class ExternalBuffer implements RowBuffer {
         BufferFileWriter writer = ioManager.createBufferFileWriter(channel);
         int numRecordBuffers = inMemoryBuffer.getNumRecordBuffers();
         ArrayList<MemorySegment> segments = inMemoryBuffer.getRecordBufferSegments();
+        long writeBytes;
         try {
             // spill in memory buffer in zero-copy.
             for (int i = 0; i < numRecordBuffers; i++) {
@@ -148,6 +169,7 @@ public class ExternalBuffer implements RowBuffer {
                                 : segment.size();
                 writer.writeBlock(Buffer.create(segment, bufferSize));
             }
+            writeBytes = writer.getSize();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
@@ -162,7 +184,8 @@ public class ExternalBuffer implements RowBuffer {
                 new ChannelWithMeta(
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
-                        inMemoryBuffer.getNumBytesInLastBuffer()));
+                        inMemoryBuffer.getNumBytesInLastBuffer(),
+                        writeBytes));
 
         inMemoryBuffer.reset();
     }

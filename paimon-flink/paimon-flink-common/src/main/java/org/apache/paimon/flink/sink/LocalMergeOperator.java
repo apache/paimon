@@ -27,6 +27,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.mergetree.SortBufferWriteBuffer;
 import org.apache.paimon.mergetree.compact.MergeFunction;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.PrimaryKeyTableUtils;
@@ -120,6 +121,7 @@ public class LocalMergeOperator extends AbstractStreamOperator<InternalRow>
                         new HeapMemorySegmentPool(
                                 options.localMergeBufferSize(), options.pageSize()),
                         false,
+                        MemorySize.MAX_VALUE,
                         options.localSortMaxNumFileHandles(),
                         options.spillCompression(),
                         null);

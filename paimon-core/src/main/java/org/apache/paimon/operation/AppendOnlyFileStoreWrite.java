@@ -32,6 +32,7 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
@@ -69,6 +70,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final String fileCompression;
     private final boolean useWriteBuffer;
     private final boolean spillable;
+    private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
     private boolean forceBufferSpill = false;
@@ -101,6 +103,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.fileCompression = options.fileCompression();
         this.useWriteBuffer = options.useWriteBufferForAppend();
         this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
+        this.maxDiskSize = options.writeBufferSpillDiskSize();
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
     }
@@ -146,7 +149,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 useWriteBuffer || forceBufferSpill,
                 spillable || forceBufferSpill,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                maxDiskSize);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(

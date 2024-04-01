@@ -30,6 +30,7 @@ import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
 import org.apache.paimon.mergetree.compact.MergeFunctionTestUtils;
 import org.apache.paimon.mergetree.compact.PartialUpdateMergeFunction;
 import org.apache.paimon.mergetree.compact.aggregate.AggregateMergeFunction;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.sort.BinaryInMemorySortBuffer;
 import org.apache.paimon.types.BigIntType;
@@ -69,6 +70,7 @@ public abstract class SortBufferWriteBufferTestBase {
                     null,
                     new HeapMemorySegmentPool(32 * 1024 * 3L, 32 * 1024),
                     false,
+                    MemorySize.MAX_VALUE,
                     128,
                     "lz4",
                     null);
