@@ -236,6 +236,10 @@ public class FileStoreLookupFunction implements Serializable, Closeable {
 
         boolean partitionChanged = partitionLoader.checkRefresh();
         BinaryRow partition = partitionLoader.partition();
+        if (partition == null) {
+            return null;
+        }
+
         lookupTable.specificPartitionFilter(createSpecificPartFilter(partition));
 
         if (partitionChanged && reopen) {
