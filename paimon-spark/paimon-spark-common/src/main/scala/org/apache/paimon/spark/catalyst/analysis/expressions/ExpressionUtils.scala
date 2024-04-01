@@ -16,16 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.commands
+package org.apache.paimon.spark.catalyst.analysis.expressions
 
-import org.apache.paimon.table.FileStoreTable
-import org.apache.paimon.types.RowType
-
-private[spark] trait WithFileStoreTable {
-
-  def table: FileStoreTable
-
-  def withPrimaryKeys: Boolean = !table.primaryKeys().isEmpty
-
-  def rowType: RowType = table.rowType()
-}
+/** This wrapper is only used in java code, e.g. Procedure. */
+object ExpressionUtils extends ExpressionHelper

@@ -101,8 +101,16 @@ public class FileStorePathFactory {
     }
 
     public Path bucketPath(BinaryRow partition, int bucket) {
-        return new Path(
-                root + "/" + getPartitionString(partition) + "/" + BUCKET_PATH_PREFIX + bucket);
+        return new Path(root + "/" + relativePartitionAndBucketPath(partition, bucket));
+    }
+
+    public Path relativePartitionAndBucketPath(BinaryRow partition, int bucket) {
+        String partitionPath = getPartitionString(partition);
+        if (partitionPath.isEmpty()) {
+            return new Path(BUCKET_PATH_PREFIX + bucket);
+        } else {
+            return new Path(getPartitionString(partition) + "/" + BUCKET_PATH_PREFIX + bucket);
+        }
     }
 
     /** IMPORTANT: This method is NOT THREAD SAFE. */

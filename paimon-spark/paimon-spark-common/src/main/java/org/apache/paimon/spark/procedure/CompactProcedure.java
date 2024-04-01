@@ -28,7 +28,7 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.spark.DynamicOverWrite$;
 import org.apache.paimon.spark.SparkUtils;
-import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper;
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionUtils;
 import org.apache.paimon.spark.commands.WriteIntoPaimonTable;
 import org.apache.paimon.spark.sort.TableSorter;
 import org.apache.paimon.table.BucketMode;
@@ -143,9 +143,9 @@ public class CompactProcedure extends BaseProcedure {
                     LogicalPlan relation = createRelation(tableIdent);
                     Expression condition = null;
                     if (!StringUtils.isBlank(finalWhere)) {
-                        condition = ExpressionHelper.resolveFilter(spark(), relation, finalWhere);
+                        condition = ExpressionUtils.resolveFilter(spark(), relation, finalWhere);
                         checkArgument(
-                                ExpressionHelper.onlyHasPartitionPredicate(
+                                ExpressionUtils.isValidPredicate(
                                         spark(),
                                         condition,
                                         table.partitionKeys().toArray(new String[0])),
@@ -188,7 +188,7 @@ public class CompactProcedure extends BaseProcedure {
             Predicate filter =
                     condition == null
                             ? null
-                            : ExpressionHelper.convertConditionToPaimonPredicate(
+                            : ExpressionUtils.convertConditionToPaimonPredicate(
                                     condition, relation.output(), table.rowType());
             switch (bucketMode) {
                 case FIXED:

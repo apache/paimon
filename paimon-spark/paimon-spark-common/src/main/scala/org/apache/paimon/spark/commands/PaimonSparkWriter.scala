@@ -35,7 +35,7 @@ import java.io.IOException
 
 import scala.collection.JavaConverters._
 
-trait PaimonSparkWriter extends WithFileStoreTable {
+case class PaimonSparkWriter(table: FileStoreTable) {
 
   private lazy val tableSchema = table.schema
 
@@ -52,7 +52,9 @@ trait PaimonSparkWriter extends WithFileStoreTable {
 
   private lazy val serializer = new CommitMessageSerializer
 
-  def write(data: Dataset[_], writeBuilder: BatchWriteBuilder): Seq[CommitMessage] = {
+  val writeBuilder: BatchWriteBuilder = table.newBatchWriteBuilder()
+
+  def write(data: Dataset[_]): Seq[CommitMessage] = {
     val sparkSession = data.sparkSession
     import sparkSession.implicits._
 
@@ -99,6 +101,17 @@ trait PaimonSparkWriter extends WithFileStoreTable {
       .map(deserializeCommitMessage(serializer, _))
 
     commitMessages.toSeq
+  }
+
+  def commit(commitMessages: Seq[CommitMessage]): Unit = {
+    val tableCommit = writeBuilder.newCommit()
+    try {
+      tableCommit.commit(commitMessages.toList.asJava)
+    } catch {
+      case e: Throwable => throw new RuntimeException(e);
+    } finally {
+      tableCommit.close()
+    }
   }
 
   /** assign a valid bucket id for each of record. */

@@ -19,13 +19,13 @@
 package org.apache.paimon.spark.commands
 
 import org.apache.paimon.spark.SparkFilterConverter
+import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
 import org.apache.paimon.types.RowType
 
-import org.apache.spark.sql.catalyst.expressions.PredicateHelper
 import org.apache.spark.sql.sources.{AlwaysTrue, And, EqualNullSafe, Filter}
 
 /** Helper trait for all paimon commands. */
-trait PaimonCommand extends WithFileStoreTable with PredicateHelper {
+trait PaimonCommand extends WithFileStoreTable with ExpressionHelper {
 
   /**
    * For the 'INSERT OVERWRITE' semantics of SQL, Spark DataSourceV2 will call the `truncate`
