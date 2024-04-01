@@ -309,6 +309,7 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
 
+    @Documentation.OverrideDefault("infinite")
     public static final ConfigOption<MemorySize> WRITE_BUFFER_MAX_DISK_SIZE =
             key("write-buffer-spill.max-disk-size")
                     .memoryType()

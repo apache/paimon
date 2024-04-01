@@ -160,15 +160,20 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
     @Override
     public boolean flushMemory() throws IOException {
-        spill();
-        return getDiskUsage() < maxDiskSize.getBytes();
+        boolean isFull = getDiskUsage() >= maxDiskSize.getBytes();
+        if (isFull) {
+            return false;
+        } else {
+            spill();
+            return true;
+        }
     }
 
     private long getDiskUsage() {
         long bytes = 0;
 
         for (ChannelWithMeta spillChannelID : spillChannelIDs) {
-            bytes += spillChannelID.getNumEstimatedBytes();
+            bytes += spillChannelID.getNumBytes();
         }
         return bytes;
     }
@@ -267,7 +272,7 @@ public class BinaryExternalSortBuffer implements SortBuffer {
 
         spillChannelIDs.add(
                 new ChannelWithMeta(
-                        channel, blockCount, bytesInLastBuffer, output.getNumCompressedBytes()));
+                        channel, blockCount, bytesInLastBuffer, output.getChannel().getSize()));
         inMemorySortBuffer.clear();
     }
 }

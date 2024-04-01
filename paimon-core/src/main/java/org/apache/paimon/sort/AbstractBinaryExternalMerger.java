@@ -206,7 +206,7 @@ public abstract class AbstractBinaryExternalMerger<Entry> implements Closeable {
                 mergedChannelID,
                 numBlocksWritten,
                 numBytesInLastBlock,
-                output.getNumCompressedBytes());
+                output.getChannel().getSize());
     }
 
     // -------------------------------------------------------------------------------------------
