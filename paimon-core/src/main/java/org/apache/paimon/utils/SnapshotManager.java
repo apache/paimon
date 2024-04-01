@@ -318,6 +318,13 @@ public class SnapshotManager implements Serializable {
                 .iterator();
     }
 
+    public Iterator<Changelog> changelogs() throws IOException {
+        return listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
+                .map(this::changelog)
+                .sorted(Comparator.comparingLong(Changelog::id))
+                .iterator();
+    }
+
     /**
      * If {@link FileNotFoundException} is thrown when reading the snapshot file, this snapshot may
      * be deleted by other processes, so just skip this snapshot.
@@ -336,13 +343,40 @@ public class SnapshotManager implements Serializable {
         return snapshots;
     }
 
+    public List<Changelog> safelyGetAllChangelogs() throws IOException {
+        List<Path> paths =
+                listVersionedFiles(fileIO, changelogDirectory(), CHANGELOG_PREFIX)
+                        .map(this::longLivedChangelogPath)
+                        .collect(Collectors.toList());
+
+        List<Changelog> changelogs = new ArrayList<>();
+        for (Path path : paths) {
+            try {
+                String json = fileIO.readFileUtf8(path);
+                changelogs.add(Changelog.fromJson(json));
+            } catch (FileNotFoundException ignored) {
+            }
+        }
+
+        return changelogs;
+    }
+
     /**
      * Try to get non snapshot files. If any error occurred, just ignore it and return an empty
      * result.
      */
     public List<Path> tryGetNonSnapshotFiles(Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(snapshotDirectory(), fileStatusFilter, nonSnapshotFileFilter());
+    }
+
+    public List<Path> tryGetNonChangelogFiles(Predicate<FileStatus> fileStatusFilter) {
+        return listPathWithFilter(changelogDirectory(), fileStatusFilter, nonChangelogFileFilter());
+    }
+
+    private List<Path> listPathWithFilter(
+            Path directory, Predicate<FileStatus> fileStatusFilter, Predicate<Path> fileFilter) {
         try {
-            FileStatus[] statuses = fileIO.listStatus(snapshotDirectory());
+            FileStatus[] statuses = fileIO.listStatus(directory);
             if (statuses == null) {
                 return Collections.emptyList();
             }
@@ -350,7 +384,7 @@ public class SnapshotManager implements Serializable {
             return Arrays.stream(statuses)
                     .filter(fileStatusFilter)
                     .map(FileStatus::getPath)
-                    .filter(nonSnapshotFileFilter())
+                    .filter(fileFilter)
                     .collect(Collectors.toList());
         } catch (IOException ignored) {
             return Collections.emptyList();
@@ -361,6 +395,15 @@ public class SnapshotManager implements Serializable {
         return path -> {
             String name = path.getName();
             return !name.startsWith(SNAPSHOT_PREFIX)
+                    && !name.equals(EARLIEST)
+                    && !name.equals(LATEST);
+        };
+    }
+
+    private Predicate<Path> nonChangelogFileFilter() {
+        return path -> {
+            String name = path.getName();
+            return !name.startsWith(CHANGELOG_PREFIX)
                     && !name.equals(EARLIEST)
                     && !name.equals(LATEST);
         };
@@ -472,7 +515,7 @@ public class SnapshotManager implements Serializable {
         }
 
         Long snapshotId = readHint(LATEST, dir);
-        if (snapshotId != null) {
+        if (snapshotId != null && snapshotId > 0) {
             long nextSnapshot = snapshotId + 1;
             // it is the latest only there is no next one
             if (!fileIO.exists(file.apply(nextSnapshot))) {

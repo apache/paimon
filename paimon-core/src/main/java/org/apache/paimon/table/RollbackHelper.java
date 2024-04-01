@@ -138,7 +138,7 @@ public class RollbackHelper {
             return Collections.emptyList();
         }
 
-        // delete snapshot files first, cannot be read now
+        // delete changelog files first, cannot be read now
         // it is possible that some snapshots have been expired
         List<Changelog> toBeCleaned = new ArrayList<>();
         long to = Math.max(earliest, retainedSnapshot.id() + 1);
@@ -156,6 +156,21 @@ public class RollbackHelper {
 
         // delete directories
         snapshotDeletion.cleanDataDirectories();
+
+        // modify the latest hint
+        try {
+            if (toBeCleaned.size() > 0) {
+                if (to == earliest) {
+                    // all changelog has been cleaned, so we do not know the actual latest id
+                    // set to -1
+                    snapshotManager.commitLongLivedChangelogLatestHint(-1);
+                } else {
+                    snapshotManager.commitLongLivedChangelogLatestHint(to - 1);
+                }
+            }
+        } catch (IOException e) {
+            throw new UncheckedIOException(e);
+        }
 
         return toBeCleaned;
     }

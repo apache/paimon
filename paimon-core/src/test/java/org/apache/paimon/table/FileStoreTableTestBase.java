@@ -845,6 +845,7 @@ public abstract class FileStoreTableTestBase {
             Options options = new Options();
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 5);
             options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 5);
+            options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
             options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
             options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
             table.copy(options.toMap()).newCommit("").expireSnapshots();
@@ -881,6 +882,12 @@ public abstract class FileStoreTableTestBase {
 
     private FileStoreTable prepareRollbackTable(int commitTimes) throws Exception {
         FileStoreTable table = createFileStoreTable();
+        prepareRollbackTable(commitTimes, table);
+        return table;
+    }
+
+    protected FileStoreTable prepareRollbackTable(int commitTimes, FileStoreTable table)
+            throws Exception {
         StreamTableWrite write = table.newWrite(commitUser);
         StreamTableCommit commit = table.newCommit(commitUser);
 
