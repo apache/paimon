@@ -70,7 +70,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 /**
  * Tests for file deletion when expiring snapshot and deleting tag. It also tests that after
  * expiration, empty data file directories (buckets and partitions) are deleted. It didn't extend
- * {@link FileStoreExpireTestBase} because there are not too many codes can be reused.
+ * {@link ExpireSnapshotsTest} because there are not too many codes can be reused.
  */
 public class FileDeletionTest {
 

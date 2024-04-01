@@ -18,41 +18,155 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.KeyValue;
+import org.apache.paimon.Snapshot;
+import org.apache.paimon.TestFileStore;
+import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
 import org.apache.paimon.manifest.ManifestEntry;
+import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.ExpireSnapshots;
 import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.utils.RecordWriter;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TagManager;
 
-import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
+import java.util.stream.Collectors;
 
+import static java.util.Objects.requireNonNull;
 import static org.apache.paimon.data.BinaryRow.EMPTY_ROW;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/**
- * Tests for {@link ExpireSnapshotsImpl}. After expiration, only useful files should be retained.
- */
-public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
+/** Base test class for {@link ExpireSnapshotsImpl}. */
+public class ExpireSnapshotsTest {
 
-    @AfterEach
-    public void afterEach() throws IOException {
-        store.assertCleaned();
+    protected final FileIO fileIO = new LocalFileIO();
+    protected TestKeyValueGenerator gen;
+    @TempDir java.nio.file.Path tempDir;
+    protected TestFileStore store;
+    protected SnapshotManager snapshotManager;
+
+    @BeforeEach
+    public void beforeEach() throws Exception {
+        gen = new TestKeyValueGenerator();
+        store = createStore();
+        snapshotManager = store.snapshotManager();
+        SchemaManager schemaManager = new SchemaManager(fileIO, new Path(tempDir.toUri()));
+        schemaManager.createTable(
+                new Schema(
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE.getFields(),
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
+                        TestKeyValueGenerator.getPrimaryKeys(
+                                TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
+                        Collections.emptyMap(),
+                        null));
+    }
+
+    @Test
+    public void testExpireWithMissingFiles() throws Exception {
+        ExpireSnapshots expire = store.newExpire(1, 1, 1);
+
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        commit(5, allData, snapshotPositions);
+
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        Set<Path> filesInUse = store.getFilesInUse(latestSnapshotId);
+        List<Path> unusedFileList =
+                Files.walk(Paths.get(tempDir.toString()))
+                        .filter(Files::isRegularFile)
+                        .filter(p -> !p.getFileName().toString().startsWith("snapshot"))
+                        .filter(p -> !p.getFileName().toString().startsWith("schema"))
+                        .map(p -> new Path(p.toString()))
+                        .filter(p -> !filesInUse.contains(p))
+                        .collect(Collectors.toList());
+
+        // shuffle list
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+        for (int i = unusedFileList.size() - 1; i > 0; i--) {
+            int j = random.nextInt(i + 1);
+            Collections.swap(unusedFileList, i, j);
+        }
+
+        // delete some unused files
+        int numFilesToDelete = random.nextInt(unusedFileList.size());
+        for (int i = 0; i < numFilesToDelete; i++) {
+            fileIO.deleteQuietly(unusedFileList.get(i));
+        }
+
+        expire.expire();
+
+        for (int i = 1; i < latestSnapshotId; i++) {
+            assertThat(snapshotManager.snapshotExists(i)).isFalse();
+        }
+        assertThat(snapshotManager.snapshotExists(latestSnapshotId)).isTrue();
+        assertSnapshot(latestSnapshotId, allData, snapshotPositions);
+    }
+
+    @Test
+    public void testMixedSnapshotAndTagDeletion() throws Exception {
+        List<KeyValue> allData = new ArrayList<>();
+        List<Integer> snapshotPositions = new ArrayList<>();
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        commit(random.nextInt(10) + 30, allData, snapshotPositions);
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
+        TagManager tagManager = store.newTagManager();
+
+        // create tags for each snapshot
+        for (int id = 1; id <= latestSnapshotId; id++) {
+            Snapshot snapshot = snapshotManager.snapshot(id);
+            tagManager.createTag(snapshot, "tag" + id, Collections.emptyList());
+        }
+
+        // randomly expire snapshots
+        int expired = random.nextInt(latestSnapshotId / 2) + 1;
+        int retained = latestSnapshotId - expired;
+        store.newExpire(retained, retained, Long.MAX_VALUE).expire();
+
+        // randomly delete tags
+        for (int id = 1; id <= latestSnapshotId; id++) {
+            if (random.nextBoolean()) {
+                tagManager.deleteTag(
+                        "tag" + id,
+                        store.newTagDeletion(),
+                        snapshotManager,
+                        Collections.emptyList());
+            }
+        }
+
+        // check snapshots and tags
+        Set<Snapshot> allSnapshots = new HashSet<>();
+        snapshotManager.snapshots().forEachRemaining(allSnapshots::add);
+        allSnapshots.addAll(tagManager.taggedSnapshots());
+
+        for (Snapshot snapshot : allSnapshots) {
+            assertSnapshot(snapshot, allData, snapshotPositions);
+        }
     }
 
     @Test
@@ -97,14 +211,18 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         assertThat(fileIO.exists(myDataFile)).isFalse();
         assertThat(fileIO.exists(extra1)).isFalse();
         assertThat(fileIO.exists(extra2)).isFalse();
+
+        store.assertCleaned();
     }
 
     @Test
-    public void testNoSnapshot() {
+    public void testNoSnapshot() throws IOException {
         ExpireSnapshots expire = store.newExpire(1, 3, Long.MAX_VALUE);
         expire.expire();
 
         assertThat(snapshotManager.latestSnapshotId()).isNull();
+
+        store.assertCleaned();
     }
 
     @Test
@@ -112,7 +230,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(2, allData, snapshotPositions);
-        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         ExpireSnapshots expire = store.newExpire(1, latestSnapshotId + 1, Long.MAX_VALUE);
         expire.expire();
 
@@ -120,6 +238,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
             assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
+
+        store.assertCleaned();
     }
 
     @Test
@@ -127,7 +247,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(5, allData, snapshotPositions);
-        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         ExpireSnapshots expire = store.newExpire(1, Integer.MAX_VALUE, Long.MAX_VALUE);
         expire.expire();
 
@@ -135,6 +255,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
             assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
+
+        store.assertCleaned();
     }
 
     @Test
@@ -145,7 +267,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
         commit(numRetainedMin + random.nextInt(5), allData, snapshotPositions);
-        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         Thread.sleep(100);
         ExpireSnapshots expire = store.newExpire(numRetainedMin, Integer.MAX_VALUE, 1);
         expire.expire();
@@ -157,6 +279,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
             assertThat(snapshotManager.snapshotExists(i)).isTrue();
             assertSnapshot(i, allData, snapshotPositions);
         }
+
+        store.assertCleaned();
     }
 
     @Test
@@ -169,7 +293,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
             commit(ThreadLocalRandom.current().nextInt(5) + 1, allData, snapshotPositions);
             expire.expire();
 
-            int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+            int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
             for (int j = 1; j <= latestSnapshotId; j++) {
                 if (j > latestSnapshotId - 3) {
                     assertThat(snapshotManager.snapshotExists(j)).isTrue();
@@ -193,6 +317,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         fileIO.delete(earliest, false);
 
         assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(earliestId);
+
+        store.assertCleaned();
     }
 
     @Test
@@ -209,7 +335,7 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         expire.olderThanMills(expireMillis - 1000).expire();
         expire.olderThanMills(expireMillis - 1000).expire();
 
-        int latestSnapshotId = snapshotManager.latestSnapshotId().intValue();
+        int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         for (int i = 1; i <= latestSnapshotId; i++) {
             if (snapshotManager.snapshotExists(i)) {
                 assertThat(snapshotManager.snapshot(i).timeMillis())
@@ -217,6 +343,8 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
                 assertSnapshot(i, allData, snapshotPositions);
             }
         }
+
+        store.assertCleaned();
     }
 
     @Test
@@ -258,5 +386,67 @@ public class CleanedFileStoreExpireTest extends FileStoreExpireTestBase {
         ExpireSnapshots expire = store.newExpire(1, 1, Long.MAX_VALUE);
         expire.expire();
         FileStoreTestUtils.assertPathExists(fileIO, dataFilePath2);
+
+        store.assertCleaned();
+    }
+
+    private TestFileStore createStore() {
+        ThreadLocalRandom random = ThreadLocalRandom.current();
+
+        CoreOptions.ChangelogProducer changelogProducer;
+        if (random.nextBoolean()) {
+            changelogProducer = CoreOptions.ChangelogProducer.INPUT;
+        } else {
+            changelogProducer = CoreOptions.ChangelogProducer.NONE;
+        }
+
+        return new TestFileStore.Builder(
+                        "avro",
+                        tempDir.toString(),
+                        1,
+                        TestKeyValueGenerator.DEFAULT_PART_TYPE,
+                        TestKeyValueGenerator.KEY_TYPE,
+                        TestKeyValueGenerator.DEFAULT_ROW_TYPE,
+                        TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
+                        DeduplicateMergeFunction.factory(),
+                        null)
+                .changelogProducer(changelogProducer)
+                .build();
+    }
+
+    protected void commit(int numCommits, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        for (int i = 0; i < numCommits; i++) {
+            int numRecords = ThreadLocalRandom.current().nextInt(100) + 1;
+            List<KeyValue> data = new ArrayList<>();
+            for (int j = 0; j < numRecords; j++) {
+                data.add(gen.next());
+            }
+            allData.addAll(data);
+            List<Snapshot> snapshots = store.commitData(data, gen::getPartition, kv -> 0);
+            for (int j = 0; j < snapshots.size(); j++) {
+                snapshotPositions.add(allData.size());
+            }
+        }
+    }
+
+    protected void assertSnapshot(
+            int snapshotId, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        assertSnapshot(snapshotManager.snapshot(snapshotId), allData, snapshotPositions);
+    }
+
+    protected void assertSnapshot(
+            Snapshot snapshot, List<KeyValue> allData, List<Integer> snapshotPositions)
+            throws Exception {
+        int snapshotId = (int) snapshot.id();
+        Map<BinaryRow, BinaryRow> expected =
+                store.toKvMap(allData.subList(0, snapshotPositions.get(snapshotId - 1)));
+        List<KeyValue> actualKvs =
+                store.readKvsFromManifestEntries(
+                        store.newScan().withSnapshot(snapshot).plan().files(), false);
+        gen.sort(actualKvs);
+        Map<BinaryRow, BinaryRow> actual = store.toKvMap(actualKvs);
+        assertThat(actual).isEqualTo(expected);
     }
 }
