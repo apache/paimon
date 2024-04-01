@@ -151,4 +151,9 @@ public class StoreCommitter implements Committer<Committable, ManifestCommittabl
     private static long calcTotalFileRowCount(List<DataFileMeta> files) {
         return files.stream().mapToLong(DataFileMeta::rowCount).reduce(Long::sum).orElse(0);
     }
+
+    @Override
+    public void ignoreExpireCheckInterval() {
+        commit.ignoreExpireCheckInterval();
+    }
 }

@@ -383,4 +383,10 @@ public class TableCommitImpl implements InnerTableCommit {
     public ExecutorService getExpireMainExecutor() {
         return expireMainExecutor;
     }
+
+    public void ignoreExpireCheckInterval() {
+        if (partitionExpire != null) {
+            partitionExpire.ignoreExpireCheckInterval();
+        }
+    }
 }
