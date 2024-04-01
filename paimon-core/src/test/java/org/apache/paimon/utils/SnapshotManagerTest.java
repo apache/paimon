@@ -145,22 +145,23 @@ public class SnapshotManagerTest {
 
     private Changelog createChangelogWithMillis(long id, long millis) {
         return new Changelog(
-                id,
-                0L,
-                null,
-                null,
-                null,
-                null,
-                null,
-                0L,
-                Snapshot.CommitKind.APPEND,
-                millis,
-                null,
-                null,
-                null,
-                null,
-                null,
-                null);
+                new Snapshot(
+                        id,
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        Snapshot.CommitKind.APPEND,
+                        millis,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null));
     }
 
     @Test
