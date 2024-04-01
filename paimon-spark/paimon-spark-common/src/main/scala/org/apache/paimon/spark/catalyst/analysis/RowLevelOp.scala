@@ -18,10 +18,8 @@
 
 package org.apache.paimon.spark.catalyst.analysis
 
-import org.apache.paimon.AppendOnlyFileStore
 import org.apache.paimon.CoreOptions.{MERGE_ENGINE, MergeEngine}
 import org.apache.paimon.options.Options
-import org.apache.paimon.spark.catalyst.analysis.RowLevelOp.{AppendTable, PrimaryKeyTable}
 import org.apache.paimon.table.Table
 
 sealed trait RowLevelOp {
@@ -30,10 +28,10 @@ sealed trait RowLevelOp {
 
   protected val supportedMergeEngine: Seq[MergeEngine]
 
-  protected val supportedTable: Seq[String]
+  protected val supportAppendOnlyTable: Boolean
 
   def checkValidity(table: Table): Unit = {
-    if (!supportedTable.contains(table.getClass.getSimpleName)) {
+    if (!supportAppendOnlyTable && table.primaryKeys().isEmpty) {
       throw new UnsupportedOperationException(s"Only support to $name table with primary keys.")
     }
 
@@ -50,7 +48,7 @@ case object Delete extends RowLevelOp {
 
   override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
 
-  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable)
+  override val supportAppendOnlyTable: Boolean = false
 
 }
 
@@ -59,7 +57,7 @@ case object Update extends RowLevelOp {
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
 
-  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable, AppendTable)
+  override val supportAppendOnlyTable: Boolean = true
 
 }
 
@@ -68,13 +66,6 @@ case object MergeInto extends RowLevelOp {
   override val supportedMergeEngine: Seq[MergeEngine] =
     Seq(MergeEngine.DEDUPLICATE, MergeEngine.PARTIAL_UPDATE)
 
-  override val supportedTable: Seq[String] = Seq(PrimaryKeyTable)
-
-}
-
-object RowLevelOp {
-
-  val AppendTable = "AppendOnlyFileStoreTable"
-  val PrimaryKeyTable = "PrimaryKeyFileStoreTable"
+  override val supportAppendOnlyTable: Boolean = false
 
 }

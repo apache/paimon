@@ -29,19 +29,13 @@ case class SparkDataFileMeta(
     partition: BinaryRow,
     bucket: Int,
     totalBuckets: Int,
-    dataFileMeta: DataFileMeta
-) {
+    dataFileMeta: DataFileMeta) {
 
   def relativePath(fileStorePathFactory: FileStorePathFactory): String = {
-    val partitionPath = fileStorePathFactory.getPartitionString(partition)
-    if (partitionPath.isEmpty) {
-      FileStorePathFactory.BUCKET_PATH_PREFIX + bucket + "/" +
-        dataFileMeta.fileName()
-    } else {
-      partitionPath +
-        FileStorePathFactory.BUCKET_PATH_PREFIX + bucket + "/" +
-        dataFileMeta.fileName()
-    }
+    fileStorePathFactory
+      .relativePartitionAndBucketPath(partition, bucket)
+      .toUri
+      .toString + "/" + dataFileMeta.fileName()
   }
 }
 
