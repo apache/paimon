@@ -313,7 +313,7 @@ public abstract class KafkaActionITCaseBase extends CdcActionITCaseBase {
         URL url =
                 KafkaCanalSyncTableActionITCase.class
                         .getClassLoader()
-                        .getResource(String.format(resourceDirFormat, (Object[]) args));
+                        .getResource(String.format(resourceDirFormat, args));
         Files.readAllLines(Paths.get(url.toURI())).stream()
                 .filter(this::isRecordLine)
                 .forEach(r -> send(topic, r, wait));
