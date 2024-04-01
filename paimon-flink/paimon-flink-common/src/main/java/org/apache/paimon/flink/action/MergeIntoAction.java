@@ -172,6 +172,7 @@ public class MergeIntoAction extends TableActionBase {
             Map<String, String> dynamicOptions = new HashMap<>();
             dynamicOptions.put(
                     CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.DEDUPLICATE.toString());
+            dynamicOptions.put(CoreOptions.IGNORE_DELETE.key(), "false");
             // force compaction
             dynamicOptions.put(CoreOptions.FULL_COMPACTION_DELTA_COMMITS.key(), "1");
             table = ((FileStoreTable) table).internalCopyWithoutCheck(dynamicOptions);
