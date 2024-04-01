@@ -107,6 +107,7 @@ public class ContinuousFileStoreSource extends FlinkSource {
                 coreOptions.continuousDiscoveryInterval().toMillis(),
                 scan,
                 bucketMode,
-                coreOptions.scanSplitMaxPerTask());
+                coreOptions.scanSplitMaxPerTask(),
+                coreOptions.scanShuffleByPartition());
     }
 }

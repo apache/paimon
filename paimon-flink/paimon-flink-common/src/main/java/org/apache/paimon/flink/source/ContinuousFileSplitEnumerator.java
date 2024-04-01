@@ -23,6 +23,7 @@ import org.apache.paimon.flink.source.assigners.FIFOSplitAssigner;
 import org.apache.paimon.flink.source.assigners.PreAssignSplitAssigner;
 import org.apache.paimon.flink.source.assigners.SplitAssigner;
 import org.apache.paimon.table.BucketMode;
+import org.apache.paimon.table.sink.ChannelComputer;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
 import org.apache.paimon.table.source.SnapshotNotExistPlan;
@@ -81,6 +82,8 @@ public class ContinuousFileSplitEnumerator
 
     private boolean stopTriggerScan = false;
 
+    private boolean shuffleByPartition = false;
+
     public ContinuousFileSplitEnumerator(
             SplitEnumeratorContext<FileStoreSourceSplit> context,
             Collection<FileStoreSourceSplit> remainSplits,
@@ -88,7 +91,8 @@ public class ContinuousFileSplitEnumerator
             long discoveryInterval,
             StreamTableScan scan,
             BucketMode bucketMode,
-            int splitMaxPerTask) {
+            int splitMaxPerTask,
+            boolean shuffleByPartition) {
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
         this.nextSnapshotId = nextSnapshotId;
@@ -98,6 +102,7 @@ public class ContinuousFileSplitEnumerator
         this.scan = scan;
         this.splitAssigner = createSplitAssigner(bucketMode);
         this.splitMaxNum = context.currentParallelism() * splitMaxPerTask;
+        this.shuffleByPartition = shuffleByPartition;
         addSplits(remainSplits);
 
         this.consumerProgressCalculator =
@@ -275,7 +280,12 @@ public class ContinuousFileSplitEnumerator
     }
 
     protected int assignSuggestedTask(FileStoreSourceSplit split) {
-        return ((DataSplit) split.split()).bucket() % context.currentParallelism();
+        DataSplit dataSplit = ((DataSplit) split.split());
+        if (shuffleByPartition) {
+            return ChannelComputer.select(
+                    dataSplit.partition(), dataSplit.bucket(), context.currentParallelism());
+        }
+        return dataSplit.bucket() % context.currentParallelism();
     }
 
     protected SplitAssigner createSplitAssigner(BucketMode bucketMode) {
