@@ -460,7 +460,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         assertThat(batchSql("SELECT * FROM ignore_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", null));
 
-        // force alter merge-engine and read
+        // force altering merge engine and read
         Map<String, String> newOptions = new HashMap<>();
         newOptions.put(
                 CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
