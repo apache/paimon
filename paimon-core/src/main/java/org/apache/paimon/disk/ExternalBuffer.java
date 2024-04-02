@@ -19,7 +19,7 @@
 package org.apache.paimon.disk;
 
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.compression.Lz4BlockCompressionFactory;
+import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
@@ -44,8 +44,8 @@ public class ExternalBuffer implements RowBuffer {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
 
-    private static final Lz4BlockCompressionFactory compactionFactory =
-            new Lz4BlockCompressionFactory();
+    private static final BlockCompressionFactory compactionFactory =
+            BlockCompressionFactory.create("LZ4");
 
     private final IOManager ioManager;
     private final MemorySegmentPool pool;
