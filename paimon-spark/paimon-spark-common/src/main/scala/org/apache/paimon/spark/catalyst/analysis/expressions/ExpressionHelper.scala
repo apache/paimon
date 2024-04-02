@@ -112,6 +112,17 @@ trait ExpressionHelper extends PredicateHelper {
     }
   }
 
+  def splitPruePartitionAndOtherPredicates(
+      condition: Expression,
+      partitionColumns: Seq[String],
+      resolver: Resolver): (Seq[Expression], Seq[Expression]) = {
+    splitConjunctivePredicates(condition)
+      .partition {
+        isPredicatePartitionColumnsOnly(_, partitionColumns, resolver) && !SubqueryExpression
+          .hasSubquery(condition)
+      }
+  }
+
   def isPredicatePartitionColumnsOnly(
       condition: Expression,
       partitionColumns: Seq[String],
