@@ -108,6 +108,12 @@ public class BitSet {
         }
     }
 
+    public byte[] getBytes() {
+        byte[] b = new byte[byteLength];
+        System.arraycopy(memorySegment.getArray(), 0, b, 0, b.length);
+        return b;
+    }
+
     @Override
     public String toString() {
         return "BitSet:\n"

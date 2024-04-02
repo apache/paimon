@@ -16,7 +16,7 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.fileindex;
+package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
@@ -29,91 +29,84 @@ import java.math.BigDecimal;
 import java.util.Random;
 import java.util.function.Function;
 
-/** Test for {@link FastHashForNumber}. */
-public class FastHashForNumberTest {
+/** Test for {@link FastHash}. */
+public class FastHashTest {
 
     private static final Random RANDOM = new Random();
 
     @Test
     public void testDecimalType() {
-        Function<Object, Long> function =
-                DataTypes.DECIMAL(10, 5).accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.DECIMAL(10, 5).accept(FastHash.INSTANCE);
         Decimal decimal = Decimal.fromBigDecimal(new BigDecimal("0.00123"), 10, 5);
         Assertions.assertThat(function.apply(decimal))
-                .isEqualTo(FastHashForNumber.getLongHash(decimal.toUnscaledLong()));
+                .isEqualTo(FastHash.getLongHash(decimal.toUnscaledLong()));
     }
 
     @Test
     public void testTinyIntType() {
-        Function<Object, Long> function =
-                DataTypes.TINYINT().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.TINYINT().accept(FastHash.INSTANCE);
         byte c = (byte) RANDOM.nextInt();
-        Assertions.assertThat(function.apply(c)).isEqualTo(FastHashForNumber.getLongHash(c));
+        Assertions.assertThat(function.apply(c)).isEqualTo(FastHash.getLongHash(c));
     }
 
     @Test
     public void testSmallIntType() {
-        Function<Object, Long> function =
-                DataTypes.SMALLINT().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.SMALLINT().accept(FastHash.INSTANCE);
         short c = (short) RANDOM.nextInt();
-        Assertions.assertThat(function.apply(c)).isEqualTo(FastHashForNumber.getLongHash(c));
+        Assertions.assertThat(function.apply(c)).isEqualTo(FastHash.getLongHash(c));
     }
 
     @Test
     public void testIntType() {
-        Function<Object, Long> function = DataTypes.INT().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.INT().accept(FastHash.INSTANCE);
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.apply(c)).isEqualTo((FastHashForNumber.getLongHash(c)));
+        Assertions.assertThat(function.apply(c)).isEqualTo((FastHash.getLongHash(c)));
     }
 
     @Test
     public void testBigIntType() {
-        Function<Object, Long> function =
-                DataTypes.BIGINT().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.BIGINT().accept(FastHash.INSTANCE);
         long c = RANDOM.nextLong();
-        Assertions.assertThat(function.apply(c)).isEqualTo((FastHashForNumber.getLongHash(c)));
+        Assertions.assertThat(function.apply(c)).isEqualTo((FastHash.getLongHash(c)));
     }
 
     @Test
     public void testFloatType() {
-        Function<Object, Long> function =
-                DataTypes.FLOAT().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.FLOAT().accept(FastHash.INSTANCE);
         float c = RANDOM.nextFloat();
         Assertions.assertThat(function.apply(c))
-                .isEqualTo((FastHashForNumber.getLongHash(Float.floatToIntBits(c))));
+                .isEqualTo((FastHash.getLongHash(Float.floatToIntBits(c))));
     }
 
     @Test
     public void testDoubleType() {
-        Function<Object, Long> function =
-                DataTypes.DOUBLE().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.DOUBLE().accept(FastHash.INSTANCE);
         double c = RANDOM.nextDouble();
         Assertions.assertThat(function.apply(c))
-                .isEqualTo((FastHashForNumber.getLongHash(Double.doubleToLongBits(c))));
+                .isEqualTo((FastHash.getLongHash(Double.doubleToLongBits(c))));
     }
 
     @Test
     public void testDateType() {
-        Function<Object, Long> function = DataTypes.DATE().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.DATE().accept(FastHash.INSTANCE);
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.apply(c)).isEqualTo((FastHashForNumber.getLongHash(c)));
+        Assertions.assertThat(function.apply(c)).isEqualTo((FastHash.getLongHash(c)));
     }
 
     @Test
     public void testTimestampType() {
-        Function<Object, Long> function =
-                DataTypes.TIMESTAMP().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function = DataTypes.TIMESTAMP().accept(FastHash.INSTANCE);
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.apply(c))
-                .isEqualTo((FastHashForNumber.getLongHash(c.getMillisecond())));
+                .isEqualTo((FastHash.getLongHash(c.getMillisecond())));
     }
 
     @Test
     public void testLocalZonedTimestampType() {
-        Function<Object, Long> function =
-                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE().accept(FastHashForNumber.INSTANCE).get();
+        Function<Object, Integer> function =
+                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE().accept(FastHash.INSTANCE);
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.apply(c))
-                .isEqualTo((FastHashForNumber.getLongHash(c.getMillisecond())));
+                .isEqualTo((FastHash.getLongHash(c.getMillisecond())));
     }
 }
