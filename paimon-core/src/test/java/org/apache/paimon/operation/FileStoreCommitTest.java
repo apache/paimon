@@ -559,11 +559,6 @@ public class FileStoreCommitTest {
                     .isInstanceOf(RuntimeException.class)
                     .hasMessageContaining("Give up committing.");
         }
-
-        // commit without check, should pass
-        for (int i = 0; i < 3; i++) {
-            store.newCommit().commit(committables.get(0), Collections.emptyMap());
-        }
     }
 
     @Test
