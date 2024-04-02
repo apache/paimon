@@ -26,6 +26,7 @@ import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
+import org.apache.paimon.types.VarCharType;
 
 import org.apache.spark.sql.sources.EqualNullSafe;
 import org.apache.spark.sql.sources.EqualTo;
@@ -36,6 +37,8 @@ import org.apache.spark.sql.sources.IsNotNull;
 import org.apache.spark.sql.sources.IsNull;
 import org.apache.spark.sql.sources.LessThan;
 import org.apache.spark.sql.sources.LessThanOrEqual;
+import org.apache.spark.sql.sources.Not;
+import org.apache.spark.sql.sources.StringStartsWith;
 import org.junit.jupiter.api.Test;
 
 import java.sql.Date;
@@ -43,10 +46,13 @@ import java.time.Instant;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.catchThrowableOfType;
 
 /** Test for {@link SparkFilterConverter}. */
 public class SparkFilterConverterTest {
@@ -182,5 +188,18 @@ public class SparkFilterConverterTest {
 
         assertThat(dateExpression).isEqualTo(rawExpression);
         assertThat(localDateExpression).isEqualTo(rawExpression);
+    }
+
+    @Test
+    public void testIgnoreFailure() {
+        List<DataField> dataFields = new ArrayList<>();
+        dataFields.add(new DataField(0, "id", new IntType()));
+        dataFields.add(new DataField(1, "name", new VarCharType(VarCharType.MAX_LENGTH)));
+        RowType rowType = new RowType(dataFields);
+        SparkFilterConverter converter = new SparkFilterConverter(rowType);
+
+        Not not = Not.apply(StringStartsWith.apply("name", "paimon"));
+        catchThrowableOfType(() -> converter.convert(not), UnsupportedOperationException.class);
+        assertThat(converter.convertIgnoreFailure(not)).isNull();
     }
 }
