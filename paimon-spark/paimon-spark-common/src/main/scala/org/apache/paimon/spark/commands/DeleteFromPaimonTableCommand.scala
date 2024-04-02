@@ -51,9 +51,7 @@ trait DeleteFromPaimonTableCommandBase extends PaimonLeafRunnableCommand with Pa
       (None, false)
     } else {
       try {
-        (
-          Some(convertConditionToPaimonPredicate(condition(), relation.output, table.rowType())),
-          false)
+        (convertConditionToPaimonPredicate(condition(), relation.output, table.rowType()), false)
       } catch {
         case NonFatal(_) =>
           (None, true)

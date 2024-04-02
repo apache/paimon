@@ -189,7 +189,8 @@ public class CompactProcedure extends BaseProcedure {
                     condition == null
                             ? null
                             : ExpressionUtils.convertConditionToPaimonPredicate(
-                                    condition, relation.output(), table.rowType());
+                                            condition, relation.output(), table.rowType(), false)
+                                    .getOrElse(null);
             switch (bucketMode) {
                 case FIXED:
                 case DYNAMIC:

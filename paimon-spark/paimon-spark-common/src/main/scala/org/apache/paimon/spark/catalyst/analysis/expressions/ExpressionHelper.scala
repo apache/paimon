@@ -138,18 +138,28 @@ trait ExpressionHelper extends PredicateHelper {
   def convertConditionToPaimonPredicate(
       condition: Expression,
       output: Seq[Attribute],
-      rowType: RowType): Predicate = {
+      rowType: RowType,
+      ignoreFailure: Boolean = false): Option[Predicate] = {
     val converter = new SparkFilterConverter(rowType)
     val filters = normalizeExprs(Seq(condition), output)
-      .flatMap(splitConjunctivePredicates(_).map {
+      .flatMap(splitConjunctivePredicates(_).flatMap {
         f =>
-          translateFilter(f, supportNestedPredicatePushdown = true).getOrElse(
-            throw new RuntimeException("Exec update failed:" +
-              s" cannot translate expression to source filter: $f"))
+          val filter = translateFilter(f, supportNestedPredicatePushdown = true)
+          if (filter.isEmpty && !ignoreFailure) {
+            throw new RuntimeException(
+              "Exec update failed:" +
+                s" cannot translate expression to source filter: $f")
+          }
+          filter
       })
       .toArray
-    val predicates = filters.map(converter.convert)
-    PredicateBuilder.and(predicates: _*)
+
+    if (filters.isEmpty) {
+      None
+    } else {
+      val predicates = filters.map(converter.convertIgnoreFailure)
+      Some(PredicateBuilder.and(predicates: _*))
+    }
   }
 }
 
