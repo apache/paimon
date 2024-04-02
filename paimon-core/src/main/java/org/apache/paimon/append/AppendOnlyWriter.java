@@ -71,6 +71,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final List<DataFileMeta> compactAfter;
     private final LongCounter seqNumCounter;
     private final String fileCompression;
+    private final String spillCompression;
     private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
@@ -93,6 +94,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean useWriteBuffer,
             boolean spillable,
             String fileCompression,
+            String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize) {
         this.fileIO = fileIO;
@@ -109,13 +111,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.compactAfter = new ArrayList<>();
         this.seqNumCounter = new LongCounter(maxSequenceNumber + 1);
         this.fileCompression = fileCompression;
+        this.spillCompression = spillCompression;
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
 
         this.sinkWriter =
                 useWriteBuffer
-                        ? new BufferedSinkWriter(spillable, maxDiskSize)
+                        ? new BufferedSinkWriter(spillable, maxDiskSize, spillCompression)
                         : new DirectSinkWriter();
 
         if (increment != null) {
@@ -211,7 +214,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             trySyncLatestCompaction(true);
 
             sinkWriter.close();
-            sinkWriter = new BufferedSinkWriter(true, maxDiskSize);
+            sinkWriter = new BufferedSinkWriter(true, maxDiskSize, spillCompression);
             sinkWriter.setMemoryPool(memorySegmentPool);
         }
     }
@@ -378,11 +381,14 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
 
         private final MemorySize maxDiskSize;
 
+        private final String compression;
+
         private RowBuffer writeBuffer;
 
-        private BufferedSinkWriter(boolean spillable, MemorySize maxDiskSize) {
+        private BufferedSinkWriter(boolean spillable, MemorySize maxDiskSize, String compression) {
             this.spillable = spillable;
             this.maxDiskSize = maxDiskSize;
+            this.compression = compression;
         }
 
         @Override
@@ -439,7 +445,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                             memoryPool,
                             new InternalRowSerializer(writeSchema),
                             spillable,
-                            maxDiskSize);
+                            maxDiskSize,
+                            compression);
         }
 
         @Override

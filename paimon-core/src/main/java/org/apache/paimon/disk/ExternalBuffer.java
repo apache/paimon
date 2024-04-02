@@ -44,14 +44,12 @@ public class ExternalBuffer implements RowBuffer {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
 
-    private static final BlockCompressionFactory compactionFactory =
-            BlockCompressionFactory.create("LZ4");
-
     private final IOManager ioManager;
     private final MemorySegmentPool pool;
     private final BinaryRowSerializer binaryRowSerializer;
     private final InMemoryBuffer inMemoryBuffer;
     private final MemorySize maxDiskSize;
+    private final BlockCompressionFactory compactionFactory;
 
     // The size of each segment
     private final int segmentSize;
@@ -65,10 +63,13 @@ public class ExternalBuffer implements RowBuffer {
             IOManager ioManager,
             MemorySegmentPool pool,
             AbstractRowDataSerializer<?> serializer,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            String compression) {
         this.ioManager = ioManager;
         this.pool = pool;
         this.maxDiskSize = maxDiskSize;
+
+        this.compactionFactory = BlockCompressionFactory.create(compression);
 
         this.binaryRowSerializer =
                 serializer instanceof BinaryRowSerializer
