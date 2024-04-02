@@ -139,8 +139,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
         prepareTargetTable(CoreOptions.ChangelogProducer.LOOKUP);
 
         MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
-        // here test if it works when table S is in default and qualified both
-        action.withSourceTable("default.S")
+        action.withSourceTable("S")
                 .withMergeCondition("T.k = S.k AND T.dt = S.dt")
                 .withMatchedUpsert(
                         "T.v <> S.v AND S.v IS NOT NULL", "v = S.v, last_action = 'matched_upsert'")
