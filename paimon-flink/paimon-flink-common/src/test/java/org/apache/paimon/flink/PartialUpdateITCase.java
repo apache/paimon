@@ -37,6 +37,8 @@ import org.apache.flink.util.CloseableIterator;
 import org.assertj.core.api.Assertions;
 import org.awaitility.Awaitility;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -420,30 +422,34 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         insert2.close();
     }
 
-    @Test
-    public void testIgnoreDelete() throws Exception {
+    @ParameterizedTest(name = "localMergeEnabled = {0}")
+    @ValueSource(booleans = {true, false})
+    public void testIgnoreDelete(boolean localMerge) throws Exception {
         sql(
-                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a INT, g INT) WITH ("
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
                         + " 'merge-engine' = 'partial-update',"
-                        + " 'ignore-delete' = 'true',"
-                        + " 'fields.a.aggregate-function' = 'sum',"
-                        + " 'fields.g.sequence-group'='a')");
+                        + " 'ignore-delete' = 'true'"
+                        + ")");
+        if (localMerge) {
+            sql("ALTER TABLE ignore_delete SET ('local-merge-buffer-size' = '256 kb')");
+        }
 
         String id =
                 TestValuesTableFactory.registerData(
                         Arrays.asList(
-                                Row.ofKind(RowKind.INSERT, 1, 10, 1),
-                                Row.ofKind(RowKind.DELETE, 1, 10, 2),
-                                Row.ofKind(RowKind.INSERT, 1, 20, 3)));
+                                Row.ofKind(RowKind.INSERT, 1, null, "apple"),
+                                Row.ofKind(RowKind.DELETE, 1, null, "apple"),
+                                Row.ofKind(RowKind.INSERT, 1, "A", null)));
         streamSqlIter(
-                        "CREATE TEMPORARY TABLE input (pk INT PRIMARY KEY NOT ENFORCED, a INT, g INT) "
+                        "CREATE TEMPORARY TABLE input (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) "
                                 + "WITH ('connector'='values', 'bounded'='true', 'data-id'='%s', "
                                 + "'changelog-mode' = 'I,D')",
                         id)
                 .close();
         sEnv.executeSql("INSERT INTO ignore_delete SELECT * FROM input").await();
 
-        assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, 30, 3));
+        assertThat(sql("SELECT * FROM ignore_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", "apple"));
     }
 
     @Test
@@ -457,7 +463,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         // write delete records
         sql("DELETE FROM ignore_delete WHERE pk = 1");
         sql("INSERT INTO ignore_delete VALUES (1, 'A', CAST (NULL AS STRING))");
-        assertThat(batchSql("SELECT * FROM ignore_delete"))
+        assertThat(sql("SELECT * FROM ignore_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", null));
 
         // force altering merge engine and read
@@ -477,7 +483,7 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
                         Collections.singletonList("pk"),
                         newOptions,
                         null));
-        assertThat(batchSql("SELECT * FROM ignore_delete"))
+        assertThat(sql("SELECT * FROM ignore_delete"))
                 .containsExactlyInAnyOrder(Row.of(1, "A", "apple"));
     }
 }
