@@ -361,15 +361,13 @@ public class CoreOptions implements Serializable {
             key("file-index.bloom-filter-items")
                     .intType()
                     .defaultValue(150)
-                    .withDescription(
-                            "Cache size for reading manifest files for write initialization.");
+                    .withDescription("File index bloom filter distinct value count.");
 
     public static final ConfigOption<Double> FILE_INDEX_BLOOM_FILTER_FPP =
             key("file-index.bloom-filter-fpp")
                     .doubleType()
                     .defaultValue(0.1)
-                    .withDescription(
-                            "Cache size for reading manifest files for write initialization.");
+                    .withDescription("File index bloom filter false positive problem rate.");
 
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
