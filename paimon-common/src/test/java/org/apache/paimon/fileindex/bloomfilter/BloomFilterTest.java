@@ -21,6 +21,7 @@ package org.apache.paimon.fileindex.bloomfilter;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
@@ -42,7 +43,7 @@ public class BloomFilterTest {
         BloomFilter filter =
                 new BloomFilter(
                         DataTypes.BYTES(),
-                        new CoreOptions(
+                        new Options(
                                 new HashMap<String, String>() {
                                     {
                                         put(
@@ -59,6 +60,9 @@ public class BloomFilterTest {
             testData.add(random());
         }
 
+        // test empty bytes
+        testData.add(new byte[0]);
+
         testData.forEach(writer::write);
 
         for (byte[] bytes : testData) {
@@ -74,8 +78,7 @@ public class BloomFilterTest {
             }
         }
 
-        System.out.println((double) errorCount / num);
-        // ffp should be less than 0.02
+        // ffp should be less than 0.021
         Assertions.assertThat((double) errorCount / num).isLessThan(0.021);
     }
 

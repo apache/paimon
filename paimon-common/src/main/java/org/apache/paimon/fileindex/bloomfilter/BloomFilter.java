@@ -18,10 +18,10 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.fileindex.FileIndexer;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 
@@ -41,13 +41,11 @@ public class BloomFilter implements FileIndexer {
 
     private final Function<Object, Integer> hashFunction;
 
-    public BloomFilter(DataType type, CoreOptions options) {
+    public BloomFilter(DataType type, Options options) {
+        int items = options.getInteger("items", 1_000_000);
+        double fpp = options.getDouble("fpp", 0.1);
         this.hashFunction = type.accept(FastHash.INSTANCE);
-        this.filter =
-                org.apache.paimon.utils.BloomFilter.builder(
-                                options.fileIndexBloomFilterItems(),
-                                options.fileIndexBloomFilterFPP())
-                        .getFilter();
+        this.filter = org.apache.paimon.utils.BloomFilter.builder(items, fpp).getFilter();
     }
 
     public String name() {

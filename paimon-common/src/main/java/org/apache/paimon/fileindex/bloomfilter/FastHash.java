@@ -18,9 +18,9 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
+import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
-import org.apache.paimon.fileindex.ObjectToBytesVisitor;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
@@ -51,37 +51,37 @@ public class FastHash implements DataTypeVisitor<Function<Object, Integer>> {
 
     public static final FastHash INSTANCE = new FastHash();
 
+    public static final byte[] NULL_BYTES = new byte[0];
+
     @Override
     public Function<Object, Integer> visit(CharType charType) {
-        final Function<Object, byte[]> converter = charType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        return o ->
+                MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
     }
 
     @Override
     public Function<Object, Integer> visit(VarCharType varCharType) {
-        final Function<Object, byte[]> converter =
-                varCharType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        return o ->
+                MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
     }
 
     @Override
     public Function<Object, Integer> visit(BooleanType booleanType) {
-        final Function<Object, byte[]> converter =
-                booleanType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        return o ->
+                MurmurHashUtils.hashBytes(
+                        o == null
+                                ? NULL_BYTES
+                                : ((Boolean) o) ? new byte[] {0x01} : new byte[] {0x00});
     }
 
     @Override
     public Function<Object, Integer> visit(BinaryType binaryType) {
-        final Function<Object, byte[]> converter = binaryType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
     }
 
     @Override
     public Function<Object, Integer> visit(VarBinaryType varBinaryType) {
-        final Function<Object, byte[]> converter =
-                varBinaryType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
     }
 
     @Override
@@ -141,27 +141,22 @@ public class FastHash implements DataTypeVisitor<Function<Object, Integer>> {
 
     @Override
     public Function<Object, Integer> visit(ArrayType arrayType) {
-        final Function<Object, byte[]> converter = arrayType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public Function<Object, Integer> visit(MultisetType multisetType) {
-        final Function<Object, byte[]> converter =
-                multisetType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public Function<Object, Integer> visit(MapType mapType) {
-        final Function<Object, byte[]> converter = mapType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        throw new UnsupportedOperationException();
     }
 
     @Override
     public Function<Object, Integer> visit(RowType rowType) {
-        final Function<Object, byte[]> converter = rowType.accept(ObjectToBytesVisitor.INSTANCE);
-        return o -> MurmurHashUtils.hashBytes(converter.apply(o));
+        throw new UnsupportedOperationException();
     }
 
     // Thomas Wang's integer hash function

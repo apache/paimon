@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fileindex;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.SeekableInputStream;
 import org.apache.paimon.options.Options;
@@ -246,7 +245,7 @@ public final class FileIndexFormat {
                                     FileIndexer.create(
                                                     type,
                                                     fields.get(columnName).type(),
-                                                    new CoreOptions(new Options()))
+                                                    new Options())
                                             .createReader()
                                             .recoverFrom(serializedBytes))
                     .orElse(null);
