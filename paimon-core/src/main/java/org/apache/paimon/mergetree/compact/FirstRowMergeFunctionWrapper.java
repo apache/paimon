@@ -25,13 +25,13 @@ import org.apache.paimon.utils.Filter;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Wrapper for {@link MergeFunction}s to produce changelog by lookup for first row. */
-public class FistRowMergeFunctionWrapper implements MergeFunctionWrapper<ChangelogResult> {
+public class FirstRowMergeFunctionWrapper implements MergeFunctionWrapper<ChangelogResult> {
 
     private final Filter<InternalRow> contains;
     private final FirstRowMergeFunction mergeFunction;
     private final ChangelogResult reusedResult = new ChangelogResult();
 
-    public FistRowMergeFunctionWrapper(
+    public FirstRowMergeFunctionWrapper(
             MergeFunctionFactory<KeyValue> mergeFunctionFactory, Filter<InternalRow> contains) {
         this.contains = contains;
         MergeFunction<KeyValue> mergeFunction = mergeFunctionFactory.create();

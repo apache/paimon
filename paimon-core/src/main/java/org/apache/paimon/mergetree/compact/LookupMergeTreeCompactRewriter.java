@@ -192,7 +192,7 @@ public class LookupMergeTreeCompactRewriter<T> extends ChangelogMergeTreeRewrite
                 int outputLevel,
                 LookupLevels<Boolean> lookupLevels,
                 @Nullable DeletionVectorsMaintainer deletionVectorsMaintainer) {
-            return new FistRowMergeFunctionWrapper(
+            return new FirstRowMergeFunctionWrapper(
                     mfFactory,
                     key -> {
                         try {

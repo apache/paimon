@@ -298,8 +298,8 @@ public class LookupChangelogMergeFunctionWrapperTest {
     @Test
     public void testFirstRow() {
         Set<InternalRow> highLevel = new HashSet<>();
-        FistRowMergeFunctionWrapper function =
-                new FistRowMergeFunctionWrapper(
+        FirstRowMergeFunctionWrapper function =
+                new FirstRowMergeFunctionWrapper(
                         projection ->
                                 new FirstRowMergeFunction(
                                         new RowType(
