@@ -144,7 +144,12 @@ public class KeyValueFileReaderFactory {
                     new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
         }
 
-        return new KeyValueDataFileRecordReader(fileRecordReader, keyType, valueType, level);
+        return new KeyValueDataFileRecordReader(
+                fileRecordReader,
+                keyType,
+                valueType,
+                level,
+                CoreOptions.fromMap(schema.options()).ignoreDelete());
     }
 
     public static Builder builder(

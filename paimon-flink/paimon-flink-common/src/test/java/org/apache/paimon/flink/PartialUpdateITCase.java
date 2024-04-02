@@ -18,6 +18,14 @@
 
 package org.apache.paimon.flink;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.schema.Schema;
+import org.apache.paimon.schema.SchemaManager;
+import org.apache.paimon.schema.SchemaUtils;
+import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.BlockingIterator;
 
 import org.apache.flink.configuration.RestartStrategyOptions;
@@ -32,7 +40,10 @@ import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.stream.Collectors;
@@ -433,5 +444,40 @@ public class PartialUpdateITCase extends CatalogITCaseBase {
         sEnv.executeSql("INSERT INTO ignore_delete SELECT * FROM input").await();
 
         assertThat(sql("SELECT * FROM ignore_delete")).containsExactlyInAnyOrder(Row.of(1, 30, 3));
+    }
+
+    @Test
+    public void testIgnoreDeleteInReader() throws Exception {
+        sql(
+                "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, a STRING, b STRING) WITH ("
+                        + " 'merge-engine' = 'deduplicate',"
+                        + " 'write-only' = 'true',"
+                        + " 'bucket' = '1')");
+        sql("INSERT INTO ignore_delete VALUES (1, CAST (NULL AS STRING), 'apple')");
+        // write delete records
+        sql("DELETE FROM ignore_delete WHERE pk = 1");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A', CAST (NULL AS STRING))");
+        assertThat(batchSql("SELECT * FROM ignore_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", null));
+
+        // force alter merge-engine and read
+        Map<String, String> newOptions = new HashMap<>();
+        newOptions.put(
+                CoreOptions.MERGE_ENGINE.key(), CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
+        newOptions.put(CoreOptions.BUCKET.key(), "1");
+        newOptions.put(CoreOptions.IGNORE_DELETE.key(), "true");
+        SchemaUtils.forceCommit(
+                new SchemaManager(LocalFileIO.create(), new Path(path, "default.db/ignore_delete")),
+                new Schema(
+                        Arrays.asList(
+                                new DataField(0, "pk", DataTypes.INT().notNull()),
+                                new DataField(1, "a", DataTypes.STRING()),
+                                new DataField(2, "b", DataTypes.STRING())),
+                        Collections.emptyList(),
+                        Collections.singletonList("pk"),
+                        newOptions,
+                        null));
+        assertThat(batchSql("SELECT * FROM ignore_delete"))
+                .containsExactlyInAnyOrder(Row.of(1, "A", "apple"));
     }
 }

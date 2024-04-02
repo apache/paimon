@@ -130,29 +130,60 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                         changelogRow("+I", 8, "v_8", "insert", "02-29"),
                         changelogRow("+I", 11, "v_11", "insert", "02-29"),
                         changelogRow("+I", 12, "v_12", "insert", "02-29")));
-
-        if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
-            // test partial update still works after action
-            testWorkWithPartialUpdate();
-        }
     }
 
-    private void testWorkWithPartialUpdate() throws Exception {
+    @Test
+    public void testWorkWithPartialUpdate() throws Exception {
+        // re-create target table with given producer
+        sEnv.executeSql("DROP TABLE T");
+        prepareTargetTable(CoreOptions.ChangelogProducer.LOOKUP);
+
+        MergeIntoActionBuilder action = new MergeIntoActionBuilder(warehouse, database, "T");
+        // here test if it works when table S is in default and qualified both
+        action.withSourceTable("default.S")
+                .withMergeCondition("T.k = S.k AND T.dt = S.dt")
+                .withMatchedUpsert(
+                        "T.v <> S.v AND S.v IS NOT NULL", "v = S.v, last_action = 'matched_upsert'")
+                .withMatchedDelete("S.v IS NULL")
+                .withNotMatchedInsert(null, "S.k, S.v, 'insert', S.dt")
+                .withNotMatchedBySourceUpsert(
+                        "dt < '02-28'", "v = v || '_nmu', last_action = 'not_matched_upsert'")
+                .withNotMatchedBySourceDelete("dt >= '02-28'");
+
+        // delete records are filtered
+        validateActionRunResult(
+                action.build(),
+                Arrays.asList(
+                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
+                        changelogRow("+I", 8, "v_8", "insert", "02-29"),
+                        changelogRow("+I", 11, "v_11", "insert", "02-29"),
+                        changelogRow("+I", 12, "v_12", "insert", "02-29")),
+                Arrays.asList(
+                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
+                        changelogRow("+I", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
+                        changelogRow("+I", 4, "v_4", "creation", "02-27"),
+                        changelogRow("+I", 5, "v_5", "creation", "02-28"),
+                        changelogRow("+I", 6, "v_6", "creation", "02-28"),
+                        changelogRow("+I", 7, "Seven", "matched_upsert", "02-28"),
+                        changelogRow("+I", 8, "v_8", "creation", "02-28"),
+                        changelogRow("+I", 8, "v_8", "insert", "02-29"),
+                        changelogRow("+I", 9, "v_9", "creation", "02-28"),
+                        changelogRow("+I", 10, "v_10", "creation", "02-28"),
+                        changelogRow("+I", 11, "v_11", "insert", "02-29"),
+                        changelogRow("+I", 12, "v_12", "insert", "02-29")));
+
+        // test partial update still works after action
         insertInto(
                 "T",
                 "(12, CAST (NULL AS STRING), '$', '02-29')",
                 "(12, 'Test', CAST (NULL AS STRING), '02-29')");
 
         testBatchRead(
-                buildSimpleQuery("T"),
-                Arrays.asList(
-                        changelogRow("+I", 1, "v_1", "creation", "02-27"),
-                        changelogRow("+U", 2, "v_2_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 3, "v_3_nmu", "not_matched_upsert", "02-27"),
-                        changelogRow("+U", 7, "Seven", "matched_upsert", "02-28"),
-                        changelogRow("+I", 8, "v_8", "insert", "02-29"),
-                        changelogRow("+I", 11, "v_11", "insert", "02-29"),
-                        changelogRow("+I", 12, "Test", "$", "02-29")));
+                "SELECT * FROM T WHERE k = 12",
+                Collections.singletonList(changelogRow("+I", 12, "Test", "$", "02-29")));
     }
 
     @ParameterizedTest(name = "in-default = {0}")
@@ -553,7 +584,7 @@ public class MergeIntoActionITCase extends ActionITCaseBase {
                             {
                                 put(CHANGELOG_PRODUCER.key(), producer.toString());
                                 // test works with partial update normally
-                                if (producer == CoreOptions.ChangelogProducer.FULL_COMPACTION) {
+                                if (producer == CoreOptions.ChangelogProducer.LOOKUP) {
                                     put(
                                             CoreOptions.MERGE_ENGINE.key(),
                                             CoreOptions.MergeEngine.PARTIAL_UPDATE.toString());
