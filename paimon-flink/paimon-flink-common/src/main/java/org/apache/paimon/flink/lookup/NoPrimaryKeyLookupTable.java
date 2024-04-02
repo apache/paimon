@@ -42,7 +42,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     private RocksDBListState<InternalRow, InternalRow> state;
 
-    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) {
         super(context);
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
@@ -52,6 +52,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
         this.state =
                 stateFactory.listState(
                         "join-key-index",
@@ -59,7 +60,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
-        super.open();
+        bootstrap();
     }
 
     @Override

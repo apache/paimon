@@ -47,6 +47,8 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
+        createTableState();
         this.indexState =
                 stateFactory.setState(
                         "sec-index",
@@ -55,7 +57,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                         InternalSerializers.create(
                                 TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
                         lruCacheSize);
-        super.open();
+        bootstrap();
     }
 
     @Override

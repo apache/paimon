@@ -53,22 +53,17 @@ import java.util.concurrent.atomic.AtomicInteger;
 public abstract class FullCacheLookupTable implements LookupTable {
 
     protected final Context context;
-    protected final RocksDBStateFactory stateFactory;
     protected final RowType projectedType;
 
     @Nullable protected final FieldsComparator userDefinedSeqComparator;
     protected final int appendUdsFieldNumber;
 
+    protected RocksDBStateFactory stateFactory;
     private LookupStreamingReader reader;
     private Predicate specificPartition;
 
-    public FullCacheLookupTable(Context context) throws IOException {
+    public FullCacheLookupTable(Context context) {
         this.context = context;
-        this.stateFactory =
-                new RocksDBStateFactory(
-                        context.tempPath.toString(),
-                        context.table.coreOptions().toConfiguration(),
-                        null);
         FileStoreTable table = context.table;
         List<String> sequenceFields = new ArrayList<>();
         if (table.primaryKeys().size() > 0) {
@@ -104,8 +99,15 @@ public abstract class FullCacheLookupTable implements LookupTable {
         this.specificPartition = filter;
     }
 
-    @Override
-    public void open() throws Exception {
+    protected void openStateFactory() throws Exception {
+        this.stateFactory =
+                new RocksDBStateFactory(
+                        context.tempPath.toString(),
+                        context.table.coreOptions().toConfiguration(),
+                        null);
+    }
+
+    protected void bootstrap() throws Exception {
         Predicate scanPredicate =
                 PredicateBuilder.andNullable(context.tablePredicate, specificPartition);
         this.reader = new LookupStreamingReader(context.table, context.projection, scanPredicate);
