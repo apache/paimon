@@ -21,6 +21,7 @@ package org.apache.paimon.flink.lookup;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkRowData;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.LocalQueryExecutor;
 import org.apache.paimon.flink.lookup.PrimaryKeyPartialLookupTable.QueryExecutor;
@@ -83,12 +84,20 @@ public class FileStoreLookupFunctionTest {
     }
 
     private void createLookupFunction(boolean isPartition, boolean joinEqualPk) throws Exception {
+        createLookupFunction(isPartition, joinEqualPk, false);
+    }
+
+    private void createLookupFunction(
+            boolean isPartition, boolean joinEqualPk, boolean dynamicPartition) throws Exception {
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         Options conf = new Options();
         conf.set(CoreOptions.BUCKET, 2);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 3);
         conf.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
         conf.set(RocksDBOptions.LOOKUP_CONTINUOUS_DISCOVERY_INTERVAL, Duration.ofSeconds(1));
+        if (dynamicPartition) {
+            conf.set(FlinkConnectorOptions.LOOKUP_DYNAMIC_PARTITION, "max_pt()");
+        }
 
         RowType rowType =
                 RowType.of(
@@ -176,6 +185,26 @@ public class FileStoreLookupFunctionTest {
         commit(writeCommit(4));
         commit(writeCommit(5));
         lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+    }
+
+    @Test
+    public void testLookupDynamicPartition() throws Exception {
+        createLookupFunction(true, false, true);
+        commit(writeCommit(1));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
+
+        commit(writeCommit(10));
+        lookupFunction.lookup(new FlinkRowData(GenericRow.of(1, 1, 10L)));
+        assertThat(
+                        TraceableFileIO.openInputStreams(
+                                        s -> s.toString().contains(tempDir.toString()))
+                                .size())
+                .isEqualTo(0);
     }
 
     private void commit(List<CommitMessage> messages) throws Exception {
