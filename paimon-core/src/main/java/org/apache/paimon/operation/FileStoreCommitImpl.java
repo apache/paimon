@@ -94,7 +94,7 @@ import static org.apache.paimon.utils.BranchManager.DEFAULT_MAIN_BRANCH;
  *
  * <p>NOTE: If you want to modify this class, any exception during commit MUST NOT BE IGNORED. They
  * must be thrown to restart the job. It is recommended to run FileStoreCommitTest thousands of
- * times to make sure that your changes is correct.
+ * times to make sure that your changes are correct.
  */
 public class FileStoreCommitImpl implements FileStoreCommit {
 
