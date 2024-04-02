@@ -38,7 +38,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     private RocksDBSetState<InternalRow, InternalRow> indexState;
 
-    public SecondaryIndexLookupTable(Context context, long lruCacheSize) throws IOException {
+    public SecondaryIndexLookupTable(Context context, long lruCacheSize) {
         super(context, lruCacheSize / 2, context.table.primaryKeys());
         List<String> fieldNames = projectedType.getFieldNames();
         int[] secKeyMapping = context.joinKey.stream().mapToInt(fieldNames::indexOf).toArray();
@@ -47,6 +47,8 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
+        createTableState();
         this.indexState =
                 stateFactory.setState(
                         "sec-index",
@@ -55,7 +57,7 @@ public class SecondaryIndexLookupTable extends PrimaryKeyLookupTable {
                         InternalSerializers.create(
                                 TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
                         lruCacheSize);
-        super.open();
+        bootstrap();
     }
 
     @Override

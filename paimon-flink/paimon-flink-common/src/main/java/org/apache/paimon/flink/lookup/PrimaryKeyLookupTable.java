@@ -47,8 +47,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     protected RocksDBValueState<InternalRow, InternalRow> tableState;
 
-    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
-            throws IOException {
+    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey) {
         super(context);
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
@@ -71,6 +70,12 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
+        createTableState();
+        bootstrap();
+    }
+
+    protected void createTableState() throws IOException {
         this.tableState =
                 stateFactory.valueState(
                         "table",
@@ -78,7 +83,6 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
-        super.open();
     }
 
     @Override

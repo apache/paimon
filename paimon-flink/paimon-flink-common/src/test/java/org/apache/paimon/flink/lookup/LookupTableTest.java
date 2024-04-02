@@ -118,6 +118,10 @@ public class LookupTableTest extends TableTestBase {
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
         table.open();
 
+        // test re-open
+        table.close();
+        table.open();
+
         // test bulk load error
         {
             TableBulkLoader bulkLoader = table.createBulkLoader();
@@ -175,6 +179,10 @@ public class LookupTableTest extends TableTestBase {
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
         table.open();
 
+        // test re-open
+        table.close();
+        table.open();
+
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
         for (int i = 1; i <= 10; i++) {
             InternalRow row = row(i, 11 * i, 111 * i);
@@ -219,6 +227,10 @@ public class LookupTableTest extends TableTestBase {
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
         table.open();
 
+        // test re-open
+        table.close();
+        table.open();
+
         table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
@@ -250,6 +262,10 @@ public class LookupTableTest extends TableTestBase {
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
         table.open();
 
+        // test re-open
+        table.close();
+        table.open();
+
         table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(1));
         assertThat(result).hasSize(1);
@@ -272,6 +288,10 @@ public class LookupTableTest extends TableTestBase {
                         tempDir.toFile(),
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         // test bulk load 100_000 records
@@ -317,6 +337,10 @@ public class LookupTableTest extends TableTestBase {
                         tempDir.toFile(),
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         List<Pair<byte[], byte[]>> records = new ArrayList<>();
@@ -367,6 +391,10 @@ public class LookupTableTest extends TableTestBase {
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
         table.open();
 
+        // test re-open
+        table.close();
+        table.open();
+
         table.refresh(singletonList(row(1, 11, 111)).iterator());
         List<InternalRow> result = table.get(row(11));
         assertThat(result).hasSize(1);
@@ -405,6 +433,10 @@ public class LookupTableTest extends TableTestBase {
                         tempDir.toFile(),
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         // test bulk load 100_000 records
@@ -448,6 +480,10 @@ public class LookupTableTest extends TableTestBase {
                         tempDir.toFile(),
                         singletonList("f1"));
         table = FullCacheLookupTable.create(context, ThreadLocalRandom.current().nextInt(2) * 10);
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         table.refresh(singletonList(row(1, 11, 333)).iterator());
@@ -508,6 +544,11 @@ public class LookupTableTest extends TableTestBase {
                         tempDir.toFile(),
                         ImmutableList.of("pk1", "pk2"));
         table.open();
+
+        // test re-open
+        table.close();
+        table.open();
+
         List<InternalRow> result = table.get(row(1, -1));
         assertThat(result).hasSize(0);
 
@@ -533,6 +574,10 @@ public class LookupTableTest extends TableTestBase {
                         new int[] {2, 1},
                         tempDir.toFile(),
                         ImmutableList.of("pk2", "pk1"));
+        table.open();
+
+        // test re-open
+        table.close();
         table.open();
 
         List<InternalRow> result = table.get(row(-1, 1));
