@@ -62,7 +62,7 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
                                 internalRow == null
                                         ? null
                                         : serializer.fromRow(internalRow).setLevel(level));
-        // In older version, the delete records might be written into data file even when
+        // In 0.7- versions, the delete records might be written into data file even when
         // ignore-delete configured, so the reader should also filter the delete records
         return ignoreDelete ? transformed.filter(KeyValue::isAdd) : transformed;
     }
