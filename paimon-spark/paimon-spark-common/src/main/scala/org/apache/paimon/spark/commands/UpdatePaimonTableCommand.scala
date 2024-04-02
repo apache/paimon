@@ -158,9 +158,10 @@ case class UpdatePaimonTableCommand(
 
   private def findCandidateDataSplits(): Seq[DataSplit] = {
     val snapshotReader = table.newSnapshotReader()
-    if (condition == TrueLiteral) {
-      val filter = convertConditionToPaimonPredicate(condition, relation.output, rowType)
-      snapshotReader.withFilter(filter)
+    if (condition != TrueLiteral) {
+      val filter =
+        convertConditionToPaimonPredicate(condition, relation.output, rowType, ignoreFailure = true)
+      filter.foreach(snapshotReader.withFilter)
     }
 
     snapshotReader.read().splits().asScala.collect { case s: DataSplit => s }
