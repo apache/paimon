@@ -22,16 +22,13 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 
-import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerRecord;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.List;
 import java.util.Map;
-import java.util.Properties;
 
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.TOPIC;
 import static org.apache.flink.streaming.connectors.kafka.table.KafkaConnectorOptions.VALUE_FORMAT;
@@ -125,22 +122,10 @@ public class KafkaDebeziumSyncTableActionITCase extends KafkaSyncTableActionITCa
         final String topic = "test_null_value";
         createTestTopic(topic, 1, 1);
 
-        List<String> lines = readLines("kafka/debezium/table/nullvalue/debezium-data-1.txt");
-        writeRecordsToKafka(topic, lines);
-
+        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-1.txt");
         // write null value
-        Properties producerProperties = getStandardProps();
-        producerProperties.setProperty("retries", "0");
-        producerProperties.put(
-                "key.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        producerProperties.put(
-                "value.serializer", "org.apache.kafka.common.serialization.StringSerializer");
-        KafkaProducer<String, String> kafkaProducer = new KafkaProducer<>(producerProperties);
         kafkaProducer.send(new ProducerRecord<>(topic, null));
-        kafkaProducer.close();
-
-        lines = readLines("kafka/debezium/table/nullvalue/debezium-data-2.txt");
-        writeRecordsToKafka(topic, lines);
+        writeRecordsToKafka(topic, "kafka/debezium/table/nullvalue/debezium-data-2.txt");
 
         Map<String, String> kafkaConfig = getBasicKafkaConfig();
         kafkaConfig.put(VALUE_FORMAT.key(), "debezium-json");
