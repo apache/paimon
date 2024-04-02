@@ -88,7 +88,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
     val newPlan = removeReferences(planWithReferences, cache)
     val subqueryCTEs = cache.filter(_.merged).map(_.plan.asInstanceOf[CTERelationDef])
     if (subqueryCTEs.nonEmpty) {
-      WithCTE(newPlan, subqueryCTEs.toSeq)
+      WithCTE(newPlan, subqueryCTEs)
     } else {
       newPlan
     }
@@ -130,12 +130,12 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
                 } else {
                   header.attributes
                 }
-                cache(subqueryIndex) = Header(newHeaderAttributes, mergedPlan, true)
+                cache(subqueryIndex) = Header(newHeaderAttributes, mergedPlan, merged = true)
                 subqueryIndex -> headerIndex
             })
       })
       .getOrElse {
-        cache += Header(Seq(output), plan, false)
+        cache += Header(Seq(output), plan, merged = false)
         cache.length - 1 -> 0
       }
   }
@@ -292,7 +292,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
       plan)
   }
 
-  protected def mapAttributes[T <: Expression](expr: T, outputMap: AttributeMap[Attribute]) = {
+  protected def mapAttributes[T <: Expression](expr: T, outputMap: AttributeMap[Attribute]): T = {
     expr.transform { case a: Attribute => outputMap.getOrElse(a, a) }.asInstanceOf[T]
   }
 
