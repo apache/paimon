@@ -32,7 +32,7 @@ import java.io.DataOutputStream;
 import java.io.IOException;
 import java.util.function.Function;
 
-/** Bloom filter for secondary index. */
+/** Bloom filter for file index. */
 public class BloomFilter implements FileIndexer {
 
     public static final String BLOOM_FILTER = "bloom";

@@ -46,7 +46,7 @@ import org.apache.paimon.utils.MurmurHashUtils;
 
 import java.util.function.Function;
 
-/** Fast hash for number type. */
+/** Fast hash for object differs to DataType. */
 public class FastHash implements DataTypeVisitor<Function<Object, Integer>> {
 
     public static final FastHash INSTANCE = new FastHash();
