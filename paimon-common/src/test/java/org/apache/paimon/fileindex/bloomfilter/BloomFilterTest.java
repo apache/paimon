@@ -21,13 +21,13 @@ package org.apache.paimon.fileindex.bloomfilter;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataTypes;
 
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
@@ -39,7 +39,18 @@ public class BloomFilterTest {
     @Test
     public void testAddFindByRandom() {
 
-        BloomFilter filter = new BloomFilter(DataTypes.BYTES(), new CoreOptions(new Options()));
+        BloomFilter filter =
+                new BloomFilter(
+                        DataTypes.BYTES(),
+                        new CoreOptions(
+                                new HashMap<String, String>() {
+                                    {
+                                        put(
+                                                CoreOptions.FILE_INDEX_BLOOM_FILTER_ITEMS.key(),
+                                                "10000");
+                                        put(CoreOptions.FILE_INDEX_BLOOM_FILTER_FPP.key(), "0.02");
+                                    }
+                                }));
         FileIndexWriter writer = filter.createWriter();
         FileIndexReader reader = filter.createReader();
         List<byte[]> testData = new ArrayList<>();
@@ -64,8 +75,8 @@ public class BloomFilterTest {
         }
 
         System.out.println((double) errorCount / num);
-        // ffp should be less than 0.03
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
+        // ffp should be less than 0.02
+        Assertions.assertThat((double) errorCount / num).isLessThan(0.021);
     }
 
     private byte[] random() {
