@@ -19,11 +19,11 @@
 package org.apache.paimon.disk;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compression.Lz4BlockCompressionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
@@ -43,6 +43,9 @@ import static org.apache.paimon.utils.Preconditions.checkState;
 public class ExternalBuffer implements RowBuffer {
 
     private static final Logger LOG = LoggerFactory.getLogger(ExternalBuffer.class);
+
+    private static final Lz4BlockCompressionFactory compactionFactory =
+            new Lz4BlockCompressionFactory();
 
     private final IOManager ioManager;
     private final MemorySegmentPool pool;
@@ -155,7 +158,9 @@ public class ExternalBuffer implements RowBuffer {
     private void spill() throws IOException {
         FileIOChannel.ID channel = ioManager.createChannel();
 
-        BufferFileWriter writer = ioManager.createBufferFileWriter(channel);
+        ChannelWriterOutputView channelWriterOutputView =
+                new ChannelWriterOutputView(
+                        ioManager.createBufferFileWriter(channel), compactionFactory, segmentSize);
         int numRecordBuffers = inMemoryBuffer.getNumRecordBuffers();
         ArrayList<MemorySegment> segments = inMemoryBuffer.getRecordBufferSegments();
         long writeBytes;
@@ -167,16 +172,16 @@ public class ExternalBuffer implements RowBuffer {
                         i == numRecordBuffers - 1
                                 ? inMemoryBuffer.getNumBytesInLastBuffer()
                                 : segment.size();
-                writer.writeBlock(Buffer.create(segment, bufferSize));
+                channelWriterOutputView.write(segment, 0, bufferSize);
             }
             writeBytes = writer.getSize();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
-                    writer.getSize());
-            writer.close();
+                    channelWriterOutputView.getNumBytes());
+            channelWriterOutputView.close();
         } catch (IOException e) {
-            writer.closeAndDelete();
+            channelWriterOutputView.closeAndDelete();
             throw e;
         }
 
@@ -224,7 +229,7 @@ public class ExternalBuffer implements RowBuffer {
         private int currentChannelID = -1;
         private BinaryRow row;
         private boolean closed;
-        private BufferFileReaderInputView channelReader;
+        private ChannelReaderInputView channelReader;
 
         private BufferIterator() {
             this.closed = false;
@@ -303,7 +308,13 @@ public class ExternalBuffer implements RowBuffer {
 
             // new reader.
             this.channelReader =
-                    new BufferFileReaderInputView(channel.getChannel(), ioManager, segmentSize);
+                    new ChannelReaderInputView(
+                            channel.getChannel(),
+                            ioManager,
+                            compactionFactory,
+                            segmentSize,
+                            channel.getBlockCount());
+
             this.currentIterator = channelReader.createBinaryRowIterator(binaryRowSerializer);
         }
 
