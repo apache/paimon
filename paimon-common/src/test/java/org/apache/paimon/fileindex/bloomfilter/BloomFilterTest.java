@@ -18,16 +18,16 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.fileindex.FileIndexReader;
-import org.apache.paimon.fileindex.FileIndexWriter;
-import org.apache.paimon.types.DataTypes;
-
-import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fileindex.FileIndexReader;
+import org.apache.paimon.fileindex.FileIndexWriter;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.types.DataTypes;
+import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 /** Tests for {@link BloomFilter}. */
 public class BloomFilterTest {
@@ -37,7 +37,7 @@ public class BloomFilterTest {
     @Test
     public void testAddFindByRandom() {
 
-        BloomFilter filter = new BloomFilter(DataTypes.BYTES());
+        BloomFilter filter = new BloomFilter(DataTypes.BYTES(), new CoreOptions(new Options()));
         FileIndexWriter writer = filter.createWriter();
         FileIndexReader reader = filter.createReader();
         List<byte[]> testData = new ArrayList<>();
@@ -62,13 +62,12 @@ public class BloomFilterTest {
         }
 
         System.out.println((double) errorCount / num);
-
         // ffp should be less than 0.03
         Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
     private byte[] random() {
-        byte[] b = new byte[Math.abs(RANDOM.nextInt(40) + 1)];
+        byte[] b = new byte[Math.abs(RANDOM.nextInt(400) + 1)];
         RANDOM.nextBytes(b);
         return b;
     }

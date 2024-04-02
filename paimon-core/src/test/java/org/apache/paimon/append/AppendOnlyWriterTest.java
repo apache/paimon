@@ -603,9 +603,7 @@ public class AppendOnlyWriterTest {
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
-                        Collections.emptyList(),
-                        "",
-                        400L);
+                        new CoreOptions(new Options()));
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

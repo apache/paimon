@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroFileFormat;
@@ -41,9 +42,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            List<String> indexColumns,
-            String indexType,
-            long indexSizeInMeta) {
+            CoreOptions coreOptions) {
         super(
                 () ->
                         new RowDataFileWriter(
@@ -60,9 +59,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                                 seqNumCounter,
                                 fileCompression,
                                 statsCollectors,
-                                indexColumns,
-                                indexType,
-                                indexSizeInMeta),
+                                coreOptions),
                 targetFileSize);
     }
 }

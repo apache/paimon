@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
@@ -74,9 +75,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
-    private final List<String> indexColumns;
-    private final String indexType;
-    private final long indexSizeInMeta;
+    private final CoreOptions coreOptions;
+//    private final List<String> indexColumns;
+//    private final String indexType;
+//    private final long indexSizeInMeta;
 
     private MemorySegmentPool memorySegmentPool;
 
@@ -96,9 +98,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             boolean spillable,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            List<String> indexColumn,
-            String indexType,
-            long indexSizeInMeta) {
+//            List<String> indexColumn,
+//            String indexType,
+//            long indexSizeInMeta,
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -123,9 +126,10 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
-        this.indexColumns = indexColumn;
-        this.indexType = indexType;
-        this.indexSizeInMeta = indexSizeInMeta;
+        this.coreOptions = coreOptions;
+//        this.indexColumns = indexColumn;
+//        this.indexType = indexType;
+//        this.indexSizeInMeta = indexSizeInMeta;
     }
 
     @Override
@@ -228,9 +232,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                indexColumns,
-                indexType,
-                indexSizeInMeta);
+                coreOptions);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

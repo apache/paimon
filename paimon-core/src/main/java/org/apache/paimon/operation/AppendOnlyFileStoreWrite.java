@@ -70,13 +70,13 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean useWriteBuffer;
     private final boolean spillable;
     private final FieldStatsCollector.Factory[] statsCollectors;
-    private final List<String> indexColumn;
-    private final String indexType;
-    private final long indexSizeInMeta;
+
+    private final CoreOptions coreOptions;
 
     private boolean forceBufferSpill = false;
     private boolean skipCompaction;
     private BucketMode bucketMode = BucketMode.FIXED;
+
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
@@ -107,18 +107,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
 
-        this.indexColumn = options.indexColumns();
-        this.indexType = options.indexType();
-        this.indexSizeInMeta = options.indexSizeInMeta();
-
-        if (!indexColumn.isEmpty()) {
-            List<String> columnNames = rowType.getFieldNames();
-            for (String name : indexColumn) {
-                if (!columnNames.contains(name)) {
-                    throw new IllegalArgumentException(name + " does not exist in column fields");
-                }
-            }
-        }
+        this.coreOptions = options;
     }
 
     @Override
@@ -163,9 +152,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillable || forceBufferSpill,
                 fileCompression,
                 statsCollectors,
-                indexColumn,
-                indexType,
-                indexSizeInMeta);
+                coreOptions);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -185,9 +172,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors,
-                            indexColumn,
-                            indexType,
-                            indexSizeInMeta);
+                            coreOptions);
             try {
                 rewriter.write(
                         new RecordReaderIterator<>(

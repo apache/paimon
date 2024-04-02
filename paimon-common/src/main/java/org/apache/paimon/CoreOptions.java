@@ -352,6 +352,20 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Cache size for reading manifest files for write initialization.");
 
+    public static final ConfigOption<Integer> FILE_INDEX_BLOOM_FILTER_ITEMS =
+            key("file-index.bloom-filter-items")
+                    .intType()
+                    .defaultValue(1000)
+                    .withDescription(
+                            "Cache size for reading manifest files for write initialization.");
+
+    public static final ConfigOption<Double> FILE_INDEX_BLOOM_FILTER_FPP =
+            key("file-index.bloom-filter-fpp")
+                    .doubleType()
+                    .defaultValue(0.1)
+                    .withDescription(
+                            "Cache size for reading manifest files for write initialization.");
+
     public static final ConfigOption<Integer> LOCAL_SORT_MAX_NUM_FILE_HANDLES =
             key("local-sort.max-num-file-handles")
                     .intType()
@@ -1171,6 +1185,14 @@ public class CoreOptions implements Serializable {
 
     public MemorySize writeManifestCache() {
         return options.get(WRITE_MANIFEST_CACHE);
+    }
+
+    public int fileIndexBloomFilterItems() {
+        return options.get(FILE_INDEX_BLOOM_FILTER_ITEMS);
+    }
+
+    public double fileIndexBloomFilterFPP() {
+        return options.get(FILE_INDEX_BLOOM_FILTER_FPP);
     }
 
     public String partitionDefaultName() {

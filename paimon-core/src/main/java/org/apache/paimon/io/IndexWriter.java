@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
@@ -60,14 +61,12 @@ public final class IndexWriter {
             FileIO fileIO,
             DataFilePathFactory pathFactory,
             RowType rowType,
-            List<String> indexColumns,
-            String indexType,
-            long indexSizeInMeta) {
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
-        this.indexType = indexType;
-        this.indexSizeInMeta = indexSizeInMeta;
-        ArrayList<String> columns = new ArrayList<>(indexColumns);
+        this.indexType = coreOptions.indexType();
+        this.indexSizeInMeta = coreOptions.indexSizeInMeta();
+        List<String> indexColumns = coreOptions.indexColumns();
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
         Map<String, Integer> index = new HashMap<>();
@@ -76,12 +75,15 @@ public final class IndexWriter {
                     map.put(dataField.name(), dataField);
                     index.put(dataField.name(), rowType.getFieldIndex(dataField.name()));
                 });
-        for (String columnName : columns) {
+        for (String columnName : indexColumns) {
             DataField field = map.get(columnName);
+            if (field == null) {
+                throw new IllegalArgumentException(columnName + " does not exist in column fields");
+            }
             indexMaintainers.add(
                     new IndexMaintainer(
                             field.name(),
-                            FileIndexer.create(indexType, field.type()).createWriter(),
+                            FileIndexer.create(indexType, field.type(), coreOptions).createWriter(),
                             InternalRow.createFieldGetter(field.type(), index.get(columnName))));
         }
     }

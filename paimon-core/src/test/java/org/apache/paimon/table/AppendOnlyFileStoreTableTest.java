@@ -350,6 +350,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                     CoreOptions.INDEX_COLUMNS,
                                     "index_column,index_column2,index_column3");
                             options.set(CoreOptions.INDEX_SIZE_IN_META.key(), "500 B");
+                            options.set(CoreOptions.FILE_INDEX_BLOOM_FILTER_ITEMS.key(), "150");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);

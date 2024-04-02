@@ -18,6 +18,7 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriterFactory;
@@ -58,9 +59,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            List<String> indexColumns,
-            String indexType,
-            long indexSizeInMeta) {
+            CoreOptions coreOptions) {
         super(
                 fileIO,
                 factory,
@@ -75,7 +74,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
         this.indexWriter =
                 new IndexWriter(
-                        fileIO, pathFactory, writeSchema, indexColumns, indexType, indexSizeInMeta);
+                        fileIO, pathFactory, writeSchema, coreOptions);
     }
 
     @Override
