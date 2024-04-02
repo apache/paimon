@@ -38,6 +38,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.CommonTestUtils;
 import org.apache.paimon.utils.SnapshotManager;
 
+import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
@@ -294,8 +295,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                     () ->
                             snapshotManager.latestSnapshotId() - 2
                                     == snapshotManager.earliestSnapshotId(),
-                    Duration.ofSeconds(60_000),
-                    Duration.ofSeconds(100),
+                    Duration.ofSeconds(60),
+                    Duration.ofMillis(100),
                     String.format(
                             "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
             write.close();
@@ -387,8 +388,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         () ->
                                 snapshotManager.latestSnapshotId() - 2
                                         == snapshotManager.earliestSnapshotId(),
-                        Duration.ofSeconds(60_000),
-                        Duration.ofSeconds(100),
+                        Duration.ofSeconds(60),
+                        Duration.ofMillis(100),
                         String.format(
                                 "Cannot validate snapshot expiration in %s milliseconds.", 60_000));
                 write.close();
@@ -700,6 +701,66 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
             // first compaction, snapshot will be 3.
             checkFileAndRowSize(table, 3L, 0L, 1, 6);
         }
+    }
+
+    @Test
+    public void testCombinedModeWithDynamicOptions() throws Exception {
+        // create table and commit data
+        Map<String, String> options = new HashMap<>();
+        options.put(CoreOptions.WRITE_ONLY.key(), "true");
+        options.put(CoreOptions.BUCKET.key(), "1");
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(), "1000");
+        FileStoreTable table =
+                createTable(
+                        "test_db",
+                        "t",
+                        Arrays.asList("dt", "hh"),
+                        Arrays.asList("dt", "hh", "k"),
+                        options);
+
+        StreamWriteBuilder streamWriteBuilder =
+                table.newStreamWriteBuilder().withCommitUser(commitUser);
+        write = streamWriteBuilder.newWrite();
+        commit = streamWriteBuilder.newCommit();
+
+        for (int i = 0; i < 10; i++) {
+            writeData(rowData(1, i, 15, BinaryString.fromString("20221208")));
+        }
+        SnapshotManager snapshotManager = table.snapshotManager();
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(10);
+
+        // if CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() use default value, the cost
+        // time in combined mode will be over 1 min
+        CompactDatabaseAction action =
+                createAction(
+                        CompactDatabaseAction.class,
+                        "compact_database",
+                        "--warehouse",
+                        warehouse,
+                        "--mode",
+                        "combined",
+                        "--table_conf",
+                        CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s",
+                        // test dynamic options will be copied in commit
+                        "--table_conf",
+                        CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key() + "=3",
+                        "--table_conf",
+                        CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key() + "=3");
+
+        StreamExecutionEnvironment env = buildDefaultEnv(true);
+        action.withStreamExecutionEnvironment(env).build();
+        JobClient jobClient = env.executeAsync();
+
+        CommonTestUtils.waitUtil(
+                () -> snapshotManager.latestSnapshotId() == 11L,
+                Duration.ofSeconds(60),
+                Duration.ofMillis(100));
+        jobClient.cancel();
+
+        Snapshot latest = snapshotManager.latestSnapshot();
+        Snapshot earliest = snapshotManager.earliestSnapshot();
+        assertThat(latest.commitKind()).isEqualTo(Snapshot.CommitKind.COMPACT);
+        assertThat(latest.id() - earliest.id()).isEqualTo(2);
     }
 
     private void writeData(

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.flink.VersionedSerializerWrapper;
 import org.apache.paimon.manifest.WrappedManifestCommittable;
@@ -38,6 +39,7 @@ import org.apache.flink.streaming.api.operators.OneInputStreamOperator;
 import org.apache.flink.table.data.RowData;
 
 import java.io.Serializable;
+import java.util.Map;
 import java.util.UUID;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.SINK_MANAGED_WRITER_BUFFER_MEMORY;
@@ -172,8 +174,10 @@ public class MultiTablesCompactorSink implements Serializable {
 
     protected Committer.Factory<MultiTableCommittable, WrappedManifestCommittable>
             createCommitterFactory() {
+        Map<String, String> dynamicOptions = options.toMap();
+        dynamicOptions.put(CoreOptions.WRITE_ONLY.key(), "false");
         return (user, metricGroup) ->
-                new StoreMultiCommitter(catalogLoader, user, metricGroup, true);
+                new StoreMultiCommitter(catalogLoader, user, metricGroup, true, dynamicOptions);
     }
 
     protected CommittableStateManager<WrappedManifestCommittable> createCommittableStateManager() {
