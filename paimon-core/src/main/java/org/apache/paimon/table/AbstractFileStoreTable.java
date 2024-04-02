@@ -189,11 +189,6 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         return copyInternal(dynamicOptions, false);
     }
 
-    @Override
-    public FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions) {
-        return copyInternal(dynamicOptions, true);
-    }
-
     private void checkImmutability(Map<String, String> dynamicOptions) {
         Map<String, String> options = tableSchema.options();
         // check option is not immutable

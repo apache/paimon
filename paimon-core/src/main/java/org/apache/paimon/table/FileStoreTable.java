@@ -86,9 +86,6 @@ public interface FileStoreTable extends DataTable {
     /** Doesn't change table schema even when there exists time travel scan options. */
     FileStoreTable copyWithoutTimeTravel(Map<String, String> dynamicOptions);
 
-    /** Sometimes we have to change some Immutable options to implement features. */
-    FileStoreTable internalCopyWithoutCheck(Map<String, String> dynamicOptions);
-
     /** TODO: this method is weird, old options will overwrite new options. */
     FileStoreTable copyWithLatestSchema();
 
