@@ -360,7 +360,7 @@ public class CoreOptions implements Serializable {
     public static final ConfigOption<Integer> FILE_INDEX_BLOOM_FILTER_ITEMS =
             key("file-index.bloom-filter-items")
                     .intType()
-                    .defaultValue(1000)
+                    .defaultValue(150)
                     .withDescription(
                             "Cache size for reading manifest files for write initialization.");
 
