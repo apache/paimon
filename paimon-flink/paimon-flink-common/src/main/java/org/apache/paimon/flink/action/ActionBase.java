@@ -55,8 +55,8 @@ public abstract class ActionBase implements Action {
         catalogOptions = Options.fromMap(catalogConfig);
         catalogOptions.set(CatalogOptions.WAREHOUSE, warehouse);
 
-        catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        flinkCatalog = FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+        catalog = initPaimonCatalog();
+        flinkCatalog = initFlinkCatalog();
 
         // use the default env if user doesn't pass one
         initFlinkEnv(StreamExecutionEnvironment.getExecutionEnvironment());
@@ -67,7 +67,15 @@ public abstract class ActionBase implements Action {
         return this;
     }
 
-    private void initFlinkEnv(StreamExecutionEnvironment env) {
+    protected Catalog initPaimonCatalog() {
+        return FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+    }
+
+    protected FlinkCatalog initFlinkCatalog() {
+        return FlinkCatalogFactory.createCatalog(catalogName, catalog, catalogOptions);
+    }
+
+    protected void initFlinkEnv(StreamExecutionEnvironment env) {
         this.env = env;
         // we enable object reuse, we copy the un-reusable object ourselves.
         this.env.getConfig().enableObjectReuse();
