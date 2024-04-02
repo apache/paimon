@@ -1076,6 +1076,12 @@ public class CoreOptions implements Serializable {
                                     + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
                                     + "the config can be set to size.");
 
+    public static final ConfigOption<Integer> SORT_COMPACTION_SAMPLE_MAGNIFICATION =
+            key("sort-compaction.local-sample.magnification")
+                    .intType()
+                    .defaultValue(1000)
+                    .withDescription(
+                            "The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.");
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1144,6 +1150,10 @@ public class CoreOptions implements Serializable {
 
     public boolean sortBySize() {
         return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
+    }
+
+    public Integer getLocalSampleMagnification() {
+        return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
     }
 
     public static FileFormat createFileFormat(

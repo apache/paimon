@@ -96,7 +96,8 @@ public class RangeShuffle {
             DataStream<Tuple2<T, RowData>> inputDataStream,
             SerializableSupplier<Comparator<T>> keyComparator,
             TypeInformation<T> keyTypeInformation,
-            int sampleSize,
+            int localSampleSize,
+            int globalSampleSize,
             int rangeNum,
             int outParallelism,
             RowType valueRowType,
@@ -116,7 +117,7 @@ public class RangeShuffle {
                 new OneInputTransformation<>(
                         keyInput,
                         "LOCAL SAMPLE",
-                        new LocalSampleOperator<>(sampleSize),
+                        new LocalSampleOperator<>(localSampleSize),
                         new TupleTypeInfo<>(
                                 BasicTypeInfo.DOUBLE_TYPE_INFO,
                                 keyTypeInformation,
@@ -128,7 +129,7 @@ public class RangeShuffle {
                 new OneInputTransformation<>(
                         localSample,
                         "GLOBAL SAMPLE",
-                        new GlobalSampleOperator<>(sampleSize, keyComparator, rangeNum),
+                        new GlobalSampleOperator<>(globalSampleSize, keyComparator, rangeNum),
                         new ListTypeInfo<>(keyTypeInformation),
                         1);
 
