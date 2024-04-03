@@ -44,119 +44,129 @@ import org.apache.paimon.types.VarBinaryType;
 import org.apache.paimon.types.VarCharType;
 import org.apache.paimon.utils.MurmurHashUtils;
 
-import java.util.function.Function;
-
 /** Fast hash for object differs to DataType. */
-public class FastHash implements DataTypeVisitor<Function<Object, Integer>> {
+public class FastHash implements DataTypeVisitor<HashConverter32> {
 
     public static final FastHash INSTANCE = new FastHash();
 
     public static final byte[] NULL_BYTES = new byte[0];
 
     @Override
-    public Function<Object, Integer> visit(CharType charType) {
+    public HashConverter32 visit(CharType charType) {
         return o ->
                 MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
     }
 
     @Override
-    public Function<Object, Integer> visit(VarCharType varCharType) {
+    public HashConverter32 visit(VarCharType varCharType) {
         return o ->
                 MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
     }
 
     @Override
-    public Function<Object, Integer> visit(BooleanType booleanType) {
+    public HashConverter32 visit(BooleanType booleanType) {
+        throw new UnsupportedOperationException("Doesn't support type boolean");
+    }
+
+    @Override
+    public HashConverter32 visit(BinaryType binaryType) {
+        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
+    }
+
+    @Override
+    public HashConverter32 visit(VarBinaryType varBinaryType) {
+        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
+    }
+
+    @Override
+    public HashConverter32 visit(DecimalType decimalType) {
         return o ->
-                MurmurHashUtils.hashBytes(
-                        o == null
-                                ? NULL_BYTES
-                                : ((Boolean) o) ? new byte[] {0x01} : new byte[] {0x00});
+                o == null
+                        ? 0
+                        : getLongHash(
+                                Double.doubleToLongBits(
+                                        ((Decimal) o).toBigDecimal().doubleValue()));
     }
 
     @Override
-    public Function<Object, Integer> visit(BinaryType binaryType) {
-        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
-    }
-
-    @Override
-    public Function<Object, Integer> visit(VarBinaryType varBinaryType) {
-        return o -> MurmurHashUtils.hashBytes(o == null ? NULL_BYTES : (byte[]) o);
-    }
-
-    @Override
-    public Function<Object, Integer> visit(DecimalType decimalType) {
-        return o -> o == null ? 0 : getLongHash(((Decimal) o).toUnscaledLong());
-    }
-
-    @Override
-    public Function<Object, Integer> visit(TinyIntType tinyIntType) {
+    public HashConverter32 visit(TinyIntType tinyIntType) {
         return o -> o == null ? 0 : getLongHash((byte) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(SmallIntType smallIntType) {
+    public HashConverter32 visit(SmallIntType smallIntType) {
         return o -> o == null ? 0 : getLongHash((short) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(IntType intType) {
+    public HashConverter32 visit(IntType intType) {
         return o -> o == null ? 0 : getLongHash((int) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(BigIntType bigIntType) {
+    public HashConverter32 visit(BigIntType bigIntType) {
         return o -> o == null ? 0 : getLongHash((long) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(FloatType floatType) {
+    public HashConverter32 visit(FloatType floatType) {
         return o -> o == null ? 0 : getLongHash(Float.floatToIntBits((float) o));
     }
 
     @Override
-    public Function<Object, Integer> visit(DoubleType doubleType) {
+    public HashConverter32 visit(DoubleType doubleType) {
         return o -> o == null ? 0 : getLongHash(Double.doubleToLongBits((double) o));
     }
 
     @Override
-    public Function<Object, Integer> visit(DateType dateType) {
+    public HashConverter32 visit(DateType dateType) {
         return o -> o == null ? 0 : getLongHash((int) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(TimeType timeType) {
+    public HashConverter32 visit(TimeType timeType) {
         return o -> o == null ? 0 : getLongHash((int) o);
     }
 
     @Override
-    public Function<Object, Integer> visit(TimestampType timestampType) {
-        return o -> o == null ? 0 : getLongHash(((Timestamp) o).getMillisecond());
+    public HashConverter32 visit(TimestampType timestampType) {
+        // same as orc
+        return o ->
+                o == null
+                        ? 0
+                        : getLongHash(
+                                ((Timestamp) o).getMillisecond()
+                                        + ((Timestamp) o).getNanoOfMillisecond() / 1_000_000);
     }
 
     @Override
-    public Function<Object, Integer> visit(LocalZonedTimestampType localZonedTimestampType) {
-        return o -> o == null ? 0 : getLongHash(((Timestamp) o).getMillisecond());
+    public HashConverter32 visit(LocalZonedTimestampType localZonedTimestampType) {
+        return o ->
+                o == null
+                        ? 0
+                        : getLongHash(
+                                ((Timestamp) o).getMillisecond()
+                                        + ((Timestamp) o).getNanoOfMillisecond() / 1_000_000);
     }
 
     @Override
-    public Function<Object, Integer> visit(ArrayType arrayType) {
-        throw new UnsupportedOperationException();
+    public HashConverter32 visit(ArrayType arrayType) {
+        throw new UnsupportedOperationException("Does not support type array");
     }
 
     @Override
-    public Function<Object, Integer> visit(MultisetType multisetType) {
-        throw new UnsupportedOperationException();
+    public HashConverter32 visit(MultisetType multisetType) {
+        throw new UnsupportedOperationException("Does not support type mutiset");
     }
 
     @Override
-    public Function<Object, Integer> visit(MapType mapType) {
-        throw new UnsupportedOperationException();
+    public HashConverter32 visit(MapType mapType) {
+        throw new UnsupportedOperationException("Does not support type map");
     }
 
     @Override
-    public Function<Object, Integer> visit(RowType rowType) {
-        throw new UnsupportedOperationException();
+    public HashConverter32 visit(RowType rowType) {
+        throw new UnsupportedOperationException("Does not support type row");
     }
 
     // Thomas Wang's integer hash function

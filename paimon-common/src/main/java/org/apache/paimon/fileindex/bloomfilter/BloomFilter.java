@@ -30,7 +30,6 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.function.Function;
 
 /** Bloom filter for file index. */
 public class BloomFilter implements FileIndexer {
@@ -39,7 +38,7 @@ public class BloomFilter implements FileIndexer {
 
     private final org.apache.paimon.utils.BloomFilter filter;
 
-    private final Function<Object, Integer> hashFunction;
+    private final HashConverter32 hashFunction;
 
     public BloomFilter(DataType type, Options options) {
         int items = options.getInteger("items", 1_000_000);
@@ -68,7 +67,7 @@ public class BloomFilter implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            filter.addHash(hashFunction.apply(key));
+            filter.addHash(hashFunction.hash(key));
         }
 
         @Override
@@ -103,7 +102,7 @@ public class BloomFilter implements FileIndexer {
 
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object key) {
-            return filter.testHash(hashFunction.apply(key));
+            return filter.testHash(hashFunction.hash(key));
         }
     }
 }
