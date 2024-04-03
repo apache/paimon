@@ -64,7 +64,7 @@ public class FastHash implements DataTypeVisitor<HashConverter32> {
 
     @Override
     public HashConverter32 visit(BooleanType booleanType) {
-        throw new UnsupportedOperationException("Doesn't support type boolean");
+        throw new UnsupportedOperationException("Does not support type boolean");
     }
 
     @Override
