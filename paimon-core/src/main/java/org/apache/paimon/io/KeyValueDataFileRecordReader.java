@@ -34,12 +34,18 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
     private final RecordReader<InternalRow> reader;
     private final KeyValueSerializer serializer;
     private final int level;
+    private final boolean ignoreDelete;
 
     public KeyValueDataFileRecordReader(
-            RecordReader<InternalRow> reader, RowType keyType, RowType valueType, int level) {
+            RecordReader<InternalRow> reader,
+            RowType keyType,
+            RowType valueType,
+            int level,
+            boolean ignoreDelete) {
         this.reader = reader;
         this.serializer = new KeyValueSerializer(keyType, valueType);
         this.level = level;
+        this.ignoreDelete = ignoreDelete;
     }
 
     @Nullable
@@ -50,11 +56,15 @@ public class KeyValueDataFileRecordReader implements RecordReader<KeyValue> {
             return null;
         }
 
-        return iterator.transform(
-                internalRow ->
-                        internalRow == null
-                                ? null
-                                : serializer.fromRow(internalRow).setLevel(level));
+        RecordIterator<KeyValue> transformed =
+                iterator.transform(
+                        internalRow ->
+                                internalRow == null
+                                        ? null
+                                        : serializer.fromRow(internalRow).setLevel(level));
+        // In 0.7- versions, the delete records might be written into data file even when
+        // ignore-delete configured, so the reader should also filter the delete records
+        return ignoreDelete ? transformed.filter(KeyValue::isAdd) : transformed;
     }
 
     @Override
