@@ -18,7 +18,6 @@
 
 package org.apache.paimon.fileindex.bloomfilter;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.fileindex.FileIndexReader;
 import org.apache.paimon.fileindex.FileIndexWriter;
 import org.apache.paimon.options.Options;
@@ -39,17 +38,14 @@ public class BloomFilterTest {
 
     @Test
     public void testAddFindByRandom() {
-
         BloomFilter filter =
                 new BloomFilter(
                         DataTypes.BYTES(),
                         new Options(
                                 new HashMap<String, String>() {
                                     {
-                                        put(
-                                                CoreOptions.FILE_INDEX_BLOOM_FILTER_ITEMS.key(),
-                                                "10000");
-                                        put(CoreOptions.FILE_INDEX_BLOOM_FILTER_FPP.key(), "0.02");
+                                        put("items", "10000");
+                                        put("fpp", "0.02");
                                     }
                                 }));
         FileIndexWriter writer = filter.createWriter();

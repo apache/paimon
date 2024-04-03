@@ -19,7 +19,6 @@
 package org.apache.paimon.fileindex.bloomfilter;
 
 import org.apache.paimon.data.BinaryString;
-import org.apache.paimon.data.Decimal;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.ArrayType;
 import org.apache.paimon.types.BigIntType;
@@ -80,12 +79,7 @@ public class FastHash implements DataTypeVisitor<HashConverter32> {
 
     @Override
     public HashConverter32 visit(DecimalType decimalType) {
-        return o ->
-                o == null
-                        ? 0
-                        : getLongHash(
-                                Double.doubleToLongBits(
-                                        ((Decimal) o).toBigDecimal().doubleValue()));
+        throw new UnsupportedOperationException("Does not support decimal");
     }
 
     @Override
@@ -130,13 +124,17 @@ public class FastHash implements DataTypeVisitor<HashConverter32> {
 
     @Override
     public HashConverter32 visit(TimestampType timestampType) {
-        // same as orc
-        return o ->
-                o == null
-                        ? 0
-                        : getLongHash(
-                                ((Timestamp) o).getMillisecond()
-                                        + ((Timestamp) o).getNanoOfMillisecond() / 1_000_000);
+        final int precision = timestampType.getPrecision();
+        return o -> {
+            if (o == null) {
+                return 0;
+            }
+            if (precision <= 3) {
+                return getLongHash(((Timestamp) o).getMillisecond());
+            }
+
+            return getLongHash(((Timestamp) o).toMicros());
+        };
     }
 
     @Override
