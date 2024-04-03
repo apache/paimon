@@ -33,6 +33,8 @@ import org.apache.flink.types.RowKind;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.Timeout;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -597,16 +599,18 @@ public class ContinuousFileStoreITCase extends CatalogITCaseBase {
         assertThat(iterator.collect(1)).containsExactlyInAnyOrder(Row.of(3, "c"));
     }
 
-    @Test
-    public void testScanFromChangelog() throws Exception {
+    @ParameterizedTest(name = "changelog-producer = {0}")
+    @ValueSource(strings = {"none", "input"})
+    public void testScanFromChangelog(String changelogProducer) throws Exception {
         batchSql(
                 "CREATE TABLE IF NOT EXISTS T3 (a STRING, b STRING, c STRING, PRIMARY KEY (a) NOT ENFORCED)\n"
-                        + " WITH ('changelog-producer'='input', 'bucket' = '1', \n"
+                        + " WITH ('changelog-producer'='%s', 'bucket' = '1', \n"
                         + " 'snapshot.num-retained.max' = '2',\n"
                         + " 'snapshot.num-retained.min' = '1',\n"
                         + " 'changelog.num-retained.max' = '3',\n"
                         + " 'changelog.num-retained.min' = '1'\n"
-                        + ")");
+                        + ")",
+                changelogProducer);
 
         batchSql("INSERT INTO T3 VALUES ('1', '2', '3')");
         batchSql("INSERT INTO T3 VALUES ('4', '5', '6')");

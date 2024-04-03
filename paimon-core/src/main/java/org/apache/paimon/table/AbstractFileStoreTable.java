@@ -288,22 +288,20 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     }
 
     @Override
-    public ExpireSnapshots newExpireSnapshots() {
-        return new ExpireSnapshotsImpl(
+    public ExpireSnapshots newExpireSnapshots(CoreOptions options) {
+        return new ExpireSnapshots.Expire(
                 snapshotManager(),
-                store().newSnapshotDeletion(),
+                store().newSnapshotDeletion(options),
+                store().newChangelogDeletion(options),
                 store().newTagManager(),
-                coreOptions().snapshotExpireCleanEmptyDirectories(),
-                coreOptions().changelogLifecycleDecoupled());
-    }
-
-    @Override
-    public ExpireSnapshots newExpireChangelog() {
-        return new ExpireChangelogImpl(
-                snapshotManager(),
-                tagManager(),
-                store().newSnapshotDeletion(),
-                coreOptions().snapshotExpireCleanEmptyDirectories());
+                options.snapshotExpireCleanEmptyDirectories(),
+                options.snapshotNumRetainMax(),
+                options.snapshotNumRetainMin(),
+                options.snapshotTimeRetain().toMillis(),
+                options.changelogNumRetainMax(),
+                options.changelogNumRetainMin(),
+                options.changelogTimeRetain().toMillis(),
+                options.snapshotExpireLimit());
     }
 
     @Override
@@ -316,27 +314,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         CoreOptions options = coreOptions();
         Runnable snapshotExpire = null;
         if (!options.writeOnly()) {
-            boolean changelogDecoupled = options.changelogLifecycleDecoupled();
-            ExpireSnapshots expireChangelog =
-                    newExpireChangelog()
-                            .maxDeletes(options.snapshotExpireLimit())
-                            .retainMin(options.changelogNumRetainMin())
-                            .retainMax(options.changelogNumRetainMax());
-            ExpireSnapshots expireSnapshots =
-                    newExpireSnapshots()
-                            .retainMax(options.snapshotNumRetainMax())
-                            .retainMin(options.snapshotNumRetainMin())
-                            .maxDeletes(options.snapshotExpireLimit());
-            long snapshotTimeRetain = options.snapshotTimeRetain().toMillis();
-            long changelogTimeRetain = options.changelogTimeRetain().toMillis();
-            snapshotExpire =
-                    () -> {
-                        long current = System.currentTimeMillis();
-                        expireSnapshots.olderThanMills(current - snapshotTimeRetain).expire();
-                        if (changelogDecoupled) {
-                            expireChangelog.olderThanMills(current - changelogTimeRetain).expire();
-                        }
-                    };
+            ExpireSnapshots expireSnapshots = newExpireSnapshots(options);
+            snapshotExpire = expireSnapshots::expire;
         }
 
         return new TableCommitImpl(
@@ -574,7 +553,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshotManager(),
                 tagManager(),
                 fileIO,
-                store().newSnapshotDeletion(),
+                store().newSnapshotDeletion(store().options()),
+                store().newChangelogDeletion(store().options()),
                 store().newTagDeletion());
     }
 

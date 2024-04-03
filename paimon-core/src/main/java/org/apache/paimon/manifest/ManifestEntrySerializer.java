@@ -66,6 +66,7 @@ public class ManifestEntrySerializer extends VersionedObjectSerializer<ManifestE
                                 "The current version %s is not compatible with the version %s, please recreate the table.",
                                 getVersion(), version));
             }
+
             throw new IllegalArgumentException("Unsupported version: " + version);
         }
         return new ManifestEntry(

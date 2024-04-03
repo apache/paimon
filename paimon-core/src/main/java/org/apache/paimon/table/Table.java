@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.annotation.Public;
 import org.apache.paimon.stats.Statistics;
@@ -105,10 +106,7 @@ public interface Table extends Serializable {
 
     /** Manually expire snapshots, parameters can be controlled independently of table options. */
     @Experimental
-    ExpireSnapshots newExpireSnapshots();
-
-    @Experimental
-    ExpireSnapshots newExpireChangelog();
+    ExpireSnapshots newExpireSnapshots(CoreOptions options);
 
     // =============== Read & Write Operations ==================
 

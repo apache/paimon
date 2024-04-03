@@ -18,6 +18,7 @@
 
 package org.apache.paimon.table;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
@@ -167,18 +168,10 @@ public interface ReadonlyTable extends InnerTable {
     }
 
     @Override
-    default ExpireSnapshots newExpireSnapshots() {
+    default ExpireSnapshots newExpireSnapshots(CoreOptions options) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support expireSnapshots.",
-                        this.getClass().getSimpleName()));
-    }
-
-    @Override
-    default ExpireSnapshots newExpireChangelog() {
-        throw new UnsupportedOperationException(
-                String.format(
-                        "Readonly Table %s does not support expireChangelog.",
                         this.getClass().getSimpleName()));
     }
 }

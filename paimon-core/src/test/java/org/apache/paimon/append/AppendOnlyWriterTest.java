@@ -34,6 +34,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
 import org.apache.paimon.memory.MemoryPoolFactory;
 import org.apache.paimon.options.MemorySize;
@@ -646,6 +647,7 @@ public class AppendOnlyWriterTest {
                         }),
                 minSeq,
                 maxSeq,
-                toCompact.get(0).schemaId());
+                toCompact.get(0).schemaId(),
+                FileSource.APPEND);
     }
 }

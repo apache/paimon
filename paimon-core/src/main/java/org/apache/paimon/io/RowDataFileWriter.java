@@ -24,6 +24,7 @@ import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
@@ -48,6 +49,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final LongCounter seqNumCounter;
     private final FieldStatsArraySerializer statsArraySerializer;
     @Nullable private final FileIndexWriter fileIndexWriter;
+    private final boolean isCompact;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -59,7 +61,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            FileIndexOptions fileIndexOptions) {
+            FileIndexOptions fileIndexOptions,
+            boolean isCompact) {
         super(
                 fileIO,
                 factory,
@@ -72,6 +75,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
+        this.isCompact = isCompact;
         this.fileIndexWriter =
                 FileIndexWriter.create(
                         fileIO, toFileIndexPath(path), writeSchema, fileIndexOptions);
@@ -111,6 +115,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 indexResult.independentIndexFile() == null
                         ? Collections.emptyList()
                         : Collections.singletonList(indexResult.independentIndexFile()),
-                indexResult.embeddedIndexBytes());
+                indexResult.embeddedIndexBytes(),
+                isCompact ? FileSource.COMPACT : FileSource.APPEND);
     }
 }

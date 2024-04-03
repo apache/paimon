@@ -206,7 +206,7 @@ public class ContainsLevelsTest {
 
     private DataFileMeta newFile(int level, KeyValue... records) throws IOException {
         RollingFileWriter<KeyValue, DataFileMeta> writer =
-                createWriterFactory().createRollingMergeTreeFileWriter(level);
+                createWriterFactory().createRollingMergeTreeFileWriter(level, false);
         for (KeyValue kv : records) {
             writer.write(kv);
         }

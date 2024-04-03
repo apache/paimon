@@ -117,23 +117,7 @@ public class SchemaValidation {
                             ChangelogProducer.LOOKUP));
         }
 
-        checkArgument(
-                options.snapshotNumRetainMin() > 0,
-                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
-        checkArgument(
-                options.snapshotNumRetainMin() <= options.snapshotNumRetainMax(),
-                SNAPSHOT_NUM_RETAINED_MIN.key()
-                        + " should not be larger than "
-                        + SNAPSHOT_NUM_RETAINED_MAX.key());
-
-        checkArgument(
-                options.changelogNumRetainMin() > 0,
-                CHANGELOG_NUM_RETAINED_MIN.key() + " should be at least 1");
-        checkArgument(
-                options.changelogNumRetainMin() <= options.changelogNumRetainMax(),
-                CHANGELOG_NUM_RETAINED_MIN.key()
-                        + " should not be larger than "
-                        + CHANGELOG_NUM_RETAINED_MAX.key());
+        validateSnapshotAndChangelogRetainOption(options);
 
         // Get the format type here which will try to convert string value to {@Code
         // FileFormatType}. If the string value is illegal, an exception will be thrown.
@@ -188,6 +172,26 @@ public class SchemaValidation {
         if (options.deletionVectorsEnabled()) {
             validateForDeletionVectors(schema, options);
         }
+    }
+
+    public static void validateSnapshotAndChangelogRetainOption(CoreOptions options) {
+        checkArgument(
+                options.snapshotNumRetainMin() > 0,
+                SNAPSHOT_NUM_RETAINED_MIN.key() + " should be at least 1");
+        checkArgument(
+                options.snapshotNumRetainMin() <= options.snapshotNumRetainMax(),
+                SNAPSHOT_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + SNAPSHOT_NUM_RETAINED_MAX.key());
+
+        checkArgument(
+                options.changelogNumRetainMin() > 0,
+                CHANGELOG_NUM_RETAINED_MIN.key() + " should be at least 1");
+        checkArgument(
+                options.changelogNumRetainMin() <= options.changelogNumRetainMax(),
+                CHANGELOG_NUM_RETAINED_MIN.key()
+                        + " should not be larger than "
+                        + CHANGELOG_NUM_RETAINED_MAX.key());
     }
 
     private static void validateOnlyContainPrimitiveType(

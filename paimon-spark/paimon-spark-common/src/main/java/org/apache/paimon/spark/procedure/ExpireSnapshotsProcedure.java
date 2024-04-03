@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.schema.SchemaValidation;
 import org.apache.paimon.table.ExpireSnapshots;
 
 import org.apache.spark.sql.catalyst.InternalRow;
@@ -26,6 +28,9 @@ import org.apache.spark.sql.connector.catalog.TableCatalog;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.util.HashMap;
+import java.util.Map;
 
 import static org.apache.spark.sql.types.DataTypes.IntegerType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -74,19 +79,46 @@ public class ExpireSnapshotsProcedure extends BaseProcedure {
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
-                    ExpireSnapshots expireSnapshots = table.newExpireSnapshots();
+                    Map<String, String> options = new HashMap<>(table.options());
                     if (retainMax != null) {
-                        expireSnapshots.retainMax(retainMax);
+                        options.put(
+                                CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(),
+                                String.valueOf(retainMax));
+                        if (!options.containsKey(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key())) {
+                            options.put(
+                                    CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(),
+                                    String.valueOf(retainMax));
+                        }
                     }
                     if (retainMin != null) {
-                        expireSnapshots.retainMin(retainMin);
+                        options.put(
+                                CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(),
+                                String.valueOf(retainMin));
+                        if (!options.containsKey(CoreOptions.CHANGELOG_NUM_RETAINED_MIN.key())) {
+                            options.put(
+                                    CoreOptions.CHANGELOG_NUM_RETAINED_MIN.key(),
+                                    String.valueOf(retainMin));
+                        }
                     }
                     if (olderThanMills != null) {
-                        expireSnapshots.olderThanMills(olderThanMills);
+                        long snapshotRetainMs = System.currentTimeMillis() - olderThanMills;
+                        options.put(
+                                CoreOptions.SNAPSHOT_TIME_RETAINED.key(),
+                                String.format("%dms", snapshotRetainMs));
+                        if (!options.containsKey(CoreOptions.CHANGELOG_TIME_RETAINED.key())) {
+                            options.put(
+                                    CoreOptions.CHANGELOG_TIME_RETAINED.key(),
+                                    String.format("%dms", snapshotRetainMs));
+                        }
                     }
                     if (maxDeletes != null) {
-                        expireSnapshots.maxDeletes(maxDeletes);
+                        options.put(
+                                CoreOptions.SNAPSHOT_EXPIRE_LIMIT.key(),
+                                String.valueOf(maxDeletes));
                     }
+                    CoreOptions newOption = new CoreOptions(options);
+                    SchemaValidation.validateSnapshotAndChangelogRetainOption(newOption);
+                    ExpireSnapshots expireSnapshots = table.newExpireSnapshots(newOption);
                     int deleted = expireSnapshots.expire();
                     return new InternalRow[] {newInternalRow(deleted)};
                 });

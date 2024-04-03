@@ -182,6 +182,7 @@ public class IntervalPartitionTest {
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100000),
                 0L,
+                null,
                 null);
     }
 

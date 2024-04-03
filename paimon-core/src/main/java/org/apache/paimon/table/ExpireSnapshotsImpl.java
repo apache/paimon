@@ -50,17 +50,21 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
     /** Whether to clean the changelog or delta files. */
     private final boolean changelogDecoupled;
 
-    private int retainMax = Integer.MAX_VALUE;
-    private int retainMin = 1;
-    private long olderThanMills = 0;
-    private int maxDeletes = Integer.MAX_VALUE;
+    private final int retainMax;
+    private final int retainMin;
+    private final long snapshotTimeToRetain;
+    private final int maxDeletes;
 
-    public ExpireSnapshotsImpl(
+    ExpireSnapshotsImpl(
             SnapshotManager snapshotManager,
             SnapshotDeletion snapshotDeletion,
             TagManager tagManager,
             boolean cleanEmptyDirectories,
-            boolean changelogDecoupled) {
+            boolean changelogDecoupled,
+            int retainMax,
+            int retainMin,
+            long snapshotTimeToRetain,
+            int maxDeletes) {
         this.snapshotManager = snapshotManager;
         this.consumerManager =
                 new ConsumerManager(snapshotManager.fileIO(), snapshotManager.tablePath());
@@ -68,34 +72,15 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         this.tagManager = tagManager;
         this.cleanEmptyDirectories = cleanEmptyDirectories;
         this.changelogDecoupled = changelogDecoupled;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl retainMax(int retainMax) {
         this.retainMax = retainMax;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl retainMin(int retainMin) {
         this.retainMin = retainMin;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl olderThanMills(long olderThanMills) {
-        this.olderThanMills = olderThanMills;
-        return this;
-    }
-
-    @Override
-    public ExpireSnapshotsImpl maxDeletes(int maxDeletes) {
+        this.snapshotTimeToRetain = snapshotTimeToRetain;
         this.maxDeletes = maxDeletes;
-        return this;
     }
 
     @Override
     public int expire() {
+        long olderThanMills = System.currentTimeMillis() - snapshotTimeToRetain;
         Long latestSnapshotId = snapshotManager.latestSnapshotId();
         if (latestSnapshotId == null) {
             // no snapshot, nothing to expire
@@ -226,7 +211,7 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             }
 
             Snapshot snapshot = snapshotManager.snapshot(id);
-            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet, !changelogDecoupled);
+            snapshotDeletion.cleanUnusedManifests(snapshot, skippingSet);
             if (changelogDecoupled) {
                 commitChangelog(new Changelog(snapshot));
             }

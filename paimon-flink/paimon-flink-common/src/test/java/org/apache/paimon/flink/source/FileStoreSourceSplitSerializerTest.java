@@ -20,6 +20,7 @@ package org.apache.paimon.flink.source;
 
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.stats.StatsTestUtils;
 import org.apache.paimon.table.source.DataSplit;
 
@@ -86,7 +87,8 @@ public class FileStoreSourceSplitSerializerTest {
                 0,
                 level,
                 0L,
-                null);
+                null,
+                FileSource.APPEND);
     }
 
     public static FileStoreSourceSplit newSourceSplit(

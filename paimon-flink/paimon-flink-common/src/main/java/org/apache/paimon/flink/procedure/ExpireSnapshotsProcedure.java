@@ -18,9 +18,14 @@
 
 package org.apache.paimon.flink.procedure;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.schema.SchemaValidation;
 
 import org.apache.flink.table.procedure.ProcedureContext;
+
+import java.util.HashMap;
+import java.util.Map;
 
 /** A procedure to expire snapshots. */
 public class ExpireSnapshotsProcedure extends ProcedureBase {
@@ -32,8 +37,14 @@ public class ExpireSnapshotsProcedure extends ProcedureBase {
 
     public String[] call(ProcedureContext procedureContext, String tableId, int retainMax)
             throws Catalog.TableNotExistException {
-        return new String[] {
-            table(tableId).newExpireSnapshots().retainMax(retainMax).expire() + ""
-        };
+        Map<String, String> options = new HashMap<>(table(tableId).options());
+        options.put(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(), String.valueOf(retainMax));
+        if (!options.containsKey(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key())) {
+            options.put(CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(), String.valueOf(retainMax));
+        }
+        CoreOptions newOption = new CoreOptions(options);
+        SchemaValidation.validateSnapshotAndChangelogRetainOption(newOption);
+
+        return new String[] {String.valueOf(table(tableId).newExpireSnapshots(newOption).expire())};
     }
 }

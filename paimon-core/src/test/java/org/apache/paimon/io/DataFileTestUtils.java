@@ -52,6 +52,7 @@ public class DataFileTestUtils {
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100),
                 maxSeq - minSeq + 1,
+                null,
                 null);
     }
 
@@ -69,6 +70,7 @@ public class DataFileTestUtils {
                 0,
                 0,
                 0L,
+                null,
                 null);
     }
 
@@ -92,6 +94,7 @@ public class DataFileTestUtils {
                 0,
                 level,
                 deleteRowCount,
+                null,
                 null);
     }
 

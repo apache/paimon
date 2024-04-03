@@ -26,6 +26,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.IndexIncrement;
+import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFileMeta;
@@ -46,9 +48,7 @@ import org.apache.paimon.schema.KeyValueFieldsExtractor;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.CatalogEnvironment;
-import org.apache.paimon.table.ExpireChangelogImpl;
 import org.apache.paimon.table.ExpireSnapshots;
-import org.apache.paimon.table.ExpireSnapshotsImpl;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ScanMode;
@@ -160,44 +160,58 @@ public class TestFileStore extends KeyValueFileStore {
                 numRetainedMin,
                 numRetainedMax,
                 millisRetained,
-                snapshotExpireCleanEmptyDirectories,
-                false);
+                numRetainedMin,
+                numRetainedMax,
+                millisRetained,
+                snapshotExpireCleanEmptyDirectories);
     }
 
     public ExpireSnapshots newExpire(int numRetainedMin, int numRetainedMax, long millisRetained) {
-        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true, false);
+        return newExpire(numRetainedMin, numRetainedMax, millisRetained, true);
     }
 
     public ExpireSnapshots newExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
-            boolean snapshotExpireCleanEmptyDirectories,
-            boolean changelogDecoupled) {
-        return new ExpireSnapshotsImpl(
-                        snapshotManager(),
-                        newSnapshotDeletion(),
-                        new TagManager(fileIO, options.path()),
-                        snapshotExpireCleanEmptyDirectories,
-                        changelogDecoupled)
-                .retainMax(numRetainedMax)
-                .retainMin(numRetainedMin)
-                .olderThanMills(System.currentTimeMillis() - millisRetained);
-    }
-
-    public ExpireSnapshots newChangelogExpire(
-            int numRetainedMin,
-            int numRetainedMax,
-            long millisRetained,
+            int snapshotNumRetainedMin,
+            int snapshotNumRetainedMax,
+            long snapshotMillisRetained,
+            int changelogNumRetainedMin,
+            int changelogNumRetainedMax,
+            long changelogMillisRetained,
             boolean snapshotExpireCleanEmptyDirectories) {
-        return new ExpireChangelogImpl(
-                        snapshotManager(),
-                        new TagManager(fileIO, options.path()),
-                        newSnapshotDeletion(),
-                        snapshotExpireCleanEmptyDirectories)
-                .retainMin(numRetainedMin)
-                .retainMax(numRetainedMax)
-                .olderThanMills(System.currentTimeMillis() - millisRetained);
+        Map<String, String> origin = new HashMap<>(options.toMap());
+        origin.put(
+                CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key(),
+                String.valueOf(snapshotNumRetainedMax));
+        origin.put(
+                CoreOptions.SNAPSHOT_NUM_RETAINED_MIN.key(),
+                String.valueOf(snapshotNumRetainedMin));
+        origin.put(
+                CoreOptions.SNAPSHOT_TIME_RETAINED.key(),
+                String.format("%dms", snapshotMillisRetained));
+        origin.put(
+                CoreOptions.CHANGELOG_NUM_RETAINED_MAX.key(),
+                String.valueOf(changelogNumRetainedMax));
+        origin.put(
+                CoreOptions.CHANGELOG_NUM_RETAINED_MIN.key(),
+                String.valueOf(changelogNumRetainedMin));
+        origin.put(
+                CoreOptions.CHANGELOG_TIME_RETAINED.key(),
+                String.format("%dms", changelogMillisRetained));
+
+        CoreOptions newOption = new CoreOptions(origin);
+        return new ExpireSnapshots.Expire(
+                snapshotManager(),
+                newSnapshotDeletion(newOption),
+                newChangelogDeletion(newOption),
+                new TagManager(fileIO, options.path()),
+                snapshotExpireCleanEmptyDirectories,
+                newOption.snapshotNumRetainMax(),
+                newOption.snapshotNumRetainMin(),
+                newOption.snapshotTimeRetain().toMillis(),
+                newOption.changelogNumRetainMax(),
+                newOption.changelogNumRetainMin(),
+                newOption.changelogTimeRetain().toMillis(),
+                Integer.MAX_VALUE);
     }
 
     public List<Snapshot> commitData(
@@ -608,6 +622,12 @@ public class TestFileStore extends KeyValueFileStore {
             FileStorePathFactory pathFactory,
             ManifestList manifestList) {
         Set<Path> result = new HashSet<>();
+        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
+        boolean produceChangelog =
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
+        // The option from the table may not align with the expiration config
+        boolean changelogDecoupled = snapshotManager.earliestLongLivedChangelogId() != null;
 
         Path snapshotPath = snapshotManager.snapshotPath(snapshotId);
         Snapshot snapshot = Snapshot.fromPath(fileIO, snapshotPath);
@@ -635,6 +655,27 @@ public class TestFileStore extends KeyValueFileStore {
                             entry.file().fileName()));
         }
 
+        // Add 'DELETE' 'APPEND' file in snapshot
+        // These 'delete' files can be merged by the plan#splits,
+        // so it's not shown in the entries above.
+        // In other words, these files are not used (by snapshot or changelog) now,
+        // but it can only be cleaned after this snapshot expired, so we should add it to the file
+        // use list.
+        if (changelogDecoupled && !produceChangelog) {
+            entries = scan.withManifestList(snapshot.deltaManifests(manifestList)).plan().files();
+            for (ManifestEntry entry : entries) {
+                // append delete file are delayed to delete
+                if (entry.kind() == FileKind.DELETE
+                        && entry.file().fileSource().orElse(FileSource.APPEND)
+                                == FileSource.APPEND) {
+                    result.add(
+                            new Path(
+                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    entry.file().fileName()));
+                }
+            }
+        }
+
         return result;
     }
 
@@ -646,6 +687,10 @@ public class TestFileStore extends KeyValueFileStore {
             FileStorePathFactory pathFactory,
             ManifestList manifestList) {
         Set<Path> result = new HashSet<>();
+        SchemaManager schemaManager = new SchemaManager(fileIO, snapshotManager.tablePath());
+        CoreOptions options = new CoreOptions(schemaManager.latest().get().options());
+        boolean produceChangelog =
+                options.changelogProducer() != CoreOptions.ChangelogProducer.NONE;
 
         Path changelogPath = snapshotManager.longLivedChangelogPath(changelogId);
         Changelog changelog = Changelog.fromPath(fileIO, changelogPath);
@@ -654,24 +699,51 @@ public class TestFileStore extends KeyValueFileStore {
         result.add(changelogPath);
 
         // manifest lists
+        if (!produceChangelog) {
+            result.add(pathFactory.toManifestListPath(changelog.baseManifestList()));
+            result.add(pathFactory.toManifestListPath(changelog.deltaManifestList()));
+        }
         if (changelog.changelogManifestList() != null) {
             result.add(pathFactory.toManifestListPath(changelog.changelogManifestList()));
         }
 
         // manifests
-        List<ManifestFileMeta> manifests = new ArrayList<>();
-        manifests.addAll(changelog.changelogManifests(manifestList));
+        List<ManifestFileMeta> manifests =
+                new ArrayList<>(changelog.changelogManifests(manifestList));
+        if (!produceChangelog) {
+            manifests.addAll(changelog.dataManifests(manifestList));
+        }
 
         manifests.forEach(m -> result.add(pathFactory.toManifestFilePath(m.fileName())));
 
-        // data file
-        List<ManifestEntry> entries = scan.withManifestList(manifests).plan().files();
-        for (ManifestEntry entry : entries) {
-            result.add(
-                    new Path(
-                            pathFactory.bucketPath(entry.partition(), entry.bucket()),
-                            entry.file().fileName()));
+        // not all manifests contains useful data file
+        // (1) produceChangelog = 'true': data file in changelog manifests
+        // (2) produceChangelog = 'false': 'APPEND' data file in delta manifests
+
+        // delta file
+        if (!produceChangelog) {
+            for (ManifestEntry entry :
+                    scan.withManifestList(changelog.deltaManifests(manifestList)).plan().files()) {
+                if (entry.file().fileSource().orElse(FileSource.APPEND) == FileSource.APPEND) {
+                    result.add(
+                            new Path(
+                                    pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                    entry.file().fileName()));
+                }
+            }
+        } else {
+            // changelog
+            for (ManifestEntry entry :
+                    scan.withManifestList(changelog.changelogManifests(manifestList))
+                            .plan()
+                            .files()) {
+                result.add(
+                        new Path(
+                                pathFactory.bucketPath(entry.partition(), entry.bucket()),
+                                entry.file().fileName()));
+            }
         }
+
         return result;
     }
 

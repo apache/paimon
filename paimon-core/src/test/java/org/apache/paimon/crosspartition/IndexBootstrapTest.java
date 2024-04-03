@@ -139,6 +139,7 @@ public class IndexBootstrapTest extends TableTestBase {
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDateTime()),
                 0L,
+                null,
                 null);
     }
 

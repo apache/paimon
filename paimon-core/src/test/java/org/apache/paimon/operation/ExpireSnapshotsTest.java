@@ -30,6 +30,7 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
+import org.apache.paimon.manifest.FileSource;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.schema.Schema;
@@ -82,7 +83,7 @@ public class ExpireSnapshotsTest {
                         TestKeyValueGenerator.DEFAULT_PART_TYPE.getFieldNames(),
                         TestKeyValueGenerator.getPrimaryKeys(
                                 TestKeyValueGenerator.GeneratorMode.MULTI_PARTITIONED),
-                        Collections.emptyMap(),
+                        store.options().toMap(),
                         null));
     }
 
@@ -175,7 +176,9 @@ public class ExpireSnapshotsTest {
 
     @Test
     public void testExpireExtraFiles() throws IOException {
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) store.newExpire(1, 3, Long.MAX_VALUE);
+        ExpireSnapshotsImpl expire =
+                ((ExpireSnapshots.Expire) store.newExpire(1, 3, Long.MAX_VALUE))
+                        .getExpireSnapshots();
 
         // write test files
         BinaryRow partition = gen.getPartition(gen.next());
@@ -205,7 +208,8 @@ public class ExpireSnapshotsTest {
                         extraFiles,
                         Timestamp.now(),
                         0L,
-                        null);
+                        null,
+                        FileSource.APPEND);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 
@@ -337,8 +341,9 @@ public class ExpireSnapshotsTest {
         commit(5, allData, snapshotPositions);
         long expireMillis = System.currentTimeMillis();
         // expire twice to check for idempotence
-        expire.olderThanMills(expireMillis - 1000).expire();
-        expire.olderThanMills(expireMillis - 1000).expire();
+
+        expire.expire();
+        expire.expire();
 
         int latestSnapshotId = requireNonNull(snapshotManager.latestSnapshotId()).intValue();
         for (int i = 1; i <= latestSnapshotId; i++) {
@@ -399,9 +404,9 @@ public class ExpireSnapshotsTest {
     public void testChangelogOutLivedSnapshot() throws Exception {
         List<KeyValue> allData = new ArrayList<>();
         List<Integer> snapshotPositions = new ArrayList<>();
-        commit(10, allData, snapshotPositions);
-        ExpireSnapshots snapshot = store.newExpire(1, 2, Long.MAX_VALUE, true, true);
-        ExpireSnapshots changelog = store.newChangelogExpire(1, 3, Long.MAX_VALUE, true);
+        commit(40, allData, snapshotPositions);
+        ExpireSnapshots snapshot =
+                store.newExpire(1, 10, Long.MAX_VALUE, 1, Integer.MAX_VALUE, Long.MAX_VALUE, true);
         // expire twice to check for idempotence
         snapshot.expire();
         snapshot.expire();
@@ -412,21 +417,25 @@ public class ExpireSnapshotsTest {
         int earliestLongLivedChangelogId =
                 snapshotManager.earliestLongLivedChangelogId().intValue();
 
-        // 2 snapshot in /snapshot
-        assertThat(latestSnapshotId - earliestSnapshotId).isEqualTo(1);
+        // 10 snapshot in /snapshot dir
+        assertThat(latestSnapshotId - earliestSnapshotId).isEqualTo(9);
         assertThat(earliestLongLivedChangelogId).isEqualTo(1);
         // The changelog id and snapshot id is continuous
         assertThat(earliestSnapshotId - latestLongLivedChangelogId).isEqualTo(1);
+        for (int i = earliestLongLivedChangelogId; i <= latestLongLivedChangelogId; i++) {
+            // assert changelog id is continuous
+            assertThat(snapshotManager.longLivedChangelogExists(i)).isTrue();
+        }
 
-        changelog.expire();
-        changelog.expire();
+        snapshot = store.newExpire(1, 10, Long.MAX_VALUE, 1, 20, Integer.MAX_VALUE, true);
+        snapshot.expire();
 
         assertThat(snapshotManager.latestSnapshotId().intValue()).isEqualTo(latestSnapshotId);
         assertThat(snapshotManager.earliestSnapshotId().intValue()).isEqualTo(earliestSnapshotId);
         assertThat(snapshotManager.latestLongLivedChangelogId())
                 .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
         assertThat(snapshotManager.earliestLongLivedChangelogId())
-                .isEqualTo(snapshotManager.earliestSnapshotId() - 1);
+                .isEqualTo(snapshotManager.earliestSnapshotId() - 10);
         store.assertCleaned();
     }
 

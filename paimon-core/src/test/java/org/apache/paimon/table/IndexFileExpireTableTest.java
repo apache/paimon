@@ -59,10 +59,13 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpiration() throws Exception {
         prepareExpireTable();
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
 
         long indexFileSize = indexFileSize();
         long indexManifestSize = indexManifestSize();
+
+        ExpireSnapshotsImpl expire =
+                ((ExpireSnapshots.Expire) table.newExpireSnapshots(table.coreOptions()))
+                        .getExpireSnapshots();
 
         expire.expireUntil(1, 2);
         checkIndexFiles(2);
@@ -88,7 +91,9 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpirationWithTag() throws Exception {
         prepareExpireTable();
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
+        ExpireSnapshotsImpl expire =
+                ((ExpireSnapshots.Expire) table.newExpireSnapshots(table.coreOptions()))
+                        .getExpireSnapshots();
 
         table.createTag("tag3", 3);
         table.createTag("tag5", 5);
@@ -114,7 +119,9 @@ public class IndexFileExpireTableTest extends PrimaryKeyTableTestBase {
     @Test
     public void testIndexFileExpirationWhenDeletingTag() throws Exception {
         prepareExpireTable();
-        ExpireSnapshotsImpl expire = (ExpireSnapshotsImpl) table.newExpireSnapshots();
+        ExpireSnapshotsImpl expire =
+                ((ExpireSnapshots.Expire) table.newExpireSnapshots(table.coreOptions()))
+                        .getExpireSnapshots();
 
         table.createTag("tag3", 3);
         table.createTag("tag5", 5);

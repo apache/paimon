@@ -22,6 +22,7 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
+import org.apache.paimon.operation.ChangelogDeletion;
 import org.apache.paimon.operation.FileStoreCommit;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
@@ -83,7 +84,9 @@ public interface FileStore<T> extends Serializable {
 
     FileStoreCommit newCommit(String commitUser, String branchName);
 
-    SnapshotDeletion newSnapshotDeletion();
+    SnapshotDeletion newSnapshotDeletion(CoreOptions options);
+
+    ChangelogDeletion newChangelogDeletion(CoreOptions options);
 
     TagManager newTagManager();
 

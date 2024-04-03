@@ -71,7 +71,8 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
 
             // expire
             checkAnswer(
-              spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 2)"),
+              spark.sql(
+                "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 2, retain_min => 1)"),
               Row(1) :: Nil)
 
             checkAnswer(
