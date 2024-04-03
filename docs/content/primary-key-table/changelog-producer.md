@@ -3,7 +3,7 @@ title: "Changelog Producer"
 weight: 4
 type: docs
 aliases:
-- /concepts/primary-key-table/changelog-producer.html
+- /primary-key-table/changelog-producer.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

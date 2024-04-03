@@ -3,7 +3,7 @@ title: "Read Optimized"
 weight: 7
 type: docs
 aliases:
-- /concepts/primary-key-table/read-optimized.html
+- /primary-key-table/read-optimized.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -32,7 +32,7 @@ For Primary Key Table, it's a 'MergeOnRead' technology. When reading data, multi
 and the number of parallelism will be limited by the number of buckets. Although Paimon's merge performance is efficient,
 it still cannot catch up with the ordinary AppendOnly table.
 
-We recommend that you use [Deletion Vectors]({{< ref "concepts/primary-key-table/deletion-vectors" >}}) mode.
+We recommend that you use [Deletion Vectors]({{< ref "primary-key-table/deletion-vectors" >}}) mode.
 
 If you don't want to use Deletion Vectors mode, you want to query fast enough in certain scenarios, but can only find
 older data, you can also:

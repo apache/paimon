@@ -40,7 +40,7 @@ Before delving further into this page, please ensure that you have read through 
 following sections:
 
 1. [Basic Concepts]({{< ref "concepts/basic-concepts" >}}),
-2. [Primary Key Table]({{< ref "concepts/primary-key-table/overview" >}}) and
+2. [Primary Key Table]({{< ref "primary-key-table/overview" >}}) and
 3. How to use Paimon in [Flink]({{< ref "engines/flink" >}}).
 
 ## Understand File Operations
@@ -455,7 +455,7 @@ this means that there are at least 5 files in a bucket. If you want to reduce th
 By default, Append also does automatic compaction to reduce the number of small files.
 
 However, for Bucket's Append table, it will only compact the files within the Bucket for sequential
-purposes, which may keep more small files. See [Append Queue Table]({{< ref "/concepts/append-table/append-queue-table" >}}).
+purposes, which may keep more small files. See [Append Queue Table]({{< ref "append-table/append-queue-table" >}}).
 
 ### Understand Full-Compaction
 

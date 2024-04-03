@@ -332,8 +332,8 @@ For more information of drop_partition, see
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
-2. [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table/merge-engine#deduplicate" >}}) or [partial-update]({{< ref "concepts/primary-key-table/merge-engine#partial-update" >}}) to support this feature.
+1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
+2. [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}) or [partial-update]({{< ref "primary-key-table/merge-engine#partial-update" >}}) to support this feature.
 {{< /hint >}}
 
 {{< hint warning >}}
@@ -439,7 +439,7 @@ For more information of 'delete', see
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table/merge-engine#deduplicate" >}}) to support this feature.
+2. If the table has primary keys, [MergeEngine]({{< ref "primary-key-table/merge-engine" >}}) needs to be [deduplicate]({{< ref "primary-key-table/merge-engine#deduplicate" >}}) to support this feature.
    {{< /hint >}}
 
 {{< hint warning >}}
@@ -472,7 +472,7 @@ DELETE FROM my_table WHERE currency = 'UNKNOWN';
 {{< hint info >}}
 Important table properties setting:
 1. Only primary key tables support this feature.
-2. If the table has primary keys, [MergeEngine]({{< ref "concepts/primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "concepts/primary-key-table#deduplicate" >}}) to support this feature.
+2. If the table has primary keys, [MergeEngine]({{< ref "primary-key-table#merge-engines" >}}) needs to be [deduplicate]({{< ref "primary-key-table#deduplicate" >}}) to support this feature.
    {{< /hint >}}
 
 To enable delete needs these configs below:
@@ -495,7 +495,7 @@ Paimon supports "MERGE INTO" via submitting the 'merge_into' job through `flink 
 
 {{< hint info >}}
 Important table properties setting:
-1. Only [primary key table]({{< ref "concepts/primary-key-table" >}}) supports this feature.
+1. Only [primary key table]({{< ref "primary-key-table" >}}) supports this feature.
 2. The action won't produce UPDATE_BEFORE, so it's not recommended to set 'changelog-producer' = 'input'.
 {{< /hint >}}
 

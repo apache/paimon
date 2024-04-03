@@ -1,7 +1,9 @@
 ---
-title: "Append Table"
+title: "Table w/o PK"
+icon: <i class="fa fa-database title maindish" aria-hidden="true"></i>
+bold: true
 bookCollapseSection: true
-weight: 7
+weight: 3
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

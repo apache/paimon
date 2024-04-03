@@ -3,7 +3,7 @@ title: "Overview"
 weight: 1
 type: docs
 aliases:
-- /concepts/primary-key-table/overview.html
+- /primary-key-table/overview.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -26,7 +26,7 @@ under the License.
 
 # Overview
 
-Primary key table is the default table type when creating a table. Users can insert, update or delete records in the table.
+If you define a table with primary key, you can insert, update or delete records in the table.
 
 Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by
 sorting the primary key within each bucket, allowing users to achieve high performance by applying filtering conditions
@@ -36,7 +36,7 @@ on the primary key. See [CREATE TABLE]({{< ref "how-to/creating-tables" >}}).
 
 Unpartitioned tables, or partitions in partitioned tables, are sub-divided into buckets, to provide extra structure to the data that may be used for more efficient querying.
 
-Each bucket directory contains an LSM tree and its [changelog files]({{< ref "concepts/primary-key-table/changelog-producer" >}}).
+Each bucket directory contains an LSM tree and its [changelog files]({{< ref "primary-key-table/changelog-producer" >}}).
 
 The range for a bucket is determined by the hash value of one or more columns in the records. Users can specify bucketing columns by providing the [`bucket-key` option]({{< ref "maintenance/configurations#coreoptions" >}}). If no `bucket-key` option is specified, the primary key (if defined) or the complete record will be used as the bucket key.
 
@@ -56,7 +56,7 @@ Records within a data file are sorted by their primary keys. Within a sorted run
 
 {{< img src="/img/sorted-runs.png">}}
 
-As you can see, different sorted runs may have overlapping primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "concepts/primary-key-table/merge-engine" >}}) and the timestamp of each record.
+As you can see, different sorted runs may have overlapping primary key ranges, and may even contain the same primary key. When querying the LSM tree, all sorted runs must be combined and all records with the same primary key must be merged according to the user-specified [merge engine]({{< ref "primary-key-table/merge-engine" >}}) and the timestamp of each record.
 
 New records written into the LSM tree will be first buffered in memory. When the memory buffer is full, all records in memory will be sorted and flushed to disk. A new sorted run is now created.
 

@@ -3,7 +3,7 @@ title: "Merge Engine"
 weight: 3
 type: docs
 aliases:
-- /concepts/primary-key-table/merge-engine.html
+- /primary-key-table/merge-engine.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -31,7 +31,7 @@ When Paimon sink receives two or more records with the same primary keys, it wil
 {{< hint info >}}
 Always set `table.exec.sink.upsert-materialize` to `NONE` in Flink SQL TableConfig, sink upsert-materialize may
 result in strange behavior. When the input is out of order, we recommend that you use
-[Sequence Field]({{< ref "concepts/primary-key-table/sequence-rowkind#sequence-field" >}}) to correct disorder.
+[Sequence Field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}) to correct disorder.
 {{< /hint >}}
 
 ## Deduplicate
@@ -54,7 +54,7 @@ Assuming that the first column is the primary key, the final result would be `<1
 
 {{< hint info >}}
 For streaming queries, `partial-update` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer]({{< ref "concepts/primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
+[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
 {{< hint info >}}
@@ -108,7 +108,7 @@ For `fields.<field-name>.sequence-group`, valid comparative data types include: 
 
 ### Aggregation For Partial Update
 
-You can specify aggregation function for the input field, all the functions in the [Aggregation]({{< ref "concepts/primary-key-table/merge-engine#aggregation" >}}) are supported.
+You can specify aggregation function for the input field, all the functions in the [Aggregation]({{< ref "primary-key-table/merge-engine#aggregation" >}}) are supported.
 
 See example:
 
@@ -297,7 +297,7 @@ Current supported aggregate functions and data types are:
 
 {{< hint info >}}
 For streaming queries, `aggregation` merge engine must be used together with `lookup` or `full-compaction`
-[changelog producer]({{< ref "concepts/primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
+[changelog producer]({{< ref "primary-key-table/changelog-producer" >}}). ('input' changelog producer is also supported, but only returns input records.)
 {{< /hint >}}
 
 ### Retract
@@ -326,7 +326,7 @@ By specifying `'merge-engine' = 'first-row'`, users can keep the first row of th
 `deduplicate` merge engine that in the `first-row` merge engine, it will generate insert only changelog.
 
 {{< hint info >}}
-1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "concepts/primary-key-table/changelog-producer" >}}).
+1. `first-row` merge engine must be used together with `lookup` [changelog producer]({{< ref "primary-key-table/changelog-producer" >}}).
 2. You can not specify `sequence.field`.
 3. Not accept `DELETE` and `UPDATE_BEFORE` message. You can config `ignore-delete` to ignore these two kinds records.
    {{< /hint >}}

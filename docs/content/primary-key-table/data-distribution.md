@@ -3,7 +3,7 @@ title: "Data Distribution"
 weight: 2
 type: docs
 aliases:
-- /concepts/primary-key-table/data-distribution.html
+- /primary-key-table/data-distribution.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -31,7 +31,7 @@ By default, Paimon table only has one bucket, which means it only provides singl
 Please configure the bucket strategy to your table.
 {{< /hint >}}
 
-A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "concepts/primary-key-table/overview#lsm-trees" >}}).
+A bucket is the smallest storage unit for reads and writes, each bucket directory contains an [LSM tree]({{< ref "primary-key-table/overview#lsm-trees" >}}).
 
 ## Fixed Bucket
 

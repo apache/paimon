@@ -224,7 +224,7 @@ By configuring [partition.expiration-time]({{< ref "maintenance/manage-partition
 #### Pick Partition Fields
 
 {{< hint info >}}
-If you need cross partition upsert (primary keys not contain all partition fields), see [Cross partition Upsert]({{< ref "concepts/primary-key-table/data-distribution#cross-partitions-upsert-dynamic-bucket-mode">}}) mode.
+If you need cross partition upsert (primary keys not contain all partition fields), see [Cross partition Upsert]({{< ref "primary-key-table/data-distribution#cross-partitions-upsert-dynamic-bucket-mode">}}) mode.
 {{< /hint >}}
 
 The following three types of fields may be defined as partition fields in the warehouse:

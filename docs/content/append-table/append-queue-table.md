@@ -3,7 +3,7 @@ title: "Append Queue Table"
 weight: 3
 type: docs
 aliases:
-- /concepts/append-table/append-queue-table.html
+- /append-table/append-queue-table.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

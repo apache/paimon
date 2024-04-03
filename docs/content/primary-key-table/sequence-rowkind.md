@@ -3,7 +3,7 @@ title: "Sequence & Rowkind"
 weight: 5
 type: docs
 aliases:
-- /concepts/primary-key-table/sequence-rowkind.html
+- /primary-key-table/sequence-rowkind.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

@@ -3,7 +3,7 @@ title: "Append Scalable Table"
 weight: 2
 type: docs
 aliases:
-- /concepts/append-table/append-scalable-table.html
+- /append-table/append-scalable-table.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

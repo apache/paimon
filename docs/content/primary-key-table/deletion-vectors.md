@@ -3,7 +3,7 @@ title: "Deletion Vectors"
 weight: 6
 type: docs
 aliases:
-- /concepts/primary-key-table/deletion-vectors.html
+- /primary-key-table/deletion-vectors.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

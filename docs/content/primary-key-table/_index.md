@@ -1,9 +1,9 @@
 ---
-title: "Overview"
-weight: 1
-type: docs
-aliases:
-- /concepts/append-table/overview.html
+title: "Table with PK"
+icon: <i class="fa fa-database title maindish" aria-hidden="true"></i>
+bold: true
+bookCollapseSection: true
+weight: 2
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -23,14 +23,3 @@ KIND, either express or implied.  See the License for the
 specific language governing permissions and limitations
 under the License.
 -->
-
-# Overview
-
-If a table does not have a primary key defined, it is an append table by default.
-
-You can only insert a complete record into the table in streaming. This type of table is suitable for use cases that
-do not require streaming updates (such as log data synchronization).
-
-{{< hint info >}}
-We highly recommend using [Append Scalable Table]({{< ref "concepts/append-table/append-scalable-table" >}}). (bucket = -1).
-{{< /hint >}}
