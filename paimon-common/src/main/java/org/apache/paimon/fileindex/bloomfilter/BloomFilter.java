@@ -119,8 +119,9 @@ public class BloomFilter implements FileIndexer {
         private int numHashFunctions;
 
         public BloomFilterImpl(long items, double fpp) {
-            this.numBits = optimalNumOfBits(items, fpp);
-            this.numHashFunctions = optimalNumOfHashFunctions(items, numBits);
+            this.numBits = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
+            this.numHashFunctions =
+                    Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
             this.bitSet = new BitSet(numBits);
         }
 
@@ -172,13 +173,5 @@ public class BloomFilter implements FileIndexer {
             input.readFully(b);
             this.bitSet = BitSet.valueOf(b);
         }
-    }
-
-    static int optimalNumOfHashFunctions(long items, long numBits) {
-        return Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
-    }
-
-    static int optimalNumOfBits(long items, double fpp) {
-        return (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
     }
 }
