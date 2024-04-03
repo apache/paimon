@@ -667,6 +667,9 @@ public class KafkaCanalSyncTableActionITCase extends KafkaSyncTableActionITCase 
                         .build();
         runActionWithDefaultEnv(action);
 
+        // wait task running to commit LATEST_OFFSET
+        Thread.sleep(5_000);
+
         writeRecordsToKafka(topic, "kafka/canal/table/startupmode/canal-data-2.txt");
 
         FileStoreTable table = getFileStoreTable(tableName);
