@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink.cdc;
 
 import org.apache.paimon.flink.action.cdc.CdcMetadataConverter;
 import org.apache.paimon.schema.Schema;
-import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataField;
 
 import java.io.Serializable;
 import java.util.HashSet;
@@ -60,12 +60,11 @@ public class NewTableSchemaBuilder implements Serializable {
         Set<String> existedFields = new HashSet<>();
         Function<String, String> columnDuplicateErrMsg = columnDuplicateErrMsg(tableName);
 
-        for (Map.Entry<String, DataType> entry : record.fieldTypes().entrySet()) {
+        for (DataField dataField : record.fields()) {
             String fieldName =
                     columnCaseConvertAndDuplicateCheck(
-                            entry.getKey(), existedFields, caseSensitive, columnDuplicateErrMsg);
-
-            builder.column(fieldName, entry.getValue());
+                            dataField.name(), existedFields, caseSensitive, columnDuplicateErrMsg);
+            builder.column(fieldName, dataField.type(), dataField.description());
         }
 
         for (CdcMetadataConverter metadataConverter : metadataConverters) {

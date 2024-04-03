@@ -107,7 +107,7 @@ public class CdcDynamicTableParsingProcessFunction<T> extends ProcessFunction<T,
                         });
 
         List<DataField> schemaChange = parser.parseSchemaChange();
-        if (schemaChange.size() > 0) {
+        if (!schemaChange.isEmpty()) {
             context.output(
                     DYNAMIC_SCHEMA_CHANGE_OUTPUT_TAG,
                     Tuple2.of(Identifier.create(database, tableName), schemaChange));
