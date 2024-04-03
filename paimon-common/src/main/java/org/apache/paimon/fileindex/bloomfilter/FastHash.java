@@ -49,16 +49,14 @@ public class FastHash implements DataTypeVisitor<HashConverter64> {
 
     public static final FastHash INSTANCE = new FastHash();
 
-    public static final byte[] NULL_BYTES = new byte[0];
-
     @Override
     public HashConverter64 visit(CharType charType) {
-        return o -> hash64(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
+        return o -> hash64(((BinaryString) o).toBytes());
     }
 
     @Override
     public HashConverter64 visit(VarCharType varCharType) {
-        return o -> hash64(o == null ? NULL_BYTES : ((BinaryString) o).toBytes());
+        return o -> hash64(((BinaryString) o).toBytes());
     }
 
     @Override
@@ -68,12 +66,12 @@ public class FastHash implements DataTypeVisitor<HashConverter64> {
 
     @Override
     public HashConverter64 visit(BinaryType binaryType) {
-        return o -> hash64(o == null ? NULL_BYTES : (byte[]) o);
+        return o -> hash64((byte[]) o);
     }
 
     @Override
     public HashConverter64 visit(VarBinaryType varBinaryType) {
-        return o -> hash64(o == null ? NULL_BYTES : (byte[]) o);
+        return o -> hash64((byte[]) o);
     }
 
     @Override
@@ -83,42 +81,42 @@ public class FastHash implements DataTypeVisitor<HashConverter64> {
 
     @Override
     public HashConverter64 visit(TinyIntType tinyIntType) {
-        return o -> o == null ? 0 : getLongHash((byte) o);
+        return o -> getLongHash((byte) o);
     }
 
     @Override
     public HashConverter64 visit(SmallIntType smallIntType) {
-        return o -> o == null ? 0 : getLongHash((short) o);
+        return o -> getLongHash((short) o);
     }
 
     @Override
     public HashConverter64 visit(IntType intType) {
-        return o -> o == null ? 0 : getLongHash((int) o);
+        return o -> getLongHash((int) o);
     }
 
     @Override
     public HashConverter64 visit(BigIntType bigIntType) {
-        return o -> o == null ? 0 : getLongHash((long) o);
+        return o -> getLongHash((long) o);
     }
 
     @Override
     public HashConverter64 visit(FloatType floatType) {
-        return o -> o == null ? 0 : getLongHash(Float.floatToIntBits((float) o));
+        return o -> getLongHash(Float.floatToIntBits((float) o));
     }
 
     @Override
     public HashConverter64 visit(DoubleType doubleType) {
-        return o -> o == null ? 0 : getLongHash(Double.doubleToLongBits((double) o));
+        return o -> getLongHash(Double.doubleToLongBits((double) o));
     }
 
     @Override
     public HashConverter64 visit(DateType dateType) {
-        return o -> o == null ? 0 : getLongHash((int) o);
+        return o -> getLongHash((int) o);
     }
 
     @Override
     public HashConverter64 visit(TimeType timeType) {
-        return o -> o == null ? 0 : getLongHash((int) o);
+        return o -> getLongHash((int) o);
     }
 
     @Override

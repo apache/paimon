@@ -24,30 +24,28 @@ import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
+import org.apache.paimon.utils.BloomFilter64;
 
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
-import java.io.DataInput;
 import java.io.DataInputStream;
-import java.io.DataOutput;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.util.BitSet;
 
 /** Bloom filter for file index. */
-public class BloomFilter implements FileIndexer {
+public class BloomFilterFileIndex implements FileIndexer {
 
     public static final String BLOOM_FILTER = "bloom";
 
     private final HashConverter64 hashFunction;
 
-    private final BloomFilterImpl filter;
+    private final BloomFilter64 filter;
 
-    public BloomFilter(DataType type, Options options) {
+    public BloomFilterFileIndex(DataType type, Options options) {
         int items = options.getInteger("items", 1_000_000);
         double fpp = options.getDouble("fpp", 0.1);
         this.hashFunction = type.accept(FastHash.INSTANCE);
-        this.filter = new BloomFilterImpl(items, fpp);
+        this.filter = new BloomFilter64(items, fpp);
     }
 
     public String name() {
@@ -108,70 +106,6 @@ public class BloomFilter implements FileIndexer {
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object key) {
             return filter.testHash(hashFunction.hash(key));
-        }
-    }
-
-    /** Bloom filter impl for 64 bit long hash code. */
-    private static class BloomFilterImpl {
-
-        private BitSet bitSet;
-        private int numBits;
-        private int numHashFunctions;
-
-        public BloomFilterImpl(long items, double fpp) {
-            this.numBits = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
-            this.numHashFunctions =
-                    Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
-            this.bitSet = new BitSet(numBits);
-        }
-
-        public void addHash(long hash64) {
-            int hash1 = (int) hash64;
-            int hash2 = (int) (hash64 >>> 32);
-
-            for (int i = 1; i <= numHashFunctions; i++) {
-                int combinedHash = hash1 + (i * hash2);
-                // hashcode should be positive, flip all the bits if it's negative
-                if (combinedHash < 0) {
-                    combinedHash = ~combinedHash;
-                }
-                int pos = combinedHash % numBits;
-                bitSet.set(pos);
-            }
-        }
-
-        public boolean testHash(long hash64) {
-            int hash1 = (int) hash64;
-            int hash2 = (int) (hash64 >>> 32);
-
-            for (int i = 1; i <= numHashFunctions; i++) {
-                int combinedHash = hash1 + (i * hash2);
-                // hashcode should be positive, flip all the bits if it's negative
-                if (combinedHash < 0) {
-                    combinedHash = ~combinedHash;
-                }
-                int pos = combinedHash % numBits;
-                if (!bitSet.get(pos)) {
-                    return false;
-                }
-            }
-            return true;
-        }
-
-        public void write(DataOutput out) throws IOException {
-            out.writeInt(this.numHashFunctions);
-            out.writeInt(this.numBits);
-            byte[] b = bitSet.toByteArray();
-            out.writeInt(b.length);
-            out.write(b);
-        }
-
-        public void read(DataInput input) throws IOException {
-            this.numHashFunctions = input.readInt();
-            this.numBits = input.readInt();
-            byte[] b = new byte[input.readInt()];
-            input.readFully(b);
-            this.bitSet = BitSet.valueOf(b);
         }
     }
 }

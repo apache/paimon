@@ -31,15 +31,15 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Random;
 
-/** Tests for {@link BloomFilter}. */
-public class BloomFilterTest {
+/** Tests for {@link BloomFilterFileIndex}. */
+public class BloomFilterFileIndexTest {
 
     private static final Random RANDOM = new Random();
 
     @Test
     public void testAddFindByRandom() {
-        BloomFilter filter =
-                new BloomFilter(
+        BloomFilterFileIndex filter =
+                new BloomFilterFileIndex(
                         DataTypes.BYTES(),
                         new Options(
                                 new HashMap<String, String>() {
@@ -81,8 +81,8 @@ public class BloomFilterTest {
 
     @Test
     public void testAddFindByRandomLong() {
-        BloomFilter filter =
-                new BloomFilter(
+        BloomFilterFileIndex filter =
+                new BloomFilterFileIndex(
                         DataTypes.BIGINT(),
                         new Options(
                                 new HashMap<String, String>() {

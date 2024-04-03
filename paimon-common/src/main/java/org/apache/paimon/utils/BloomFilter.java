@@ -21,10 +21,6 @@ package org.apache.paimon.utils;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.memory.MemorySegment;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.IOException;
-
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Bloom filter based on one memory segment. */
@@ -105,23 +101,6 @@ public class BloomFilter {
 
     public void reset() {
         this.bitSet.clear();
-    }
-
-    public void write(DataOutput out) throws IOException {
-        out.writeInt(this.numHashFunctions);
-        out.writeLong(this.expectedEntries);
-        byte[] b = bitSet.getBytes();
-        out.writeInt(b.length);
-        out.write(b);
-    }
-
-    public void read(DataInput input) throws IOException {
-        this.numHashFunctions = input.readInt();
-        this.expectedEntries = input.readLong();
-        byte[] b = new byte[input.readInt()];
-        input.readFully(b);
-        this.bitSet = new BitSet(b.length);
-        this.bitSet.setMemorySegment(MemorySegment.wrap(b), 0);
     }
 
     @Override
