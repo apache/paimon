@@ -64,8 +64,6 @@ public class BloomFilterFileIndex implements FileIndexer {
 
     private class Writer implements FileIndexWriter {
 
-        private Writer() {}
-
         @Override
         public void write(Object key) {
             filter.addHash(hashFunction.hash(key));
