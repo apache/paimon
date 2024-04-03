@@ -42,7 +42,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.utils.TraceableFileIO;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.Test;
@@ -148,12 +147,12 @@ public class FlinkCdcSyncDatabaseSinkITCase extends AbstractTestBase {
         }
 
         List<TestCdcEvent> events = mergeTestTableEvents(testTables);
-
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getCheckpointConfig().setCheckpointInterval(100);
-        if (!enableFailure) {
-            env.setRestartStrategy(RestartStrategies.noRestart());
-        }
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .allowRestart(enableFailure)
+                        .build();
 
         TestCdcSourceFunction sourceFunction = new TestCdcSourceFunction(events);
         DataStreamSource<TestCdcEvent> source = env.addSource(sourceFunction);

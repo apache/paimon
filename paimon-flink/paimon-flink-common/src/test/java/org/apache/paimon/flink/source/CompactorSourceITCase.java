@@ -103,7 +103,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
         write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         commit.commit(1, write.prepareCommit(true, 1));
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStreamSource<RowData> compactorSource =
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(false)
@@ -164,7 +165,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
         write.write(rowData(2, 1620, BinaryString.fromString("20221209"), 16));
         commit.commit(3, write.prepareCommit(true, 3));
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStreamSource<RowData> compactorSource =
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(true)
@@ -257,7 +259,8 @@ public class CompactorSourceITCase extends AbstractTestBase {
         write.write(rowData(1, 1510, BinaryString.fromString("20221209"), 15));
         commit.commit(2, write.prepareCommit(true, 2));
 
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         DataStreamSource<RowData> compactorSource =
                 new CompactorSourceBuilder("test", table)
                         .withContinuousMode(isStreaming)
