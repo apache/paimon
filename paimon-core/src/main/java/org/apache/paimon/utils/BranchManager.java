@@ -31,7 +31,9 @@ import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.PriorityQueue;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
 
@@ -164,7 +166,8 @@ public class BranchManager {
                     listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX)
                             .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
                             .collect(Collectors.toList());
-            List<TableBranch> branches = new ArrayList<>();
+            PriorityQueue<TableBranch> pq =
+                    new PriorityQueue<>(Comparator.comparingLong(TableBranch::getCreateTime));
             for (Pair<Path, Long> path : paths) {
                 String branchName = path.getLeft().getName().substring(BRANCH_PREFIX.length());
                 FileStoreTable branchTable =
@@ -175,10 +178,13 @@ public class BranchManager {
                 Snapshot snapshot = snapshotTags.firstKey();
                 List<String> tags = snapshotTags.get(snapshot);
                 checkArgument(tags.size() == 1);
-                branches.add(
-                        new TableBranch(branchName, tags.get(0), snapshot.id(), path.getValue()));
+                pq.add(new TableBranch(branchName, tags.get(0), snapshot.id(), path.getValue()));
             }
 
+            List<TableBranch> branches = new ArrayList<>(pq.size());
+            while (!pq.isEmpty()) {
+                branches.add(pq.poll());
+            }
             return branches;
         } catch (IOException e) {
             throw new RuntimeException(e);
