@@ -463,6 +463,5 @@ Maybe you think the 5 files for the primary key table are actually okay, but the
 may have 50 small files in a single bucket, which is very difficult to accept. Worse still, partitions that
 are no longer active also keep so many small files.
 
-It is recommended that you configure [Full-Compaction]({{< ref "/maintenance/read-performance#full-compaction" >}}),
-configure ‘full-compaction.delta-commits’ perform full-compaction periodically in Flink writing. And it can ensure
+Configure ‘full-compaction.delta-commits’ perform full-compaction periodically in Flink writing. And it can ensure
 that partitions are full compacted before writing ends.
