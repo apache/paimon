@@ -52,6 +52,7 @@ public interface Expression extends Serializable {
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
 
+    /** Enumerates the expression processing behaviors for computed column. */
     enum ExpressionProcessor {
         YEAR(
                 (fieldReference, fieldType, literals) ->
@@ -116,6 +117,7 @@ public interface Expression extends Serializable {
         }
     }
 
+    /** Define the function interface for creating Expression. */
     @FunctionalInterface
     interface ExpressionFactory {
         Expression create(String fieldReference, DataType fieldType, String... literals);
