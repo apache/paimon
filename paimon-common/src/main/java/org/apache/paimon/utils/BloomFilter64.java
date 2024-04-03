@@ -26,7 +26,7 @@ import java.util.BitSet;
 /** Bloom filter 64 handle 64 bit hash. */
 public class BloomFilter64 {
 
-    private java.util.BitSet bitSet;
+    private BitSet bitSet;
     private int numBits;
     private int numHashFunctions;
 
@@ -34,7 +34,7 @@ public class BloomFilter64 {
         this.numBits = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
         this.numHashFunctions =
                 Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
-        this.bitSet = new java.util.BitSet(numBits);
+        this.bitSet = new BitSet(numBits);
     }
 
     public void addHash(long hash64) {
