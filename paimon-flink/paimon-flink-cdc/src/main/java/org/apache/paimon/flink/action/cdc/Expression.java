@@ -34,24 +34,14 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
-
-    List<String> SUPPORTED_EXPRESSION =
-            Arrays.asList(
-                    "year",
-                    "month",
-                    "day",
-                    "hour",
-                    "minute",
-                    "second",
-                    "date_format",
-                    "substring",
-                    "truncate");
 
     /** Return name of referenced field. */
     String fieldReference();
@@ -62,40 +52,88 @@ public interface Expression extends Serializable {
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
 
+    enum ExpressionProcessor {
+        YEAR(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference, fieldType, () -> LocalDateTime::getYear, literals)),
+        MONTH(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference,
+                                fieldType,
+                                () -> LocalDateTime::getMonthValue,
+                                literals)),
+        DAY(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference,
+                                fieldType,
+                                () -> LocalDateTime::getDayOfMonth,
+                                literals)),
+        HOUR(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference, fieldType, () -> LocalDateTime::getHour, literals)),
+        MINUTE(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference,
+                                fieldType,
+                                () -> LocalDateTime::getMinute,
+                                literals)),
+        SECOND(
+                (fieldReference, fieldType, literals) ->
+                        TemporalToIntConverter.create(
+                                fieldReference,
+                                fieldType,
+                                () -> LocalDateTime::getSecond,
+                                literals)),
+        DATE_FORMAT(DateFormat::create),
+        SUBSTRING((fieldReference, fieldType, literals) -> substring(fieldReference, literals)),
+        TRUNCATE(Expression::truncate),
+        CONSTANT((fieldReference, fieldType, literals) -> constant(literals));
+
+        private final ExpressionFactory factory;
+
+        ExpressionProcessor(ExpressionFactory factory) {
+            this.factory = factory;
+        }
+
+        private ExpressionFactory factory() {
+            return this.factory;
+        }
+
+        private static final Map<String, ExpressionFactory> EXPRESSION_FACTORIES =
+                Arrays.stream(ExpressionProcessor.values())
+                        .collect(
+                                Collectors.toMap(
+                                        value -> value.name().toLowerCase(),
+                                        ExpressionProcessor::factory));
+
+        public static ExpressionFactory factory(String exprName) {
+            return EXPRESSION_FACTORIES.get(exprName.toLowerCase());
+        }
+    }
+
+    @FunctionalInterface
+    interface ExpressionFactory {
+        Expression create(String fieldReference, DataType fieldType, String... literals);
+    }
+
     static Expression create(
             String exprName, String fieldReference, DataType fieldType, String... literals) {
-        switch (exprName.toLowerCase()) {
-            case "year":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getYear, literals);
-            case "month":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getMonthValue, literals);
-            case "day":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getDayOfMonth, literals);
-            case "hour":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getHour, literals);
-            case "minute":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getMinute, literals);
-            case "second":
-                return TemporalToIntConverter.create(
-                        fieldReference, fieldType, () -> LocalDateTime::getSecond, literals);
-            case "date_format":
-                return DateFormat.create(fieldReference, fieldType, literals);
-            case "substring":
-                return substring(fieldReference, literals);
-            case "truncate":
-                return truncate(fieldReference, fieldType, literals);
-                // TODO: support more expression
-            default:
-                throw new UnsupportedOperationException(
-                        String.format(
-                                "Unsupported expression: %s. Supported expressions are: %s",
-                                exprName, String.join(",", SUPPORTED_EXPRESSION)));
+
+        ExpressionFactory factory = ExpressionProcessor.factory(exprName.toLowerCase());
+        if (factory == null) {
+            throw new UnsupportedOperationException(
+                    String.format(
+                            "Unsupported expression: %s. Supported expressions are: %s",
+                            exprName,
+                            String.join(",", ExpressionProcessor.EXPRESSION_FACTORIES.keySet())));
         }
+
+        return factory.create(fieldReference, fieldType, literals);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -135,6 +173,15 @@ public interface Expression extends Serializable {
                         "'truncate' expression supports one argument, but found '%s'.",
                         literals.length));
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
+    }
+
+    static Expression constant(String... literals) {
+        checkArgument(
+                literals.length == 1,
+                String.format(
+                        "'constant' expression supports one argument, but found '%s'.",
+                        literals.length));
+        return new Constant(literals[0]);
     }
 
     /** Expression to handle temporal value. */
@@ -429,6 +476,33 @@ public interface Expression extends Serializable {
                             value.scale());
 
             return value.subtract(remainder);
+        }
+    }
+
+    /** Get constant value. */
+    final class Constant implements Expression {
+
+        private static final long serialVersionUID = 1L;
+
+        private final String value;
+
+        private Constant(String value) {
+            this.value = value;
+        }
+
+        @Override
+        public String fieldReference() {
+            return null;
+        }
+
+        @Override
+        public DataType outputType() {
+            return DataTypes.STRING();
+        }
+
+        @Override
+        public String eval(String input) {
+            return value;
         }
     }
 }

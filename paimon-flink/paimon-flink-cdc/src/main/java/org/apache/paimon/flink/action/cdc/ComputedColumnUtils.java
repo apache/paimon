@@ -71,6 +71,15 @@ public class ComputedColumnUtils {
             String[] args = expression.substring(left + 1, right).split(",");
             checkArgument(args.length >= 1, "Computed column needs at least one argument.");
 
+            // handle constant expression
+            if (Expression.ExpressionProcessor.CONSTANT.name().equalsIgnoreCase(exprName)) {
+                computedColumns.add(
+                        new ComputedColumn(
+                                columnName,
+                                Expression.create(exprName, null, null, args[0].trim())));
+                continue;
+            }
+
             String fieldReference = args[0].trim();
             String[] literals =
                     Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
