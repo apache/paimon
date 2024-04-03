@@ -171,7 +171,8 @@ public class GlobalIndexAssigner implements Serializable, Closeable {
                                 coreOptions.writeBufferSize() / 2, coreOptions.pageSize()),
                         new InternalRowSerializer(table.rowType()),
                         true,
-                        coreOptions.writeBufferSpillDiskSize());
+                        coreOptions.writeBufferSpillDiskSize(),
+                        coreOptions.spillCompression());
     }
 
     public void bootstrapKey(InternalRow value) throws IOException {

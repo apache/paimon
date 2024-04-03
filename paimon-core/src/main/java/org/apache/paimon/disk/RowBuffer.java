@@ -59,9 +59,10 @@ public interface RowBuffer {
             MemorySegmentPool memoryPool,
             AbstractRowDataSerializer<InternalRow> serializer,
             boolean spillable,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            String compression) {
         if (spillable) {
-            return new ExternalBuffer(ioManager, memoryPool, serializer, maxDiskSize);
+            return new ExternalBuffer(ioManager, memoryPool, serializer, maxDiskSize, compression);
         } else {
             return new InMemoryBuffer(memoryPool, serializer);
         }

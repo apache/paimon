@@ -71,6 +71,14 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
         return -1;
     }
 
+    public void closeAndDelete() throws IOException {
+        try {
+            close();
+        } finally {
+            writer.deleteChannel();
+        }
+    }
+
     @Override
     protected MemorySegment nextSegment(MemorySegment current, int positionInCurrent)
             throws IOException {

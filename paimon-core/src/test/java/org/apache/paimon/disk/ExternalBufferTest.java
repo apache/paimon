@@ -18,6 +18,7 @@
 
 package org.apache.paimon.disk;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.BinaryString;
@@ -65,7 +66,8 @@ public class ExternalBufferTest {
                 ioManager,
                 new HeapMemorySegmentPool(2 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
                 this.serializer,
-                maxDiskSize);
+                maxDiskSize,
+                CoreOptions.SPILL_COMPRESSION.defaultValue());
     }
 
     @Test
@@ -179,7 +181,8 @@ public class ExternalBufferTest {
                         ioManager,
                         new HeapMemorySegmentPool(3 * DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
                         new BinaryRowSerializer(1),
-                        MemorySize.MAX_VALUE);
+                        MemorySize.MAX_VALUE,
+                        CoreOptions.SPILL_COMPRESSION.defaultValue());
         assertThatThrownBy(() -> writeHuge(buffer)).isInstanceOf(IOException.class);
         buffer.reset();
     }

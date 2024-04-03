@@ -19,11 +19,11 @@
 package org.apache.paimon.disk;
 
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.AbstractRowDataSerializer;
 import org.apache.paimon.data.serializer.BinaryRowSerializer;
-import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.options.MemorySize;
@@ -49,6 +49,7 @@ public class ExternalBuffer implements RowBuffer {
     private final BinaryRowSerializer binaryRowSerializer;
     private final InMemoryBuffer inMemoryBuffer;
     private final MemorySize maxDiskSize;
+    private final BlockCompressionFactory compactionFactory;
 
     // The size of each segment
     private final int segmentSize;
@@ -62,10 +63,13 @@ public class ExternalBuffer implements RowBuffer {
             IOManager ioManager,
             MemorySegmentPool pool,
             AbstractRowDataSerializer<?> serializer,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            String compression) {
         this.ioManager = ioManager;
         this.pool = pool;
         this.maxDiskSize = maxDiskSize;
+
+        this.compactionFactory = BlockCompressionFactory.create(compression);
 
         this.binaryRowSerializer =
                 serializer instanceof BinaryRowSerializer
@@ -155,10 +159,11 @@ public class ExternalBuffer implements RowBuffer {
     private void spill() throws IOException {
         FileIOChannel.ID channel = ioManager.createChannel();
 
-        BufferFileWriter writer = ioManager.createBufferFileWriter(channel);
+        ChannelWriterOutputView channelWriterOutputView =
+                new ChannelWriterOutputView(
+                        ioManager.createBufferFileWriter(channel), compactionFactory, segmentSize);
         int numRecordBuffers = inMemoryBuffer.getNumRecordBuffers();
         ArrayList<MemorySegment> segments = inMemoryBuffer.getRecordBufferSegments();
-        long writeBytes;
         try {
             // spill in memory buffer in zero-copy.
             for (int i = 0; i < numRecordBuffers; i++) {
@@ -167,16 +172,15 @@ public class ExternalBuffer implements RowBuffer {
                         i == numRecordBuffers - 1
                                 ? inMemoryBuffer.getNumBytesInLastBuffer()
                                 : segment.size();
-                writer.writeBlock(Buffer.create(segment, bufferSize));
+                channelWriterOutputView.write(segment, 0, bufferSize);
             }
-            writeBytes = writer.getSize();
             LOG.info(
                     "here spill the reset buffer data with {} records {} bytes",
                     inMemoryBuffer.size(),
-                    writer.getSize());
-            writer.close();
+                    channelWriterOutputView.getNumBytes());
+            channelWriterOutputView.close();
         } catch (IOException e) {
-            writer.closeAndDelete();
+            channelWriterOutputView.closeAndDelete();
             throw e;
         }
 
@@ -185,7 +189,7 @@ public class ExternalBuffer implements RowBuffer {
                         channel,
                         inMemoryBuffer.getNumRecordBuffers(),
                         inMemoryBuffer.getNumBytesInLastBuffer(),
-                        writeBytes));
+                        channelWriterOutputView.getNumBytes()));
 
         inMemoryBuffer.reset();
     }
@@ -224,7 +228,7 @@ public class ExternalBuffer implements RowBuffer {
         private int currentChannelID = -1;
         private BinaryRow row;
         private boolean closed;
-        private BufferFileReaderInputView channelReader;
+        private ChannelReaderInputView channelReader;
 
         private BufferIterator() {
             this.closed = false;
@@ -303,7 +307,13 @@ public class ExternalBuffer implements RowBuffer {
 
             // new reader.
             this.channelReader =
-                    new BufferFileReaderInputView(channel.getChannel(), ioManager, segmentSize);
+                    new ChannelReaderInputView(
+                            channel.getChannel(),
+                            ioManager,
+                            compactionFactory,
+                            segmentSize,
+                            channel.getBlockCount());
+
             this.currentIterator = channelReader.createBinaryRowIterator(binaryRowSerializer);
         }
 
