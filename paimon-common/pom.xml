@@ -141,6 +141,12 @@ under the License.
             <version>1.0.5</version>
         </dependency>
 
+        <dependency>
+            <groupId>net.openhft</groupId>
+            <artifactId>zero-allocation-hashing</artifactId>
+            <version>0.16</version>
+        </dependency>
+
         <!-- Test -->
 
         <dependency>

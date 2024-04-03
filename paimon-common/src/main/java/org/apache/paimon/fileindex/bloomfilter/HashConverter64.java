@@ -19,7 +19,7 @@
 package org.apache.paimon.fileindex.bloomfilter;
 
 /** Hash object to 32 bits hash code. */
-public interface HashConverter32 {
+public interface HashConverter64 {
 
-    int hash(Object o);
+    long hash(Object o);
 }

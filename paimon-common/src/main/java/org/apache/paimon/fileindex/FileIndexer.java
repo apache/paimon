@@ -29,7 +29,7 @@ public interface FileIndexer {
 
     FileIndexWriter createWriter();
 
-    FileIndexReader createReader();
+    FileIndexReader createReader(byte[] serializedBytes);
 
     static FileIndexer create(String type, DataType dataType, Options options) {
         switch (type) {

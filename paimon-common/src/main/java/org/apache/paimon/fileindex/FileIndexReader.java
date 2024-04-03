@@ -29,7 +29,7 @@ import java.util.List;
  */
 public interface FileIndexReader extends FunctionVisitor<Boolean> {
 
-    FileIndexReader recoverFrom(byte[] serializedBytes);
+    //    FileIndexReader recoverFrom(byte[] serializedBytes);
 
     @Override
     default Boolean visitIsNotNull(FieldRef fieldRef) {

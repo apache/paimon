@@ -246,8 +246,7 @@ public final class FileIndexFormat {
                                                     type,
                                                     fields.get(columnName).type(),
                                                     new Options())
-                                            .createReader()
-                                            .recoverFrom(serializedBytes))
+                                            .createReader(serializedBytes))
                     .orElse(null);
         }
 

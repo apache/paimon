@@ -49,7 +49,6 @@ public class BloomFilterTest {
                                     }
                                 }));
         FileIndexWriter writer = filter.createWriter();
-        FileIndexReader reader = filter.createReader();
         List<byte[]> testData = new ArrayList<>();
 
         for (int i = 0; i < 10000; i++) {
@@ -61,6 +60,8 @@ public class BloomFilterTest {
 
         testData.forEach(writer::write);
 
+        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+
         for (byte[] bytes : testData) {
             Assertions.assertThat(reader.visitEqual(null, bytes)).isTrue();
         }
@@ -69,6 +70,46 @@ public class BloomFilterTest {
         int num = 1000000;
         for (int i = 0; i < num; i++) {
             byte[] ra = random();
+            if (reader.visitEqual(null, ra)) {
+                errorCount++;
+            }
+        }
+
+        // ffp should be less than 0.021
+        Assertions.assertThat((double) errorCount / num).isLessThan(0.021);
+    }
+
+    @Test
+    public void testAddFindByRandomLong() {
+        BloomFilter filter =
+                new BloomFilter(
+                        DataTypes.BIGINT(),
+                        new Options(
+                                new HashMap<String, String>() {
+                                    {
+                                        put("items", "10000");
+                                        put("fpp", "0.02");
+                                    }
+                                }));
+        FileIndexWriter writer = filter.createWriter();
+        List<Long> testData = new ArrayList<>();
+
+        for (int i = 0; i < 10000; i++) {
+            testData.add(RANDOM.nextLong());
+        }
+
+        testData.forEach(writer::write);
+
+        FileIndexReader reader = filter.createReader(writer.serializedBytes());
+
+        for (Long value : testData) {
+            Assertions.assertThat(reader.visitEqual(null, value)).isTrue();
+        }
+
+        int errorCount = 0;
+        int num = 1000000;
+        for (int i = 0; i < num; i++) {
+            Long ra = RANDOM.nextLong();
             if (reader.visitEqual(null, ra)) {
                 errorCount++;
             }
