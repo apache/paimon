@@ -16,14 +16,19 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.commands
+package org.apache.paimon.spark.catalyst
 
-import org.apache.paimon.spark.SparkTable
+import org.apache.spark.sql.catalyst.expressions.AttributeReference
+import org.apache.spark.sql.connector.read.Scan
+import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
 
-import org.apache.spark.sql.catalyst.expressions.Expression
-import org.apache.spark.sql.catalyst.plans.logical.DeleteFromTable
+object Compatibility {
 
-case class DeleteFromPaimonTableCommand(v2Table: SparkTable, delete: DeleteFromTable)
-  extends DeleteFromPaimonTableCommandBase {
-  override def condition(): Expression = delete.condition.orNull
+  def createDataSourceV2ScanRelation(
+      relation: DataSourceV2Relation,
+      scan: Scan,
+      output: Seq[AttributeReference]): DataSourceV2ScanRelation = {
+    DataSourceV2ScanRelation(relation, scan, output)
+  }
+
 }

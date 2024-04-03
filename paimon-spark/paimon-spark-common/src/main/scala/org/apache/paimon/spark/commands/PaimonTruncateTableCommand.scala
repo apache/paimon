@@ -32,7 +32,7 @@ import scala.collection.JavaConverters._
 
 case class PaimonTruncateTableCommand(v2Table: SparkTable, partitionSpec: TablePartitionSpec)
   extends PaimonLeafRunnableCommand
-  with PaimonCommand {
+  with WithFileStoreTable {
 
   override def table: FileStoreTable = v2Table.getTable.asInstanceOf[FileStoreTable]
 

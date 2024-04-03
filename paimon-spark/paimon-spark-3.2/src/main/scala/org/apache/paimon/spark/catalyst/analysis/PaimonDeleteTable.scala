@@ -21,6 +21,7 @@ package org.apache.paimon.spark.catalyst.analysis
 import org.apache.paimon.spark.commands.DeleteFromPaimonTableCommand
 import org.apache.paimon.table.FileStoreTable
 
+import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{DeleteFromTable, LogicalPlan}
 import org.apache.spark.sql.catalyst.rules.Rule
 
@@ -39,11 +40,11 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
           case paimonTable: FileStoreTable =>
             val primaryKeys = paimonTable.primaryKeys().asScala
             if (primaryKeys.isEmpty) {
-              checkSubquery(condition)
+              condition.foreach(checkSubquery)
             }
 
             val relation = PaimonRelation.getPaimonRelation(d.table)
-            DeleteFromPaimonTableCommand(relation, paimonTable, condition)
+            DeleteFromPaimonTableCommand(relation, paimonTable, condition.getOrElse(TrueLiteral))
 
           case _ =>
             throw new RuntimeException("Delete Operation is only supported for FileStoreTable.")

@@ -48,7 +48,7 @@ case object Delete extends RowLevelOp {
 
   override val supportedMergeEngine: Seq[MergeEngine] = Seq(MergeEngine.DEDUPLICATE)
 
-  override val supportAppendOnlyTable: Boolean = false
+  override val supportAppendOnlyTable: Boolean = true
 
 }
 
