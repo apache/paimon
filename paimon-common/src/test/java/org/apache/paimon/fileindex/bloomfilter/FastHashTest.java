@@ -96,7 +96,7 @@ public class FastHashTest {
 
     @Test
     public void testTimestampType() {
-        HashConverter32 function = DataTypes.TIMESTAMP().accept(FastHash.INSTANCE);
+        HashConverter32 function = DataTypes.TIMESTAMP_MILLIS().accept(FastHash.INSTANCE);
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.hash(c))
                 .isEqualTo((FastHash.getLongHash(c.getMillisecond())));
