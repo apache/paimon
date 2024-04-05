@@ -291,9 +291,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
                     builder.withDataFiles(dataFiles);
-                    if (splitGroup.rawConvertible) {
-                        builder.rawFiles(convertToRawFiles(partition, bucket, dataFiles));
-                    }
+                    builder.rawFiles(
+                            splitGroup.rawConvertible
+                                    ? convertToRawFiles(partition, bucket, dataFiles)
+                                    : Collections.emptyList());
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
