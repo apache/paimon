@@ -54,7 +54,7 @@ public class BloomFilter64Test {
             }
         }
 
-        // ffp should be less than 0.021
+        // ffp should be less than 0.03
         Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
     }
 }
