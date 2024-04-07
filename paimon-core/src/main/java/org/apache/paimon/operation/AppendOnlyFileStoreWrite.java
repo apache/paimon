@@ -47,6 +47,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -145,6 +146,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 rowType,
                 maxSequenceNumber,
                 compactManager,
+                bucketReader(partition, bucket),
                 commitForceCompact,
                 factory,
                 restoreIncrement,
@@ -174,18 +176,27 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             fileCompression,
                             statsCollectors);
             try {
-                rewriter.write(
-                        new RecordReaderIterator<>(
-                                read.createReader(
-                                        DataSplit.builder()
-                                                .withPartition(partition)
-                                                .withBucket(bucket)
-                                                .withDataFiles(toCompact)
-                                                .build())));
+                rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {
                 rewriter.close();
             }
             return rewriter.result();
+        };
+    }
+
+    public BucketFileRead bucketReader(BinaryRow partition, int bucket) {
+        return files -> {
+            try {
+                return new RecordReaderIterator<>(
+                        read.createReader(
+                                DataSplit.builder()
+                                        .withPartition(partition)
+                                        .withBucket(bucket)
+                                        .withDataFiles(files)
+                                        .build()));
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
         };
     }
 
@@ -214,5 +225,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
             }
         }
+    }
+
+    public interface BucketFileRead {
+
+        RecordReaderIterator<InternalRow> read(List<DataFileMeta> files);
     }
 }
