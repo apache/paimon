@@ -185,6 +185,27 @@ public class SplitGeneratorTest {
                         Pair.of(Collections.singletonList("6"), true));
     }
 
+    @Test
+    public void testMergeTreeSplitRawConvertible() {
+        Comparator<InternalRow> comparator = Comparator.comparingInt(o -> o.getInt(0));
+        MergeTreeSplitGenerator mergeTreeSplitGenerator =
+                new MergeTreeSplitGenerator(comparator, 100, 2, false, DEDUPLICATE);
+
+        List<DataFileMeta> files =
+                Arrays.asList(
+                        newFile("1", 0, 0, 10, 10L),
+                        newFile("2", 0, 0, 12, 12L),
+                        newFile("3", 0, 13, 20, 20L),
+                        newFile("4", 0, 21, 200, 200L),
+                        newFile("5", 0, 201, 210, 210L),
+                        newFile("6", 0, 211, 220, 220L));
+        assertThat(toNamesAndRawConvertible(mergeTreeSplitGenerator.splitForBatch(files)))
+                .containsExactlyInAnyOrder(
+                        Pair.of(Arrays.asList("1", "2", "3"), false),
+                        Pair.of(Collections.singletonList("4"), true),
+                        Pair.of(Arrays.asList("5", "6"), false));
+    }
+
     private List<List<String>> toNames(List<SplitGenerator.SplitGroup> splitGroups) {
         return splitGroups.stream()
                 .map(
