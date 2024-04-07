@@ -185,19 +185,14 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     }
 
     public BucketFileRead bucketReader(BinaryRow partition, int bucket) {
-        return files -> {
-            try {
-                return new RecordReaderIterator<>(
+        return files ->
+                new RecordReaderIterator<>(
                         read.createReader(
                                 DataSplit.builder()
                                         .withPartition(partition)
                                         .withBucket(bucket)
                                         .withDataFiles(files)
                                         .build()));
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-        };
     }
 
     public AppendOnlyFileStoreWrite withBucketMode(BucketMode bucketMode) {
@@ -229,6 +224,6 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
 
     /** Read for one bucket. */
     public interface BucketFileRead {
-        RecordReaderIterator<InternalRow> read(List<DataFileMeta> files);
+        RecordReaderIterator<InternalRow> read(List<DataFileMeta> files) throws IOException;
     }
 }
