@@ -66,6 +66,8 @@ import org.apache.paimon.utils.CompatibilityTestUtils;
 
 import org.junit.jupiter.api.Test;
 
+import java.io.File;
+import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -73,14 +75,19 @@ import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.BUCKET;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MAX;
+import static org.apache.paimon.CoreOptions.CHANGELOG_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.CHANGELOG_PRODUCER;
 import static org.apache.paimon.CoreOptions.ChangelogProducer.LOOKUP;
 import static org.apache.paimon.CoreOptions.DELETION_VECTORS_ENABLED;
+import static org.apache.paimon.CoreOptions.SNAPSHOT_EXPIRE_LIMIT;
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.Snapshot.CommitKind.COMPACT;
 import static org.apache.paimon.data.DataFormatTestUtil.internalRowToString;
@@ -1369,6 +1376,79 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
                 .isEqualTo(
                         Collections.singletonList(
                                 "1|2|200|binary|varbinary|mapKey:mapVal|multiset"));
+    }
+
+    @Test
+    public void testRollbackToTagWithChangelogDecoupled() throws Exception {
+        int commitTimes = ThreadLocalRandom.current().nextInt(100) + 5;
+        FileStoreTable table =
+                createFileStoreTable(
+                        options ->
+                                options.set(
+                                        CoreOptions.CHANGELOG_PRODUCER,
+                                        CoreOptions.ChangelogProducer.INPUT));
+        prepareRollbackTable(commitTimes, table);
+
+        int t1 = 1;
+        int t2 = commitTimes - 3;
+        int t3 = commitTimes - 1;
+        table.createTag("test1", t1);
+        table.createTag("test2", t2);
+        table.createTag("test3", t3);
+
+        // expire snapshots
+        Options options = new Options();
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        // -------------changelog--------- |-------snapshot------|
+        // s(1)test1 -------- s(c - 3)test2 --- s(c - 1) test3
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 2);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
+        options.set(SNAPSHOT_EXPIRE_LIMIT, Integer.MAX_VALUE);
+        options.set(CHANGELOG_NUM_RETAINED_MIN, 5);
+        options.set(CHANGELOG_NUM_RETAINED_MAX, 5);
+        table.copy(options.toMap()).newCommit("").expireSnapshots();
+
+        table.rollbackTo("test3");
+        assertReadChangelog(t3, table);
+
+        table.rollbackTo("test2");
+        assertReadChangelog(t2, table);
+
+        table.rollbackTo("test1");
+
+        List<java.nio.file.Path> files =
+                Files.walk(new File(tablePath.toUri().getPath()).toPath())
+                        .collect(Collectors.toList());
+        assertThat(files.size()).isEqualTo(19);
+        // rollback snapshot case testRollbackToSnapshotCase0 plus 4:
+        // table-path/tag/tag-test1
+        // table-path/changelog
+        // table-path/changelog/LATEST
+        // table-path/changelog/EARLIEST
+    }
+
+    private void assertReadChangelog(int id, FileStoreTable table) throws Exception {
+        // read the changelog at #{id}
+        table =
+                table.copy(
+                        Collections.singletonMap(
+                                CoreOptions.SCAN_SNAPSHOT_ID.key(), String.valueOf(id)));
+        ReadBuilder readBuilder = table.newReadBuilder();
+        StreamTableScan scan = readBuilder.newStreamScan();
+
+        // skip the NextSnapshot
+        scan.plan();
+        List<String> results =
+                getResult(readBuilder.newRead(), scan.plan().splits(), BATCH_ROW_TO_STRING);
+        if (id == 1) {
+            assertThat(results).isEmpty();
+        } else {
+            assertThat(results)
+                    .containsExactlyInAnyOrder(
+                            String.format(
+                                    "%s|%s|%s|binary|varbinary|mapKey:mapVal|multiset",
+                                    id - 1, (id - 1) * 10, (id - 1) * 100));
+        }
     }
 
     private void innerTestTableQuery(FileStoreTable table) throws Exception {
