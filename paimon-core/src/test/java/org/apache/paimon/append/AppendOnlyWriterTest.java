@@ -594,6 +594,7 @@ public class AppendOnlyWriterTest {
                         AppendOnlyWriterTest.SCHEMA,
                         getMaxSequenceNumber(toCompact),
                         compactManager,
+                        null,
                         forceCompact,
                         pathFactory,
                         null,
