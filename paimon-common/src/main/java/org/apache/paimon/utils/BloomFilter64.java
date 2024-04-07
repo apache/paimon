@@ -18,23 +18,27 @@
 
 package org.apache.paimon.utils;
 
-import java.io.DataInput;
-import java.io.DataOutput;
-import java.io.IOException;
 import java.util.BitSet;
 
-/** Bloom filter 64 handle 64 bit hash. */
+/** Bloom filter 64 handle 64 bits hash. */
 public class BloomFilter64 {
 
-    private BitSet bitSet;
-    private int numBits;
-    private int numHashFunctions;
+    private final BitSet bitSet;
+    private final int numBits;
+    private final int numHashFunctions;
 
     public BloomFilter64(long items, double fpp) {
-        this.numBits = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
+        int nb = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
+        this.numBits = nb + (Long.SIZE - (nb % Long.SIZE));
         this.numHashFunctions =
                 Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
         this.bitSet = new BitSet(numBits);
+    }
+
+    public BloomFilter64(int numHashFunctions, BitSet bitSet) {
+        this.numHashFunctions = numHashFunctions;
+        this.numBits = bitSet.size();
+        this.bitSet = bitSet;
     }
 
     public void addHash(long hash64) {
@@ -70,19 +74,11 @@ public class BloomFilter64 {
         return true;
     }
 
-    public void write(DataOutput out) throws IOException {
-        out.writeInt(this.numHashFunctions);
-        out.writeInt(this.numBits);
-        byte[] b = bitSet.toByteArray();
-        out.writeInt(b.length);
-        out.write(b);
+    public int getNumHashFunctions() {
+        return numHashFunctions;
     }
 
-    public void read(DataInput input) throws IOException {
-        this.numHashFunctions = input.readInt();
-        this.numBits = input.readInt();
-        byte[] b = new byte[input.readInt()];
-        input.readFully(b);
-        this.bitSet = BitSet.valueOf(b);
+    public BitSet getBitSet() {
+        return bitSet;
     }
 }

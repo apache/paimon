@@ -25,6 +25,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.BinaryType;
 import org.apache.paimon.types.BooleanType;
 import org.apache.paimon.types.CharType;
+import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeVisitor;
 import org.apache.paimon.types.DateType;
 import org.apache.paimon.types.DecimalType;
@@ -44,145 +45,155 @@ import org.apache.paimon.types.VarCharType;
 
 import net.openhft.hashing.LongHashFunction;
 
-/** Fast hash for object differs to DataType. */
-public class FastHash implements DataTypeVisitor<HashConverter64> {
+/** Hash object to 64 bits hash code. */
+public interface FastHash {
 
-    public static final FastHash INSTANCE = new FastHash();
+    long hash(Object o);
 
-    @Override
-    public HashConverter64 visit(CharType charType) {
-        return o -> hash64(((BinaryString) o).toBytes());
+    static FastHash getHashFunction(DataType type) {
+        return type.accept(FastHashVisitor.INSTANCE);
     }
 
-    @Override
-    public HashConverter64 visit(VarCharType varCharType) {
-        return o -> hash64(((BinaryString) o).toBytes());
-    }
+    /** Fast hash for object differs to DataType. */
+    class FastHashVisitor implements DataTypeVisitor<FastHash> {
 
-    @Override
-    public HashConverter64 visit(BooleanType booleanType) {
-        throw new UnsupportedOperationException("Does not support type boolean");
-    }
+        private static final FastHashVisitor INSTANCE = new FastHashVisitor();
 
-    @Override
-    public HashConverter64 visit(BinaryType binaryType) {
-        return o -> hash64((byte[]) o);
-    }
+        @Override
+        public FastHash visit(CharType charType) {
+            return o -> hash64(((BinaryString) o).toBytes());
+        }
 
-    @Override
-    public HashConverter64 visit(VarBinaryType varBinaryType) {
-        return o -> hash64((byte[]) o);
-    }
+        @Override
+        public FastHash visit(VarCharType varCharType) {
+            return o -> hash64(((BinaryString) o).toBytes());
+        }
 
-    @Override
-    public HashConverter64 visit(DecimalType decimalType) {
-        throw new UnsupportedOperationException("Does not support decimal");
-    }
+        @Override
+        public FastHash visit(BooleanType booleanType) {
+            throw new UnsupportedOperationException("Does not support type boolean");
+        }
 
-    @Override
-    public HashConverter64 visit(TinyIntType tinyIntType) {
-        return o -> getLongHash((byte) o);
-    }
+        @Override
+        public FastHash visit(BinaryType binaryType) {
+            return o -> hash64((byte[]) o);
+        }
 
-    @Override
-    public HashConverter64 visit(SmallIntType smallIntType) {
-        return o -> getLongHash((short) o);
-    }
+        @Override
+        public FastHash visit(VarBinaryType varBinaryType) {
+            return o -> hash64((byte[]) o);
+        }
 
-    @Override
-    public HashConverter64 visit(IntType intType) {
-        return o -> getLongHash((int) o);
-    }
+        @Override
+        public FastHash visit(DecimalType decimalType) {
+            throw new UnsupportedOperationException("Does not support decimal");
+        }
 
-    @Override
-    public HashConverter64 visit(BigIntType bigIntType) {
-        return o -> getLongHash((long) o);
-    }
+        @Override
+        public FastHash visit(TinyIntType tinyIntType) {
+            return o -> getLongHash((byte) o);
+        }
 
-    @Override
-    public HashConverter64 visit(FloatType floatType) {
-        return o -> getLongHash(Float.floatToIntBits((float) o));
-    }
+        @Override
+        public FastHash visit(SmallIntType smallIntType) {
+            return o -> getLongHash((short) o);
+        }
 
-    @Override
-    public HashConverter64 visit(DoubleType doubleType) {
-        return o -> getLongHash(Double.doubleToLongBits((double) o));
-    }
+        @Override
+        public FastHash visit(IntType intType) {
+            return o -> getLongHash((int) o);
+        }
 
-    @Override
-    public HashConverter64 visit(DateType dateType) {
-        return o -> getLongHash((int) o);
-    }
+        @Override
+        public FastHash visit(BigIntType bigIntType) {
+            return o -> getLongHash((long) o);
+        }
 
-    @Override
-    public HashConverter64 visit(TimeType timeType) {
-        return o -> getLongHash((int) o);
-    }
+        @Override
+        public FastHash visit(FloatType floatType) {
+            return o -> getLongHash(Float.floatToIntBits((float) o));
+        }
 
-    @Override
-    public HashConverter64 visit(TimestampType timestampType) {
-        final int precision = timestampType.getPrecision();
-        return o -> {
-            if (o == null) {
-                return 0;
-            }
-            if (precision <= 3) {
-                return getLongHash(((Timestamp) o).getMillisecond());
-            }
+        @Override
+        public FastHash visit(DoubleType doubleType) {
+            return o -> getLongHash(Double.doubleToLongBits((double) o));
+        }
 
-            return getLongHash(((Timestamp) o).toMicros());
-        };
-    }
+        @Override
+        public FastHash visit(DateType dateType) {
+            return o -> getLongHash((int) o);
+        }
 
-    @Override
-    public HashConverter64 visit(LocalZonedTimestampType localZonedTimestampType) {
-        final int precision = localZonedTimestampType.getPrecision();
-        return o -> {
-            if (o == null) {
-                return 0;
-            }
-            if (precision <= 3) {
-                return getLongHash(((Timestamp) o).getMillisecond());
-            }
+        @Override
+        public FastHash visit(TimeType timeType) {
+            return o -> getLongHash((int) o);
+        }
 
-            return getLongHash(((Timestamp) o).toMicros());
-        };
-    }
+        @Override
+        public FastHash visit(TimestampType timestampType) {
+            final int precision = timestampType.getPrecision();
+            return o -> {
+                if (o == null) {
+                    return 0;
+                }
+                if (precision <= 3) {
+                    return getLongHash(((Timestamp) o).getMillisecond());
+                }
 
-    @Override
-    public HashConverter64 visit(ArrayType arrayType) {
-        throw new UnsupportedOperationException("Does not support type array");
-    }
+                return getLongHash(((Timestamp) o).toMicros());
+            };
+        }
 
-    @Override
-    public HashConverter64 visit(MultisetType multisetType) {
-        throw new UnsupportedOperationException("Does not support type mutiset");
-    }
+        @Override
+        public FastHash visit(LocalZonedTimestampType localZonedTimestampType) {
+            final int precision = localZonedTimestampType.getPrecision();
+            return o -> {
+                if (o == null) {
+                    return 0;
+                }
+                if (precision <= 3) {
+                    return getLongHash(((Timestamp) o).getMillisecond());
+                }
 
-    @Override
-    public HashConverter64 visit(MapType mapType) {
-        throw new UnsupportedOperationException("Does not support type map");
-    }
+                return getLongHash(((Timestamp) o).toMicros());
+            };
+        }
 
-    @Override
-    public HashConverter64 visit(RowType rowType) {
-        throw new UnsupportedOperationException("Does not support type row");
-    }
+        @Override
+        public FastHash visit(ArrayType arrayType) {
+            throw new UnsupportedOperationException("Does not support type array");
+        }
 
-    // Thomas Wang's integer hash function
-    // http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm
-    static long getLongHash(long key) {
-        key = (~key) + (key << 21); // key = (key << 21) - key - 1;
-        key = key ^ (key >> 24);
-        key = (key + (key << 3)) + (key << 8); // key * 265
-        key = key ^ (key >> 14);
-        key = (key + (key << 2)) + (key << 4); // key * 21
-        key = key ^ (key >> 28);
-        key = key + (key << 31);
-        return key;
-    }
+        @Override
+        public FastHash visit(MultisetType multisetType) {
+            throw new UnsupportedOperationException("Does not support type mutiset");
+        }
 
-    static long hash64(byte[] data) {
-        return LongHashFunction.xx().hashBytes(data);
+        @Override
+        public FastHash visit(MapType mapType) {
+            throw new UnsupportedOperationException("Does not support type map");
+        }
+
+        @Override
+        public FastHash visit(RowType rowType) {
+            throw new UnsupportedOperationException("Does not support type row");
+        }
+
+        // Thomas Wang's integer hash function
+        // http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm
+        static long getLongHash(long key) {
+            key = (~key) + (key << 21); // key = (key << 21) - key - 1;
+            key = key ^ (key >> 24);
+            key = (key + (key << 3)) + (key << 8); // key * 265
+            key = key ^ (key >> 14);
+            key = (key + (key << 2)) + (key << 4); // key * 21
+            key = key ^ (key >> 28);
+            key = key + (key << 31);
+            return key;
+        }
+
+        static long hash64(byte[] data) {
+            return LongHashFunction.xx().hashBytes(data);
+        }
     }
 }

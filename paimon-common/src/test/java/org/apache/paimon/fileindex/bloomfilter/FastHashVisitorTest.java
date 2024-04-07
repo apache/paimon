@@ -26,76 +26,78 @@ import org.junit.jupiter.api.Test;
 
 import java.util.Random;
 
-/** Test for {@link FastHash}. */
-public class FastHashTest {
+/** Test for {@link FastHash.FastHashVisitor}. */
+public class FastHashVisitorTest {
 
     private static final Random RANDOM = new Random();
 
     @Test
     public void testTinyIntType() {
-        HashConverter64 function = DataTypes.TINYINT().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.TINYINT());
         byte c = (byte) RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.getLongHash(c));
+        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
     public void testSmallIntType() {
-        HashConverter64 function = DataTypes.SMALLINT().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.SMALLINT());
         short c = (short) RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.getLongHash(c));
+        Assertions.assertThat(function.hash(c)).isEqualTo(FastHash.FastHashVisitor.getLongHash(c));
     }
 
     @Test
     public void testIntType() {
-        HashConverter64 function = DataTypes.INT().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.INT());
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo((FastHash.getLongHash(c)));
+        Assertions.assertThat(function.hash(c))
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test
     public void testBigIntType() {
-        HashConverter64 function = DataTypes.BIGINT().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.BIGINT());
         long c = RANDOM.nextLong();
-        Assertions.assertThat(function.hash(c)).isEqualTo((FastHash.getLongHash(c)));
+        Assertions.assertThat(function.hash(c))
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test
     public void testFloatType() {
-        HashConverter64 function = DataTypes.FLOAT().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.FLOAT());
         float c = RANDOM.nextFloat();
         Assertions.assertThat(function.hash(c))
-                .isEqualTo((FastHash.getLongHash(Float.floatToIntBits(c))));
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(Float.floatToIntBits(c))));
     }
 
     @Test
     public void testDoubleType() {
-        HashConverter64 function = DataTypes.DOUBLE().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.DOUBLE());
         double c = RANDOM.nextDouble();
         Assertions.assertThat(function.hash(c))
-                .isEqualTo((FastHash.getLongHash(Double.doubleToLongBits(c))));
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(Double.doubleToLongBits(c))));
     }
 
     @Test
     public void testDateType() {
-        HashConverter64 function = DataTypes.DATE().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.DATE());
         int c = RANDOM.nextInt();
-        Assertions.assertThat(function.hash(c)).isEqualTo((FastHash.getLongHash(c)));
+        Assertions.assertThat(function.hash(c))
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c)));
     }
 
     @Test
     public void testTimestampType() {
-        HashConverter64 function = DataTypes.TIMESTAMP_MILLIS().accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_MILLIS());
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.hash(c))
-                .isEqualTo((FastHash.getLongHash(c.getMillisecond())));
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c.getMillisecond())));
     }
 
     @Test
     public void testLocalZonedTimestampType() {
-        HashConverter64 function =
-                DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3).accept(FastHash.INSTANCE);
+        FastHash function = FastHash.getHashFunction(DataTypes.TIMESTAMP_WITH_LOCAL_TIME_ZONE(3));
         Timestamp c = Timestamp.fromEpochMillis(System.currentTimeMillis());
         Assertions.assertThat(function.hash(c))
-                .isEqualTo((FastHash.getLongHash(c.getMillisecond())));
+                .isEqualTo((FastHash.FastHashVisitor.getLongHash(c.getMillisecond())));
     }
 }

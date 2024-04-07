@@ -26,26 +26,27 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
 
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
-import java.io.DataInputStream;
-import java.io.DataOutputStream;
-import java.io.IOException;
+import java.util.BitSet;
 
 /** Bloom filter for file index. */
 public class BloomFilterFileIndex implements FileIndexer {
 
     public static final String BLOOM_FILTER = "bloom";
 
-    private final HashConverter64 hashFunction;
+    private static final int DEFAULT_ITEMS = 1_000_000;
+    private static final double DEFAULT_FPP = 0.1;
 
-    private final BloomFilter64 filter;
+    private static final String ITEMS = "items";
+    private static final String FPP = "fpp";
 
-    public BloomFilterFileIndex(DataType type, Options options) {
-        int items = options.getInteger("items", 1_000_000);
-        double fpp = options.getDouble("fpp", 0.1);
-        this.hashFunction = type.accept(FastHash.INSTANCE);
-        this.filter = new BloomFilter64(items, fpp);
+    private final DataType dataType;
+    private final int items;
+    private final double fpp;
+
+    public BloomFilterFileIndex(DataType dataType, Options options) {
+        this.dataType = dataType;
+        this.items = options.getInteger(ITEMS, DEFAULT_ITEMS);
+        this.fpp = options.getDouble(FPP, DEFAULT_FPP);
     }
 
     public String name() {
@@ -54,15 +55,23 @@ public class BloomFilterFileIndex implements FileIndexer {
 
     @Override
     public FileIndexWriter createWriter() {
-        return new Writer();
+        return new Writer(dataType, items, fpp);
     }
 
     @Override
     public FileIndexReader createReader(byte[] serializedBytes) {
-        return new Reader(serializedBytes);
+        return new Reader(dataType, serializedBytes);
     }
 
-    private class Writer implements FileIndexWriter {
+    private static class Writer implements FileIndexWriter {
+
+        private final BloomFilter64 filter;
+        private final FastHash hashFunction;
+
+        public Writer(DataType type, int items, double fpp) {
+            this.filter = new BloomFilter64(items, fpp);
+            this.hashFunction = FastHash.getHashFunction(type);
+        }
 
         @Override
         public void write(Object key) {
@@ -71,34 +80,34 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public byte[] serializedBytes() {
-            ByteArrayOutputStream baos = new ByteArrayOutputStream(1024);
-            DataOutputStream dos = new DataOutputStream(baos);
-
-            try {
-                filter.write(dos);
-                byte[] bytes = baos.toByteArray();
-                dos.close();
-                return bytes;
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            int numHashFunctions = filter.getNumHashFunctions();
+            byte[] bytes = filter.getBitSet().toByteArray();
+            byte[] serialized = new byte[bytes.length + Integer.BYTES];
+            serialized[0] = (byte) ((numHashFunctions >>> 24) & 0xFF);
+            serialized[1] = (byte) ((numHashFunctions >>> 16) & 0xFF);
+            serialized[2] = (byte) ((numHashFunctions >>> 8) & 0xFF);
+            serialized[3] = (byte) (numHashFunctions & 0xFF);
+            System.arraycopy(bytes, 0, serialized, 4, bytes.length);
+            return serialized;
         }
     }
 
-    private class Reader implements FileIndexReader {
+    private static class Reader implements FileIndexReader {
 
-        public Reader(byte[] serializedBytes) {
-            recoverFrom(serializedBytes);
-        }
+        private final BloomFilter64 filter;
+        private final FastHash hashFunction;
 
-        public void recoverFrom(byte[] serializedBytes) {
-            DataInputStream dis = new DataInputStream(new ByteArrayInputStream(serializedBytes));
-
-            try {
-                filter.read(dis);
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+        public Reader(DataType type, byte[] serializedBytes) {
+            int numHashFunctions =
+                    ((serializedBytes[0] << 24)
+                            + (serializedBytes[1] << 16)
+                            + (serializedBytes[2] << 8)
+                            + serializedBytes[3]);
+            byte[] bytes = new byte[serializedBytes.length - Integer.BYTES];
+            System.arraycopy(serializedBytes, 4, bytes, 0, bytes.length);
+            BitSet bitSet = BitSet.valueOf(bytes);
+            this.filter = new BloomFilter64(numHashFunctions, bitSet);
+            this.hashFunction = FastHash.getHashFunction(type);
         }
 
         @Override
