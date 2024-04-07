@@ -45,6 +45,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.apache.paimon.utils.JsonSerdeUtil.toFlatJson;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Unit tests for {@link TagsTable}. */
@@ -108,7 +109,10 @@ class TagsTableTest extends TableTestBase {
                             if (tag.equals("2023-07-17")) {
                                 return Collections.singletonList("2023-07-17-branch1");
                             } else if (tag.equals("2023-07-18")) {
-                                return Arrays.asList("2023-07-18-branch2", "2023-07-18-branch1");
+                                List<String> list =
+                                        Arrays.asList("2023-07-18-branch2", "2023-07-18-branch1");
+                                Collections.sort(list);
+                                return list;
                             } else {
                                 return new ArrayList<>();
                             }
@@ -132,7 +136,7 @@ class TagsTableTest extends TableTestBase {
                                         DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
                                 snapshot.totalRecordCount(),
                                 BinaryString.fromString(
-                                        tagBranchesFunction.apply(tagName).toString())));
+                                        toFlatJson(tagBranchesFunction.apply(tagName)))));
             }
         }
         return internalRows;

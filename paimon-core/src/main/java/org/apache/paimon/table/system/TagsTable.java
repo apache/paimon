@@ -45,6 +45,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.JsonSerdeUtil;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.TagManager;
@@ -244,7 +245,11 @@ public class TagsTable implements ReadonlyTable {
                     Timestamp.fromLocalDateTime(
                             DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
                     snapshot.totalRecordCount(),
-                    BinaryString.fromString(branches == null ? "[]" : branches.toString()));
+                    toJson(branches));
+        }
+
+        private BinaryString toJson(Object obj) {
+            return BinaryString.fromString(JsonSerdeUtil.toFlatJson(obj));
         }
     }
 }
