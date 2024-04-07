@@ -38,11 +38,6 @@ object PaimonDeleteTable extends Rule[LogicalPlan] with RowLevelHelper {
 
         table.getTable match {
           case paimonTable: FileStoreTable =>
-            val primaryKeys = paimonTable.primaryKeys().asScala
-            if (primaryKeys.isEmpty) {
-              condition.foreach(checkSubquery)
-            }
-
             val relation = PaimonRelation.getPaimonRelation(d.table)
             DeleteFromPaimonTableCommand(relation, paimonTable, condition.getOrElse(TrueLiteral))
 
