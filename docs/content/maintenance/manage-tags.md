@@ -88,7 +88,7 @@ SELECT * FROM t VERSION AS OF '2023-07-26';
 SELECT * FROM paimon_incremental_query('t', '2023-07-25', '2023-07-26');
 ```
 
-See [Query Tables]({{< ref "how-to/querying-tables" >}}) to see more query for engines.
+See [Query Tables]({{< ref "spark/sql-query" >}}) to see more query for Spark.
 
 ## Create Tags
 
@@ -257,44 +257,3 @@ CALL rollback(table => 'test.t', version => '2');
 {{< /tab >}}
 
 {{< /tabs >}}
-
-## Work with Flink Savepoint
-
-In Flink, we may consume from kafka and then write to paimon. Since flink's checkpoint only retains a limited number, 
-we will trigger a savepoint at certain time (such as code upgrades, data updates, etc.) to ensure that the state can 
-be retained for a longer time, so that the job can be restored incrementally. 
-
-Paimon's snapshot is similar to flink's checkpoint, and both will automatically expire, but the tag feature of paimon 
-allows snapshots to be retained for a long time. Therefore, we can combine the two features of paimon's tag and flink's 
-savepoint to achieve incremental recovery of job from the specified savepoint.
-
-{{< hint warning >}}
-Starting from Flink 1.15 intermediate savepoints (savepoints other than created with 
-[stop-with-savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint)) 
-are not used for recovery and do not commit any side effects. 
-
-For savepoint created with [stop-with-savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#stopping-a-job-with-savepoint), 
-tags will be created automatically. For other savepoints, tags will be created after the next checkpoint succeeds.
-{{< /hint >}}
-
-**Step 1: Enable automatically create tags for savepoint.**
-
-You can set `sink.savepoint.auto-tag` to `true` to enable the feature of automatically creating tags for savepoint.
-
-**Step 2: Trigger savepoint.**
-
-You can refer to [flink savepoint](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#operations) 
-to learn how to configure and trigger savepoint.
-
-**Step 3: Choose the tag corresponding to the savepoint.**
-
-The tag corresponding to the savepoint will be named in the form of `savepoint-${savepointID}`. You can refer to 
-[Tags Table]({{< ref "how-to/system-tables#tags-table" >}}) to query.
-
-**Step 4: Rollback the paimon table.**
-
-[Rollback]({{< ref "maintenance/manage-tags#rollback-to-tag" >}}) the paimon table to the specified tag.
-
-**Step 5: Restart from the savepoint.**
-
-You can refer to [here](https://nightlies.apache.org/flink/flink-docs-stable/docs/ops/state/savepoints/#resuming-from-savepoints) to learn how to restart from a specified savepoint.

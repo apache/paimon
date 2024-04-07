@@ -218,7 +218,7 @@ Please note that too short retain time or too small retain number may result in:
   expires, at which point the batch query will read a deleted snapshot.
 - Streaming reading jobs on table files (without the external log system) fail to restart.
   When the job restarts, the snapshot it recorded may have expired. (You can use
-  [Consumer Id]({{< ref "how-to/querying-tables#consumer-id" >}}) to protect streaming reading
+  [Consumer Id]({{< ref "flink/sql-query#consumer-id" >}}) to protect streaming reading
   in a small retain time of snapshot expiration).
 
 By default, paimon will delete expired snapshots synchronously. When there are too 

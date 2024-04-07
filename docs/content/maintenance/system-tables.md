@@ -1,9 +1,9 @@
 ---
 title: "System Tables"
-weight: 6
+weight: 1
 type: docs
 aliases:
-- /how-to/system-tables.html
+- /maintenance/system-tables.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -275,7 +275,7 @@ SELECT * FROM my_table$aggregation_fields;
 */
 ```
 
-## Partitions Table
+### Partitions Table
 
 You can query the partition files of the table.
 
@@ -301,7 +301,7 @@ SHOW TABLES;
 ```
 
 ### ALL Options Table
-This table is similar to [Options Table]({{< ref "how-to/system-tables#options-table" >}}), but it shows all the table options is all database.
+This table is similar to [Options Table]({{< ref "#options-table" >}}), but it shows all the table options is all database.
 
 ```sql
 SELECT * FROM sys.all_table_options;

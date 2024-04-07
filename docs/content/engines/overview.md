@@ -26,10 +26,6 @@ under the License.
 
 # Overview
 
-Paimon not only supports Flink SQL writes and queries natively,
-but also provides queries from other popular engines, such as
-Apache Spark and Apache Hive.
-
 ## Compatibility Matrix
 
 |                                     Engine                                      |    Version    | Batch Read | Batch Write | Create Table | Alter Table | Streaming Write | Streaming Read | Batch Overwrite |

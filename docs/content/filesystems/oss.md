@@ -96,7 +96,7 @@ SET paimon.fs.oss.accessKeyId=xxx;
 SET paimon.fs.oss.accessKeySecret=yyy;
 ```
 
-And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "how-to/creating-catalogs" >}})
+And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "flink/sql-ddl" >}})
 ```sql
 SELECT * FROM test_table;
 SELECT COUNT(1) FROM test_table;

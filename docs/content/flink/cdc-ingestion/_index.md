@@ -1,9 +1,7 @@
 ---
 title: CDC Ingestion
-icon: <i class="fa fa-database title maindish" aria-hidden="true"></i>
-bold: true
 bookCollapseSection: true
-weight: 94
+weight: 96
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

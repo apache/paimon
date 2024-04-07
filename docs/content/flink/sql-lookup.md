@@ -1,9 +1,9 @@
 ---
-title: "Lookup Joins"
-weight: 7
+title: "SQL Lookup"
+weight: 5
 type: docs
 aliases:
-- /how-to/lookup-joins.html
+- /flink/sql-lookup.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one

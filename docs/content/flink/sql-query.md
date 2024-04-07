@@ -1,9 +1,9 @@
 ---
-title: "Querying Tables"
-weight: 5
+title: "SQL Query"
+weight: 4
 type: docs
 aliases:
-- /how-to/querying-tables.html
+- /flink/sql-query.html
 ---
 <!--
 Licensed to the Apache Software Foundation (ASF) under one
@@ -24,7 +24,7 @@ specific language governing permissions and limitations
 under the License.
 -->
 
-# Querying Tables
+# SQL Query
 
 Just like all other tables, Paimon tables can be queried with `SELECT` statement.
 
@@ -57,7 +57,9 @@ SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
 {{< /tab >}}
 
 {{< tab "Flink 1.18+" >}}
+
 Flink SQL supports time travel syntax after 1.18.
+
 ```sql
 -- read the snapshot from specified timestamp
 SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
@@ -65,109 +67,7 @@ SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00';
 -- you can also use some simple expressions (see flink document to get supported functions)
 SELECT * FROM t FOR SYSTEM_TIME AS OF TIMESTAMP '2023-01-01 00:00:00' + INTERVAL '1' DAY
 ```
-{{< /tab >}}
 
-{{< tab "Spark3" >}}
-
-Requires Spark 3.3+.
-
-you can use `VERSION AS OF` and `TIMESTAMP AS OF` in query to do time travel:
-
-```sql
--- read the snapshot with id 1L (use snapshot id as version)
-SELECT * FROM t VERSION AS OF 1;
-
--- read the snapshot from specified timestamp 
-SELECT * FROM t TIMESTAMP AS OF '2023-06-01 00:00:00.123';
-
--- read the snapshot from specified timestamp in unix seconds
-SELECT * FROM t TIMESTAMP AS OF 1678883047;
-
--- read tag 'my-tag'
-SELECT * FROM t VERSION AS OF 'my-tag';
-```
-
-{{< hint warning >}}
-If tag's name is a number and equals to a snapshot id, the VERSION AS OF syntax will consider tag first. For example, if 
-you have a tag named '1' based on snapshot 2, the statement `SELECT * FROM t VERSION AS OF '1'` actually queries snapshot 2 
-instead of snapshot 1.
-{{< /hint >}}
-
-{{< /tab >}}
-
-{{< tab "Spark3-DF" >}}
-
-```scala
-// read the snapshot from specified timestamp in unix seconds
-spark.read
-    .option("scan.timestamp-millis", "1678883047000")
-    .format("paimon")
-    .load("path/to/table")
-```
-
-```scala
-// read the snapshot with id 1L (use snapshot id as version)
-spark.read
-    .option("scan.snapshot-id", 1)
-    .format("paimon")
-    .load("path/to/table")
-```
-
-```scala
-// read tag 'my-tag'
-spark.read
-    .option("scan.tag-name", "my-tag")
-    .format("paimon")
-    .load("path/to/table")
-```
-
-{{< /tab >}}
-
-{{< tab "Trino 422+" >}}
-
-```sql
--- read the snapshot from specified timestamp
-SELECT * FROM t FOR TIMESTAMP AS OF TIMESTAMP '2023-01-01 00:00:00 Asia/Shanghai';
-
--- read the snapshot with id 1L (use snapshot id as version)
-SELECT * FROM t FOR VERSION AS OF 1;
-```
-
-{{< /tab >}}
-
-{{< tab "Hive" >}}
-
-Hive requires adding the following configuration parameters to the hive-site.xml file:
-```xml
-<!--This parameter is used to configure the whitelist of permissible configuration items allowed for use in SQL standard authorization mode.-->
-<property>
-  <name>hive.security.authorization.sqlstd.confwhitelist</name>
-  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
-</property>
-
-<!--This parameter is an additional configuration for hive.security.authorization.sqlstd.confwhitelist. It allows you to add other permissible configuration items to the existing whitelist.-->
-<property>
- <name>hive.security.authorization.sqlstd.confwhitelist.append</name>
-  <value>mapred.*|hive.*|mapreduce.*|spark.*</value>
-</property>
-```
-
-```sql
--- read the snapshot with id 1L (use snapshot id as version)
-SET paimon.scan.snapshot-id=1
-SELECT * FROM t;
-SET paimon.scan.snapshot-id=null;
-
--- read the snapshot from specified timestamp in unix seconds
-SET paimon.scan.timestamp-millis=1679486589444;
-SELECT * FROM t;
-SET paimon.scan.timestamp-millis=null;
-    
--- read tag 'my-tag'
-set paimon.scan.tag-name=my-tag;
-SELECT * FROM t;
-set paimon.scan.tag-name=null;
-```
 {{< /tab >}}
 
 {{< /tabs >}}
@@ -180,9 +80,6 @@ For example:
 - '5,10' means changes between snapshot 5 and snapshot 10.
 - 'TAG1,TAG3' means changes between TAG1 and TAG3.
 
-{{< tabs "incremental-example" >}}
-
-{{< tab "Flink" >}}
 ```sql
 -- incremental between snapshot ids
 SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
@@ -190,80 +87,24 @@ SELECT * FROM t /*+ OPTIONS('incremental-between' = '12,20') */;
 -- incremental between snapshot time mills
 SELECT * FROM t /*+ OPTIONS('incremental-between-timestamp' = '1692169000000,1692169900000') */;
 ```
-{{< /tab >}}
-
-{{< tab "Spark3" >}}
-
-Requires Spark 3.2+.
-
-Paimon supports that use Spark SQL to do the incremental query that implemented by Spark Table Valued Function.
-To enable this needs these configs below:
-
-```text
---conf spark.sql.extensions=org.apache.paimon.spark.extensions.PaimonSparkSessionExtensions
-```
-
-you can use `paimon_incremental_query` in query to extract the incremental data:
-
-```sql
--- read the incremental data between snapshot id 12 and snapshot id 20.
-SELECT * FROM paimon_incremental_query('tableName', 12, 20);
-```
-
-{{< /tab >}}
-
-{{< tab "Spark-DF" >}}
-
-```scala
-// incremental between snapshot ids
-spark.read()
-  .format("paimon")
-  .option("incremental-between", "12,20")
-  .load("path/to/table")
-
-// incremental between snapshot time mills
-spark.read()
-  .format("paimon")
-  .option("incremental-between-timestamp", "1692169000000,1692169900000")
-  .load("path/to/table")
-```
-
-{{< /tab >}}
-
-{{< tab "Hive" >}}
-```sql
--- incremental between snapshot ids
-SET paimon.incremental-between='12,20';
-SELECT * FROM t;
-SET paimon.incremental-between=null;
-
--- incremental between snapshot time mills
-SET paimon.incremental-between-timestamp='1692169000000,1692169900000';
-SELECT * FROM t;
-SET paimon.incremental-between-timestamp=null;
-```
-{{< /tab >}}
-
-{{< /tabs >}}
 
 In Batch SQL, the `DELETE` records are not allowed to be returned, so records of `-D` will be dropped.
 If you want see `DELETE` records, you can use audit_log table:
 
-{{< tabs "incremental-audit_log" >}}
-{{< tab "Flink" >}}
 ```sql
 SELECT * FROM t$audit_log /*+ OPTIONS('incremental-between' = '12,20') */;
 ```
-{{< /tab >}}
-{{< /tabs >}}
 
 ## Streaming Query
 
 By default, Streaming read produces the latest snapshot on the table upon first startup,
 and continue to read the latest changes.
 
-Paimon by default ensures that your startup is properly processed with the full amount
-included.
+Paimon by default ensures that your startup is properly processed with all data included.
+
+{{< hint warning >}}
+Paimon Source in Streaming mode is unbounded, like a queue that never ends.
+{{< /hint >}}
 
 ```sql
 -- Flink SQL
@@ -271,15 +112,10 @@ SET 'execution.runtime-mode' = 'streaming';
 ```
 
 You can also do streaming read without the snapshot data, you can use `latest` scan mode:
-
-{{< tabs "latest streaming read" >}}
-{{< tab "Flink" >}}
 ```sql
 -- Continuously reads latest changes without producing a snapshot at the beginning.
 SELECT * FROM t /*+ OPTIONS('scan.mode' = 'latest') */;
 ```
-{{< /tab >}}
-{{< /tabs >}}
 
 ### Streaming Time Travel
 
@@ -322,15 +158,9 @@ Time travel's stream read rely on snapshots, but by default, snapshot only retai
 prevent you from reading older incremental data. So, Paimon also provides another mode for streaming reads, 
 `scan.file-creation-time-millis`, which provides a rough filtering to retain files generated after `timeMillis`.
 
-{{< tabs "file-creation-time-millis" >}}
-
-{{< tab "Flink (dynamic option)" >}}
 ```sql
 SELECT * FROM t /*+ OPTIONS('scan.file-creation-time-millis' = '1678883047356') */;
 ```
-{{< /tab >}}
-
-{{< /tabs >}}
 
 ### Consumer ID
 
@@ -368,10 +198,6 @@ You can reset a consumer with a given consumer ID and next snapshot ID and delet
 First, you need to stop the streaming task using this consumer ID, and then execute the reset consumer action job.
 {{< /hint >}}
 
-{{< tabs "reset-consumer" >}}
-
-{{< tab "Flink" >}}
-
 Run the following command:
 
 ```bash
@@ -388,19 +214,12 @@ Run the following command:
 
 please don't specify --next_snapshot parameter if you want to delete the consumer.
 
-{{< /tab >}}
-
-{{< /tabs >}}
-
 ### Read Overwrite
 
 Streaming reading will ignore the commits generated by `INSERT OVERWRITE` by default. If you want to read the
 commits of `OVERWRITE`, you can configure `streaming-read-overwrite`.
 
 ## Read Parallelism
-
-{{< tabs "Read Parallelism" >}}
-{{< tab "Flink" >}}
 
 By default, the parallelism of batch reads is the same as the number of splits, while the parallelism of stream 
 reads is the same as the number of buckets, but not greater than `scan.infer-parallelism.max`.
@@ -439,9 +258,6 @@ You can also manually specify the parallelism from `scan.parallelism`.
         </tr>
     </tbody>
 </table>
-
-{{< /tab >}}
-{{< /tabs >}}
 
 ## Query Optimization
 

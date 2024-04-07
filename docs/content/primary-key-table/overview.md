@@ -30,7 +30,7 @@ If you define a table with primary key, you can insert, update or delete records
 
 Primary keys consist of a set of columns that contain unique values for each record. Paimon enforces data ordering by
 sorting the primary key within each bucket, allowing users to achieve high performance by applying filtering conditions
-on the primary key. See [CREATE TABLE]({{< ref "how-to/creating-tables" >}}).
+on the primary key. See [CREATE TABLE]({{< ref "flink/sql-ddl#create-table" >}}).
 
 ## Bucket
 
