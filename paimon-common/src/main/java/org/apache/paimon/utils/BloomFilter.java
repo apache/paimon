@@ -26,15 +26,18 @@ import static org.apache.paimon.utils.Preconditions.checkArgument;
 /** Bloom filter based on one memory segment. */
 public class BloomFilter {
 
-    protected BitSet bitSet;
-    protected long expectedEntries;
-    protected int numHashFunctions;
+    private final BitSet bitSet;
+    private final int numHashFunctions;
 
     public BloomFilter(long expectedEntries, int byteSize) {
         checkArgument(expectedEntries > 0, "expectedEntries should be > 0");
-        this.expectedEntries = expectedEntries;
         this.numHashFunctions = optimalNumOfHashFunctions(expectedEntries, (long) byteSize << 3);
         this.bitSet = new BitSet(byteSize);
+    }
+
+    @VisibleForTesting
+    int numHashFunctions() {
+        return numHashFunctions;
     }
 
     public void setMemorySegment(MemorySegment memorySegment, int offset) {
