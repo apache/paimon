@@ -320,8 +320,8 @@ under the License.
                                     <shadedPattern>org.apache.paimon.shade.org.roaringbitmap</shadedPattern>
                                 </relocation>
                                 <relocation>
-                                    <pattern>net.openhft</pattern>
-                                    <shadedPattern>org.apache.paimon.shade.net.openhft</shadedPattern>
+                                    <pattern>net.openhft.hashing</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.net.openhft.hashing</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>
