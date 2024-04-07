@@ -227,11 +227,11 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 while (reader.hasNext()) {
                     sinkWriter.write(reader.next());
                 }
-            }
-
-            // remove small files
-            for (DataFileMeta file : files) {
-                fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+            } finally {
+                // remove small files
+                for (DataFileMeta file : files) {
+                    fileIO.deleteQuietly(pathFactory.toPath(file.fileName()));
+                }
             }
         }
     }
