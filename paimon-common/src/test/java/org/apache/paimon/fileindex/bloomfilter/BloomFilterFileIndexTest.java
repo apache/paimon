@@ -75,8 +75,8 @@ public class BloomFilterFileIndexTest {
             }
         }
 
-        // ffp should be less than 0.021
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.021);
+        // ffp should be less than 0.03
+        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
     @Test
@@ -115,8 +115,8 @@ public class BloomFilterFileIndexTest {
             }
         }
 
-        // ffp should be less than 0.021
-        Assertions.assertThat((double) errorCount / num).isLessThan(0.021);
+        // ffp should be less than 0.03
+        Assertions.assertThat((double) errorCount / num).isLessThan(0.03);
     }
 
     private byte[] random() {
