@@ -33,13 +33,12 @@ import org.apache.spark.sql.Utils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{And, Expression, Not}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
-import org.apache.spark.sql.execution.datasources.v2.{DataSourceV2Relation, DataSourceV2ScanRelation}
+import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
 import java.util.{Collections, UUID}
 
 import scala.collection.JavaConverters._
-import scala.util.Try
 
 case class DeleteFromPaimonTableCommand(
     relation: DataSourceV2Relation,
