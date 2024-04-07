@@ -1361,7 +1361,7 @@ public class PrimaryKeyFileStoreTableTest extends FileStoreTableTestBase {
         write.write(rowDataWithKind(RowKind.INSERT, 1, 1000, 1001L));
         commit.commit(3, write.prepareCommit(true, 3));
 
-        // split1[file1], split2[file3], split3[file4, file5]
+        // split1[file1], split2[file2], split3[file3, file4]
         List<DataSplit> dataSplits = table.newSnapshotReader().read().dataSplits();
         assertThat(dataSplits).hasSize(3);
         assertThat(dataSplits.get(0).dataFiles()).hasSize(1);
