@@ -227,8 +227,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         }
     }
 
+    /** Read for one bucket. */
     public interface BucketFileRead {
-
         RecordReaderIterator<InternalRow> read(List<DataFileMeta> files);
     }
 }
