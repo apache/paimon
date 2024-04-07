@@ -88,6 +88,10 @@ public class MemorySize implements java.io.Serializable, Comparable<MemorySize> 
         return new MemorySize(kibiBytes << 10);
     }
 
+    public static MemorySize ofBytes(long bytes) {
+        return new MemorySize(bytes);
+    }
+
     // ------------------------------------------------------------------------
 
     /** Gets the memory size in bytes. */
