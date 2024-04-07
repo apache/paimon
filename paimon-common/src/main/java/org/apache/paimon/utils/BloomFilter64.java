@@ -21,7 +21,7 @@ package org.apache.paimon.utils;
 import java.util.BitSet;
 
 /** Bloom filter 64 handle 64 bits hash. */
-public class BloomFilter64 {
+public final class BloomFilter64 {
 
     private final BitSet bitSet;
     private final int numBits;

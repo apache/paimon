@@ -26,9 +26,18 @@ import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
 
+import org.apache.hadoop.util.bloom.HashFunction;
+
 import java.util.BitSet;
 
-/** Bloom filter for file index. */
+/**
+ * Bloom filter for file index.
+ *
+ * <p>Note: This class use {@link BloomFilter64} as a base filter. Store the num hash function (one
+ * integer) and bit set bytes only. Use {@link HashFunction} to hash the objects, which hash bytes
+ * type(like varchar, binary, etc.) using xx hash, hash numeric type by specified number hash(see
+ * http://web.archive.org/web/20071223173210/http://www.concentric.net/~Ttwang/tech/inthash.htm).
+ */
 public class BloomFilterFileIndex implements FileIndexer {
 
     public static final String BLOOM_FILTER = "bloom";
