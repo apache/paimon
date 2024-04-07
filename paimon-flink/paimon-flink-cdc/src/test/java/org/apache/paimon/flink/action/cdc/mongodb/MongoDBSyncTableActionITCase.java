@@ -199,8 +199,9 @@ public class MongoDBSyncTableActionITCase extends MongoDBActionITCaseBase {
         MongoDBSyncTableAction action2 =
                 syncTableActionBuilder(mongodbConfig).withTableConfig(tableConfig).build();
         runActionWithDefaultEnv(action2);
-        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
-        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
+
+        FileStoreTable table = getFileStoreTable(tableName);
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test

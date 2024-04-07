@@ -20,6 +20,9 @@ package org.apache.paimon.flink;
 
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.CatalogLock;
+import org.apache.paimon.catalog.CatalogLockContext;
+import org.apache.paimon.catalog.CatalogLockFactory;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
@@ -35,15 +38,19 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 /** ITCase for {@link FlinkCatalog}. */
 public class FileSystemCatalogITCase extends AbstractTestBase {
+    private static final AtomicInteger LOCK_COUNT = new AtomicInteger(0);
 
     private static final String DB_NAME = "default";
 
@@ -113,7 +120,7 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
                                 + "'table-default.opt2'='value2', "
                                 + "'table-default.opt3'='value3', "
                                 + "'fs.allow-hadoop-fallback'='false',"
-                                + "'lock.enabled'='true'"
+                                + "'lock.enabled'='false'"
                                 + ")",
                         path));
         tEnv.useCatalog("fs_with_options");
@@ -146,6 +153,27 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
         assertThat(tableOptions).doesNotContainKey("lock.enabled");
     }
 
+    @Test
+    void testCatalogWithLockForSchema() throws Exception {
+        LOCK_COUNT.set(0);
+        tEnv.executeSql(
+                        String.format(
+                                "CREATE CATALOG fs_with_lock WITH ("
+                                        + "'type'='paimon', "
+                                        + "'warehouse'='%s', "
+                                        + "'lock.enabled'='true',"
+                                        + "'lock.type'='DUMMY'"
+                                        + ")",
+                                path))
+                .await();
+        tEnv.useCatalog("fs_with_lock");
+        tEnv.executeSql("CREATE TABLE table1 (a STRING, b STRING, c STRING)").await();
+        tEnv.executeSql("CREATE TABLE table2 (a STRING, b STRING, c STRING)").await();
+        tEnv.executeSql("CREATE TABLE table3 (a STRING, b STRING, c STRING)").await();
+        tEnv.executeSql("DROP TABLE table3").await();
+        assertThat(LOCK_COUNT.get()).isEqualTo(3);
+    }
+
     private void innerTestWriteRead() throws Exception {
         tEnv.executeSql("INSERT INTO T VALUES ('1', '2', '3'), ('4', '5', '6')").await();
         BlockingIterator<Row, Row> iterator =
@@ -162,5 +190,31 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
             }
         }
         return result;
+    }
+
+    /** Lock factory for file system catalog. */
+    public static class FileSystemCatalogDummyLockFactory implements CatalogLockFactory {
+
+        private static final String IDENTIFIER = "DUMMY";
+
+        @Override
+        public String identifier() {
+            return IDENTIFIER;
+        }
+
+        @Override
+        public CatalogLock createLock(CatalogLockContext context) {
+            return new CatalogLock() {
+                @Override
+                public <T> T runWithLock(String database, String table, Callable<T> callable)
+                        throws Exception {
+                    LOCK_COUNT.incrementAndGet();
+                    return callable.call();
+                }
+
+                @Override
+                public void close() throws IOException {}
+            };
+        }
     }
 }

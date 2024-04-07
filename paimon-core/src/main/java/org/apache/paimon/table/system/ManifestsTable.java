@@ -25,12 +25,11 @@ import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.format.FileFormat;
-import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
@@ -74,13 +73,9 @@ public class ManifestsTable implements ReadonlyTable {
                             new DataField(3, "num_deleted_files", new BigIntType(false)),
                             new DataField(4, "schema_id", new BigIntType(false))));
 
-    private final FileIO fileIO;
-    private final Path location;
-    private final Table dataTable;
+    private final FileStoreTable dataTable;
 
-    public ManifestsTable(FileIO fileIO, Path location, Table dataTable) {
-        this.fileIO = fileIO;
-        this.location = location;
+    public ManifestsTable(FileStoreTable dataTable) {
         this.dataTable = dataTable;
     }
 
@@ -91,12 +86,12 @@ public class ManifestsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new ManifestsRead(fileIO, dataTable);
+        return new ManifestsRead(dataTable);
     }
 
     @Override
     public String name() {
-        return location.getName() + SYSTEM_TABLE_SPLITTER + MANIFESTS;
+        return dataTable.name() + SYSTEM_TABLE_SPLITTER + MANIFESTS;
     }
 
     @Override
@@ -111,7 +106,7 @@ public class ManifestsTable implements ReadonlyTable {
 
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
-        return new ManifestsTable(fileIO, location, dataTable.copy(dynamicOptions));
+        return new ManifestsTable(dataTable.copy(dynamicOptions));
     }
 
     private class ManifestsScan extends ReadOnceTableScan {
@@ -124,7 +119,8 @@ public class ManifestsTable implements ReadonlyTable {
 
         @Override
         protected Plan innerPlan() {
-            return () -> Collections.singletonList(new ManifestsSplit(fileIO, location, dataTable));
+            return () ->
+                    Collections.singletonList(new ManifestsSplit(allManifests(dataTable).size()));
         }
     }
 
@@ -132,19 +128,15 @@ public class ManifestsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
-        private final Path location;
-        private final Table dataTable;
+        private final long rowCount;
 
-        private ManifestsSplit(FileIO fileIO, Path location, Table dataTable) {
-            this.fileIO = fileIO;
-            this.location = location;
-            this.dataTable = dataTable;
+        private ManifestsSplit(long rowCount) {
+            this.rowCount = rowCount;
         }
 
         @Override
         public long rowCount() {
-            return allManifests(fileIO, location, dataTable).size();
+            return rowCount;
         }
 
         @Override
@@ -156,12 +148,12 @@ public class ManifestsTable implements ReadonlyTable {
                 return false;
             }
             ManifestsSplit that = (ManifestsSplit) o;
-            return Objects.equals(location, that.location);
+            return Objects.equals(rowCount, that.rowCount);
         }
 
         @Override
         public int hashCode() {
-            return Objects.hash(location);
+            return Objects.hash(rowCount);
         }
     }
 
@@ -169,12 +161,9 @@ public class ManifestsTable implements ReadonlyTable {
 
         private int[][] projection;
 
-        private final FileIO fileIO;
+        private final FileStoreTable dataTable;
 
-        private final Table dataTable;
-
-        public ManifestsRead(FileIO fileIO, Table dataTable) {
-            this.fileIO = fileIO;
+        public ManifestsRead(FileStoreTable dataTable) {
             this.dataTable = dataTable;
         }
 
@@ -200,8 +189,7 @@ public class ManifestsTable implements ReadonlyTable {
             if (!(split instanceof ManifestsSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Path location = ((ManifestsSplit) split).location;
-            List<ManifestFileMeta> manifestFileMetas = allManifests(fileIO, location, dataTable);
+            List<ManifestFileMeta> manifestFileMetas = allManifests(dataTable);
 
             Iterator<InternalRow> rows =
                     Iterators.transform(manifestFileMetas.iterator(), this::toRow);
@@ -223,10 +211,9 @@ public class ManifestsTable implements ReadonlyTable {
         }
     }
 
-    private static List<ManifestFileMeta> allManifests(
-            FileIO fileIO, Path location, Table dataTable) {
+    private static List<ManifestFileMeta> allManifests(FileStoreTable dataTable) {
         CoreOptions coreOptions = CoreOptions.fromMap(dataTable.options());
-        SnapshotManager snapshotManager = new SnapshotManager(fileIO, location);
+        SnapshotManager snapshotManager = dataTable.snapshotManager();
         Long snapshotId = coreOptions.scanSnapshotId();
         Snapshot snapshot = null;
         if (snapshotId != null && snapshotManager.snapshotExists(snapshotId)) {
@@ -238,10 +225,11 @@ public class ManifestsTable implements ReadonlyTable {
         if (snapshot == null) {
             return Collections.emptyList();
         }
-        FileStorePathFactory fileStorePathFactory = new FileStorePathFactory(location);
+        FileStorePathFactory fileStorePathFactory = dataTable.store().pathFactory();
         FileFormat fileFormat = coreOptions.manifestFormat();
         ManifestList manifestList =
-                new ManifestList.Factory(fileIO, fileFormat, fileStorePathFactory, null).create();
+                new ManifestList.Factory(dataTable.fileIO(), fileFormat, fileStorePathFactory, null)
+                        .create();
         return snapshot.allManifests(manifestList);
     }
 }

@@ -23,7 +23,7 @@ import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
-import org.apache.paimon.table.Table;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -96,17 +96,6 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
         setParallelism(defaultParallelism());
         prepareEnv();
-    }
-
-    protected Table getPaimonTable(String tableName) {
-        FlinkCatalog flinkCatalog = (FlinkCatalog) tEnv.getCatalog(tEnv.getCurrentCatalog()).get();
-        try {
-            return flinkCatalog
-                    .catalog()
-                    .getTable(new Identifier(tEnv.getCurrentDatabase(), tableName));
-        } catch (org.apache.paimon.catalog.Catalog.TableNotExistException e) {
-            throw new RuntimeException(e);
-        }
     }
 
     protected Map<String, String> catalogOptions() {
@@ -194,10 +183,11 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
         return (CatalogTable) table;
     }
 
-    protected Table paimonTable(String tableName)
+    protected FileStoreTable paimonTable(String tableName)
             throws org.apache.paimon.catalog.Catalog.TableNotExistException {
         org.apache.paimon.catalog.Catalog catalog = flinkCatalog().catalog();
-        return catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
+        return (FileStoreTable)
+                catalog.getTable(Identifier.create(tEnv.getCurrentDatabase(), tableName));
     }
 
     private FlinkCatalog flinkCatalog() {

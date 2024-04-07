@@ -105,9 +105,9 @@ public class ReadOptimizedTable implements DataTable, ReadonlyTable {
     @Override
     public InnerTableScan newScan() {
         return new InnerTableScanImpl(
+                dataTable.schema().primaryKeys().size() > 0,
                 coreOptions(),
                 newSnapshotReader(),
-                snapshotManager(),
                 DefaultValueAssigner.create(dataTable.schema()));
     }
 

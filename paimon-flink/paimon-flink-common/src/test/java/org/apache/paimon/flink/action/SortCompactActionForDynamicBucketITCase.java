@@ -108,6 +108,36 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     @Test
+    public void testDynamicBucketSortWithOrderAndHilbert() throws Exception {
+        createTable();
+
+        commit(writeData(100));
+        PredicateBuilder predicateBuilder = new PredicateBuilder(getTable().rowType());
+        Predicate predicate = predicateBuilder.between(1, 100L, 200L);
+
+        // order f2,f1 will make predicate of f1 perform worse.
+        order(Arrays.asList("f2", "f1"));
+        List<ManifestEntry> files = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilter =
+                ((KeyValueFileStoreScan) getTable().store().newScan())
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+
+        hilbert(Arrays.asList("f2", "f1"));
+
+        List<ManifestEntry> filesHilbert = getTable().store().newScan().plan().files();
+        List<ManifestEntry> filesFilterHilbert =
+                ((KeyValueFileStoreScan) getTable().store().newScan())
+                        .withValueFilter(predicate)
+                        .plan()
+                        .files();
+
+        Assertions.assertThat(filesFilterHilbert.size() / (double) filesHilbert.size())
+                .isLessThan(filesFilter.size() / (double) files.size());
+    }
+
+    @Test
     public void testDynamicBucketSortWithStringType() throws Exception {
         createTable();
 
@@ -139,19 +169,15 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
     }
 
     private void zorder(List<String> columns) throws Exception {
-        if (RANDOM.nextBoolean()) {
-            createAction("zorder", columns).run();
-        } else {
-            callProcedure("zorder", columns);
-        }
+        createAction("zorder", columns).run();
+    }
+
+    private void hilbert(List<String> columns) throws Exception {
+        createAction("hilbert", columns).run();
     }
 
     private void order(List<String> columns) throws Exception {
-        if (RANDOM.nextBoolean()) {
-            createAction("order", columns).run();
-        } else {
-            callProcedure("order", columns);
-        }
+        createAction("order", columns).run();
     }
 
     private SortCompactAction createAction(String orderStrategy, List<String> columns) {
@@ -168,15 +194,6 @@ public class SortCompactActionForDynamicBucketITCase extends ActionITCaseBase {
                 orderStrategy,
                 "--order_by",
                 String.join(",", columns));
-    }
-
-    private void callProcedure(String orderStrategy, List<String> orderByColumns) {
-        callProcedure(
-                String.format(
-                        "CALL sys.compact('%s.%s', 'ALL', '%s', '%s')",
-                        database, tableName, orderStrategy, String.join(",", orderByColumns)),
-                false,
-                true);
     }
 
     // schema with all the basic types.

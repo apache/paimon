@@ -46,19 +46,19 @@ public class BloomFilterTest {
 
     @Test
     public void testEstimatedHashFunctions() {
-        Assertions.assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(1000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(10_000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(100_000, 0.05).getFilter().numHashFunctions())
                 .isEqualTo(4);
-        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.01).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.01).getFilter().numHashFunctions())
                 .isEqualTo(7);
-        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.05).getFilter().numHashFunctions)
+        Assertions.assertThat(BloomFilter.builder(1_000_000, 0.05).getFilter().numHashFunctions())
                 .isEqualTo(4);
     }
 

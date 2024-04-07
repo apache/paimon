@@ -42,7 +42,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     private RocksDBListState<InternalRow, InternalRow> state;
 
-    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) throws IOException {
+    public NoPrimaryKeyLookupTable(Context context, long lruCacheSize) {
         super(context);
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
@@ -52,6 +52,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
         this.state =
                 stateFactory.listState(
                         "join-key-index",
@@ -59,7 +60,7 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, joinKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
-        super.open();
+        bootstrap();
     }
 
     @Override
@@ -68,11 +69,10 @@ public class NoPrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
-        if (orderByLastField) {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
+        if (userDefinedSeqComparator != null) {
             throw new IllegalArgumentException(
-                    "Append table does not support order by last field.");
+                    "Append table does not support user defined sequence fields.");
         }
 
         Predicate predicate = projectedPredicate();

@@ -35,8 +35,7 @@ class PaimonSink(
     outputMode: OutputMode,
     options: Options)
   extends Sink
-  with SchemaHelper
-  with PaimonCommand {
+  with SchemaHelper {
 
   override def addBatch(batchId: Long, data: DataFrame): Unit = {
     val saveMode = if (outputMode == OutputMode.Complete()) {

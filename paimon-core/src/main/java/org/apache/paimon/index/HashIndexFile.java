@@ -37,6 +37,10 @@ public class HashIndexFile extends IndexFile {
         super(fileIO, pathFactory);
     }
 
+    public Path path(String fileName) {
+        return pathFactory.toPath(fileName);
+    }
+
     public IntIterator read(String fileName) throws IOException {
         return readInts(fileIO, pathFactory.toPath(fileName));
     }

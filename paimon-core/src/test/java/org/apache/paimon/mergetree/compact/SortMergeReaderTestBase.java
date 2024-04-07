@@ -48,6 +48,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
         return SortMergeReader.createSortMergeReader(
                 new ArrayList<>(readers),
                 KEY_COMPARATOR,
+                null,
                 new ReducerMergeFunctionWrapper(createMergeFunction()),
                 sortEngine);
     }
@@ -129,7 +130,7 @@ public abstract class SortMergeReaderTestBase extends CombiningRecordReaderTestB
             RowType keyType = new RowType(Lists.list(new DataField(0, "f0", new IntType())));
             RowType valueType = new RowType(Lists.list(new DataField(1, "f1", new BigIntType())));
             return new LookupMergeFunction(
-                    new FirstRowMergeFunction(keyType, valueType, false), keyType, valueType);
+                    new FirstRowMergeFunction(keyType, valueType), keyType, valueType);
         }
     }
 }

@@ -64,6 +64,7 @@ public class BulkFormatMapping {
         return castMapping;
     }
 
+    @Nullable
     public Pair<int[], RowType> getPartitionPair() {
         return partitionPair;
     }
@@ -166,15 +167,15 @@ public class BulkFormatMapping {
 
             Pair<int[], RowType> partitionPair = null;
             if (!dataSchema.partitionKeys().isEmpty()) {
-                Pair<int[], int[][]> partitionMappping =
+                Pair<int[], int[][]> partitionMapping =
                         PartitionUtils.constructPartitionMapping(
                                 dataRecordType, dataSchema.partitionKeys(), dataProjection);
                 // is partition fields are not selected, we just do nothing.
-                if (partitionMappping != null) {
-                    dataProjection = partitionMappping.getRight();
+                if (partitionMapping != null) {
+                    dataProjection = partitionMapping.getRight();
                     partitionPair =
                             Pair.of(
-                                    partitionMappping.getLeft(),
+                                    partitionMapping.getLeft(),
                                     dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
                 }
             }

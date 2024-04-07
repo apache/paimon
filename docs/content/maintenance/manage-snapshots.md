@@ -30,7 +30,7 @@ This section will describe the management and behavior related to snapshots.
 
 ## Expire Snapshots
 
-Paimon writers generate one or two [snapshots]({{< ref "concepts/basic-concepts#snapshots" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Paimon also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
+Paimon writers generate one or two [snapshot]({{< ref "concepts/basic-concepts#snapshot" >}}) per commit. Each snapshot may add some new data files or mark some old data files as deleted. However, the marked data files are not truly deleted because Paimon also supports time traveling to an earlier snapshot. They are only deleted when the snapshot expires.
 
 Currently, expiration is automatically performed by Paimon writers when committing new changes. By expiring old snapshots, old data files and metadata files that are no longer used can be deleted to release disk space.
 
@@ -218,7 +218,7 @@ Please note that too short retain time or too small retain number may result in:
   expires, at which point the batch query will read a deleted snapshot.
 - Streaming reading jobs on table files (without the external log system) fail to restart.
   When the job restarts, the snapshot it recorded may have expired. (You can use
-  [Consumer Id]({{< ref "how-to/querying-tables#consumer-id" >}}) to protect streaming reading
+  [Consumer Id]({{< ref "flink/sql-query#consumer-id" >}}) to protect streaming reading
   in a small retain time of snapshot expiration).
 
 By default, paimon will delete expired snapshots synchronously. When there are too 

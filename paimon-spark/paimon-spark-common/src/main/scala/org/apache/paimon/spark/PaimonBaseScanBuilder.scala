@@ -60,18 +60,16 @@ abstract class PaimonBaseScanBuilder(table: Table)
     val visitor = new PartitionPredicateVisitor(table.partitionKeys())
     filters.foreach {
       filter =>
-        try {
-          val predicate = converter.convert(filter)
+        val predicate = converter.convertIgnoreFailure(filter)
+        if (predicate == null) {
+          postScan.append(filter)
+        } else {
           pushable.append((filter, predicate))
-          if (!predicate.visit(visitor)) {
-            postScan.append(filter)
-          } else {
+          if (predicate.visit(visitor)) {
             reserved.append(filter)
-          }
-        } catch {
-          case e: UnsupportedOperationException =>
-            logWarning(e.getMessage)
+          } else {
             postScan.append(filter)
+          }
         }
     }
 

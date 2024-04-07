@@ -18,12 +18,19 @@
 
 package org.apache.paimon.table.source.snapshot;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.fs.Path;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.TraceableFileIO;
 
 import org.junit.jupiter.api.Test;
+
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -58,7 +65,8 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(3).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, timestamp, false, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         assertThat(result.nextSnapshotId()).isEqualTo(3);
@@ -72,7 +80,7 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         SnapshotManager snapshotManager = table.snapshotManager();
         ContinuousFromTimestampStartingScanner scanner =
                 new ContinuousFromTimestampStartingScanner(
-                        snapshotManager, System.currentTimeMillis());
+                        snapshotManager, System.currentTimeMillis(), false, false);
         assertThat(scanner.scan(snapshotReader)).isInstanceOf(StartingScanner.NoSnapshot.class);
     }
 
@@ -92,11 +100,80 @@ public class ContinuousFromTimestampStartingScannerTest extends ScannerTestBase 
         long timestamp = snapshotManager.snapshot(1).timeMillis();
 
         ContinuousFromTimestampStartingScanner scanner =
-                new ContinuousFromTimestampStartingScanner(snapshotManager, timestamp);
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, timestamp, false, false);
         StartingScanner.NextSnapshot result =
                 (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
         // next snapshot
         assertThat(result.nextSnapshotId()).isEqualTo(1);
+
+        write.close();
+        commit.close();
+    }
+
+    @Test
+    public void testScanFromChangelog() throws Exception {
+        Options options = new Options();
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MAX, 2);
+        options.set(CoreOptions.SNAPSHOT_NUM_RETAINED_MIN, 1);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MAX, 20);
+        options.set(CoreOptions.CHANGELOG_NUM_RETAINED_MIN, 10);
+        options.set(CoreOptions.CHANGELOG_PRODUCER, CoreOptions.ChangelogProducer.INPUT);
+        FileStoreTable table =
+                createFileStoreTable(
+                        true,
+                        options,
+                        new Path(
+                                TraceableFileIO.SCHEME
+                                        + "://"
+                                        + tempDir.toString()
+                                        + "/"
+                                        + UUID.randomUUID()));
+        SnapshotManager snapshotManager = table.snapshotManager();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+
+        write.write(rowData(1, 10, 100L));
+        write.write(rowData(1, 20, 200L));
+        write.write(rowData(1, 40, 400L));
+        commit.commit(0, write.prepareCommit(true, 0));
+
+        Thread.sleep(50);
+
+        write.write(rowData(1, 10, 101L));
+        write.write(rowData(1, 30, 300L));
+        write.write(rowDataWithKind(RowKind.DELETE, 1, 40, 400L));
+        commit.commit(1, write.prepareCommit(true, 1));
+
+        // wait for a little while
+        Thread.sleep(50);
+
+        write.write(rowData(1, 10, 102L));
+        write.write(rowData(1, 20, 201L));
+        commit.commit(2, write.prepareCommit(true, 2));
+
+        assertThat(snapshotManager.latestSnapshotId()).isEqualTo(3);
+        assertThat(snapshotManager.earliestLongLivedChangelogId()).isEqualTo(1);
+        assertThat(snapshotManager.earliestSnapshotId()).isEqualTo(2);
+
+        ContinuousFromTimestampStartingScanner scanner =
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, snapshotManager.snapshot(3).timeMillis(), true, true);
+        StartingScanner.NextSnapshot result =
+                (StartingScanner.NextSnapshot) scanner.scan(snapshotReader);
+        assertThat(result.nextSnapshotId()).isEqualTo(3);
+        scanner =
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, snapshotManager.snapshot(2).timeMillis(), true, true);
+
+        assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
+                .isEqualTo(2);
+
+        scanner =
+                new ContinuousFromTimestampStartingScanner(
+                        snapshotManager, snapshotManager.changelog(1).timeMillis(), true, true);
+        assertThat(((StartingScanner.NextSnapshot) scanner.scan(snapshotReader)).nextSnapshotId())
+                .isEqualTo(1);
 
         write.close();
         commit.close();

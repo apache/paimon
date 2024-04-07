@@ -24,10 +24,11 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader.ReaderSupplier;
-import org.apache.paimon.mergetree.compact.MergeFunction;
 import org.apache.paimon.mergetree.compact.MergeFunctionWrapper;
-import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.utils.FieldsComparator;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -39,15 +40,15 @@ public class MergeTreeReaders {
 
     private MergeTreeReaders() {}
 
-    public static RecordReader<KeyValue> readerForMergeTree(
+    public static <T> RecordReader<T> readerForMergeTree(
             List<List<SortedRun>> sections,
-            boolean dropDelete,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
-            MergeFunction<KeyValue> mergeFunction,
+            @Nullable FieldsComparator userDefinedSeqComparator,
+            MergeFunctionWrapper<T> mergeFunctionWrapper,
             MergeSorter mergeSorter)
             throws IOException {
-        List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
+        List<ReaderSupplier<T>> readers = new ArrayList<>();
         for (List<SortedRun> section : sections) {
             readers.add(
                     () ->
@@ -55,20 +56,18 @@ public class MergeTreeReaders {
                                     section,
                                     readerFactory,
                                     userKeyComparator,
-                                    new ReducerMergeFunctionWrapper(mergeFunction),
+                                    userDefinedSeqComparator,
+                                    mergeFunctionWrapper,
                                     mergeSorter));
         }
-        RecordReader<KeyValue> reader = ConcatRecordReader.create(readers);
-        if (dropDelete) {
-            reader = new DropDeleteReader(reader);
-        }
-        return reader;
+        return ConcatRecordReader.create(readers);
     }
 
     public static <T> RecordReader<T> readerForSection(
             List<SortedRun> section,
             KeyValueFileReaderFactory readerFactory,
             Comparator<InternalRow> userKeyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionWrapper<T> mergeFunctionWrapper,
             MergeSorter mergeSorter)
             throws IOException {
@@ -76,10 +75,11 @@ public class MergeTreeReaders {
         for (SortedRun run : section) {
             readers.add(() -> readerForRun(run, readerFactory));
         }
-        return mergeSorter.mergeSort(readers, userKeyComparator, mergeFunctionWrapper);
+        return mergeSorter.mergeSort(
+                readers, userKeyComparator, userDefinedSeqComparator, mergeFunctionWrapper);
     }
 
-    public static RecordReader<KeyValue> readerForRun(
+    private static RecordReader<KeyValue> readerForRun(
             SortedRun run, KeyValueFileReaderFactory readerFactory) throws IOException {
         List<ReaderSupplier<KeyValue>> readers = new ArrayList<>();
         for (DataFileMeta file : run.files()) {

@@ -26,8 +26,6 @@ import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.disk.IOManager;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.table.FileStoreTable;
@@ -40,7 +38,6 @@ import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
-import org.apache.paimon.types.IntType;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.IteratorRecordReader;
@@ -96,9 +93,7 @@ public class SnapshotsTable implements ReadonlyTable {
                             new DataField(9, "total_record_count", new BigIntType(true)),
                             new DataField(10, "delta_record_count", new BigIntType(true)),
                             new DataField(11, "changelog_record_count", new BigIntType(true)),
-                            new DataField(12, "added_file_count", new IntType(true)),
-                            new DataField(13, "delete_file_count", new IntType(true)),
-                            new DataField(14, "watermark", new BigIntType(true))));
+                            new DataField(12, "watermark", new BigIntType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -133,7 +128,7 @@ public class SnapshotsTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new SnapshotsRead(fileIO, dataTable);
+        return new SnapshotsRead(fileIO);
     }
 
     @Override
@@ -151,7 +146,13 @@ public class SnapshotsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new SnapshotsSplit(fileIO, location));
+            long rowCount;
+            try {
+                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return () -> Collections.singletonList(new SnapshotsSplit(rowCount, location));
         }
     }
 
@@ -159,21 +160,17 @@ public class SnapshotsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Path location;
 
-        private SnapshotsSplit(FileIO fileIO, Path location) {
-            this.fileIO = fileIO;
+        private SnapshotsSplit(long rowCount, Path location) {
             this.location = location;
+            this.rowCount = rowCount;
         }
 
         @Override
         public long rowCount() {
-            try {
-                return new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
+            return rowCount;
         }
 
         @Override
@@ -199,11 +196,8 @@ public class SnapshotsTable implements ReadonlyTable {
         private final FileIO fileIO;
         private int[][] projection;
 
-        private final FileStoreTable dataTable;
-
-        public SnapshotsRead(FileIO fileIO, FileStoreTable dataTable) {
+        public SnapshotsRead(FileIO fileIO) {
             this.fileIO = fileIO;
-            this.dataTable = dataTable;
         }
 
         @Override
@@ -230,8 +224,7 @@ public class SnapshotsTable implements ReadonlyTable {
             }
             Path location = ((SnapshotsSplit) split).location;
             Iterator<Snapshot> snapshots = new SnapshotManager(fileIO, location).snapshots();
-            Iterator<InternalRow> rows =
-                    Iterators.transform(snapshots, snapshot -> toRow(snapshot, dataTable));
+            Iterator<InternalRow> rows = Iterators.transform(snapshots, this::toRow);
             if (projection != null) {
                 rows =
                         Iterators.transform(
@@ -240,8 +233,7 @@ public class SnapshotsTable implements ReadonlyTable {
             return new IteratorRecordReader<>(rows);
         }
 
-        private InternalRow toRow(Snapshot snapshot, FileStoreTable dataTable) {
-            FileStoreScan.Plan plan = dataTable.store().newScan().withSnapshot(snapshot).plan();
+        private InternalRow toRow(Snapshot snapshot) {
             return GenericRow.of(
                     snapshot.id(),
                     snapshot.schemaId(),
@@ -258,8 +250,6 @@ public class SnapshotsTable implements ReadonlyTable {
                     snapshot.totalRecordCount(),
                     snapshot.deltaRecordCount(),
                     snapshot.changelogRecordCount(),
-                    plan.files(FileKind.ADD).size(),
-                    plan.files(FileKind.DELETE).size(),
                     snapshot.watermark());
         }
     }

@@ -155,7 +155,10 @@ public class TagAutoCreation {
                     int i = 0;
                     for (List<String> tag : tags.values()) {
                         tagManager.deleteTag(
-                                checkAndGetOneAutoTag(tag), tagDeletion, snapshotManager);
+                                checkAndGetOneAutoTag(tag),
+                                tagDeletion,
+                                snapshotManager,
+                                callbacks);
                         i++;
                         if (i == toDelete) {
                             break;

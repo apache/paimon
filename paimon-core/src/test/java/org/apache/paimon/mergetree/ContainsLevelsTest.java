@@ -23,6 +23,7 @@ import org.apache.paimon.KeyValue;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -62,6 +63,7 @@ import java.util.UUID;
 
 import static org.apache.paimon.CoreOptions.TARGET_FILE_SIZE;
 import static org.apache.paimon.io.DataFileTestUtils.row;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test {@link LookupLevels} for contains. */
@@ -216,7 +218,7 @@ public class ContainsLevelsTest {
         Path path = new Path(tempDir.toUri().toString());
         String identifier = "avro";
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
-        pathFactoryMap.put(identifier, new FileStorePathFactory(path));
+        pathFactoryMap.put(identifier, createNonPartFactory(path));
         return KeyValueFileWriterFactory.builder(
                         FileIOFinder.find(path),
                         0,
@@ -234,11 +236,11 @@ public class ContainsLevelsTest {
                 KeyValueFileReaderFactory.builder(
                         FileIOFinder.find(path),
                         createSchemaManager(path),
-                        0,
+                        createSchemaManager(path).schema(0),
                         keyType,
                         rowType,
                         ignore -> new FlushingFileFormat("avro"),
-                        new FileStorePathFactory(path),
+                        createNonPartFactory(path),
                         new KeyValueFieldsExtractor() {
                             @Override
                             public List<DataField> keyFields(TableSchema schema) {
@@ -251,7 +253,7 @@ public class ContainsLevelsTest {
                             }
                         },
                         new CoreOptions(new HashMap<>()));
-        return builder.build(BinaryRow.EMPTY_ROW, 0);
+        return builder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
     }
 
     private SchemaManager createSchemaManager(Path path) {

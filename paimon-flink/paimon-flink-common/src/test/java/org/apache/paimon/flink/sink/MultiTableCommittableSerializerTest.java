@@ -20,7 +20,7 @@ package org.apache.paimon.flink.sink;
 
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.io.CompactIncrement;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
 import org.apache.paimon.table.sink.CommitMessageSerializer;
@@ -42,10 +42,10 @@ class MultiTableCommittableSerializerTest {
 
     @Test
     public void testFileMetadata() throws IOException {
-        NewFilesIncrement newFilesIncrement = randomNewFilesIncrement();
+        DataIncrement dataIncrement = randomNewFilesIncrement();
         CompactIncrement compactIncrement = randomCompactIncrement();
         CommitMessage commitMessage =
-                new CommitMessageImpl(row(0), 1, newFilesIncrement, compactIncrement);
+                new CommitMessageImpl(row(0), 1, dataIncrement, compactIncrement);
         Committable committable = new Committable(9, Committable.Kind.FILE, commitMessage);
         String database = "database";
         String table = "table";

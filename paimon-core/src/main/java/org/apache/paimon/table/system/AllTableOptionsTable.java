@@ -121,7 +121,13 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         @Override
         public Plan innerPlan() {
-            return () -> Collections.singletonList(new AllTableSplit(fileIO, allTablePaths));
+            return () ->
+                    Collections.singletonList(
+                            new AllTableSplit(
+                                    options(fileIO, allTablePaths).values().stream()
+                                            .flatMap(t -> t.values().stream())
+                                            .reduce(0, (a, b) -> a + b.size(), Integer::sum),
+                                    allTablePaths));
         }
     }
 
@@ -129,19 +135,17 @@ public class AllTableOptionsTable implements ReadonlyTable {
 
         private static final long serialVersionUID = 1L;
 
-        private final FileIO fileIO;
+        private final long rowCount;
         private final Map<String, Map<String, Path>> allTablePaths;
 
-        private AllTableSplit(FileIO fileIO, Map<String, Map<String, Path>> allTablePaths) {
-            this.fileIO = fileIO;
+        private AllTableSplit(long rowCount, Map<String, Map<String, Path>> allTablePaths) {
+            this.rowCount = rowCount;
             this.allTablePaths = allTablePaths;
         }
 
         @Override
         public long rowCount() {
-            return options(fileIO, allTablePaths).values().stream()
-                    .flatMap(t -> t.values().stream())
-                    .reduce(0, (a, b) -> a + b.size(), Integer::sum);
+            return rowCount;
         }
 
         @Override

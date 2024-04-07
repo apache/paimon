@@ -19,7 +19,6 @@
 package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.KeyValue;
 import org.apache.paimon.KeyValueFileStore;
 import org.apache.paimon.data.InternalRow;
@@ -89,7 +88,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
             MergeFunctionFactory<KeyValue> mfFactory =
                     PrimaryKeyTableUtils.createMergeFunctionFactory(tableSchema, extractor);
-            if (options.changelogProducer() == ChangelogProducer.LOOKUP) {
+            if (options.needLookup()) {
                 mfFactory =
                         LookupMergeFunction.wrap(
                                 mfFactory, new RowType(extractor.keyFields(tableSchema)), rowType);
@@ -99,7 +98,7 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                     new KeyValueFileStore(
                             fileIO(),
                             schemaManager(),
-                            tableSchema.id(),
+                            tableSchema,
                             tableSchema.crossPartitionUpdate(),
                             options,
                             tableSchema.logicalPartitionType(),
@@ -117,10 +116,13 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
 
     @Override
     protected SplitGenerator splitGenerator() {
+        CoreOptions options = store().options();
         return new MergeTreeSplitGenerator(
                 store().newKeyComparator(),
-                store().options().splitTargetSize(),
-                store().options().splitOpenFileCost());
+                options.splitTargetSize(),
+                options.splitOpenFileCost(),
+                options.deletionVectorsEnabled(),
+                options.mergeEngine());
     }
 
     @Override
@@ -198,7 +200,8 @@ class PrimaryKeyFileStoreTable extends AbstractFileStoreTable {
                                     ? row.getRowKind()
                                     : rowKindGenerator.generate(row);
                     return kv.replace(record.primaryKey(), KeyValue.UNKNOWN_SEQUENCE, rowKind, row);
-                });
+                },
+                CoreOptions.fromMap(tableSchema.options()).ignoreDelete());
     }
 
     @Override

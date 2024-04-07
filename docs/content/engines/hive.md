@@ -84,60 +84,6 @@ NOTE:
 * If you are using HDFS, make sure that the environment variable `HADOOP_HOME` or `HADOOP_CONF_DIR` is set.
 * With hive cbo, it may lead to some incorrect query results, such as to query `struct` type with `not null` predicate, you can disable the cbo by `set hive.cbo.enable=false;` command.
 
-## Flink SQL: with Paimon Hive Catalog 
-
-By using paimon Hive catalog, you can create, drop, select and insert into paimon tables from Flink. These operations directly affect the corresponding Hive metastore. Tables created in this way can also be accessed directly from Hive.
-
-**Step 1: Prepare Flink Hive Connector Bundled Jar**
-
-See [creating a catalog with Hive metastore]({{< ref "how-to/creating-catalogs#creating-a-catalog-with-hive-metastore" >}}).
-
-**Step 2: Create Test Data with Flink SQL**
-
-Execute the following Flink SQL script in Flink SQL client to define a Paimon Hive catalog and create a table.
-
-```sql
--- Flink SQL CLI
--- Define paimon Hive catalog
-
-CREATE CATALOG my_hive WITH (
-  'type' = 'paimon',
-  'metastore' = 'hive',
-  -- 'uri' = 'thrift://<hive-metastore-host-name>:<port>', default use 'hive.metastore.uris' in HiveConf
-  -- 'hive-conf-dir' = '...', this is recommended in the kerberos environment
-  -- 'hadoop-conf-dir' = '...', this is recommended in the kerberos environment
-  -- 'warehouse' = 'hdfs:///path/to/table/store/warehouse', default use 'hive.metastore.warehouse.dir' in HiveConf
-);
-
--- Use paimon Hive catalog
-
-USE CATALOG my_hive;
-
--- Create a table in paimon Hive catalog (use "default" database by default)
-
-CREATE TABLE test_table (
-  a int,
-  b string
-);
-
--- Insert records into test table
-
-INSERT INTO test_table VALUES (1, 'Table'), (2, 'Store');
-
--- Read records from test table
-
-SELECT * FROM test_table;
-
-/*
-+---+-------+
-| a |     b |
-+---+-------+
-| 1 | Table |
-| 2 | Store |
-+---+-------+
-*/
-```
-
 ## Hive SQL: access Paimon Tables already in Hive metastore
 
 Run the following Hive SQL in Hive CLI to access the created table.
@@ -165,7 +111,10 @@ OK
 */
 
 -- Insert records into test table
--- Note tez engine does not support hive write, only the hive engine is supported.
+-- Limitations:
+-- Only support INSERT INTO, not support INSERT OVERWRITE
+-- It is recommended to write to a non primary key table
+-- Writing to a primary key table may result in a large number of small files
 
 INSERT INTO test_table VALUES (3, 'Paimon');
 

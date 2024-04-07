@@ -19,7 +19,8 @@
 package org.apache.paimon.manifest;
 
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.manifest.ManifestEntry.Identifier;
+import org.apache.paimon.io.RollingFileWriter;
+import org.apache.paimon.manifest.FileEntry.Identifier;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.stats.BinaryTableStats;
@@ -28,6 +29,7 @@ import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.VarCharType;
+import org.apache.paimon.utils.IOUtils;
 import org.apache.paimon.utils.RowDataToObjectArrayConverter;
 
 import org.slf4j.Logger;
@@ -41,7 +43,10 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.function.Supplier;
 import java.util.stream.Collectors;
+
+import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Metadata of a manifest file. */
 public class ManifestFileMeta {
@@ -170,7 +175,7 @@ public class ManifestFileMeta {
             for (ManifestFileMeta manifest : newMetas) {
                 manifestFile.delete(manifest.fileName);
             }
-            throw e;
+            throw new RuntimeException(e);
         }
     }
 
@@ -215,7 +220,7 @@ public class ManifestFileMeta {
         }
 
         Map<Identifier, ManifestEntry> map = new LinkedHashMap<>();
-        ManifestEntry.mergeEntries(manifestFile, candidates, map);
+        FileEntry.mergeEntries(manifestFile, candidates, map);
         if (!map.isEmpty()) {
             List<ManifestFileMeta> merged = manifestFile.write(new ArrayList<>(map.values()));
             result.addAll(merged);
@@ -229,7 +234,8 @@ public class ManifestFileMeta {
             ManifestFile manifestFile,
             long suggestedMetaSize,
             long sizeTrigger,
-            RowType partitionType) {
+            RowType partitionType)
+            throws Exception {
         // 1. should trigger full compaction
 
         List<ManifestFileMeta> base = new ArrayList<>();
@@ -270,7 +276,7 @@ public class ManifestFileMeta {
         // 2.1. try to skip base files by partition filter
 
         Map<Identifier, ManifestEntry> deltaMerged = new LinkedHashMap<>();
-        ManifestEntry.mergeEntries(manifestFile, delta, deltaMerged);
+        FileEntry.mergeEntries(manifestFile, delta, deltaMerged);
 
         List<ManifestFileMeta> result = new ArrayList<>();
         int j = 0;
@@ -311,15 +317,16 @@ public class ManifestFileMeta {
                     }
                 });
 
-        Map<Identifier, ManifestEntry> fullMerged = new LinkedHashMap<>();
+        List<ManifestEntry> mergedEntries = new ArrayList<>();
         for (; j < base.size(); j++) {
             ManifestFileMeta file = base.get(j);
-            ManifestEntry.mergeEntries(manifestFile.read(file.fileName), fullMerged);
             boolean contains = false;
-            for (Identifier identifier : deleteEntries) {
-                if (fullMerged.containsKey(identifier)) {
+            for (ManifestEntry entry : manifestFile.read(file.fileName, file.fileSize)) {
+                checkArgument(entry.kind() == FileKind.ADD);
+                if (deleteEntries.contains(entry.identifier())) {
                     contains = true;
-                    break;
+                } else {
+                    mergedEntries.add(entry);
                 }
             }
             if (contains) {
@@ -327,25 +334,53 @@ public class ManifestFileMeta {
                 j++;
                 break;
             } else {
-                fullMerged.clear();
+                mergedEntries.clear();
                 result.add(file);
             }
         }
 
-        // 2.3. merge base files
+        // 2.3. merge
 
-        ManifestEntry.mergeEntries(manifestFile, base.subList(j, base.size()), fullMerged);
-        ManifestEntry.mergeEntries(deltaMerged.values(), fullMerged);
+        RollingFileWriter<ManifestEntry, ManifestFileMeta> writer =
+                manifestFile.createRollingWriter();
+        Exception exception = null;
+        try {
 
-        // 2.4. write new manifest files
+            // 2.3.1 merge mergedEntries
+            for (ManifestEntry entry : mergedEntries) {
+                writer.write(entry);
+            }
 
-        if (!fullMerged.isEmpty()) {
-            List<ManifestFileMeta> merged =
-                    manifestFile.write(new ArrayList<>(fullMerged.values()));
-            result.addAll(merged);
-            newMetas.addAll(merged);
+            // 2.3.2 merge base files
+            for (Supplier<List<ManifestEntry>> reader :
+                    FileEntry.readManifestEntries(manifestFile, base.subList(j, base.size()))) {
+                for (ManifestEntry entry : reader.get()) {
+                    checkArgument(entry.kind() == FileKind.ADD);
+                    if (!deleteEntries.contains(entry.identifier())) {
+                        writer.write(entry);
+                    }
+                }
+            }
+
+            // 2.3.3 merge deltaMerged
+            for (ManifestEntry entry : deltaMerged.values()) {
+                if (entry.kind() == FileKind.ADD) {
+                    writer.write(entry);
+                }
+            }
+        } catch (Exception e) {
+            exception = e;
+        } finally {
+            if (exception != null) {
+                IOUtils.closeQuietly(writer);
+                throw exception;
+            }
+            writer.close();
         }
 
+        List<ManifestFileMeta> merged = writer.result();
+        result.addAll(merged);
+        newMetas.addAll(merged);
         return Optional.of(result);
     }
 

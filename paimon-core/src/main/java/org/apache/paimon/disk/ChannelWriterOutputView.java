@@ -42,6 +42,7 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
 
     private long numBytes;
     private long numCompressedBytes;
+    private long writeBytes;
 
     public ChannelWriterOutputView(
             BufferFileWriter writer,
@@ -64,9 +65,18 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
             int currentPositionInSegment = getCurrentPositionInSegment();
             writeCompressed(currentSegment, currentPositionInSegment);
             clear();
+            this.writeBytes = writer.getSize();
             this.writer.close();
         }
         return -1;
+    }
+
+    public void closeAndDelete() throws IOException {
+        try {
+            close();
+        } finally {
+            writer.deleteChannel();
+        }
     }
 
     @Override
@@ -91,6 +101,10 @@ public final class ChannelWriterOutputView extends AbstractPagedOutputView {
 
     public long getNumCompressedBytes() {
         return numCompressedBytes;
+    }
+
+    public long getWriteBytes() {
+        return writeBytes;
     }
 
     public int getBlockCount() {

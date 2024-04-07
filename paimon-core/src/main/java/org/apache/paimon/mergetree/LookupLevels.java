@@ -28,6 +28,7 @@ import org.apache.paimon.lookup.LookupStoreReader;
 import org.apache.paimon.lookup.LookupStoreWriter;
 import org.apache.paimon.memory.MemorySegment;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.reader.FileRecordIterator;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.types.RowKind;
 import org.apache.paimon.types.RowType;
@@ -47,6 +48,7 @@ import java.io.File;
 import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.TreeSet;
 import java.util.function.Function;
@@ -54,6 +56,9 @@ import java.util.function.Supplier;
 
 import static org.apache.paimon.mergetree.LookupUtils.fileKibiBytes;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.VarLengthIntUtils.MAX_VAR_LONG_SIZE;
+import static org.apache.paimon.utils.VarLengthIntUtils.decodeLong;
+import static org.apache.paimon.utils.VarLengthIntUtils.encodeLong;
 
 /** Provide lookup by key. */
 public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
@@ -142,7 +147,8 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
             return null;
         }
 
-        return valueProcessor.readFromDisk(key, lookupFile.remoteFile().level(), valueBytes);
+        return valueProcessor.readFromDisk(
+                key, lookupFile.remoteFile().level(), valueBytes, file.fileName());
     }
 
     private int fileWeigh(String file, LookupFile lookupFile) {
@@ -168,15 +174,28 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
                 lookupStoreFactory.createWriter(localFile, bfGenerator.apply(file.rowCount()));
         LookupStoreFactory.Context context;
         try (RecordReader<KeyValue> reader = fileReaderFactory.apply(file)) {
-            RecordReader.RecordIterator<KeyValue> batch;
             KeyValue kv;
-            while ((batch = reader.readBatch()) != null) {
-                while ((kv = batch.next()) != null) {
-                    byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
-                    byte[] valueBytes = valueProcessor.persistToDisk(kv);
-                    kvWriter.put(keyBytes, valueBytes);
+            if (valueProcessor.withPosition()) {
+                FileRecordIterator<KeyValue> batch;
+                while ((batch = (FileRecordIterator<KeyValue>) reader.readBatch()) != null) {
+                    while ((kv = batch.next()) != null) {
+                        byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
+                        byte[] valueBytes =
+                                valueProcessor.persistToDisk(kv, batch.returnedPosition());
+                        kvWriter.put(keyBytes, valueBytes);
+                    }
+                    batch.releaseBatch();
                 }
-                batch.releaseBatch();
+            } else {
+                RecordReader.RecordIterator<KeyValue> batch;
+                while ((batch = reader.readBatch()) != null) {
+                    while ((kv = batch.next()) != null) {
+                        byte[] keyBytes = keySerializer.serializeToBytes(kv.key());
+                        byte[] valueBytes = valueProcessor.persistToDisk(kv);
+                        kvWriter.put(keyBytes, valueBytes);
+                    }
+                    batch.releaseBatch();
+                }
             }
         } catch (IOException e) {
             FileIOUtils.deleteFileOrDirectory(localFile);
@@ -228,9 +247,15 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
     /** Processor to process value. */
     public interface ValueProcessor<T> {
 
+        boolean withPosition();
+
         byte[] persistToDisk(KeyValue kv);
 
-        T readFromDisk(InternalRow key, int level, byte[] valueBytes);
+        default byte[] persistToDisk(KeyValue kv, long rowPosition) {
+            throw new UnsupportedOperationException();
+        }
+
+        T readFromDisk(InternalRow key, int level, byte[] valueBytes, String fileName);
     }
 
     /** A {@link ValueProcessor} to return {@link KeyValue}. */
@@ -240,6 +265,11 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
 
         public KeyValueProcessor(RowType valueType) {
             this.valueSerializer = new RowCompactedSerializer(valueType);
+        }
+
+        @Override
+        public boolean withPosition() {
+            return false;
         }
 
         @Override
@@ -254,7 +284,7 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         }
 
         @Override
-        public KeyValue readFromDisk(InternalRow key, int level, byte[] bytes) {
+        public KeyValue readFromDisk(InternalRow key, int level, byte[] bytes, String fileName) {
             InternalRow value = valueSerializer.deserialize(bytes);
             long sequenceNumber = MemorySegment.wrap(bytes).getLong(bytes.length - 9);
             RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
@@ -268,13 +298,102 @@ public class LookupLevels<T> implements Levels.DropFileCallback, Closeable {
         private static final byte[] EMPTY_BYTES = new byte[0];
 
         @Override
+        public boolean withPosition() {
+            return false;
+        }
+
+        @Override
         public byte[] persistToDisk(KeyValue kv) {
             return EMPTY_BYTES;
         }
 
         @Override
-        public Boolean readFromDisk(InternalRow key, int level, byte[] bytes) {
+        public Boolean readFromDisk(InternalRow key, int level, byte[] bytes, String fileName) {
             return Boolean.TRUE;
+        }
+    }
+
+    /** A {@link ValueProcessor} to return {@link PositionedKeyValue}. */
+    public static class PositionedKeyValueProcessor implements ValueProcessor<PositionedKeyValue> {
+        private final boolean persistValue;
+        private final RowCompactedSerializer valueSerializer;
+
+        public PositionedKeyValueProcessor(RowType valueType, boolean persistValue) {
+            this.persistValue = persistValue;
+            this.valueSerializer = persistValue ? new RowCompactedSerializer(valueType) : null;
+        }
+
+        @Override
+        public boolean withPosition() {
+            return true;
+        }
+
+        @Override
+        public byte[] persistToDisk(KeyValue kv) {
+            throw new UnsupportedOperationException();
+        }
+
+        @Override
+        public byte[] persistToDisk(KeyValue kv, long rowPosition) {
+            if (persistValue) {
+                byte[] vBytes = valueSerializer.serializeToBytes(kv.value());
+                byte[] bytes = new byte[vBytes.length + 8 + 8 + 1];
+                MemorySegment segment = MemorySegment.wrap(bytes);
+                segment.put(0, vBytes);
+                segment.putLong(bytes.length - 17, rowPosition);
+                segment.putLong(bytes.length - 9, kv.sequenceNumber());
+                segment.put(bytes.length - 1, kv.valueKind().toByteValue());
+                return bytes;
+            } else {
+                byte[] bytes = new byte[MAX_VAR_LONG_SIZE];
+                int len = encodeLong(bytes, rowPosition);
+                return Arrays.copyOf(bytes, len);
+            }
+        }
+
+        @Override
+        public PositionedKeyValue readFromDisk(
+                InternalRow key, int level, byte[] bytes, String fileName) {
+            if (persistValue) {
+                InternalRow value = valueSerializer.deserialize(bytes);
+                MemorySegment segment = MemorySegment.wrap(bytes);
+                long rowPosition = segment.getLong(bytes.length - 17);
+                long sequenceNumber = segment.getLong(bytes.length - 9);
+                RowKind rowKind = RowKind.fromByteValue(bytes[bytes.length - 1]);
+                return new PositionedKeyValue(
+                        new KeyValue().replace(key, sequenceNumber, rowKind, value).setLevel(level),
+                        fileName,
+                        rowPosition);
+            } else {
+                long rowPosition = decodeLong(bytes, 0);
+                return new PositionedKeyValue(null, fileName, rowPosition);
+            }
+        }
+    }
+
+    /** {@link KeyValue} with file name and row position for DeletionVector. */
+    public static class PositionedKeyValue {
+        private final @Nullable KeyValue keyValue;
+        private final String fileName;
+        private final long rowPosition;
+
+        public PositionedKeyValue(@Nullable KeyValue keyValue, String fileName, long rowPosition) {
+            this.keyValue = keyValue;
+            this.fileName = fileName;
+            this.rowPosition = rowPosition;
+        }
+
+        public String fileName() {
+            return fileName;
+        }
+
+        public long rowPosition() {
+            return rowPosition;
+        }
+
+        @Nullable
+        public KeyValue keyValue() {
+            return keyValue;
         }
     }
 }

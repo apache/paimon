@@ -22,10 +22,12 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.deletionvectors.DeletionVectorsIndexFile;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.manifest.IndexManifestEntry;
 import org.apache.paimon.manifest.IndexManifestFile;
 import org.apache.paimon.utils.IntIterator;
 import org.apache.paimon.utils.Pair;
+import org.apache.paimon.utils.PathFactory;
 import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
@@ -43,16 +45,19 @@ import static org.apache.paimon.index.HashIndexFile.HASH_INDEX;
 public class IndexFileHandler {
 
     private final SnapshotManager snapshotManager;
+    private final PathFactory pathFactory;
     private final IndexManifestFile indexManifestFile;
     private final HashIndexFile hashIndex;
     private final DeletionVectorsIndexFile deletionVectorsIndex;
 
     public IndexFileHandler(
             SnapshotManager snapshotManager,
+            PathFactory pathFactory,
             IndexManifestFile indexManifestFile,
             HashIndexFile hashIndex,
             DeletionVectorsIndexFile deletionVectorsIndex) {
         this.snapshotManager = snapshotManager;
+        this.pathFactory = pathFactory;
         this.indexManifestFile = indexManifestFile;
         this.hashIndex = hashIndex;
         this.deletionVectorsIndex = deletionVectorsIndex;
@@ -100,6 +105,10 @@ public class IndexFileHandler {
         }
 
         return result;
+    }
+
+    public Path filePath(IndexFileMeta file) {
+        return pathFactory.toPath(file.fileName());
     }
 
     public List<Integer> readHashIndexList(IndexFileMeta file) {

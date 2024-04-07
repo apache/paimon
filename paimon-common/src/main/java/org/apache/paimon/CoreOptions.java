@@ -24,10 +24,10 @@ import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.options.ConfigOption;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
-import org.apache.paimon.options.OptionsUtils;
 import org.apache.paimon.options.description.DescribedEnum;
 import org.apache.paimon.options.description.Description;
 import org.apache.paimon.options.description.InlineElement;
@@ -107,20 +107,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(FileFormatType.ORC)
                     .withDescription(
                             "Specify the message format of data files, currently orc, parquet and avro are supported.");
-
-    public static final ConfigOption<String> ORC_BLOOM_FILTER_COLUMNS =
-            key("orc.bloom.filter.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "A comma-separated list of columns for which to create a bloom filter when writing.");
-
-    public static final ConfigOption<Double> ORC_BLOOM_FILTER_FPP =
-            key("orc.bloom.filter.fpp")
-                    .doubleType()
-                    .defaultValue(0.05)
-                    .withDescription(
-                            "Define the default false positive probability for bloom filters.");
 
     public static final ConfigOption<Map<String, String>> FILE_COMPRESSION_PER_LEVEL =
             key("file.compression.per.level")
@@ -205,6 +191,26 @@ public class CoreOptions implements Serializable {
                     .defaultValue(Duration.ofHours(1))
                     .withDescription("The maximum time of completed snapshots to retain.");
 
+    public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MIN =
+            key("changelog.num-retained.min")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The minimum number of completed changelog to retain. Should be greater than or equal to 1.");
+
+    public static final ConfigOption<Integer> CHANGELOG_NUM_RETAINED_MAX =
+            key("changelog.num-retained.max")
+                    .intType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "The maximum number of completed changelog to retain. Should be greater than or equal to the minimum number.");
+
+    public static final ConfigOption<Duration> CHANGELOG_TIME_RETAINED =
+            key("changelog.time-retained")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("The maximum time of completed changelog to retain.");
+
     public static final ConfigOption<ExpireExecutionMode> SNAPSHOT_EXPIRE_EXECUTION_MODE =
             key("snapshot.expire.execution-mode")
                     .enumType(ExpireExecutionMode.class)
@@ -248,23 +254,15 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MergeEngine.DEDUPLICATE)
                     .withDescription("Specify the merge engine for table with primary key.");
 
-    public static final ConfigOption<Boolean> DEDUPLICATE_IGNORE_DELETE =
-            key("deduplicate.ignore-delete")
+    public static final ConfigOption<Boolean> IGNORE_DELETE =
+            key("ignore-delete")
                     .booleanType()
                     .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in deduplicate mode.");
-
-    public static final ConfigOption<Boolean> PARTIAL_UPDATE_IGNORE_DELETE =
-            key("partial-update.ignore-delete")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in partial-update mode.");
-
-    public static final ConfigOption<Boolean> FIRST_ROW_IGNORE_DELETE =
-            key("first-row.ignore-delete")
-                    .booleanType()
-                    .defaultValue(false)
-                    .withDescription("Whether to ignore delete records in first-row mode.");
+                    .withDeprecatedKeys(
+                            "first-row.ignore-delete",
+                            "deduplicate.ignore-delete",
+                            "partial-update.ignore-delete")
+                    .withDescription("Whether to ignore delete records.");
 
     public static final ConfigOption<SortEngine> SORT_ENGINE =
             key("sort-engine")
@@ -322,6 +320,14 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("256 mb"))
                     .withDescription(
                             "Amount of data to build up in memory before converting to a sorted on-disk file.");
+
+    @Documentation.OverrideDefault("infinite")
+    public static final ConfigOption<MemorySize> WRITE_BUFFER_MAX_DISK_SIZE =
+            key("write-buffer-spill.max-disk-size")
+                    .memoryType()
+                    .defaultValue(MemorySize.MAX_VALUE)
+                    .withDescription(
+                            "The max disk to use for write buffer spill. This only work when the write buffer spill is enabled");
 
     public static final ConfigOption<Boolean> WRITE_BUFFER_SPILLABLE =
             key("write-buffer-spillable")
@@ -485,26 +491,6 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "The field that generates the row kind for primary key table,"
                                     + " the row kind determines which data is '+I', '-U', '+U' or '-D'.");
-
-    public static final ConfigOption<String> SEQUENCE_AUTO_PADDING =
-            key("sequence.auto-padding")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription(
-                            Description.builder()
-                                    .text(
-                                            "Specify the way of padding precision, if the provided sequence field is used to indicate \"time\" but doesn't meet the precise.")
-                                    .list(
-                                            text("You can specific:"),
-                                            text(
-                                                    "1. \"row-kind-flag\": Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-                                            text(
-                                                    "2. \"second-to-micro\": Pads the sequence field that indicates time with precision of seconds to micro-second."),
-                                            text(
-                                                    "3. \"millis-to-micro\": Pads the sequence field that indicates time with precision of milli-second to micro-second."),
-                                            text(
-                                                    "4. Composite pattern: for example, \"second-to-micro,row-kind-flag\"."))
-                                    .build());
 
     public static final ConfigOption<StartupMode> SCAN_MODE =
             key("scan.mode")
@@ -765,12 +751,6 @@ public class CoreOptions implements Serializable {
                     .defaultValue(1024)
                     .withDescription("Read batch size for orc and parquet.");
 
-    public static final ConfigOption<Integer> ORC_WRITE_BATCH_SIZE =
-            key("orc.write.batch-size")
-                    .intType()
-                    .defaultValue(1024)
-                    .withDescription("write batch size for orc.");
-
     public static final ConfigOption<String> CONSUMER_ID =
             key("consumer-id")
                     .stringType()
@@ -1022,22 +1002,6 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("Turn off the dictionary encoding for all fields in parquet.");
 
-    public static final ConfigOption<Integer> ORC_COLUMN_ENCODING_DIRECT =
-            key("orc.column.encoding.direct")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "Comma-separated list of fields for which dictionary encoding is to be skipped in orc.");
-
-    public static final ConfigOption<Integer> ORC_DICTIONARY_KEY_THRESHOLD =
-            key("orc.dictionary.key.threshold")
-                    .intType()
-                    .noDefaultValue()
-                    .withDescription(
-                            "If the number of distinct keys in a dictionary is greater than this "
-                                    + "fraction of the total number of non-null rows, turn off "
-                                    + "dictionary encoding in orc.  Use 1 to always use dictionary encoding.");
-
     public static final ConfigOption<String> SINK_WATERMARK_TIME_ZONE =
             key("sink.watermark-time-zone")
                     .stringType()
@@ -1089,6 +1053,35 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.ofMebiBytes(10))
                     .withDescription("The threshold for read file async.");
 
+    public static final ConfigOption<Boolean> COMMIT_FORCE_CREATE_SNAPSHOT =
+            key("commit.force-create-snapshot")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription("Whether to force create snapshot on commit.");
+
+    public static final ConfigOption<Boolean> DELETION_VECTORS_ENABLED =
+            key("deletion-vectors.enabled")
+                    .booleanType()
+                    .defaultValue(false)
+                    .withDescription(
+                            "Whether to enable deletion vectors mode. In this mode, index files containing deletion"
+                                    + " vectors are generated when data is written, which marks the data for deletion."
+                                    + " During read operations, by applying these index files, merging can be avoided.");
+    public static final ConfigOption<RangeStrategy> SORT_RANG_STRATEGY =
+            key("sort-compaction.range-strategy")
+                    .enumType(RangeStrategy.class)
+                    .defaultValue(RangeStrategy.QUANTITY)
+                    .withDescription(
+                            "The range strategy of sort compaction, the default value is quantity.\n"
+                                    + "If the data size allocated for the sorting task is uneven,which may lead to performance bottlenecks, "
+                                    + "the config can be set to size.");
+
+    public static final ConfigOption<Integer> SORT_COMPACTION_SAMPLE_MAGNIFICATION =
+            key("sort-compaction.local-sample.magnification")
+                    .intType()
+                    .defaultValue(1000)
+                    .withDescription(
+                            "The magnification of local sample for sort-compaction.The size of local sample is sink parallelism * magnification.");
     private final Options options;
 
     public CoreOptions(Map<String, String> options) {
@@ -1153,6 +1146,14 @@ public class CoreOptions implements Serializable {
 
     public String partitionDefaultName() {
         return options.get(PARTITION_DEFAULT_NAME);
+    }
+
+    public boolean sortBySize() {
+        return options.get(SORT_RANG_STRATEGY) == RangeStrategy.SIZE;
+    }
+
+    public Integer getLocalSampleMagnification() {
+        return options.get(SORT_COMPACTION_SAMPLE_MAGNIFICATION);
     }
 
     public static FileFormat createFileFormat(
@@ -1235,6 +1236,27 @@ public class CoreOptions implements Serializable {
         return options.get(SNAPSHOT_TIME_RETAINED);
     }
 
+    public int changelogNumRetainMin() {
+        return options.getOptional(CHANGELOG_NUM_RETAINED_MIN)
+                .orElse(options.get(SNAPSHOT_NUM_RETAINED_MIN));
+    }
+
+    public int changelogNumRetainMax() {
+        return options.getOptional(CHANGELOG_NUM_RETAINED_MAX)
+                .orElse(options.get(SNAPSHOT_NUM_RETAINED_MAX));
+    }
+
+    public Duration changelogTimeRetain() {
+        return options.getOptional(CHANGELOG_TIME_RETAINED)
+                .orElse(options.get(SNAPSHOT_TIME_RETAINED));
+    }
+
+    public boolean changelogLifecycleDecoupled() {
+        return changelogNumRetainMax() > snapshotNumRetainMax()
+                || changelogTimeRetain().compareTo(snapshotTimeRetain()) > 0
+                || changelogNumRetainMin() > snapshotNumRetainMin();
+    }
+
     public ExpireExecutionMode snapshotExpireExecutionMode() {
         return options.get(SNAPSHOT_EXPIRE_EXECUTION_MODE);
     }
@@ -1253,6 +1275,10 @@ public class CoreOptions implements Serializable {
 
     public MergeEngine mergeEngine() {
         return options.get(MERGE_ENGINE);
+    }
+
+    public boolean ignoreDelete() {
+        return options.get(IGNORE_DELETE);
     }
 
     public SortEngine sortEngine() {
@@ -1283,6 +1309,10 @@ public class CoreOptions implements Serializable {
     public boolean writeBufferSpillable(boolean usingObjectStore, boolean isStreaming) {
         // if not streaming mode, we turn spillable on by default.
         return options.getOptional(WRITE_BUFFER_SPILLABLE).orElse(usingObjectStore || !isStreaming);
+    }
+
+    public MemorySize writeBufferSpillDiskSize() {
+        return options.get(WRITE_BUFFER_MAX_DISK_SIZE);
     }
 
     public boolean useWriteBufferForAppend() {
@@ -1391,6 +1421,16 @@ public class CoreOptions implements Serializable {
         return options.get(CHANGELOG_PRODUCER);
     }
 
+    public boolean needLookup() {
+        return lookupStrategy().needLookup;
+    }
+
+    public LookupStrategy lookupStrategy() {
+        return LookupStrategy.from(
+                options.get(CHANGELOG_PRODUCER).equals(ChangelogProducer.LOOKUP),
+                deletionVectorsEnabled());
+    }
+
     public boolean changelogRowDeduplicate() {
         return options.get(CHANGELOG_PRODUCER_ROW_DEDUPLICATE);
     }
@@ -1486,20 +1526,14 @@ public class CoreOptions implements Serializable {
         return options.get(DYNAMIC_BUCKET_ASSIGNER_PARALLELISM);
     }
 
-    public Optional<String> sequenceField() {
-        return options.getOptional(SEQUENCE_FIELD);
+    public List<String> sequenceField() {
+        return options.getOptional(SEQUENCE_FIELD)
+                .map(s -> Arrays.asList(s.split(",")))
+                .orElse(Collections.emptyList());
     }
 
     public Optional<String> rowkindField() {
         return options.getOptional(ROWKIND_FIELD);
-    }
-
-    public List<String> sequenceAutoPadding() {
-        String padding = options.get(SEQUENCE_AUTO_PADDING);
-        if (padding == null) {
-            return Collections.emptyList();
-        }
-        return Arrays.asList(padding.split(","));
     }
 
     public boolean writeOnly() {
@@ -1591,6 +1625,10 @@ public class CoreOptions implements Serializable {
         return options.get(SINK_WATERMARK_TIME_ZONE);
     }
 
+    public boolean forceCreatingSnapshot() {
+        return options.get(COMMIT_FORCE_CREATE_SNAPSHOT);
+    }
+
     public Map<String, String> getFieldDefaultValues() {
         Map<String, String> defaultValues = new HashMap<>();
         String fieldPrefix = FIELDS_PREFIX + ".";
@@ -1628,10 +1666,6 @@ public class CoreOptions implements Serializable {
         return result;
     }
 
-    public int orcWriteBatch() {
-        return options.getInteger(ORC_WRITE_BATCH_SIZE.key(), ORC_WRITE_BATCH_SIZE.defaultValue());
-    }
-
     public boolean localMergeEnabled() {
         return options.get(LOCAL_MERGE_BUFFER_SIZE) != null;
     }
@@ -1650,6 +1684,10 @@ public class CoreOptions implements Serializable {
 
     public int varTypeSize() {
         return options.get(ZORDER_VAR_LENGTH_CONTRIBUTION);
+    }
+
+    public boolean deletionVectorsEnabled() {
+        return options.get(DELETION_VECTORS_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */
@@ -2095,41 +2133,6 @@ public class CoreOptions implements Serializable {
         }
     }
 
-    /** Specifies the way of making up time precision for sequence field. */
-    public enum SequenceAutoPadding implements DescribedEnum {
-        ROW_KIND_FLAG(
-                "row-kind-flag",
-                "Pads a bit flag to indicate whether it is retract (0) or add (1) message."),
-        SECOND_TO_MICRO(
-                "second-to-micro",
-                "Pads the sequence field that indicates time with precision of seconds to micro-second."),
-        MILLIS_TO_MICRO(
-                "millis-to-micro",
-                "Pads the sequence field that indicates time with precision of milli-second to micro-second.");
-
-        private final String value;
-        private final String description;
-
-        SequenceAutoPadding(String value, String description) {
-            this.value = value;
-            this.description = description;
-        }
-
-        @Override
-        public String toString() {
-            return value;
-        }
-
-        @Override
-        public InlineElement getDescription() {
-            return text(description);
-        }
-
-        public static SequenceAutoPadding fromString(String s) {
-            return OptionsUtils.convertToEnum(s, SequenceAutoPadding.class);
-        }
-    }
-
     /** The mode for tag creation. */
     public enum TagCreationMode implements DescribedEnum {
         NONE("none", "No automatically created tags."),
@@ -2236,6 +2239,12 @@ public class CoreOptions implements Serializable {
         public InlineElement getDescription() {
             return text(description);
         }
+    }
+
+    /** Specifies range strategy. */
+    public enum RangeStrategy {
+        SIZE,
+        QUANTITY
     }
 
     /** Specifies the log consistency mode for table. */

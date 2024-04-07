@@ -135,8 +135,6 @@ public class MergeIntoAction extends TableActionBase {
                             table.getClass().getName()));
         }
 
-        changeIgnoreMergeEngine();
-
         // init primaryKeys of target table
         primaryKeys = ((FileStoreTable) table).schema().primaryKeys();
         if (primaryKeys.isEmpty()) {

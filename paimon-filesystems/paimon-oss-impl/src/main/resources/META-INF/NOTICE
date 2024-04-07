@@ -85,3 +85,8 @@ This project bundles the following dependencies under BSD License (https://opens
 You find it under licenses/LICENSE.stax2api.
 
 - org.codehaus.woodstox:stax2-api:4.2.1 (https://github.com/FasterXML/stax2-api/tree/stax2-api-4.2.1)
+
+This project bundles the following dependencies under the CDDL 1.1 license.
+You find it under licenses/LICENSE.jaxb.
+
+- javax.xml.bind:jaxb-api:2.3.1

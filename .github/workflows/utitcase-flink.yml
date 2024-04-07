@@ -51,6 +51,11 @@ jobs:
           . .github/workflows/utils.sh
           jvm_timezone=$(random_timezone)
           echo "JVM timezone is set to $jvm_timezone"
-          mvn -T 1C -B clean install -pl 'org.apache.paimon:paimon-flink-common' -Duser.timezone=$jvm_timezone
+          test_modules=""
+          for suffix in 1.15 1.16 1.17 1.18 1.19 common; do
+            test_modules+="org.apache.paimon:paimon-flink-${suffix}," 
+          done
+          test_modules="${test_modules%,}"
+          mvn -T 1C -B clean install -pl "${test_modules}" -Duser.timezone=$jvm_timezone
         env:
           MAVEN_OPTS: -Xmx4096m

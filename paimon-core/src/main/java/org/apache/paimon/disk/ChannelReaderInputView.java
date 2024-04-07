@@ -21,9 +21,12 @@ package org.apache.paimon.disk;
 import org.apache.paimon.compression.BlockCompressionFactory;
 import org.apache.paimon.compression.BlockDecompressor;
 import org.apache.paimon.data.AbstractPagedInputView;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.serializer.BinaryRowSerializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.memory.Buffer;
 import org.apache.paimon.memory.MemorySegment;
+import org.apache.paimon.utils.MutableObjectIterator;
 
 import java.io.EOFException;
 import java.io.IOException;
@@ -99,5 +102,35 @@ public class ChannelReaderInputView extends AbstractPagedInputView {
 
     public FileIOChannel getChannel() {
         return reader;
+    }
+
+    public MutableObjectIterator<BinaryRow> createBinaryRowIterator(
+            BinaryRowSerializer serializer) {
+        return new BinaryRowChannelInputViewIterator(serializer);
+    }
+
+    private class BinaryRowChannelInputViewIterator implements MutableObjectIterator<BinaryRow> {
+
+        protected final BinaryRowSerializer serializer;
+
+        public BinaryRowChannelInputViewIterator(BinaryRowSerializer serializer) {
+            this.serializer = serializer;
+        }
+
+        @Override
+        public BinaryRow next(BinaryRow reuse) throws IOException {
+            try {
+                return this.serializer.deserializeFromPages(reuse, ChannelReaderInputView.this);
+            } catch (EOFException e) {
+                close();
+                return null;
+            }
+        }
+
+        @Override
+        public BinaryRow next() throws IOException {
+            throw new UnsupportedOperationException(
+                    "This method is disabled due to performance issue!");
+        }
     }
 }

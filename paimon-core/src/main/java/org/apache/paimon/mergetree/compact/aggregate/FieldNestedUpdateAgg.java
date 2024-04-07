@@ -18,7 +18,6 @@
 
 package org.apache.paimon.mergetree.compact.aggregate;
 
-import org.apache.paimon.codegen.CodeGenUtils;
 import org.apache.paimon.codegen.Projection;
 import org.apache.paimon.codegen.RecordEqualiser;
 import org.apache.paimon.data.BinaryRow;
@@ -35,6 +34,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import static org.apache.paimon.codegen.CodeGenUtils.newProjection;
+import static org.apache.paimon.codegen.CodeGenUtils.newRecordEqualiser;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /**
@@ -56,12 +57,9 @@ public class FieldNestedUpdateAgg extends FieldAggregator {
         this.nestedFields = nestedType.getFieldCount();
         if (nestedKey.isEmpty()) {
             this.keyProjection = null;
-            this.elementEqualiser =
-                    CodeGenUtils.generateRecordEqualiser(
-                                    nestedType.getFieldTypes(), "elementEqualiser")
-                            .newInstance(FieldNestedUpdateAgg.class.getClassLoader());
+            this.elementEqualiser = newRecordEqualiser(nestedType.getFieldTypes());
         } else {
-            this.keyProjection = CodeGenUtils.newProjection(nestedType, nestedKey);
+            this.keyProjection = newProjection(nestedType, nestedKey);
             this.elementEqualiser = null;
         }
     }

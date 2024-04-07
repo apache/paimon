@@ -192,7 +192,7 @@ public class ContinuousFileSplitEnumerator
     // context.callAsync will invoke this. This method runs in workerExecutorThreadPool in
     // parallelism.
     protected synchronized Optional<PlanWithNextSnapshotId> scanNextSnapshot() {
-        if (splitAssigner.remainingSplits().size() >= splitMaxNum) {
+        if (splitAssigner.numberOfRemainingSplits() >= splitMaxNum) {
             return Optional.empty();
         }
         TableScan.Plan plan = scan.plan();
@@ -245,9 +245,10 @@ public class ContinuousFileSplitEnumerator
         // create assignment
         Map<Integer, List<FileStoreSourceSplit>> assignment = new HashMap<>();
         Iterator<Integer> readersAwait = readersAwaitingSplit.iterator();
+        Set<Integer> subtaskIds = context.registeredReaders().keySet();
         while (readersAwait.hasNext()) {
             Integer task = readersAwait.next();
-            if (!context.registeredReaders().containsKey(task)) {
+            if (!subtaskIds.contains(task)) {
                 readersAwait.remove();
                 continue;
             }

@@ -34,8 +34,9 @@ import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumerator
 import org.apache.flink.core.testutils.ManuallyTriggeredScheduledExecutorService;
 import org.apache.flink.runtime.source.coordinator.ExecutorNotifier;
 import org.assertj.core.api.Assertions;
-import org.jetbrains.annotations.Nullable;
 import org.junit.jupiter.api.Test;
+
+import javax.annotation.Nullable;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -791,6 +792,13 @@ public class ContinuousFileSplitEnumeratorTest extends FileSplitEnumeratorTestBa
         context.triggerAllActions();
 
         Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(16 * 2);
+        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(16 * 2);
+
+        enumerator.handleSplitRequest(0, "test");
+        enumerator.handleSplitRequest(1, "test");
+
+        Assertions.assertThat(enumerator.splitAssigner.remainingSplits().size()).isEqualTo(15 * 2);
+        Assertions.assertThat(enumerator.splitAssigner.numberOfRemainingSplits()).isEqualTo(15 * 2);
     }
 
     private void triggerCheckpointAndComplete(

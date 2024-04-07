@@ -18,6 +18,7 @@
 
 package org.apache.paimon.deletionvectors;
 
+import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
@@ -29,6 +30,8 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+
+import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
 
 /** Maintainer of deletionVectors index. */
 public class DeletionVectorsMaintainer {
@@ -47,16 +50,12 @@ public class DeletionVectorsMaintainer {
                 snapshotId == null
                         ? null
                         : fileHandler
-                                .scan(
-                                        snapshotId,
-                                        DeletionVectorsIndexFile.DELETION_VECTORS_INDEX,
-                                        partition,
-                                        bucket)
+                                .scan(snapshotId, DELETION_VECTORS_INDEX, partition, bucket)
                                 .orElse(null);
         this.deletionVectors =
                 indexFile == null
                         ? new HashMap<>()
-                        : indexFileHandler.readAllDeletionVectors(indexFile);
+                        : new HashMap<>(indexFileHandler.readAllDeletionVectors(indexFile));
         this.modified = false;
     }
 
@@ -115,12 +114,17 @@ public class DeletionVectorsMaintainer {
         return Optional.ofNullable(deletionVectors.get(fileName));
     }
 
+    @VisibleForTesting
+    public Map<String, DeletionVector> deletionVectors() {
+        return deletionVectors;
+    }
+
     /** Factory to restore {@link DeletionVectorsMaintainer}. */
-    public static class DeletionVectorsMaintainerFactory {
+    public static class Factory {
 
         private final IndexFileHandler handler;
 
-        public DeletionVectorsMaintainerFactory(IndexFileHandler handler) {
+        public Factory(IndexFileHandler handler) {
             this.handler = handler;
         }
 

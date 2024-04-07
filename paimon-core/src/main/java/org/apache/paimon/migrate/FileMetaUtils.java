@@ -29,7 +29,7 @@ import org.apache.paimon.fs.FileStatus;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.CompactIncrement;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.NewFilesIncrement;
+import org.apache.paimon.io.DataIncrement;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
@@ -86,7 +86,7 @@ public class FileMetaUtils {
         return new CommitMessageImpl(
                 partition,
                 0,
-                new NewFilesIncrement(dataFileMetas, Collections.emptyList()),
+                new DataIncrement(dataFileMetas, Collections.emptyList(), Collections.emptyList()),
                 new CompactIncrement(
                         Collections.emptyList(), Collections.emptyList(), Collections.emptyList()));
     }

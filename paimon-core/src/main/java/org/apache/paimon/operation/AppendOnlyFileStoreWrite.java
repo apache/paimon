@@ -26,11 +26,13 @@ import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.compact.NoopCompactManager;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVectorsMaintainer;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
@@ -45,6 +47,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 
 import javax.annotation.Nullable;
 
+import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
@@ -66,8 +69,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final int compactionMaxFileNum;
     private final boolean commitForceCompact;
     private final String fileCompression;
+    private final String spillCompression;
     private final boolean useWriteBuffer;
     private final boolean spillable;
+    private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
 
     private boolean forceBufferSpill = false;
@@ -85,7 +90,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             FileStoreScan scan,
             CoreOptions options,
             String tableName) {
-        super(commitUser, snapshotManager, scan, options, null, tableName, pathFactory);
+        super(commitUser, snapshotManager, scan, options, null, null, tableName);
         this.fileIO = fileIO;
         this.read = read;
         this.schemaId = schemaId;
@@ -98,8 +103,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.commitForceCompact = options.commitForceCompact();
         this.skipCompaction = options.writeOnly();
         this.fileCompression = options.fileCompression();
+        this.spillCompression = options.spillCompression();
         this.useWriteBuffer = options.useWriteBufferForAppend();
         this.spillable = options.writeBufferSpillable(fileIO.isObjectStore(), isStreamingMode);
+        this.maxDiskSize = options.writeBufferSpillDiskSize();
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
     }
@@ -110,7 +117,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
             int bucket,
             List<DataFileMeta> restoredFiles,
             @Nullable CommitIncrement restoreIncrement,
-            ExecutorService compactExecutor) {
+            ExecutorService compactExecutor,
+            @Nullable DeletionVectorsMaintainer ignore) {
         // let writer and compact manager hold the same reference
         // and make restore files mutable to update
         long maxSequenceNumber = getMaxSequenceNumber(restoredFiles);
@@ -125,7 +133,9 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                 compactionMaxFileNum,
                                 targetFileSize,
                                 compactRewriter(partition, bucket),
-                                getCompactionMetrics(partition, bucket));
+                                compactionMetrics == null
+                                        ? null
+                                        : compactionMetrics.createReporter(partition, bucket));
 
         return new AppendOnlyWriter(
                 fileIO,
@@ -136,14 +146,16 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 rowType,
                 maxSequenceNumber,
                 compactManager,
+                bucketReader(partition, bucket),
                 commitForceCompact,
                 factory,
                 restoreIncrement,
                 useWriteBuffer || forceBufferSpill,
                 spillable || forceBufferSpill,
                 fileCompression,
+                spillCompression,
                 statsCollectors,
-                getWriterMetrics(partition, bucket));
+                maxDiskSize);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -164,19 +176,23 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             fileCompression,
                             statsCollectors);
             try {
-                rewriter.write(
-                        new RecordReaderIterator<>(
-                                read.createReader(
-                                        DataSplit.builder()
-                                                .withPartition(partition)
-                                                .withBucket(bucket)
-                                                .withDataFiles(toCompact)
-                                                .build())));
+                rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {
                 rewriter.close();
             }
             return rewriter.result();
         };
+    }
+
+    public BucketFileRead bucketReader(BinaryRow partition, int bucket) {
+        return files ->
+                new RecordReaderIterator<>(
+                        read.createReader(
+                                DataSplit.builder()
+                                        .withPartition(partition)
+                                        .withBucket(bucket)
+                                        .withDataFiles(files)
+                                        .build()));
     }
 
     public AppendOnlyFileStoreWrite withBucketMode(BucketMode bucketMode) {
@@ -204,5 +220,10 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 ((AppendOnlyWriter) writerContainer.writer).toBufferedWriter();
             }
         }
+    }
+
+    /** Read for one bucket. */
+    public interface BucketFileRead {
+        RecordReaderIterator<InternalRow> read(List<DataFileMeta> files) throws IOException;
     }
 }

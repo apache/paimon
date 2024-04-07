@@ -65,6 +65,7 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.ExpireExecutionMode;
+import static org.apache.paimon.table.sink.BatchWriteBuilder.COMMIT_IDENTIFIER;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /** An abstraction layer above {@link FileStoreCommit} to provide snapshot commit and expiration. */
@@ -88,6 +89,7 @@ public class TableCommitImpl implements InnerTableCommit {
 
     @Nullable private Map<String, String> overwritePartition = null;
     private boolean batchCommitted = false;
+    private final boolean forceCreatingSnapshot;
 
     public TableCommitImpl(
             FileStoreCommit commit,
@@ -99,7 +101,8 @@ public class TableCommitImpl implements InnerTableCommit {
             @Nullable Duration consumerExpireTime,
             ConsumerManager consumerManager,
             ExpireExecutionMode expireExecutionMode,
-            String tableName) {
+            String tableName,
+            boolean forceCreatingSnapshot) {
         commit.withLock(lock);
         if (partitionExpire != null) {
             partitionExpire.withLock(lock);
@@ -124,10 +127,12 @@ public class TableCommitImpl implements InnerTableCommit {
         this.expireError = new AtomicReference<>(null);
 
         this.tableName = tableName;
+        this.forceCreatingSnapshot = forceCreatingSnapshot;
     }
 
     public boolean forceCreatingSnapshot() {
-        return tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot();
+        return this.forceCreatingSnapshot
+                || (tagAutoCreation != null && tagAutoCreation.forceCreatingSnapshot());
     }
 
     @Override
@@ -149,15 +154,20 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     @Override
-    public Set<Long> filterCommitted(Set<Long> commitIdentifiers) {
-        return commit.filterCommitted(commitIdentifiers);
+    public void commit(List<CommitMessage> commitMessages) {
+        checkCommitted();
+        commit(COMMIT_IDENTIFIER, commitMessages);
     }
 
     @Override
-    public void commit(List<CommitMessage> commitMessages) {
+    public void truncateTable() {
+        checkCommitted();
+        commit.truncateTable(COMMIT_IDENTIFIER);
+    }
+
+    private void checkCommitted() {
         checkState(!batchCommitted, "BatchTableCommit only support one-time committing.");
         batchCommitted = true;
-        commit(BatchWriteBuilder.COMMIT_IDENTIFIER, commitMessages);
     }
 
     @Override
@@ -183,13 +193,13 @@ public class TableCommitImpl implements InnerTableCommit {
     }
 
     public void commit(ManifestCommittable committable) {
-        commitMultiple(Collections.singletonList(committable));
+        commitMultiple(Collections.singletonList(committable), false);
     }
 
-    public void commitMultiple(List<ManifestCommittable> committables) {
+    public void commitMultiple(List<ManifestCommittable> committables, boolean checkAppendFiles) {
         if (overwritePartition == null) {
             for (ManifestCommittable committable : committables) {
-                commit.commit(committable, new HashMap<>());
+                commit.commit(committable, new HashMap<>(), checkAppendFiles);
             }
             if (!committables.isEmpty()) {
                 expire(committables.get(committables.size() - 1).identifier(), expireMainExecutor);
@@ -238,7 +248,7 @@ public class TableCommitImpl implements InnerTableCommit {
                         .collect(Collectors.toList());
         if (retryCommittables.size() > 0) {
             checkFilesExistence(retryCommittables);
-            commitMultiple(retryCommittables);
+            commitMultiple(retryCommittables, true);
         }
         return retryCommittables.size();
     }

@@ -26,22 +26,19 @@ under the License.
 
 # Overview
 
-Paimon not only supports Flink SQL writes and queries natively,
-but also provides queries from other popular engines, such as
-Apache Spark and Apache Hive.
-
 ## Compatibility Matrix
 
-| Engine |    Version    | Batch Read | Batch Write | Create Table | Alter Table | Streaming Write | Streaming Read | Batch Overwrite |
-|:------:|:-------------:|:----------:|:-----------:|:------------:|:-----------:|:---------------:|:--------------:|:---------------:|
-| Flink  |  1.14 - 1.18  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |
-| Spark  |   3.1 - 3.5   |     ✅      |      ✅      |      ✅       |      ✅      |        ✅        |    ✅(3.3+)     |        ✅        |
-|  Hive  |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |
-| Spark  |      2.4      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
-| Trino  |   358 - 422   |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
-| Presto | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
-| [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) | 3.1+       |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
-| [Doris](https://doris.apache.org/docs/lakehouse/multi-catalog/paimon/) | 2.0+       |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
+|                                     Engine                                      |    Version    | Batch Read | Batch Write | Create Table | Alter Table | Streaming Write | Streaming Read | Batch Overwrite |
+|:-------------------------------------------------------------------------------:|:-------------:|:----------:|:-----------:|:------------:|:-----------:|:---------------:|:--------------:|:---------------:|
+|                                      Flink                                      |  1.15 - 1.19  |     ✅      |      ✅      |      ✅       |  ✅(1.17+)   |        ✅        |       ✅        |        ✅        |
+|                                      Spark                                      |   3.1 - 3.5   |     ✅      |      ✅      |      ✅       |      ✅      |        ✅        |    ✅(3.3+)     |        ✅        |
+|                                      Hive                                       |   2.1 - 3.1   |     ✅      |      ✅      |      ✅       |      ❌      |        ❌        |       ❌        |        ❌        |
+|                                      Spark                                      |      2.4      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
+|                                      Trino                                      |   422 - 426   |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
+|                                      Trino                                      |   427 - 439   |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
+|                                     Presto                                      | 0.236 - 0.280 |     ✅      |      ❌      |      ✅       |      ✅      |        ❌        |       ❌        |        ❌        |
+| [StarRocks](https://docs.starrocks.io/docs/data_source/catalog/paimon_catalog/) |     3.1+      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
+|     [Doris](https://doris.apache.org/docs/lakehouse/multi-catalog/paimon/)      |     2.0+      |     ✅      |      ❌      |      ❌       |      ❌      |        ❌        |       ❌        |        ❌        |
 
 Recommended versions are Flink 1.17.2, Spark 3.5.0, Hive 2.3.9
 

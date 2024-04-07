@@ -722,8 +722,8 @@ public class PostgresSyncTableActionITCase extends PostgresActionITCaseBase {
                         .build();
         runActionWithDefaultEnv(action2);
 
-        Map<String, String> dynamicOptions = action2.fileStoreTable().options();
-        assertThat(dynamicOptions).containsAllEntriesOf(tableConfig);
+        FileStoreTable table = getFileStoreTable();
+        assertThat(table.options()).containsAllEntriesOf(tableConfig);
     }
 
     @Test

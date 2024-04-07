@@ -14,3 +14,5 @@
 # limitations under the License.
 
 org.apache.paimon.catalog.FileSystemCatalogFactory
+org.apache.paimon.jdbc.JdbcCatalogFactory
+org.apache.paimon.jdbc.JdbcCatalogLockFactory

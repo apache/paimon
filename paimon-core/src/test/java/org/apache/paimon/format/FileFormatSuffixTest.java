@@ -31,6 +31,7 @@ import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.KeyValueFileReadWriteTest;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.memory.HeapMemorySegmentPool;
+import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.IntType;
@@ -63,7 +64,7 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
         assertThat(path.toString().endsWith(format)).isTrue();
 
         DataFilePathFactory dataFilePathFactory =
-                new DataFilePathFactory(new Path(tempDir.toString()), "dt=1", 1, format);
+                new DataFilePathFactory(new Path(tempDir + "/dt=1/bucket-1"), format);
         FileFormat fileFormat = FileFormat.fromIdentifier(format, new Options());
         LinkedList<DataFileMeta> toCompact = new LinkedList<>();
         CoreOptions options = new CoreOptions(new HashMap<>());
@@ -78,15 +79,17 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         0,
                         new AppendOnlyCompactManager(
                                 null, toCompact, 4, 10, 10, null, null), // not used
+                        null,
                         false,
                         dataFilePathFactory,
                         null,
                         false,
                         false,
                         CoreOptions.FILE_COMPRESSION.defaultValue(),
+                        CoreOptions.SPILL_COMPRESSION.defaultValue(),
                         StatsCollectorFactories.createStatsFactories(
                                 options, SCHEMA.getFieldNames()),
-                        null);
+                        MemorySize.MAX_VALUE);
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

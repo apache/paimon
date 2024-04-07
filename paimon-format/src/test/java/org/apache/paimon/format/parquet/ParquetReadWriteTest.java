@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.Timestamp;
+import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.format.FormatWriter;
 import org.apache.paimon.format.parquet.writer.RowDataParquetBuilder;
 import org.apache.paimon.fs.Path;
@@ -232,7 +233,12 @@ public class ParquetReadWriteTest {
                         500);
 
         AtomicInteger cnt = new AtomicInteger(0);
-        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)));
         reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
@@ -270,7 +276,12 @@ public class ParquetReadWriteTest {
                         500);
 
         AtomicInteger cnt = new AtomicInteger(0);
-        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath);
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)));
         reader.forEachRemaining(
                 row -> {
                     int i = cnt.get();
@@ -303,7 +314,12 @@ public class ParquetReadWriteTest {
                         batchSize);
 
         AtomicInteger cnt = new AtomicInteger(0);
-        try (RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), testPath)) {
+        try (RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(),
+                                testPath,
+                                new LocalFileIO().getFileSize(testPath)))) {
             reader.forEachRemainingWithPosition(
                     (rowPosition, row) -> {
                         assertThat(row.getDouble(0)).isEqualTo(cnt.get());
@@ -353,7 +369,10 @@ public class ParquetReadWriteTest {
             throw new IOException(e);
         }
 
-        RecordReader<InternalRow> reader = format.createReader(new LocalFileIO(), path);
+        RecordReader<InternalRow> reader =
+                format.createReader(
+                        new FormatReaderContext(
+                                new LocalFileIO(), path, new LocalFileIO().getFileSize(path)));
 
         AtomicInteger cnt = new AtomicInteger(0);
         final AtomicReference<InternalRow> previousRow = new AtomicReference<>();

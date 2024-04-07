@@ -372,20 +372,19 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
     }
 
     @Test
-    public void testIgnoreDelete() throws Exception {
+    public void testIgnoreDelete() {
         sql(
                 "CREATE TABLE ignore_delete (pk INT PRIMARY KEY NOT ENFORCED, v STRING) "
-                        + "WITH ('deduplicate.ignore-delete' = 'true', 'bucket' = '1')");
-        BlockingIterator<Row, Row> iterator = streamSqlBlockIter("SELECT * FROM ignore_delete");
+                        + "WITH ('merge-engine' = 'deduplicate', 'ignore-delete' = 'true', 'bucket' = '1')");
 
-        sql("INSERT INTO ignore_delete VALUES (1, 'A'), (2, 'B')");
+        sql("INSERT INTO ignore_delete VALUES (1, 'A')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
+
         sql("DELETE FROM ignore_delete WHERE pk = 1");
-        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "A"));
 
-        assertThat(iterator.collect(2))
-                .containsExactlyInAnyOrder(
-                        Row.ofKind(RowKind.INSERT, 1, "B"), Row.ofKind(RowKind.INSERT, 2, "B"));
-        iterator.close();
+        sql("INSERT INTO ignore_delete VALUES (1, 'B')");
+        assertThat(sql("SELECT * FROM ignore_delete")).containsExactly(Row.of(1, "B"));
     }
 
     @Test

@@ -28,6 +28,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.mergetree.LevelSortedRun;
 import org.apache.paimon.mergetree.Levels;
 import org.apache.paimon.operation.metrics.CompactionMetrics;
+import org.apache.paimon.operation.metrics.MetricUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.slf4j.Logger;
@@ -56,7 +57,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private final int numSortedRunStopTrigger;
     private final CompactRewriter rewriter;
 
-    @Nullable private final CompactionMetrics metrics;
+    @Nullable private final CompactionMetrics.Reporter metricsReporter;
+    private final boolean deletionVectorsEnabled;
 
     public MergeTreeCompactManager(
             ExecutorService executor,
@@ -66,7 +68,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
             long compactionFileSize,
             int numSortedRunStopTrigger,
             CompactRewriter rewriter,
-            @Nullable CompactionMetrics metrics) {
+            @Nullable CompactionMetrics.Reporter metricsReporter,
+            boolean deletionVectorsEnabled) {
         this.executor = executor;
         this.levels = levels;
         this.strategy = strategy;
@@ -74,8 +77,10 @@ public class MergeTreeCompactManager extends CompactFutureManager {
         this.numSortedRunStopTrigger = numSortedRunStopTrigger;
         this.keyComparator = keyComparator;
         this.rewriter = rewriter;
-        this.metrics = metrics;
-        reportLevel0FileCount();
+        this.metricsReporter = metricsReporter;
+        this.deletionVectorsEnabled = deletionVectorsEnabled;
+
+        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
     }
 
     @Override
@@ -92,7 +97,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     @Override
     public void addNewFile(DataFileMeta file) {
         levels.addLevel0File(file);
-        reportLevel0FileCount();
+        MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
     }
 
     @Override
@@ -143,7 +148,8 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                      */
                     boolean dropDelete =
                             unit.outputLevel() != 0
-                                    && unit.outputLevel() >= levels.nonEmptyHighestLevel();
+                                    && (unit.outputLevel() >= levels.nonEmptyHighestLevel()
+                                            || deletionVectorsEnabled);
 
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
@@ -171,7 +177,13 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     private void submitCompaction(CompactUnit unit, boolean dropDelete) {
         MergeTreeCompactTask task =
                 new MergeTreeCompactTask(
-                        keyComparator, compactionFileSize, rewriter, unit, dropDelete, metrics);
+                        keyComparator,
+                        compactionFileSize,
+                        rewriter,
+                        unit,
+                        dropDelete,
+                        levels.maxLevel(),
+                        metricsReporter);
         if (LOG.isDebugEnabled()) {
             LOG.debug(
                     "Pick these files (name, level, size) for compaction: {}",
@@ -200,7 +212,7 @@ public class MergeTreeCompactManager extends CompactFutureManager {
                                 r.after());
                     }
                     levels.update(r.before(), r.after());
-                    reportLevel0FileCount();
+                    MetricUtils.safeCall(this::reportLevel0FileCount, LOG);
                     if (LOG.isDebugEnabled()) {
                         LOG.debug(
                                 "Levels in compact manager updated. Current runs are\n{}",
@@ -211,16 +223,16 @@ public class MergeTreeCompactManager extends CompactFutureManager {
     }
 
     private void reportLevel0FileCount() {
-        if (metrics != null) {
-            metrics.reportLevel0FileCount(levels.level0().size());
+        if (metricsReporter != null) {
+            metricsReporter.reportLevel0FileCount(levels.level0().size());
         }
     }
 
     @Override
     public void close() throws IOException {
         rewriter.close();
-        if (metrics != null) {
-            metrics.close();
+        if (metricsReporter != null) {
+            MetricUtils.safeCall(metricsReporter::unregister, LOG);
         }
     }
 }

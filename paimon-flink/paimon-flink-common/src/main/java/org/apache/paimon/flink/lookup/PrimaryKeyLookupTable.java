@@ -47,8 +47,7 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     protected RocksDBValueState<InternalRow, InternalRow> tableState;
 
-    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey)
-            throws IOException {
+    public PrimaryKeyLookupTable(Context context, long lruCacheSize, List<String> joinKey) {
         super(context);
         this.lruCacheSize = lruCacheSize;
         List<String> fieldNames = projectedType.getFieldNames();
@@ -71,6 +70,12 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
 
     @Override
     public void open() throws Exception {
+        openStateFactory();
+        createTableState();
+        bootstrap();
+    }
+
+    protected void createTableState() throws IOException {
         this.tableState =
                 stateFactory.valueState(
                         "table",
@@ -78,7 +83,6 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
                                 TypeUtils.project(projectedType, primaryKeyRow.indexMapping())),
                         InternalSerializers.create(projectedType),
                         lruCacheSize);
-        super.open();
     }
 
     @Override
@@ -91,16 +95,14 @@ public class PrimaryKeyLookupTable extends FullCacheLookupTable {
     }
 
     @Override
-    public void refresh(Iterator<InternalRow> incremental, boolean orderByLastField)
-            throws IOException {
+    public void refresh(Iterator<InternalRow> incremental) throws IOException {
         Predicate predicate = projectedPredicate();
         while (incremental.hasNext()) {
             InternalRow row = incremental.next();
             primaryKeyRow.replaceRow(row);
-            if (orderByLastField) {
+            if (userDefinedSeqComparator != null) {
                 InternalRow previous = tableState.get(primaryKeyRow);
-                int orderIndex = projectedType.getFieldCount() - 1;
-                if (previous != null && previous.getLong(orderIndex) > row.getLong(orderIndex)) {
+                if (previous != null && userDefinedSeqComparator.compare(previous, row) > 0) {
                     continue;
                 }
             }

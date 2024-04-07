@@ -96,7 +96,7 @@ SET paimon.fs.oss.accessKeyId=xxx;
 SET paimon.fs.oss.accessKeySecret=yyy;
 ```
 
-And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "how-to/creating-catalogs" >}})
+And read table from hive metastore, table can be created by Flink or Spark, see [Catalog with Hive Metastore]({{< ref "flink/sql-ddl" >}})
 ```sql
 SELECT * FROM test_table;
 SELECT COUNT(1) FROM test_table;
@@ -106,14 +106,14 @@ SELECT COUNT(1) FROM test_table;
 
 {{< tab "Trino" >}}
 
-Place `paimon-oss-{{< version >}}.jar` together with `paimon-trino-{{< version >}}.jar` under `plugin/paimon` directory.
+From version 0.8, paimon-trino use trino filesystem as basic file read and write system. We strongly recommend you to use jindo-sdk in trino.
 
-Add options in `etc/catalog/paimon.properties`.
-```shell
-fs.oss.endpoint=oss-cn-hangzhou.aliyuncs.com
-fs.oss.accessKeyId=xxx
-fs.oss.accessKeySecret=yyy
-```
+You can find [How to config jindo sdk on trino](https://github.com/aliyun/alibabacloud-jindodata/blob/master/docs/user/4.x/4.6.x/4.6.12/oss/presto/jindosdk_on_presto.md) here.
+Please note that:
+  * Use paimon to replace hive-hadoop2 when you decompress the plugin jar and find location to put in.
+  * You can specify the `core-site.xml` in `paimon.properties` on configuration [hive.config.resources](https://trino.io/docs/current/connector/hive.html#hdfs-configuration).
+  * Presto and Jindo are the in the same configaration method.
+
 
 {{< /tab >}}
 

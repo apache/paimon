@@ -37,6 +37,8 @@ import org.scalatest.Tag
 
 import java.io.File
 
+import scala.util.Random
+
 class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTableOptions {
 
   protected lazy val tempDBDir: File = Utils.createTempDir
@@ -49,10 +51,16 @@ class PaimonSparkTestBase extends QueryTest with SharedSparkSession with WithTab
 
   /** Add paimon ([[SparkCatalog]] in fileSystem) catalog */
   override protected def sparkConf: SparkConf = {
+    val serializer = if (Random.nextBoolean()) {
+      "org.apache.spark.serializer.KryoSerializer"
+    } else {
+      "org.apache.spark.serializer.JavaSerializer"
+    }
     super.sparkConf
       .set("spark.sql.catalog.paimon", classOf[SparkCatalog].getName)
       .set("spark.sql.catalog.paimon.warehouse", tempDBDir.getCanonicalPath)
       .set("spark.sql.extensions", classOf[PaimonSparkSessionExtensions].getName)
+      .set("spark.serializer", serializer)
   }
 
   override protected def beforeAll(): Unit = {

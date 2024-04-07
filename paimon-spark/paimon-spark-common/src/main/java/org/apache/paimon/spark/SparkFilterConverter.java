@@ -71,6 +71,14 @@ public class SparkFilterConverter {
         this.builder = new PredicateBuilder(rowType);
     }
 
+    public Predicate convertIgnoreFailure(Filter filter) {
+        try {
+            return convert(filter);
+        } catch (Exception e) {
+            return null;
+        }
+    }
+
     public Predicate convert(Filter filter) {
         if (filter instanceof EqualTo) {
             EqualTo eq = (EqualTo) filter;

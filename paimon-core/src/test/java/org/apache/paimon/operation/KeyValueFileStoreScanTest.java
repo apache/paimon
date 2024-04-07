@@ -23,8 +23,6 @@ import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.TestKeyValueGenerator;
 import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
-import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.manifest.ManifestEntry;
@@ -76,7 +74,8 @@ public class KeyValueFileStoreScanTest {
                                 TestKeyValueGenerator.KEY_TYPE,
                                 TestKeyValueGenerator.DEFAULT_ROW_TYPE,
                                 TestKeyValueGenerator.TestKeyValueFieldsExtractor.EXTRACTOR,
-                                DeduplicateMergeFunction.factory())
+                                DeduplicateMergeFunction.factory(),
+                                null)
                         .build();
         snapshotManager = store.snapshotManager();
 
@@ -147,15 +146,19 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValueFilter() throws Exception {
+    public void testWithValueFilterBucket() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<KeyValue> data = generateData(100, Math.abs(random.nextInt(1000)));
+        // 0 <= item <= 999
+        List<KeyValue> data = generateData(100, 0, (long) random.nextInt(1000));
         writeData(data, 0);
-        data = generateData(100, Math.abs(random.nextInt(1000)) + 1000);
+        // 1000 <= item <= 1999
+        data = generateData(100, 0, (long) random.nextInt(1000) + 1000);
         writeData(data, 1);
-        data = generateData(100, Math.abs(random.nextInt(1000)) + 2000);
+        // 2000 <= item <= 2999
+        data = generateData(100, 0, (long) random.nextInt(1000) + 2000);
         writeData(data, 2);
-        generateData(100, Math.abs(random.nextInt(1000)) + 3000);
+        // 3000 <= item <= 3999
+        data = generateData(100, 0, (long) random.nextInt(1000) + 3000);
         Snapshot snapshot = writeData(data, 3);
 
         KeyValueFileStoreScan scan = store.newScan();
@@ -166,7 +169,7 @@ public class KeyValueFileStoreScanTest {
         scan.withSnapshot(snapshot.id());
         scan.withValueFilter(
                 new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
-                        .between(1, 1000, 2000));
+                        .between(4, 1000L, 1999L));
 
         List<ManifestEntry> filesFiltered = scan.plan().files();
 
@@ -175,16 +178,16 @@ public class KeyValueFileStoreScanTest {
     }
 
     @Test
-    public void testWithValuePartitionFilter() throws Exception {
+    public void testWithValueFilterPartition() throws Exception {
         ThreadLocalRandom random = ThreadLocalRandom.current();
-        List<KeyValue> data = generateData(100, Math.abs(random.nextInt(1000)));
-        writeData(data, "0", 0);
-        data = generateData(100, Math.abs(random.nextInt(1000)) + 1000);
-        writeData(data, "1", 0);
-        data = generateData(100, Math.abs(random.nextInt(1000)) + 2000);
-        writeData(data, "2", 0);
-        generateData(100, Math.abs(random.nextInt(1000)) + 3000);
-        Snapshot snapshot = writeData(data, "3", 0);
+        List<KeyValue> data = generateData(100, 0, (long) Math.abs(random.nextInt(1000)));
+        writeData(data, 0);
+        data = generateData(100, 1, (long) Math.abs(random.nextInt(1000)) + 1000);
+        writeData(data, 0);
+        data = generateData(100, 2, (long) Math.abs(random.nextInt(1000)) + 2000);
+        writeData(data, 0);
+        data = generateData(100, 3, (long) Math.abs(random.nextInt(1000)) + 3000);
+        Snapshot snapshot = writeData(data, 0);
 
         KeyValueFileStoreScan scan = store.newScan();
         scan.withSnapshot(snapshot.id());
@@ -194,7 +197,7 @@ public class KeyValueFileStoreScanTest {
         scan.withSnapshot(snapshot.id());
         scan.withValueFilter(
                 new PredicateBuilder(TestKeyValueGenerator.DEFAULT_ROW_TYPE)
-                        .between(1, 1000, 2000));
+                        .between(4, 1000L, 1999L));
 
         List<ManifestEntry> filesFiltered = scan.plan().files();
 
@@ -307,9 +310,13 @@ public class KeyValueFileStoreScanTest {
     }
 
     private List<KeyValue> generateData(int numRecords, int hr) {
+        return generateData(numRecords, hr, null);
+    }
+
+    private List<KeyValue> generateData(int numRecords, int hr, Long itemId) {
         List<KeyValue> data = new ArrayList<>();
         for (int i = 0; i < numRecords; i++) {
-            data.add(gen.nextInsert("", hr, null, null, null));
+            data.add(gen.nextInsert("", hr, itemId, null, null));
         }
         return data;
     }
@@ -321,16 +328,6 @@ public class KeyValueFileStoreScanTest {
 
     private Snapshot writeData(List<KeyValue> kvs, int bucket) throws Exception {
         List<Snapshot> snapshots = store.commitData(kvs, gen::getPartition, b -> bucket);
-        return snapshots.get(snapshots.size() - 1);
-    }
-
-    private Snapshot writeData(List<KeyValue> kvs, String partition, int bucket) throws Exception {
-        BinaryRow binaryRow = new BinaryRow(2);
-        BinaryRowWriter binaryRowWriter = new BinaryRowWriter(binaryRow);
-        binaryRowWriter.writeString(0, BinaryString.fromString(partition));
-        binaryRowWriter.writeInt(1, 0);
-        binaryRowWriter.complete();
-        List<Snapshot> snapshots = store.commitData(kvs, p -> binaryRow, b -> bucket);
         return snapshots.get(snapshots.size() - 1);
     }
 

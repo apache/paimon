@@ -66,10 +66,13 @@ public class SnapshotDeletion extends FileDeletionBase {
 
     @Override
     public void cleanUnusedDataFiles(Snapshot snapshot, Predicate<ManifestEntry> skipper) {
+        cleanUnusedDataFiles(snapshot.deltaManifestList(), skipper);
+    }
+
+    public void cleanUnusedDataFiles(String manifestList, Predicate<ManifestEntry> skipper) {
         // try read manifests
-        List<String> manifestFileNames =
-                readManifestFileNames(tryReadManifestList(snapshot.deltaManifestList()));
-        List<ManifestEntry> manifestEntries = new ArrayList<>();
+        List<String> manifestFileNames = readManifestFileNames(tryReadManifestList(manifestList));
+        List<ManifestEntry> manifestEntries;
         // data file path -> (original manifest entry, extra file paths)
         Map<Path, Pair<ManifestEntry, List<Path>>> dataFileToDelete = new HashMap<>();
         for (String manifest : manifestFileNames) {

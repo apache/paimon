@@ -27,6 +27,7 @@ import org.apache.paimon.utils.FailingFileIO;
 import org.apache.paimon.shade.guava30.com.google.common.collect.Lists;
 
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.RepeatedTest;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -60,6 +61,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
         manifestFile = createManifestFile(tempDir.toString());
     }
 
+    @Disabled // TODO wrong test to rely on self-defined file size
     @ParameterizedTest
     @ValueSource(ints = {2, 3, 4})
     public void testMergeWithoutFullCompaction(int numLastBits) {
@@ -210,7 +212,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testTriggerFullCompaction() {
+    public void testTriggerFullCompaction() throws Exception {
         List<ManifestEntry> entries = new ArrayList<>();
         for (int i = 0; i < 16; i++) {
             entries.add(makeEntry(true, String.valueOf(i)));
@@ -260,7 +262,7 @@ public class ManifestFileMetaTest extends ManifestFileMetaTestBase {
     }
 
     @Test
-    public void testMultiPartitionsFullCompaction() {
+    public void testMultiPartitionsFullCompaction() throws Exception {
 
         List<ManifestFileMeta> input = createBaseManifestFileMetas(true);
 

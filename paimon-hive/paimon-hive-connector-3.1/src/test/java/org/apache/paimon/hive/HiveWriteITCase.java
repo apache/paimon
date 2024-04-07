@@ -171,6 +171,27 @@ public class HiveWriteITCase {
     }
 
     @Test
+    public void testHiveCreateAndHiveWrite() throws Exception {
+        List<InternalRow> emptyData = Collections.emptyList();
+
+        hiveShell.execute(
+                "CREATE TABLE paimon_table (\n"
+                        + "    `a`   STRING  comment '',\n"
+                        + "    `b`    STRING comment '',\n"
+                        + "    `c`    STRING comment ''\n"
+                        + ") \n"
+                        + "STORED BY 'org.apache.paimon.hive.PaimonStorageHandler'\n"
+                        + "TBLPROPERTIES (\n"
+                        + "    'primary-key' = 'a',\n"
+                        + "       'bucket' = '1',\n"
+                        + "   'bucket_key' = 'a'\n"
+                        + ");");
+        hiveShell.execute("insert into  paimon_table  values (2,3,'Hello'),(5,6,'Fine')");
+        List<String> select = hiveShell.executeQuery("select * from paimon_table");
+        assertThat(select).containsExactly("2\t3\tHello", "5\t6\tFine");
+    }
+
+    @Test
     public void testInsertTimestampAndDate() throws Exception {
         List<InternalRow> emptyData = Collections.emptyList();
 

@@ -26,6 +26,7 @@ import org.apache.paimon.compact.CompactResult;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.FlushingFileFormat;
 import org.apache.paimon.fs.FileStatus;
@@ -42,6 +43,7 @@ import org.apache.paimon.mergetree.compact.CompactStrategy;
 import org.apache.paimon.mergetree.compact.DeduplicateMergeFunction;
 import org.apache.paimon.mergetree.compact.IntervalPartition;
 import org.apache.paimon.mergetree.compact.MergeTreeCompactManager;
+import org.apache.paimon.mergetree.compact.ReducerMergeFunctionWrapper;
 import org.apache.paimon.mergetree.compact.UniversalCompaction;
 import org.apache.paimon.options.MemorySize;
 import org.apache.paimon.options.Options;
@@ -85,6 +87,7 @@ import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
 
 import static java.util.Collections.singletonList;
+import static org.apache.paimon.utils.FileStorePathFactoryTest.createNonPartFactory;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link MergeTreeReaders} and {@link MergeTreeWriter}. */
@@ -106,7 +109,7 @@ public abstract class MergeTreeTestBase {
     @BeforeEach
     public void beforeEach() throws IOException {
         path = new Path(tempDir.toString());
-        pathFactory = new FileStorePathFactory(path);
+        pathFactory = createNonPartFactory(path);
         comparator = Comparator.comparingInt(o -> o.getInt(0));
         recreateMergeTree(1024 * 1024);
         Path bucketDir = writerFactory.pathFactory(0).toPath("ignore").getParent();
@@ -145,7 +148,7 @@ public abstract class MergeTreeTestBase {
                 KeyValueFileReaderFactory.builder(
                         LocalFileIO.create(),
                         createTestingSchemaManager(path),
-                        0,
+                        createTestingSchemaManager(path).schema(0),
                         keyType,
                         valueType,
                         ignore -> flushingAvro,
@@ -170,8 +173,10 @@ public abstract class MergeTreeTestBase {
                             }
                         },
                         new CoreOptions(new HashMap<>()));
-        readerFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
-        compactReaderFactory = readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0);
+        readerFactory =
+                readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
+        compactReaderFactory =
+                readerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, DeletionVector.emptyFactory());
 
         Map<String, FileStorePathFactory> pathFactoryMap = new HashMap<>();
         pathFactoryMap.put(identifier, pathFactory);
@@ -415,6 +420,7 @@ public abstract class MergeTreeTestBase {
         MergeTreeWriter writer =
                 new MergeTreeWriter(
                         false,
+                        MemorySize.ofKibiBytes(10),
                         128,
                         "lz4",
                         null,
@@ -425,7 +431,6 @@ public abstract class MergeTreeTestBase {
                         writerFactory,
                         options.commitForceCompact(),
                         ChangelogProducer.NONE,
-                        null,
                         null,
                         null);
         writer.setMemoryPool(
@@ -448,7 +453,8 @@ public abstract class MergeTreeTestBase {
                 options.compactionFileSize(),
                 options.numSortedRunStopTrigger(),
                 new TestRewriter(),
-                null);
+                null,
+                false);
     }
 
     static class MockFailResultCompactionManager extends MergeTreeCompactManager {
@@ -468,7 +474,8 @@ public abstract class MergeTreeTestBase {
                     minFileSize,
                     numSortedRunStopTrigger,
                     rewriter,
-                    null);
+                    null,
+                    false);
         }
 
         protected CompactResult obtainCompactResult()
@@ -552,11 +559,15 @@ public abstract class MergeTreeTestBase {
         RecordReader<KeyValue> reader =
                 MergeTreeReaders.readerForMergeTree(
                         new IntervalPartition(files, comparator).partition(),
-                        dropDelete,
                         readerFactory,
                         comparator,
-                        DeduplicateMergeFunction.factory().create(),
+                        null,
+                        new ReducerMergeFunctionWrapper(
+                                DeduplicateMergeFunction.factory().create()),
                         new MergeSorter(options, null, null, null));
+        if (dropDelete) {
+            reader = new DropDeleteReader(reader);
+        }
         List<TestRecord> records = new ArrayList<>();
         try (RecordReaderIterator<KeyValue> iterator = new RecordReaderIterator<>(reader)) {
             while (iterator.hasNext()) {
@@ -595,15 +606,19 @@ public abstract class MergeTreeTestBase {
                 throws Exception {
             RollingFileWriter<KeyValue, DataFileMeta> writer =
                     writerFactory.createRollingMergeTreeFileWriter(outputLevel);
-            RecordReader<KeyValue> sectionsReader =
+            RecordReader<KeyValue> reader =
                     MergeTreeReaders.readerForMergeTree(
                             sections,
-                            dropDelete,
                             compactReaderFactory,
                             comparator,
-                            DeduplicateMergeFunction.factory().create(),
+                            null,
+                            new ReducerMergeFunctionWrapper(
+                                    DeduplicateMergeFunction.factory().create()),
                             new MergeSorter(options, null, null, null));
-            writer.write(new RecordReaderIterator<>(sectionsReader));
+            if (dropDelete) {
+                reader = new DropDeleteReader(reader);
+            }
+            writer.write(new RecordReaderIterator<>(reader));
             writer.close();
             return new CompactResult(extractFilesFromSections(sections), writer.result());
         }

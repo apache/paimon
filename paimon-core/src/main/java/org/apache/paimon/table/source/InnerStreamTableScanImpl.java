@@ -21,6 +21,7 @@ package org.apache.paimon.table.source;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.consumer.Consumer;
+import org.apache.paimon.lookup.LookupStrategy;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.source.snapshot.AllDeltaFollowUpScanner;
@@ -35,12 +36,16 @@ import org.apache.paimon.table.source.snapshot.StartingContext;
 import org.apache.paimon.table.source.snapshot.StartingScanner;
 import org.apache.paimon.table.source.snapshot.StartingScanner.ScannedResult;
 import org.apache.paimon.table.source.snapshot.StaticFromSnapshotStartingScanner;
+import org.apache.paimon.utils.Filter;
+import org.apache.paimon.utils.NextSnapshotFetcher;
 import org.apache.paimon.utils.SnapshotManager;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import javax.annotation.Nullable;
+
+import static org.apache.paimon.CoreOptions.ChangelogProducer.FULL_COMPACTION;
 
 /** {@link StreamTableScan} implementation for streaming planning. */
 public class InnerStreamTableScanImpl extends AbstractInnerTableScan
@@ -52,6 +57,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     private final SnapshotManager snapshotManager;
     private final boolean supportStreamingReadOverwrite;
     private final DefaultValueAssigner defaultValueAssigner;
+    private final NextSnapshotFetcher nextSnapshotProvider;
 
     private boolean initialized = false;
     private StartingScanner startingScanner;
@@ -73,6 +79,11 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
         this.snapshotManager = snapshotManager;
         this.supportStreamingReadOverwrite = supportStreamingReadOverwrite;
         this.defaultValueAssigner = defaultValueAssigner;
+        this.nextSnapshotProvider =
+                new NextSnapshotFetcher(
+                        snapshotManager,
+                        options.changelogLifecycleDecoupled(),
+                        options.changelogProducer() != CoreOptions.ChangelogProducer.NONE);
     }
 
     @Override
@@ -116,12 +127,31 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
     }
 
     private Plan tryFirstPlan() {
-        StartingScanner.Result result = startingScanner.scan(snapshotReader);
+        StartingScanner.Result result;
+        if (options.needLookup()) {
+            result = startingScanner.scan(snapshotReader.withLevelFilter(level -> level > 0));
+            snapshotReader.withLevelFilter(Filter.alwaysTrue());
+        } else if (options.changelogProducer().equals(FULL_COMPACTION)) {
+            result =
+                    startingScanner.scan(
+                            snapshotReader.withLevelFilter(
+                                    level -> level == options.numLevels() - 1));
+            snapshotReader.withLevelFilter(Filter.alwaysTrue());
+        } else {
+            result = startingScanner.scan(snapshotReader);
+        }
+
         if (result instanceof ScannedResult) {
             ScannedResult scannedResult = (ScannedResult) result;
             currentWatermark = scannedResult.currentWatermark();
             long currentSnapshotId = scannedResult.currentSnapshotId();
-            nextSnapshotId = currentSnapshotId + 1;
+            if (options.lookupStrategy().equals(LookupStrategy.DELETION_VECTOR_ONLY)) {
+                // For DELETION_VECTOR_ONLY mode, we need to return the remaining data from level 0
+                // in the subsequent plan.
+                nextSnapshotId = currentSnapshotId;
+            } else {
+                nextSnapshotId = currentSnapshotId + 1;
+            }
             isFullPhaseEnd =
                     boundedChecker.shouldEndInput(snapshotManager.snapshot(currentSnapshotId));
             return scannedResult.plan();
@@ -141,23 +171,10 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 throw new EndOfScanException();
             }
 
-            if (!snapshotManager.snapshotExists(nextSnapshotId)) {
-                Long earliestSnapshotId = snapshotManager.earliestSnapshotId();
-                if (earliestSnapshotId != null && earliestSnapshotId > nextSnapshotId) {
-                    throw new OutOfRangeException(
-                            String.format(
-                                    "The snapshot with id %d has expired. You can: "
-                                            + "1. increase the snapshot expiration time. "
-                                            + "2. use consumer-id to ensure that unconsumed snapshots will not be expired.",
-                                    nextSnapshotId));
-                }
-                LOG.debug(
-                        "Next snapshot id {} does not exist, wait for the snapshot generation.",
-                        nextSnapshotId);
+            Snapshot snapshot = nextSnapshotProvider.getNextSnapshot(nextSnapshotId);
+            if (snapshot == null) {
                 return SnapshotNotExistPlan.INSTANCE;
             }
-
-            Snapshot snapshot = snapshotManager.snapshot(nextSnapshotId);
 
             if (boundedChecker.shouldEndInput(snapshot)) {
                 throw new EndOfScanException();
@@ -206,13 +223,7 @@ public class InnerStreamTableScanImpl extends AbstractInnerTableScan
                 followUpScanner = new InputChangelogFollowUpScanner();
                 break;
             case FULL_COMPACTION:
-                // this change in data split reader will affect both starting scanner and follow-up
-                snapshotReader.withLevelFilter(level -> level == options.numLevels() - 1);
-                followUpScanner = new CompactionChangelogFollowUpScanner();
-                break;
             case LOOKUP:
-                // this change in data split reader will affect both starting scanner and follow-up
-                snapshotReader.withLevelFilter(level -> level > 0);
                 followUpScanner = new CompactionChangelogFollowUpScanner();
                 break;
             default:

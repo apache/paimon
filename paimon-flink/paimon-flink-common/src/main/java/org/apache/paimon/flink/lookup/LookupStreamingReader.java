@@ -19,9 +19,7 @@
 package org.apache.paimon.flink.lookup;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.data.JoinedRow;
 import org.apache.paimon.io.SplitsParallelReadUtil;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.options.ConfigOption;
@@ -31,12 +29,9 @@ import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.KeyValueTableRead;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
-import org.apache.paimon.table.source.TableRead;
-import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FunctionWithIOException;
 import org.apache.paimon.utils.TypeUtils;
@@ -55,7 +50,6 @@ import java.util.stream.IntStream;
 
 import static org.apache.paimon.flink.FlinkConnectorOptions.LOOKUP_BOOTSTRAP_PARALLELISM;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
-import static org.apache.paimon.schema.SystemColumns.SEQUENCE_NUMBER;
 
 /** A streaming reader to load data into {@link LookupTable}. */
 public class LookupStreamingReader {
@@ -120,19 +114,13 @@ public class LookupStreamingReader {
         return fileStoreTable.copy(newSchema);
     }
 
-    public RecordReader<InternalRow> nextBatch(boolean useParallelism, boolean readSequenceNumber)
-            throws Exception {
+    public RecordReader<InternalRow> nextBatch(boolean useParallelism) throws Exception {
         List<Split> splits = scan.plan().splits();
         CoreOptions options = CoreOptions.fromMap(table.options());
         FunctionWithIOException<Split, RecordReader<InternalRow>> readerSupplier =
-                readSequenceNumber
-                        ? createReaderWithSequenceSupplier()
-                        : split -> readBuilder.newRead().createReader(split);
+                split -> readBuilder.newRead().createReader(split);
 
         RowType readType = TypeUtils.project(table.rowType(), projection);
-        if (readSequenceNumber) {
-            readType = readType.appendDataField(SEQUENCE_NUMBER, DataTypes.BIGINT());
-        }
 
         RecordReader<InternalRow> reader;
         if (useParallelism) {
@@ -155,26 +143,5 @@ public class LookupStreamingReader {
             reader = reader.filter(projectedPredicate::test);
         }
         return reader;
-    }
-
-    private FunctionWithIOException<Split, RecordReader<InternalRow>>
-            createReaderWithSequenceSupplier() {
-        return split -> {
-            TableRead read = readBuilder.newRead();
-            if (!(read instanceof KeyValueTableRead)) {
-                throw new IllegalArgumentException(
-                        "Only KeyValueTableRead supports sequence read, but it is: " + read);
-            }
-
-            KeyValueTableRead kvRead = (KeyValueTableRead) read;
-            JoinedRow reused = new JoinedRow();
-            return kvRead.kvReader(split)
-                    .transform(
-                            kv -> {
-                                reused.replace(kv.value(), GenericRow.of(kv.sequenceNumber()));
-                                reused.setRowKind(kv.valueKind());
-                                return reused;
-                            });
-        };
     }
 }

@@ -164,4 +164,12 @@ public interface ReadonlyTable extends InnerTable {
                         "Readonly Table %s does not support expireSnapshots.",
                         this.getClass().getSimpleName()));
     }
+
+    @Override
+    default ExpireSnapshots newExpireChangelog() {
+        throw new UnsupportedOperationException(
+                String.format(
+                        "Readonly Table %s does not support expireChangelog.",
+                        this.getClass().getSimpleName()));
+    }
 }

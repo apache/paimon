@@ -268,7 +268,7 @@ public class KeyValueFileStoreReadTest {
         Path path = new Path(tempDir.toUri());
         SchemaManager schemaManager = new SchemaManager(FileIOFinder.find(path), path);
         boolean valueCountMode = mfFactory.create() instanceof TestValueCountMergeFunction;
-        schemaManager.createTable(
+        Schema schema =
                 new Schema(
                         (valueCountMode ? keyType : valueType).getFields(),
                         partitionType.getFieldNames(),
@@ -280,7 +280,8 @@ public class KeyValueFileStoreReadTest {
                                                 partitionType.getFieldNames().stream())
                                         .collect(Collectors.toList()),
                         Collections.emptyMap(),
-                        null));
+                        null);
+        TableSchema tableSchema = schemaManager.createTable(schema);
         return new TestFileStore.Builder(
                         "avro",
                         tempDir.toString(),
@@ -289,7 +290,8 @@ public class KeyValueFileStoreReadTest {
                         keyType,
                         valueType,
                         extractor,
-                        mfFactory)
+                        mfFactory,
+                        tableSchema)
                 .build();
     }
 
@@ -317,12 +319,7 @@ public class KeyValueFileStoreReadTest {
         }
 
         @Override
-        @Nullable
         public KeyValue getResult() {
-            if (total == 0) {
-                return null;
-            }
-
             if (reused == null) {
                 reused = new KeyValue();
             }

@@ -39,8 +39,6 @@ import java.util.List;
  */
 public class ManifestList extends ObjectsFile<ManifestFileMeta> {
 
-    private final FormatWriterFactory writerFactory;
-
     private ManifestList(
             FileIO fileIO,
             ManifestFileMetaSerializer serializer,
@@ -49,7 +47,6 @@ public class ManifestList extends ObjectsFile<ManifestFileMeta> {
             PathFactory pathFactory,
             @Nullable SegmentsCache<String> cache) {
         super(fileIO, serializer, readerFactory, writerFactory, pathFactory, cache);
-        this.writerFactory = writerFactory;
     }
 
     /**

@@ -23,6 +23,8 @@ trait WithTableOptions {
   // 3: fixed bucket, -1: dynamic bucket
   protected val bucketModes: Seq[Int] = Seq(3, -1)
 
+  protected val fileFormats: Seq[String] = Seq("orc", "parquet")
+
   protected val withPk: Seq[Boolean] = Seq(true, false)
 
 }

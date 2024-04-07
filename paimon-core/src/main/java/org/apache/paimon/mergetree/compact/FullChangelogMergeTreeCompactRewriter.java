@@ -27,14 +27,17 @@ import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.io.KeyValueFileWriterFactory;
 import org.apache.paimon.mergetree.MergeSorter;
 import org.apache.paimon.mergetree.SortedRun;
+import org.apache.paimon.utils.FieldsComparator;
 import org.apache.paimon.utils.Preconditions;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Comparator;
 import java.util.List;
 
 import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.CHANGELOG_NO_REWRITE;
-import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG;
+import static org.apache.paimon.mergetree.compact.ChangelogMergeTreeRewriter.UpgradeStrategy.NO_CHANGELOG_NO_REWRITE;
 
 /** A {@link MergeTreeCompactRewriter} which produces changelog files for each full compaction. */
 public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRewriter {
@@ -48,6 +51,7 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
             KeyValueFileReaderFactory readerFactory,
             KeyValueFileWriterFactory writerFactory,
             Comparator<InternalRow> keyComparator,
+            @Nullable FieldsComparator userDefinedSeqComparator,
             MergeFunctionFactory<KeyValue> mfFactory,
             MergeSorter mergeSorter,
             RecordEqualiser valueEqualiser,
@@ -58,8 +62,11 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
                 readerFactory,
                 writerFactory,
                 keyComparator,
+                userDefinedSeqComparator,
                 mfFactory,
-                mergeSorter);
+                mergeSorter,
+                true,
+                false);
         this.valueEqualiser = valueEqualiser;
         this.changelogRowDeduplicate = changelogRowDeduplicate;
     }
@@ -77,8 +84,8 @@ public class FullChangelogMergeTreeCompactRewriter extends ChangelogMergeTreeRew
     }
 
     @Override
-    protected UpgradeStrategy upgradeChangelog(int outputLevel, DataFileMeta file) {
-        return outputLevel == maxLevel ? CHANGELOG_NO_REWRITE : NO_CHANGELOG;
+    protected UpgradeStrategy upgradeStrategy(int outputLevel, DataFileMeta file) {
+        return outputLevel == maxLevel ? CHANGELOG_NO_REWRITE : NO_CHANGELOG_NO_REWRITE;
     }
 
     @Override
