@@ -35,7 +35,6 @@ import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.TagManager;
 
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import java.time.LocalDateTime;
@@ -97,7 +96,6 @@ class TagsTableTest extends TableTestBase {
         assertThat(result).containsExactlyElementsOf(expectRow);
     }
 
-    @Disabled
     @Test
     void testTagBranchesTable() throws Exception {
         Table table = catalog.getTable(identifier(tableName));
