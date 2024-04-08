@@ -158,7 +158,7 @@ public abstract class RecordParser implements FlatMapFunction<String, RichCdcMul
                                                     return Objects.toString(entry.getValue());
                                                 }
                                             }
-                                            return Objects.toString(entry.getValue());
+                                            return Objects.toString(entry.getValue(), "");
                                         }));
         evalComputedColumns(rowData, paimonFieldTypes);
         return rowData;
