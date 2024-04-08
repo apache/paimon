@@ -111,6 +111,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
+        // use this to cache evolved predicates
+        Map<Long, List<Predicate>> filePredicates = new HashMap<>();
         for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             FormatKey key = new FormatKey(file.schemaId(), formatIdentifier);
@@ -130,12 +132,16 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                 Projection.of(dataProjection).toTopLevelIndexes(),
                                 dataSchema.fields());
 
-                // TODO: cache this
                 List<Predicate> dataFilters =
                         this.schema.id() == key.schemaId
                                 ? filters
-                                : SchemaEvolutionUtil.createDataFilters(
-                                        tableSchema.fields(), dataSchema.fields(), filters);
+                                : filePredicates.computeIfAbsent(
+                                        key.schemaId,
+                                        k ->
+                                                SchemaEvolutionUtil.createDataFilters(
+                                                        tableSchema.fields(),
+                                                        dataSchema.fields(),
+                                                        filters));
 
                 if (dataFilters != null && !dataFilters.isEmpty()) {
                     List<String> indexFiles =

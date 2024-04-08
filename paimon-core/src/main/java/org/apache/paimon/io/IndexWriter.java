@@ -56,8 +56,9 @@ public final class IndexWriter {
 
     private final List<IndexMaintainer> indexMaintainers = new ArrayList<>();
 
-    private BinaryRow resultRow;
-    private List<String> resultFileNames;
+    private final List<String> resultFileNames = new ArrayList<>();
+
+    private BinaryRow resultRow = BinaryRow.EMPTY_ROW;
 
     public IndexWriter(
             FileIO fileIO,
@@ -116,9 +117,6 @@ public final class IndexWriter {
                             FileIndexer.create(indexType, field.type(), options).createWriter(),
                             InternalRow.createFieldGetter(field.type(), index.get(columnName))));
         }
-
-        this.resultRow = BinaryRow.EMPTY_ROW;
-        this.resultFileNames = new ArrayList<>();
     }
 
     public void write(InternalRow row) {

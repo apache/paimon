@@ -65,7 +65,6 @@ public class DataFileMeta {
     // total number of rows (including add & delete) in this file
     private final long rowCount;
 
-    private final BinaryRow filter;
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
     private final BinaryTableStats keyStats;
@@ -84,6 +83,9 @@ public class DataFileMeta {
     // Because in previous versions of DataFileMeta, we only keep rowCount.
     // We have to keep the compatibility.
     private final @Nullable Long deleteRowCount;
+
+    // file index filter bytes, if it is small, store in data file meta
+    private final BinaryRow filter;
 
     public static DataFileMeta forAppend(
             String fileName,
@@ -416,18 +418,18 @@ public class DataFileMeta {
         fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(3, "_FILTER", newBytesType(false)));
-        fields.add(new DataField(4, "_MIN_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(6, "_KEY_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(7, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(8, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(9, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(10, "_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new DataField(11, "_LEVEL", new IntType(false)));
-        fields.add(new DataField(12, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
-        fields.add(new DataField(13, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
-        fields.add(new DataField(14, "_DELETE_ROW_COUNT", new BigIntType(true)));
+        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
+        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
+        fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
+        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
+        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
+        fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
+        fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
+        fields.add(new DataField(14, "_FILTER", newBytesType(false)));
         return new RowType(fields);
     }
 

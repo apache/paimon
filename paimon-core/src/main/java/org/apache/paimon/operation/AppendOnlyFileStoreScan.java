@@ -97,7 +97,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         serializer.evolution(stats.minValues()),
                         serializer.evolution(stats.maxValues()),
                         serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
-                && test(entry.file().filter(), entry);
+                && testFileIndex(entry.file().filter(), entry);
     }
 
     @Override
@@ -106,7 +106,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return entries;
     }
 
-    private boolean test(BinaryRow filterRow, ManifestEntry entry) {
+    private boolean testFileIndex(BinaryRow filterRow, ManifestEntry entry) {
         if (filterRow.getFieldCount() == 0 || filterRow.isNullAt(0)) {
             return true;
         }
