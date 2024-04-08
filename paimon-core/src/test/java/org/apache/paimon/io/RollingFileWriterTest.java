@@ -39,6 +39,7 @@ import org.junit.jupiter.params.provider.EnumSource;
 
 import java.io.File;
 import java.io.IOException;
+import java.util.Collections;
 import java.util.HashMap;
 
 import static org.apache.paimon.CoreOptions.FileFormatType;
@@ -85,7 +86,8 @@ public class RollingFileWriterTest {
                                         StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames()),
-                                        new CoreOptions(new Options())),
+                                        Collections.emptyList(),
+                                        0),
                         TARGET_FILE_SIZE);
     }
 

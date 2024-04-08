@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
@@ -64,11 +63,12 @@ public final class IndexWriter {
             FileIO fileIO,
             DataFilePathFactory pathFactory,
             RowType rowType,
-            CoreOptions coreOptions) {
+            List<String> indexExpr,
+            long indexSizeInMeta) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
-        this.indexSizeInMeta = coreOptions.indexSizeInMeta();
-        List<String> indexColumns = coreOptions.indexColumns();
+        List<String> indexColumns = indexExpr;
+        this.indexSizeInMeta = indexSizeInMeta;
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
         Map<String, Integer> index = new HashMap<>();

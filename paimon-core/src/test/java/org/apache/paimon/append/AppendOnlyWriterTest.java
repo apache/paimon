@@ -605,7 +605,8 @@ public class AppendOnlyWriterTest {
                         StatsCollectorFactories.createStatsFactories(
                                 options, AppendOnlyWriterTest.SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
-                        new CoreOptions(new Options()));
+                        Collections.emptyList(),
+                        0);
         writer.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         return Pair.of(writer, compactManager.allFiles());

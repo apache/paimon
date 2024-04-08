@@ -18,7 +18,6 @@
 
 package org.apache.paimon.append;
 
-import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
@@ -79,8 +78,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
-
-    private final CoreOptions coreOptions;
+    private final List<String> indexExpr;
+    private final long indexSizeInMeta;
 
     private MemorySegmentPool memorySegmentPool;
     private MemorySize maxDiskSize;
@@ -104,7 +103,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
-            CoreOptions coreOptions) {
+            List<String> indexExpr,
+            long indexSizeInMeta) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -124,6 +124,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
+        this.indexExpr = indexExpr;
+        this.indexSizeInMeta = indexSizeInMeta;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -136,7 +138,6 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
-        this.coreOptions = coreOptions;
     }
 
     @Override
@@ -252,7 +253,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                coreOptions);
+                indexExpr,
+                indexSizeInMeta);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

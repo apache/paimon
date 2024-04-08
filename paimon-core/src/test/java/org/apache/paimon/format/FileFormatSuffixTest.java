@@ -43,6 +43,7 @@ import org.apache.paimon.utils.StatsCollectorFactories;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.LinkedList;
 
@@ -90,7 +91,8 @@ public class FileFormatSuffixTest extends KeyValueFileReadWriteTest {
                         StatsCollectorFactories.createStatsFactories(
                                 options, SCHEMA.getFieldNames()),
                         MemorySize.MAX_VALUE,
-                        new CoreOptions(new Options()));
+                        Collections.emptyList(),
+                        0);
         appendOnlyWriter.setMemoryPool(
                 new HeapMemorySegmentPool(options.writeBufferSize(), options.pageSize()));
         appendOnlyWriter.write(

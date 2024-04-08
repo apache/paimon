@@ -74,8 +74,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean spillable;
     private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
-
-    private final CoreOptions coreOptions;
+    private final List<String> indexExpr;
+    private final long indexSizeInMeta;
 
     private boolean forceBufferSpill = false;
     private boolean skipCompaction;
@@ -111,8 +111,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.maxDiskSize = options.writeBufferSpillDiskSize();
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
-
-        this.coreOptions = options;
+        this.indexExpr = options.indexColumns();
+        this.indexSizeInMeta = options.indexSizeInMeta();
     }
 
     @Override
@@ -160,7 +160,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillCompression,
                 statsCollectors,
                 maxDiskSize,
-                coreOptions);
+                indexExpr,
+                indexSizeInMeta);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -180,7 +181,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors,
-                            coreOptions);
+                            indexExpr,
+                            indexSizeInMeta);
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {
