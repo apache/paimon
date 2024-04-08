@@ -43,6 +43,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private final FieldStatsConverters fieldStatsConverters;
 
+    private final boolean fileIndexReadEnabled;
+
     private Predicate filter;
 
     private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
@@ -58,7 +60,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
             int numOfBuckets,
             boolean checkNumOfBuckets,
             Integer scanManifestParallelism,
-            String branchName) {
+            String branchName,
+            boolean fileIndexReadEnabled) {
         super(
                 partitionType,
                 bucketFilter,
@@ -73,6 +76,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                 branchName);
         this.fieldStatsConverters =
                 new FieldStatsConverters(sid -> scanTableSchema(sid).fields(), schema.id());
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
     }
 
     public AppendOnlyFileStoreScan withFilter(Predicate predicate) {
@@ -97,7 +101,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         serializer.evolution(stats.minValues()),
                         serializer.evolution(stats.maxValues()),
                         serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
-                && testFileIndex(entry.file().filter(), entry);
+                && (!fileIndexReadEnabled || testFileIndex(entry.file().filter(), entry));
     }
 
     @Override

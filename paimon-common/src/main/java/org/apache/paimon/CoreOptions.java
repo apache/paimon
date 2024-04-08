@@ -147,6 +147,12 @@ public class CoreOptions implements Serializable {
                     .defaultValue(MemorySize.parse("500 B"))
                     .withDescription("Max memory size for lookup cache.");
 
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
+            key("file.index.read.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether enabled read file index.");
+
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
                     .enumType(FileFormatType.class)
@@ -1724,6 +1730,10 @@ public class CoreOptions implements Serializable {
 
     public long indexSizeInMeta() {
         return options.get(FILE_INDEX_SIZE_IN_META).getBytes();
+    }
+
+    public boolean fileIndexReadEnabled() {
+        return options.get(FILE_INDEX_READ_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

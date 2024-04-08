@@ -70,6 +70,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
     private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final boolean fileIndexReadEnabled;
 
     private int[][] projection;
 
@@ -81,13 +82,15 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             TableSchema schema,
             RowType rowType,
             FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            boolean fileIndexReadEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
@@ -151,7 +154,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                                     name.startsWith(
                                                             DataFilePathFactory.INDEX_PATH_PREFIX))
                                     .collect(Collectors.toList());
-                    if (!indexFiles.isEmpty()) {
+                    if (fileIndexReadEnabled && !indexFiles.isEmpty()) {
                         // go to secondary index check
                         try (FileIndexPredicate predicate =
                                 new FileIndexPredicate(

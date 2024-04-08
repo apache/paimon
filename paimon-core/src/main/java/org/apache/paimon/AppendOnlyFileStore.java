@@ -86,7 +86,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 schema,
                 rowType,
                 FileFormatDiscover.of(options),
-                pathFactory());
+                pathFactory(),
+                options.fileIndexReadEnabled());
     }
 
     @Override
@@ -145,7 +146,8 @@ public class AppendOnlyFileStore extends AbstractFileStore<InternalRow> {
                 options.bucket(),
                 forWrite,
                 options.scanManifestParallelism(),
-                branchName);
+                branchName,
+                options.fileIndexReadEnabled());
     }
 
     @Override
