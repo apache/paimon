@@ -20,6 +20,7 @@ package org.apache.paimon.fileindex;
 
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.fs.SeekableInputStream;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IOUtils;
@@ -241,9 +242,11 @@ public final class FileIndexFormat {
             return readColumnInputStream(columnName)
                     .map(
                             serializedBytes ->
-                                    FileIndexer.create(type, fields.get(columnName).type())
-                                            .createReader()
-                                            .recoverFrom(serializedBytes))
+                                    FileIndexer.create(
+                                                    type,
+                                                    fields.get(columnName).type(),
+                                                    new Options())
+                                            .createReader(serializedBytes))
                     .orElse(null);
         }
 

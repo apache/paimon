@@ -141,6 +141,12 @@ under the License.
             <version>1.0.5</version>
         </dependency>
 
+        <dependency>
+            <groupId>net.openhft</groupId>
+            <artifactId>zero-allocation-hashing</artifactId>
+            <version>0.16</version>
+        </dependency>
+
         <!-- Test -->
 
         <dependency>
@@ -273,6 +279,7 @@ under the License.
                                     <include>org.codehaus.janino:*</include>
                                     <include>it.unimi.dsi:fastutil</include>
                                     <include>org.roaringbitmap:RoaringBitmap</include>
+                                    <include>net.openhft:zero-allocation-hashing</include>
                                 </includes>
                             </artifactSet>
                             <filters>
@@ -311,6 +318,10 @@ under the License.
                                 <relocation>
                                     <pattern>org.roaringbitmap</pattern>
                                     <shadedPattern>org.apache.paimon.shade.org.roaringbitmap</shadedPattern>
+                                </relocation>
+                                <relocation>
+                                    <pattern>net.openhft.hashing</pattern>
+                                    <shadedPattern>org.apache.paimon.shade.net.openhft.hashing</shadedPattern>
                                 </relocation>
                             </relocations>
                             <minimizeJar>true</minimizeJar>
