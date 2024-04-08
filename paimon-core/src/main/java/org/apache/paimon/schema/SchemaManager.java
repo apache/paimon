@@ -56,6 +56,7 @@ import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -124,16 +125,26 @@ public class SchemaManager implements Serializable {
         }
     }
 
+    /** Check TableScheme is be modified. */
+    public void checkTableSchema(TableSchema oldSchema, TableSchema newSchema) {
+        boolean isCommon =
+                oldSchema.version() == newSchema.version()
+                        && Objects.equals(oldSchema.fields(), newSchema.fields())
+                        && oldSchema.highestFieldId() == newSchema.highestFieldId()
+                        && Objects.equals(oldSchema.partitionKeys(), newSchema.partitionKeys())
+                        && Objects.equals(oldSchema.primaryKeys(), newSchema.primaryKeys());
+
+        if (!isCommon) {
+            throw new IllegalStateException(
+                    "Schema in filesystem exists, please use updating,"
+                            + " latest schema is: "
+                            + oldSchema);
+        }
+    }
+
     /** Create a new schema from {@link Schema}. */
     public TableSchema createTable(Schema schema) throws Exception {
         while (true) {
-            latest().ifPresent(
-                            latest -> {
-                                throw new IllegalStateException(
-                                        "Schema in filesystem exists, please use updating,"
-                                                + " latest schema is: "
-                                                + latest());
-                            });
 
             List<DataField> fields = schema.fields();
             List<String> partitionKeys = schema.partitionKeys();
@@ -150,6 +161,11 @@ public class SchemaManager implements Serializable {
                             primaryKeys,
                             options,
                             schema.comment());
+
+            if (latest().isPresent()) {
+                checkTableSchema(latest().get(), newSchema);
+                return newSchema;
+            }
 
             boolean success = commit(newSchema);
             if (success) {
