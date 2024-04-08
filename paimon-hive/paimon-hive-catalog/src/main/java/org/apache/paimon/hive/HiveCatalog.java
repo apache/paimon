@@ -339,6 +339,14 @@ public class HiveCatalog extends AbstractCatalog {
                         () -> new RuntimeException("There is no paimon table in " + tableLocation));
     }
 
+    private boolean usingExternalTable() {
+        TableType tableType =
+                OptionsUtils.convertToEnum(
+                        hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
+                        TableType.class);
+        return TableType.EXTERNAL.equals(tableType);
+    }
+
     @Override
     protected void dropTableImpl(Identifier identifier) {
         try {
@@ -347,11 +355,7 @@ public class HiveCatalog extends AbstractCatalog {
 
             // When drop a Hive external table, only the hive metadata is deleted and the data files
             // are not deleted.
-            TableType tableType =
-                    OptionsUtils.convertToEnum(
-                            hiveConf.get(TABLE_TYPE.key(), TableType.MANAGED.toString()),
-                            TableType.class);
-            if (TableType.EXTERNAL.equals(tableType)) {
+            if (usingExternalTable()) {
                 return;
             }
 
@@ -377,7 +381,7 @@ public class HiveCatalog extends AbstractCatalog {
         // if changes on Hive fails there is no harm to perform the same changes to files again
         TableSchema tableSchema;
         try {
-            tableSchema = schemaManager(identifier).createTable(schema);
+            tableSchema = schemaManager(identifier).createTable(schema, usingExternalTable());
         } catch (Exception e) {
             throw new RuntimeException(
                     "Failed to commit changes of table "

@@ -125,26 +125,30 @@ public class SchemaManager implements Serializable {
         }
     }
 
-    /** Check TableScheme is be modified. */
-    public void checkTableSchema(TableSchema oldSchema, TableSchema newSchema) {
-        boolean isCommon =
-                oldSchema.version() == newSchema.version()
-                        && Objects.equals(oldSchema.fields(), newSchema.fields())
-                        && oldSchema.highestFieldId() == newSchema.highestFieldId()
-                        && Objects.equals(oldSchema.partitionKeys(), newSchema.partitionKeys())
-                        && Objects.equals(oldSchema.primaryKeys(), newSchema.primaryKeys());
-
-        if (!isCommon) {
-            throw new IllegalStateException(
-                    "Schema in filesystem exists, please use updating,"
-                            + " latest schema is: "
-                            + oldSchema);
-        }
-    }
-
     /** Create a new schema from {@link Schema}. */
     public TableSchema createTable(Schema schema) throws Exception {
+        return createTable(schema, false);
+    }
+
+    public TableSchema createTable(Schema schema, boolean ignoreIfExistsSame) throws Exception {
         while (true) {
+            Optional<TableSchema> latest = latest();
+            if (latest.isPresent()) {
+                TableSchema oldSchema = latest.get();
+                boolean isSame =
+                        Objects.equals(oldSchema.fields(), schema.fields())
+                                && Objects.equals(oldSchema.partitionKeys(), schema.partitionKeys())
+                                && Objects.equals(oldSchema.primaryKeys(), schema.primaryKeys())
+                                && Objects.equals(oldSchema.options(), schema.options());
+                if (ignoreIfExistsSame && isSame) {
+                    return oldSchema;
+                }
+
+                throw new IllegalStateException(
+                        "Schema in filesystem exists, please use updating,"
+                                + " latest schema is: "
+                                + oldSchema);
+            }
 
             List<DataField> fields = schema.fields();
             List<String> partitionKeys = schema.partitionKeys();
@@ -161,11 +165,6 @@ public class SchemaManager implements Serializable {
                             primaryKeys,
                             options,
                             schema.comment());
-
-            if (latest().isPresent()) {
-                checkTableSchema(latest().get(), newSchema);
-                return newSchema;
-            }
 
             boolean success = commit(newSchema);
             if (success) {

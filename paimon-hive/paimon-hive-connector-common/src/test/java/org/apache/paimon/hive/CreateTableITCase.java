@@ -148,11 +148,9 @@ public class CreateTableITCase extends HiveTestBase {
         hiveCatalog.createTable(identifier, schema, false);
 
         // Drop hive external table
-        String hiveSql = String.join("\n", Arrays.asList("DROP TABLE " + tableName));
-        assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
+        hiveShell.execute("DROP TABLE " + tableName);
 
-        assertThatCode(() -> hiveCatalog.createTable(identifier, schema, false))
-                .doesNotThrowAnyException();
+        hiveCatalog.createTable(identifier, schema, false);
     }
 
     @Test
