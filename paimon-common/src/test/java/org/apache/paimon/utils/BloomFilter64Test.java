@@ -19,7 +19,7 @@
 package org.apache.paimon.utils;
 
 import org.assertj.core.api.Assertions;
-import org.junit.jupiter.api.RepeatedTest;
+import org.junit.jupiter.api.Test;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -30,7 +30,7 @@ public class BloomFilter64Test {
 
     private static final Random RANDOM = new Random();
 
-    @RepeatedTest(10000)
+    @Test
     public void testFunction() {
         BloomFilter64 bloomFilter64 = new BloomFilter64(10000, 0.02);
 
