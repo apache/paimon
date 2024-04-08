@@ -19,6 +19,8 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
+import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
@@ -31,7 +33,10 @@ import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
 
+import java.io.IOException;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 /** {@link FileStoreScan} for {@link AppendOnlyFileStore}. */
 public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
@@ -39,6 +44,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
     private final FieldStatsConverters fieldStatsConverters;
 
     private Predicate filter;
+
+    private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
 
     public AppendOnlyFileStoreScan(
             RowType partitionType,
@@ -84,16 +91,38 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         FieldStatsArraySerializer serializer =
                 fieldStatsConverters.getOrCreate(entry.file().schemaId());
         BinaryTableStats stats = entry.file().valueStats();
+
         return filter.test(
-                entry.file().rowCount(),
-                serializer.evolution(stats.minValues()),
-                serializer.evolution(stats.maxValues()),
-                serializer.evolution(stats.nullCounts(), entry.file().rowCount()));
+                        entry.file().rowCount(),
+                        serializer.evolution(stats.minValues()),
+                        serializer.evolution(stats.maxValues()),
+                        serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
+                && test(entry.file().filter(), entry);
     }
 
     @Override
     protected List<ManifestEntry> filterWholeBucketByStats(List<ManifestEntry> entries) {
         // We don't need to filter per-bucket entries here
         return entries;
+    }
+
+    private boolean test(BinaryRow filterRow, ManifestEntry entry) {
+        if (filterRow.getFieldCount() == 0 || filterRow.isNullAt(0)) {
+            return true;
+        }
+
+        RowType dataRowType = scanTableSchema(entry.file().schemaId()).logicalRowType();
+
+        Predicate dataPredicate =
+                dataFilterMapping.computeIfAbsent(
+                        entry.file().schemaId(),
+                        id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
+
+        try (FileIndexPredicate predicate =
+                new FileIndexPredicate(filterRow.getBinary(0), dataRowType)) {
+            return predicate.testPredicate(dataPredicate);
+        } catch (IOException e) {
+            throw new RuntimeException("Exception happens while checking predicate.", e);
+        }
     }
 }

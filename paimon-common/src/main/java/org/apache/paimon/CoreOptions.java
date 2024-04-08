@@ -135,6 +135,18 @@ public class CoreOptions implements Serializable {
                             "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
 
+    public static final ConfigOption<String> INDEX_COLUMNS =
+            key("index.columns")
+                    .stringType()
+                    .noDefaultValue()
+                    .withDescription("The secondary index columns.");
+
+    public static final ConfigOption<MemorySize> INDEX_SIZE_IN_META =
+            key("index.size-in-meta")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("500 B"))
+                    .withDescription("Max memory size for lookup cache.");
+
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
                     .enumType(FileFormatType.class)
@@ -1701,6 +1713,17 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public List<String> indexColumns() {
+        String columns = options.get(INDEX_COLUMNS);
+        return columns == null || StringUtils.isBlank(columns)
+                ? Collections.emptyList()
+                : Arrays.asList(columns.split(";"));
+    }
+
+    public long indexSizeInMeta() {
+        return options.get(INDEX_SIZE_IN_META).getBytes();
     }
 
     /** Specifies the merge engine for table with primary key. */

@@ -18,6 +18,7 @@
 
 package org.apache.paimon.append;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.compact.CompactManager;
 import org.apache.paimon.data.InternalRow;
@@ -79,6 +80,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
 
+    private final CoreOptions coreOptions;
+
     private MemorySegmentPool memorySegmentPool;
     private MemorySize maxDiskSize;
 
@@ -100,7 +103,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String fileCompression,
             String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            MemorySize maxDiskSize) {
+            MemorySize maxDiskSize,
+            CoreOptions coreOptions) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -132,6 +136,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             compactBefore.addAll(increment.compactIncrement().compactBefore());
             compactAfter.addAll(increment.compactIncrement().compactAfter());
         }
+        this.coreOptions = coreOptions;
     }
 
     @Override
@@ -246,7 +251,8 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 pathFactory,
                 seqNumCounter,
                 fileCompression,
-                statsCollectors);
+                statsCollectors,
+                coreOptions);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

@@ -54,6 +54,7 @@ public class DataFileMeta {
     // the following dummy values.
     public static final BinaryTableStats EMPTY_KEY_STATS =
             new BinaryTableStats(EMPTY_ROW, EMPTY_ROW, BinaryArray.fromLongArray(new Long[0]));
+    public static final BinaryRow EMPTY_FILTER = EMPTY_ROW;
     public static final BinaryRow EMPTY_MIN_KEY = EMPTY_ROW;
     public static final BinaryRow EMPTY_MAX_KEY = EMPTY_ROW;
     public static final int DUMMY_LEVEL = 0;
@@ -64,6 +65,7 @@ public class DataFileMeta {
     // total number of rows (including add & delete) in this file
     private final long rowCount;
 
+    private final BinaryRow filter;
     private final BinaryRow minKey;
     private final BinaryRow maxKey;
     private final BinaryTableStats keyStats;
@@ -95,6 +97,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                EMPTY_FILTER,
                 EMPTY_MIN_KEY,
                 EMPTY_MAX_KEY,
                 EMPTY_KEY_STATS,
@@ -106,10 +109,39 @@ public class DataFileMeta {
                 0L);
     }
 
+    public static DataFileMeta forAppend(
+            String fileName,
+            long fileSize,
+            long rowCount,
+            BinaryTableStats rowStats,
+            BinaryRow filter,
+            long minSequenceNumber,
+            long maxSequenceNumber,
+            long schemaId,
+            List<String> extraFiles) {
+        return new DataFileMeta(
+                fileName,
+                fileSize,
+                rowCount,
+                filter,
+                EMPTY_MIN_KEY,
+                EMPTY_MAX_KEY,
+                EMPTY_KEY_STATS,
+                rowStats,
+                minSequenceNumber,
+                maxSequenceNumber,
+                schemaId,
+                DUMMY_LEVEL,
+                extraFiles,
+                Timestamp.fromLocalDateTime(LocalDateTime.now()).toMillisTimestamp(),
+                0L);
+    }
+
     public DataFileMeta(
             String fileName,
             long fileSize,
             long rowCount,
+            BinaryRow filter,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -123,6 +155,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                filter,
                 minKey,
                 maxKey,
                 keyStats,
@@ -140,6 +173,7 @@ public class DataFileMeta {
             String fileName,
             long fileSize,
             long rowCount,
+            BinaryRow filter,
             BinaryRow minKey,
             BinaryRow maxKey,
             BinaryTableStats keyStats,
@@ -156,6 +190,7 @@ public class DataFileMeta {
 
         this.rowCount = rowCount;
 
+        this.filter = filter;
         this.minKey = minKey;
         this.maxKey = maxKey;
         this.keyStats = keyStats;
@@ -189,6 +224,10 @@ public class DataFileMeta {
 
     public Optional<Long> deleteRowCount() {
         return Optional.ofNullable(deleteRowCount);
+    }
+
+    public BinaryRow filter() {
+        return filter;
     }
 
     public BinaryRow minKey() {
@@ -266,6 +305,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                filter,
                 minKey,
                 maxKey,
                 keyStats,
@@ -291,6 +331,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                filter,
                 minKey,
                 maxKey,
                 keyStats,
@@ -316,6 +357,7 @@ public class DataFileMeta {
         return Objects.equals(fileName, that.fileName)
                 && fileSize == that.fileSize
                 && rowCount == that.rowCount
+                && Objects.equals(filter, that.filter)
                 && Objects.equals(minKey, that.minKey)
                 && Objects.equals(maxKey, that.maxKey)
                 && Objects.equals(keyStats, that.keyStats)
@@ -335,6 +377,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                filter,
                 minKey,
                 maxKey,
                 keyStats,
@@ -358,6 +401,7 @@ public class DataFileMeta {
                 fileName,
                 fileSize,
                 rowCount,
+                filter,
                 minKey,
                 maxKey,
                 keyStats,
@@ -376,17 +420,18 @@ public class DataFileMeta {
         fields.add(new DataField(0, "_FILE_NAME", newStringType(false)));
         fields.add(new DataField(1, "_FILE_SIZE", new BigIntType(false)));
         fields.add(new DataField(2, "_ROW_COUNT", new BigIntType(false)));
-        fields.add(new DataField(3, "_MIN_KEY", newBytesType(false)));
-        fields.add(new DataField(4, "_MAX_KEY", newBytesType(false)));
-        fields.add(new DataField(5, "_KEY_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(6, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
-        fields.add(new DataField(7, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(8, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
-        fields.add(new DataField(9, "_SCHEMA_ID", new BigIntType(false)));
-        fields.add(new DataField(10, "_LEVEL", new IntType(false)));
-        fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
-        fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
-        fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
+        fields.add(new DataField(3, "_FILTER", newBytesType(false)));
+        fields.add(new DataField(4, "_MIN_KEY", newBytesType(false)));
+        fields.add(new DataField(5, "_MAX_KEY", newBytesType(false)));
+        fields.add(new DataField(6, "_KEY_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(7, "_VALUE_STATS", FieldStatsArraySerializer.schema()));
+        fields.add(new DataField(8, "_MIN_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(9, "_MAX_SEQUENCE_NUMBER", new BigIntType(false)));
+        fields.add(new DataField(10, "_SCHEMA_ID", new BigIntType(false)));
+        fields.add(new DataField(11, "_LEVEL", new IntType(false)));
+        fields.add(new DataField(12, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
+        fields.add(new DataField(13, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
+        fields.add(new DataField(14, "_DELETE_ROW_COUNT", new BigIntType(true)));
         return new RowType(fields);
     }
 

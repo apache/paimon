@@ -171,6 +171,7 @@ public class IntervalPartitionTest {
                 "DUMMY",
                 100,
                 25,
+                DataFileMeta.EMPTY_FILTER,
                 minKey,
                 maxKey,
                 newTableStats(left, right),

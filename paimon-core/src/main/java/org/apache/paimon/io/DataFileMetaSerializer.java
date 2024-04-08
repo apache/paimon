@@ -44,6 +44,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 BinaryString.fromString(meta.fileName()),
                 meta.fileSize(),
                 meta.rowCount(),
+                serializeBinaryRow(meta.filter()),
                 serializeBinaryRow(meta.minKey()),
                 serializeBinaryRow(meta.maxKey()),
                 meta.keyStats().toRow(),
@@ -65,14 +66,15 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getLong(2),
                 deserializeBinaryRow(row.getBinary(3)),
                 deserializeBinaryRow(row.getBinary(4)),
-                BinaryTableStats.fromRow(row.getRow(5, 3)),
+                deserializeBinaryRow(row.getBinary(5)),
                 BinaryTableStats.fromRow(row.getRow(6, 3)),
-                row.getLong(7),
+                BinaryTableStats.fromRow(row.getRow(7, 3)),
                 row.getLong(8),
                 row.getLong(9),
-                row.getInt(10),
-                fromStringArrayData(row.getArray(11)),
-                row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getLong(13));
+                row.getLong(10),
+                row.getInt(11),
+                fromStringArrayData(row.getArray(12)),
+                row.getTimestamp(13, 3),
+                row.isNullAt(14) ? null : row.getLong(14));
     }
 }

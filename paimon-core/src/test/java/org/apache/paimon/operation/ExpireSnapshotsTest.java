@@ -190,6 +190,7 @@ public class ExpireSnapshotsTest {
                         "myDataFile",
                         1,
                         1,
+                        DataFileMeta.EMPTY_FILTER,
                         EMPTY_ROW,
                         EMPTY_ROW,
                         null,

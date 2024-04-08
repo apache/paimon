@@ -74,6 +74,7 @@ public abstract class ManifestFileMetaTestBase {
                         0, // not used
                         binaryRow, // not used
                         binaryRow, // not used
+                        binaryRow, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         StatsTestUtils.newEmptyTableStats(), // not used
                         0, // not used
@@ -235,6 +236,7 @@ public abstract class ManifestFileMetaTestBase {
                         "", // not used
                         0, // not used
                         rowCount,
+                        null, // not used
                         null, // not used
                         null, // not used
                         StatsTestUtils.newEmptyTableStats(), // not used

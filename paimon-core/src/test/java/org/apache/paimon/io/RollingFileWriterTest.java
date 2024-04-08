@@ -69,11 +69,8 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                        new Path(tempDir + "/bucket-0"),
-                                                        CoreOptions.FILE_FORMAT
-                                                                .defaultValue()
-                                                                .toString())
-                                                .newPath(),
+                                                new Path(tempDir + "/bucket-0"),
+                                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
                                         SCHEMA,
                                         fileFormat
                                                 .createStatsExtractor(
@@ -87,7 +84,8 @@ public class RollingFileWriterTest {
                                         CoreOptions.FILE_COMPRESSION.defaultValue(),
                                         StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
-                                                SCHEMA.getFieldNames())),
+                                                SCHEMA.getFieldNames()),
+                                        new CoreOptions(new Options())),
                         TARGET_FILE_SIZE);
     }
 
