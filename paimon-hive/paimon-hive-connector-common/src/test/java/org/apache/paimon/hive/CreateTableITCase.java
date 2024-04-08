@@ -18,15 +18,12 @@
 
 package org.apache.paimon.hive;
 
-import org.apache.hadoop.hive.conf.HiveConf;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.fs.hadoop.HadoopFileIO;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
@@ -151,15 +148,11 @@ public class CreateTableITCase extends HiveTestBase {
         hiveCatalog.createTable(identifier, schema, false);
 
         // Drop hive external table
-        String hiveSql =
-                String.join(
-                        "\n",
-                        Arrays.asList(
-                                "DROP TABLE " + tableName));
+        String hiveSql = String.join("\n", Arrays.asList("DROP TABLE " + tableName));
         assertThatCode(() -> hiveShell.execute(hiveSql)).doesNotThrowAnyException();
 
-        assertThatCode(() -> hiveCatalog.createTable(identifier, schema, false)).doesNotThrowAnyException();
-
+        assertThatCode(() -> hiveCatalog.createTable(identifier, schema, false))
+                .doesNotThrowAnyException();
     }
 
     @Test
