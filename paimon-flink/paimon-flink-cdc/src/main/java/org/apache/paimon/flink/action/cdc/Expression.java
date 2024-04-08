@@ -197,7 +197,7 @@ public interface Expression extends Serializable {
                             String.format(
                                     "Referenced field '%s' is not in given fields: %s.",
                                     referencedFieldCheckForm, typeMapping.keySet()));
-            return new ReferencedField(referencedFieldCheckForm, fieldType, literals);
+            return new ReferencedField(referencedField, fieldType, literals);
         }
 
         public String field() {
