@@ -76,7 +76,7 @@ public final class DataTypeJsonParser {
         throw new IllegalArgumentException("Can not parse: " + json);
     }
 
-    private static DataType parseAtomicTypeSQLString(String string) {
+    public static DataType parseAtomicTypeSQLString(String string) {
         List<Token> tokens = tokenize(string);
         TokenParser converter = new TokenParser(string, tokens);
         return converter.parseTokens();

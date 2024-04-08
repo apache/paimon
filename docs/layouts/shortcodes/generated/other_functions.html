@@ -40,8 +40,8 @@ under the License.
              If the column is a DECIMAL, truncate(column,width) will truncate the decimal with the algorithm: let `scaled_W = decimal(W, scale(v))`, then return `v - (v % scaled_W)`.</td>
     </tr>
     <tr>
-        <td><h5>constant(value)</h5></td>
-        <td>Get constant value. Output is a STRING.</td>
+        <td><h5>cast(value,dataType)</h5></td>
+        <td>Get a constant value. The output is an atomic type, such as STRING, INT, BOOLEAN, etc.</td>
     </tr>
     </tbody>
 </table>

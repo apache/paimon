@@ -48,6 +48,7 @@ public class ComputedColumn implements Serializable {
         return expression.outputType();
     }
 
+    @Nullable
     public String fieldReference() {
         return expression.fieldReference();
     }

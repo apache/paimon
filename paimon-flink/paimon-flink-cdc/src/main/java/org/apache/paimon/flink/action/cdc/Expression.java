@@ -21,9 +21,11 @@ package org.apache.paimon.flink.action.cdc;
 import org.apache.paimon.data.Timestamp;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypeFamily;
+import org.apache.paimon.types.DataTypeJsonParser;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.SerializableSupplier;
+import org.apache.paimon.utils.StringUtils;
 
 import javax.annotation.Nullable;
 
@@ -39,6 +41,7 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
+import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
 /** Produce a computation result for computed column. */
 public interface Expression extends Serializable {
@@ -52,90 +55,179 @@ public interface Expression extends Serializable {
     /** Compute value from given input. Input and output are serialized to string. */
     String eval(String input);
 
-    /** Enumerates the expression processing behaviors for computed column. */
-    enum ExpressionProcessor {
+    /** Expression function. */
+    enum ExpressionFunction {
         YEAR(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference, fieldType, () -> LocalDateTime::getYear, literals)),
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getYear,
+                            referencedField.literals());
+                }),
         MONTH(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference,
-                                fieldType,
-                                () -> LocalDateTime::getMonthValue,
-                                literals)),
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getMonthValue,
+                            referencedField.literals());
+                }),
         DAY(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference,
-                                fieldType,
-                                () -> LocalDateTime::getDayOfMonth,
-                                literals)),
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getDayOfMonth,
+                            referencedField.literals());
+                }),
         HOUR(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference, fieldType, () -> LocalDateTime::getHour, literals)),
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getHour,
+                            referencedField.literals());
+                }),
         MINUTE(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference,
-                                fieldType,
-                                () -> LocalDateTime::getMinute,
-                                literals)),
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getMinute,
+                            referencedField.literals());
+                }),
         SECOND(
-                (fieldReference, fieldType, literals) ->
-                        TemporalToIntConverter.create(
-                                fieldReference,
-                                fieldType,
-                                () -> LocalDateTime::getSecond,
-                                literals)),
-        DATE_FORMAT(DateFormat::create),
-        SUBSTRING((fieldReference, fieldType, literals) -> substring(fieldReference, literals)),
-        TRUNCATE(Expression::truncate),
-        CONSTANT((fieldReference, fieldType, literals) -> constant(literals));
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return TemporalToIntConverter.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            () -> LocalDateTime::getSecond,
+                            referencedField.literals());
+                }),
+        DATE_FORMAT(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return DateFormat.create(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        SUBSTRING(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return substring(referencedField.field(), referencedField.literals());
+                }),
+        TRUNCATE(
+                (typeMapping, caseSensitive, args) -> {
+                    ReferencedField referencedField =
+                            ReferencedField.checkArgument(typeMapping, caseSensitive, args);
+                    return truncate(
+                            referencedField.field(),
+                            referencedField.fieldType(),
+                            referencedField.literals());
+                }),
+        CAST((typeMapping, caseSensitive, args) -> cast(args));
 
-        private final ExpressionFactory factory;
+        public final ExpressionCreator creator;
 
-        ExpressionProcessor(ExpressionFactory factory) {
-            this.factory = factory;
+        ExpressionFunction(ExpressionCreator creator) {
+            this.creator = creator;
         }
 
-        private ExpressionFactory factory() {
-            return this.factory;
+        public ExpressionCreator getCreator() {
+            return creator;
         }
 
-        private static final Map<String, ExpressionFactory> EXPRESSION_FACTORIES =
-                Arrays.stream(ExpressionProcessor.values())
+        private static final Map<String, ExpressionCreator> EXPRESSION_FUNCTIONS =
+                Arrays.stream(ExpressionFunction.values())
                         .collect(
                                 Collectors.toMap(
                                         value -> value.name().toLowerCase(),
-                                        ExpressionProcessor::factory));
+                                        ExpressionFunction::getCreator));
 
-        public static ExpressionFactory factory(String exprName) {
-            return EXPRESSION_FACTORIES.get(exprName.toLowerCase());
+        public static ExpressionCreator creator(String exprName) {
+            return EXPRESSION_FUNCTIONS.get(exprName.toLowerCase());
         }
     }
 
-    /** Define the function interface for creating Expression. */
+    /** Expression creator. */
     @FunctionalInterface
-    interface ExpressionFactory {
-        Expression create(String fieldReference, DataType fieldType, String... literals);
+    interface ExpressionCreator {
+        Expression create(Map<String, DataType> typeMapping, boolean caseSensitive, String[] args);
+    }
+
+    /** Referenced field in expression input parameters. */
+    class ReferencedField {
+        private final String field;
+        private final DataType fieldType;
+        private final String[] literals;
+
+        private ReferencedField(String field, DataType fieldType, String[] literals) {
+            this.field = field;
+            this.fieldType = fieldType;
+            this.literals = literals;
+        }
+
+        public static ReferencedField checkArgument(
+                Map<String, DataType> typeMapping, boolean caseSensitive, String... args) {
+            String referencedField = args[0].trim();
+            String[] literals =
+                    Arrays.stream(args).skip(1).map(String::trim).toArray(String[]::new);
+            String referencedFieldCheckForm =
+                    StringUtils.caseSensitiveConversion(referencedField, caseSensitive);
+
+            DataType fieldType =
+                    checkNotNull(
+                            typeMapping.get(referencedFieldCheckForm),
+                            String.format(
+                                    "Referenced field '%s' is not in given fields: %s.",
+                                    referencedFieldCheckForm, typeMapping.keySet()));
+            return new ReferencedField(referencedFieldCheckForm, fieldType, literals);
+        }
+
+        public String field() {
+            return field;
+        }
+
+        public DataType fieldType() {
+            return fieldType;
+        }
+
+        public String[] literals() {
+            return literals;
+        }
     }
 
     static Expression create(
-            String exprName, String fieldReference, DataType fieldType, String... literals) {
+            Map<String, DataType> typeMapping,
+            boolean caseSensitive,
+            String exprName,
+            String... args) {
 
-        ExpressionFactory factory = ExpressionProcessor.factory(exprName.toLowerCase());
-        if (factory == null) {
+        ExpressionCreator function = ExpressionFunction.creator(exprName.toLowerCase());
+        if (function == null) {
             throw new UnsupportedOperationException(
                     String.format(
                             "Unsupported expression: %s. Supported expressions are: %s",
                             exprName,
-                            String.join(",", ExpressionProcessor.EXPRESSION_FACTORIES.keySet())));
+                            String.join(",", ExpressionFunction.EXPRESSION_FUNCTIONS.keySet())));
         }
-
-        return factory.create(fieldReference, fieldType, literals);
+        return function.create(typeMapping, caseSensitive, args);
     }
 
     static Expression substring(String fieldReference, String... literals) {
@@ -177,14 +269,20 @@ public interface Expression extends Serializable {
         return new TruncateComputer(fieldReference, fieldType, literals[0]);
     }
 
-    static Expression constant(String... literals) {
+    static Expression cast(String... literals) {
         checkArgument(
-                literals.length == 1,
+                literals.length == 1 || literals.length == 2,
                 String.format(
-                        "'constant' expression supports one argument, but found '%s'.",
+                        "'cast' expression supports one or two arguments, but found '%s'.",
                         literals.length));
-        return new Constant(literals[0]);
+        DataType dataType = DataTypes.STRING();
+        if (literals.length == 2) {
+            dataType = DataTypeJsonParser.parseAtomicTypeSQLString(literals[1]);
+        }
+        return new CastExpression(literals[0], dataType);
     }
+
+    // ======================== Expression Implementations ========================
 
     /** Expression to handle temporal value. */
     abstract class TemporalExpressionBase<T> implements Expression {
@@ -482,14 +580,17 @@ public interface Expression extends Serializable {
     }
 
     /** Get constant value. */
-    final class Constant implements Expression {
+    final class CastExpression implements Expression {
 
         private static final long serialVersionUID = 1L;
 
         private final String value;
 
-        private Constant(String value) {
+        private final DataType dataType;
+
+        private CastExpression(String value, DataType dataType) {
             this.value = value;
+            this.dataType = dataType;
         }
 
         @Override
@@ -499,7 +600,7 @@ public interface Expression extends Serializable {
 
         @Override
         public DataType outputType() {
-            return DataTypes.STRING();
+            return dataType;
         }
 
         @Override
