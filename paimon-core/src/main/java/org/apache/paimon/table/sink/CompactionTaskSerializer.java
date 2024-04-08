@@ -25,6 +25,7 @@ import org.apache.paimon.io.DataInputDeserializer;
 import org.apache.paimon.io.DataInputView;
 import org.apache.paimon.io.DataOutputView;
 import org.apache.paimon.io.DataOutputViewStreamWrapper;
+import org.apache.paimon.io.IdentifierSerializer;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -37,12 +38,15 @@ import static org.apache.paimon.utils.SerializationUtils.serializeBinaryRow;
 /** Serializer for {@link AppendOnlyCompactionTask}. */
 public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyCompactionTask> {
 
-    private static final int CURRENT_VERSION = 2;
+    private static final int CURRENT_VERSION = 3;
 
     private final DataFileMetaSerializer dataFileSerializer;
 
+    private final IdentifierSerializer identifierSerializer;
+
     public CompactionTaskSerializer() {
         this.dataFileSerializer = new DataFileMetaSerializer();
+        this.identifierSerializer = new IdentifierSerializer();
     }
 
     @Override
@@ -69,6 +73,7 @@ public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyC
     private void serialize(AppendOnlyCompactionTask task, DataOutputView view) throws IOException {
         serializeBinaryRow(task.partition(), view);
         dataFileSerializer.serializeList(task.compactBefore(), view);
+        identifierSerializer.serialize(task.tableIdentifier(), view);
     }
 
     @Override
@@ -103,6 +108,8 @@ public class CompactionTaskSerializer implements VersionedSerializer<AppendOnlyC
 
     private AppendOnlyCompactionTask deserialize(DataInputView view) throws IOException {
         return new AppendOnlyCompactionTask(
-                deserializeBinaryRow(view), dataFileSerializer.deserializeList(view));
+                deserializeBinaryRow(view),
+                dataFileSerializer.deserializeList(view),
+                identifierSerializer.deserialize(view));
     }
 }
