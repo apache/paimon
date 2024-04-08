@@ -72,7 +72,7 @@ public class LevelsTest {
                 UUID.randomUUID().toString(),
                 0,
                 1,
-                DataFileMeta.EMPTY_FILTER,
+                row(0),
                 row(0),
                 row(0),
                 null,
