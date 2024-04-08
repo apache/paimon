@@ -28,8 +28,8 @@ import org.apache.paimon.table.sink.{CommitMessage, CommitMessageImpl}
 import org.apache.paimon.table.source.DataSplit
 import org.apache.paimon.types.RowType
 
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.SparkSession
-import org.apache.spark.sql.Utils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Attribute, Expression}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Filter => FilterLogicalNode}

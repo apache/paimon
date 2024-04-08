@@ -21,7 +21,7 @@ package org.apache.paimon.spark
 import org.apache.paimon.predicate.Predicate
 import org.apache.paimon.table.Table
 
-import org.apache.spark.sql.Utils.fieldReference
+import org.apache.spark.sql.PaimonUtils.fieldReference
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.SupportsRuntimeFiltering
 import org.apache.spark.sql.sources.{Filter, In}

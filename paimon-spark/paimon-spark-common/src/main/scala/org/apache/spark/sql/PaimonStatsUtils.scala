@@ -32,7 +32,7 @@ import java.net.URI
  * [[org.apache.spark.sql]] package, Hence, use this class to adapt then so that we can use them
  * indirectly.
  */
-object StatsUtils {
+object PaimonStatsUtils {
 
   def calculateTotalSize(
       sessionState: SessionState,

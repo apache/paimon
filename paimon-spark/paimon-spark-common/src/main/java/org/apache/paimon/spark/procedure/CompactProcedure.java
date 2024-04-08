@@ -51,8 +51,8 @@ import org.apache.spark.api.java.JavaRDD;
 import org.apache.spark.api.java.JavaSparkContext;
 import org.apache.spark.api.java.function.FlatMapFunction;
 import org.apache.spark.sql.Dataset;
+import org.apache.spark.sql.PaimonUtils;
 import org.apache.spark.sql.Row;
-import org.apache.spark.sql.Utils;
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.catalyst.expressions.Expression;
 import org.apache.spark.sql.catalyst.plans.logical.Filter;
@@ -363,7 +363,7 @@ public class CompactProcedure extends BaseProcedure {
             LogicalPlan relation,
             @Nullable Expression condition) {
         Dataset<Row> row =
-                Utils.createDataset(
+                PaimonUtils.createDataset(
                         spark(), condition == null ? relation : new Filter(condition, relation));
         new WriteIntoPaimonTable(
                         table,
