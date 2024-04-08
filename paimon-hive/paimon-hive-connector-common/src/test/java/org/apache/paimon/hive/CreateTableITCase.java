@@ -131,8 +131,8 @@ public class CreateTableITCase extends HiveTestBase {
                 new Schema(
                         Lists.newArrayList(
                                 new DataField(0, "col1", DataTypes.INT(), "first comment"),
-                                new DataField(1, "Col2", DataTypes.STRING(), "second comment"),
-                                new DataField(2, "COL3", DataTypes.DECIMAL(5, 3), "last comment")),
+                                new DataField(1, "col2", DataTypes.STRING(), "second comment"),
+                                new DataField(2, "col3", DataTypes.DECIMAL(5, 3), "last comment")),
                         Collections.emptyList(),
                         Collections.emptyList(),
                         Maps.newHashMap(),
