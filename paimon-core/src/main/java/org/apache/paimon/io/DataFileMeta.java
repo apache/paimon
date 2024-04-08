@@ -93,20 +93,16 @@ public class DataFileMeta {
             long minSequenceNumber,
             long maxSequenceNumber,
             long schemaId) {
-        return new DataFileMeta(
+        return forAppend(
                 fileName,
                 fileSize,
                 rowCount,
-                EMPTY_FILTER,
-                EMPTY_MIN_KEY,
-                EMPTY_MAX_KEY,
-                EMPTY_KEY_STATS,
                 rowStats,
+                EMPTY_FILTER,
                 minSequenceNumber,
                 maxSequenceNumber,
                 schemaId,
-                DUMMY_LEVEL,
-                0L);
+                Collections.emptyList());
     }
 
     public static DataFileMeta forAppend(

@@ -370,9 +370,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         rowType,
                         options -> {
                             options.set(
-                                    CoreOptions.INDEX_COLUMNS,
+                                    CoreOptions.FILE_INDEX_COLUMNS,
                                     "index_column:bloom:{items=150}; index_column2:bloom:{items=150}; index_column3:bloom:{items=150}");
-                            options.set(CoreOptions.INDEX_SIZE_IN_META.key(), "500 B");
+                            options.set(CoreOptions.FILE_INDEX_SIZE_IN_META.key(), "500 B");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);
@@ -414,9 +414,9 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         rowType,
                         options -> {
                             options.set(
-                                    CoreOptions.INDEX_COLUMNS,
+                                    CoreOptions.FILE_INDEX_COLUMNS,
                                     "index_column:bloom:{}; index_column2:bloom:{}; index_column3:bloom:{}");
-                            options.set(CoreOptions.INDEX_SIZE_IN_META.key(), "50 B");
+                            options.set(CoreOptions.FILE_INDEX_SIZE_IN_META.key(), "50 B");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);
