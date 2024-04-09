@@ -31,6 +31,7 @@ import org.apache.flink.api.common.state.ListStateDescriptor;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
+import org.apache.flink.api.java.functions.KeySelector;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.api.java.typeutils.runtime.TupleSerializer;
 import org.apache.flink.runtime.state.FunctionInitializationContext;
@@ -45,11 +46,7 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.ArrayList;
-import java.util.List;
-import java.util.NavigableMap;
-import java.util.OptionalLong;
-import java.util.TreeMap;
+import java.util.*;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -230,14 +227,21 @@ public class MonitorFunction extends RichSourceFunction<Split>
             ReadBuilder readBuilder,
             long monitorInterval,
             boolean emitSnapshotWatermark) {
+        KeySelector<Split, Integer> keySelector =
+                split -> {
+                    if (Objects.nonNull(((DataSplit) split).partition())) {
+                        return Math.abs(((DataSplit) split).partition().hashCode())
+                                + ((DataSplit) split).bucket();
+                    } else {
+                        return ((DataSplit) split).bucket();
+                    }
+                };
         return env.addSource(
                         new MonitorFunction(readBuilder, monitorInterval, emitSnapshotWatermark),
                         name + "-Monitor",
                         new JavaTypeInfo<>(Split.class))
                 .forceNonParallel()
-                .partitionCustom(
-                        (key, numPartitions) -> key % numPartitions,
-                        split -> ((DataSplit) split).bucket())
+                .partitionCustom((key, numPartitions) -> key % numPartitions, keySelector)
                 .transform(name + "-Reader", typeInfo, new ReadOperator(readBuilder));
     }
 }
