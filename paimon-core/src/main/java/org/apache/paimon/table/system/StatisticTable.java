@@ -38,9 +38,14 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.*;
+
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.JsonSerdeUtil;
+import org.apache.paimon.utils.ProjectedRow;
+import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
 import java.util.Arrays;
