@@ -32,6 +32,7 @@ import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
+import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -42,14 +43,10 @@ import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
+import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
-import java.util.Arrays;
-import java.util.Collections;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.util.*;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -96,7 +93,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return dataTable.newScan();
+        return new StatisticTable.StatisticScan();
     }
 
     @Override
@@ -107,6 +104,29 @@ public class StatisticTable implements ReadonlyTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new StatisticTable(fileIO, location, dataTable.copy(dynamicOptions));
+    }
+
+
+    private class StatisticScan extends ReadOnceTableScan {
+
+        @Override
+        public InnerTableScan withFilter(Predicate predicate) {
+            // TODO
+            return this;
+        }
+
+        @Override
+        public Plan innerPlan() {
+            long rowCount;
+            try {
+                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
+            } catch (IOException e) {
+                throw new RuntimeException(e);
+            }
+            return () ->
+                    Collections.singletonList(
+                            new StatisticTable.StatisticSplit(rowCount, location));
+        }
     }
 
     private static class StatisticSplit implements Split {
@@ -178,6 +198,7 @@ public class StatisticTable implements ReadonlyTable {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
+            Optional<Statistics> statistics1 = dataTable.statistics();
             Statistics statistics = dataTable.statistics().get();
             Iterator<Statistics> statisticsIterator =
                     Collections.singletonList(statistics).iterator();
