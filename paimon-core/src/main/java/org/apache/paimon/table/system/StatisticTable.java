@@ -96,7 +96,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return dataTable.newStreamScan();
+        return dataTable.newScan();
     }
 
     @Override
