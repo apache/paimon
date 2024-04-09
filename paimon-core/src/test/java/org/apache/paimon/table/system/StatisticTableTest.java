@@ -78,48 +78,4 @@ public class StatisticTableTest extends TableTestBase {
         assertThat(result.size() == 1);
     }
 
-    private List<InternalRow> getExceptedResult(long snapshotId) {
-        if (!snapshotManager.snapshotExists(snapshotId)) {
-            return Collections.emptyList();
-        }
-
-        FileStoreScan.Plan plan = scan.withSnapshot(snapshotId).plan();
-
-        List<ManifestEntry> files = plan.files(FileKind.ADD);
-
-        List<InternalRow> expectedRow = new ArrayList<>();
-        for (ManifestEntry fileEntry : files) {
-            String partition = String.valueOf(fileEntry.partition().getInt(0));
-            DataFileMeta file = fileEntry.file();
-            String minKey = String.valueOf(file.minKey().getInt(0));
-            String maxKey = String.valueOf(file.maxKey().getInt(0));
-            String minCol1 = String.valueOf(file.valueStats().minValues().getInt(2));
-            String maxCol1 = String.valueOf(file.valueStats().maxValues().getInt(2));
-            expectedRow.add(
-                    GenericRow.of(
-                            BinaryString.fromString(Arrays.toString(new String[] {partition})),
-                            fileEntry.bucket(),
-                            BinaryString.fromString(file.fileName()),
-                            BinaryString.fromString("orc"),
-                            file.schemaId(),
-                            file.level(),
-                            file.rowCount(),
-                            file.fileSize(),
-                            BinaryString.fromString(Arrays.toString(new String[] {minKey})),
-                            BinaryString.fromString(Arrays.toString(new String[] {maxKey})),
-                            BinaryString.fromString(
-                                    String.format("{col1=%s, pk=%s, pt=%s}", 0, 0, 0)),
-                            BinaryString.fromString(
-                                    String.format(
-                                            "{col1=%s, pk=%s, pt=%s}", minCol1, minKey, partition)),
-                            BinaryString.fromString(
-                                    String.format(
-                                            "{col1=%s, pk=%s, pt=%s}", maxCol1, maxKey, partition)),
-                            file.minSequenceNumber(),
-                            file.maxSequenceNumber(),
-                            file.creationTime()));
-        }
-        return expectedRow;
-    }
-
 }
