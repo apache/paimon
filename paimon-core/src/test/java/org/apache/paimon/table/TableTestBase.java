@@ -181,7 +181,7 @@ public abstract class TableTestBase {
     }
 
     protected List<CommitMessage> writeDataDefault(int size, int times) throws Exception {
-        return writeData(getTableDefault(),size,times);
+        return writeData(getTableDefault(), size, times);
     }
 
     protected List<CommitMessage> writeData(Table table, int size, int times) throws Exception {
@@ -191,6 +191,7 @@ public abstract class TableTestBase {
         }
         return messages;
     }
+
     public FileStoreTable getTableDefault() throws Exception {
         return getTable(identifier());
     }
