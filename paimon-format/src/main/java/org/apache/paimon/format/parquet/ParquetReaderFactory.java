@@ -399,7 +399,7 @@ public class ParquetReaderFactory implements FormatReaderFactory {
         }
 
         public RecordIterator<InternalRow> convertAndGetIterator(long rowNumber) {
-            result.reset(columnarBatch.getNumRows(), rowNumber);
+            result.reset(rowNumber);
             return result;
         }
     }

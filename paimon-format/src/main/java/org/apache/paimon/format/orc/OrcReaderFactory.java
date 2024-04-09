@@ -183,9 +183,8 @@ public class OrcReaderFactory implements FormatReaderFactory {
                 VectorizedRowBatch orcBatch, long rowNumber) {
             // no copying from the ORC column vectors to the Paimon columns vectors necessary,
             // because they point to the same data arrays internally design
-            int batchSize = orcBatch.size;
-            paimonColumnBatch.setNumRows(batchSize);
-            result.reset(batchSize, rowNumber);
+            paimonColumnBatch.setNumRows(orcBatch.size);
+            result.reset(rowNumber);
             return result;
         }
     }
