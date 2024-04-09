@@ -38,10 +38,7 @@ import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.IteratorRecordReader;
-import org.apache.paimon.utils.ProjectedRow;
-import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
+import org.apache.paimon.utils.*;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -67,8 +64,9 @@ public class StatisticTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "schema_id", new BigIntType(false)),
-                            new DataField(
-                                    2, "statistics", SerializationUtils.newStringType(false))));
+                            new DataField(2, "mergedRecordCount", new BigIntType(false)),
+                            new DataField(3, "mergedRecordSize", new BigIntType(false)),
+                            new DataField(2, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -218,7 +216,9 @@ public class StatisticTable implements ReadonlyTable {
             return GenericRow.of(
                     statistics.snapshotId(),
                     statistics.schemaId(),
-                    BinaryString.fromString(statistics.toJson()));
+                    statistics.mergedRecordCount(),
+                    statistics.mergedRecordSize(),
+                    BinaryString.fromString(JsonSerdeUtil.toJson(statistics.colStats())));
         }
     }
 }
