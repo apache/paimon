@@ -32,7 +32,6 @@ import org.apache.paimon.table.ReadonlyTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.InnerTableRead;
 import org.apache.paimon.table.source.InnerTableScan;
-import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.BigIntType;
@@ -41,7 +40,6 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
-import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
@@ -98,7 +96,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public InnerTableScan newScan() {
-        return new StatisticTable.StatisticScan();
+        return dataTable.newStreamScan();
     }
 
     @Override
@@ -109,28 +107,6 @@ public class StatisticTable implements ReadonlyTable {
     @Override
     public Table copy(Map<String, String> dynamicOptions) {
         return new StatisticTable(fileIO, location, dataTable.copy(dynamicOptions));
-    }
-
-    private class StatisticScan extends ReadOnceTableScan {
-
-        @Override
-        public InnerTableScan withFilter(Predicate predicate) {
-            // TODO
-            return this;
-        }
-
-        @Override
-        public Plan innerPlan() {
-            long rowCount;
-            try {
-                rowCount = new SnapshotManager(fileIO, location).snapshotCount();
-            } catch (IOException e) {
-                throw new RuntimeException(e);
-            }
-            return () ->
-                    Collections.singletonList(
-                            new StatisticTable.StatisticSplit(rowCount, location));
-        }
     }
 
     private static class StatisticSplit implements Split {
