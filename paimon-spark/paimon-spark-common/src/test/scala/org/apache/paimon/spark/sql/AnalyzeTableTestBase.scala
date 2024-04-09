@@ -50,7 +50,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(stats.colStats().isEmpty)
   }
 
-  test("Paimon analyze: test statistic system table only") {
+  test("Paimon analyze: test statistic system table") {
     spark.sql(s"""
                  |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
                  |USING PAIMON
