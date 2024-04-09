@@ -51,12 +51,11 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
   }
 
   test("Paimon analyze: test statistic system table only") {
-    spark.sql(
-      s"""
-         |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
-         |USING PAIMON
-         |TBLPROPERTIES ('primary-key'='id')
-         |""".stripMargin)
+    spark.sql(s"""
+                 |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+                 |USING PAIMON
+                 |TBLPROPERTIES ('primary-key'='id')
+                 |""".stripMargin)
 
     spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
     spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
