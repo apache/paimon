@@ -44,6 +44,7 @@ import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+/** Tests for {@link StatisticTable}. */
 public class StatisticTableTest extends TableTestBase {
 
     private FileStoreTable table;
