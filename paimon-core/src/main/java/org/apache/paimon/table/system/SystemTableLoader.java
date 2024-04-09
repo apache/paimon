@@ -48,7 +48,7 @@ import static org.apache.paimon.table.system.SchemasTable.SCHEMAS;
 import static org.apache.paimon.table.system.SinkTableLineageTable.SINK_TABLE_LINEAGE;
 import static org.apache.paimon.table.system.SnapshotsTable.SNAPSHOTS;
 import static org.apache.paimon.table.system.SourceTableLineageTable.SOURCE_TABLE_LINEAGE;
-import static org.apache.paimon.table.system.StatisticTable.STATISTIC;
+import static org.apache.paimon.table.system.StatisticTable.STATISTICS;
 import static org.apache.paimon.table.system.TagsTable.TAGS;
 import static org.apache.paimon.utils.Preconditions.checkNotNull;
 
@@ -83,7 +83,7 @@ public class SystemTableLoader {
                 return new ReadOptimizedTable(dataTable);
             case AGGREGATION:
                 return new AggregationFieldsTable(fileIO, location);
-            case STATISTIC:
+            case STATISTICS:
                 return new StatisticTable(fileIO, location, dataTable);
             default:
                 return null;

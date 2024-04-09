@@ -62,7 +62,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
 
-    val table = "`T$statistic`"
+    val table = "`T$statistics`"
     val df = spark.sql(s"select * from $table")
     Assertions.assertEquals(df.collect().size, 1)
   }

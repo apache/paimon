@@ -60,7 +60,7 @@ public class StatisticTable implements ReadonlyTable {
 
     private static final long serialVersionUID = 1L;
 
-    public static final String STATISTIC = "statistic";
+    public static final String STATISTICS = "statistics";
 
     public static final RowType TABLE_TYPE =
             new RowType(
@@ -68,7 +68,7 @@ public class StatisticTable implements ReadonlyTable {
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "schema_id", new BigIntType(false)),
                             new DataField(
-                                    2, "content_json", SerializationUtils.newStringType(false))));
+                                    2, "statistics", SerializationUtils.newStringType(false))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -83,7 +83,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public String name() {
-        return dataTable.name() + SYSTEM_TABLE_SPLITTER + STATISTIC;
+        return dataTable.name() + SYSTEM_TABLE_SPLITTER + STATISTICS;
     }
 
     @Override
@@ -103,7 +103,7 @@ public class StatisticTable implements ReadonlyTable {
 
     @Override
     public InnerTableRead newRead() {
-        return new StatisticTable.StatisticRead(fileIO, dataTable);
+        return new StatisticRead(fileIO, dataTable);
     }
 
     @Override
