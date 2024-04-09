@@ -267,7 +267,7 @@ trait MergePaimonScalarSubqueriersBase extends Rule[LogicalPlan] with PredicateH
   protected def mergePaimonScan(scan1: PaimonScan, scan2: PaimonScan): Option[PaimonScan] = {
     if (
       scan1.table == scan2.table &&
-      scan1.filters.sameElements(scan2.filters) &&
+      scan1.filters == scan2.filters &&
       scan1.pushDownLimit == scan2.pushDownLimit
     ) {
 

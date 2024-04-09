@@ -39,8 +39,8 @@ import scala.collection.JavaConverters._
 abstract class PaimonBaseScan(
     table: Table,
     requiredSchema: StructType,
-    filters: Array[Predicate],
-    reservedFilters: Array[Filter],
+    filters: Seq[Predicate],
+    reservedFilters: Seq[Filter],
     pushDownLimit: Option[Int])
   extends Scan
   with SupportsReportStatistics
