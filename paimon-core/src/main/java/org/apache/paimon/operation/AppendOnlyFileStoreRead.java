@@ -44,6 +44,7 @@ import org.apache.paimon.utils.BulkFormatMapping;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.Projection;
+import org.apache.paimon.utils.Triple;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -69,7 +70,8 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, Triple<TableSchema, List<Predicate>, BulkFormatMapping>>
+            formatKeyTripleMap;
     private final boolean fileIndexReadEnabled;
 
     private int[][] projection;
@@ -89,7 +91,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
-        this.bulkFormatMappings = new HashMap<>();
+        this.formatKeyTripleMap = new HashMap<>();
         this.fileIndexReadEnabled = fileIndexReadEnabled;
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
@@ -114,14 +116,12 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
-        // use this to cache evolved predicates
-        Map<FormatKey, List<Predicate>> filePredicates = new HashMap<>();
-        Map<FormatKey, TableSchema> fileSchema = new HashMap<>();
+
         for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             FormatKey formatKey = new FormatKey(file.schemaId(), formatIdentifier);
-            BulkFormatMapping bulkFormatMapping =
-                    bulkFormatMappings.computeIfAbsent(
+            Triple<TableSchema, List<Predicate>, BulkFormatMapping> formatMappingTriple =
+                    formatKeyTripleMap.computeIfAbsent(
                             formatKey,
                             key -> {
                                 TableSchema tableSchema = schema;
@@ -172,21 +172,22 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                         Projection.of(dataProjection)
                                                 .project(dataSchema.logicalRowType());
 
-                                fileSchema.put(key, dataSchema);
-                                if (dataFilters != null) {
-                                    filePredicates.put(key, dataFilters);
-                                }
-                                return new BulkFormatMapping(
-                                        indexCastMapping.getIndexMapping(),
-                                        indexCastMapping.getCastMapping(),
-                                        partitionPair,
-                                        formatDiscover
-                                                .discover(formatIdentifier)
-                                                .createReaderFactory(
-                                                        projectedRowType, dataFilters));
+                                return Triple.of(
+                                        dataSchema,
+                                        dataFilters,
+                                        new BulkFormatMapping(
+                                                indexCastMapping.getIndexMapping(),
+                                                indexCastMapping.getCastMapping(),
+                                                partitionPair,
+                                                formatDiscover
+                                                        .discover(formatIdentifier)
+                                                        .createReaderFactory(
+                                                                projectedRowType, dataFilters)));
                             });
 
-            List<Predicate> dataFilter = filePredicates.getOrDefault(formatKey, null);
+            TableSchema dataSchema = formatMappingTriple.f0;
+            List<Predicate> dataFilter = formatMappingTriple.f1;
+            BulkFormatMapping bulkFormatMapping = formatMappingTriple.f2;
             if (dataFilter != null && !dataFilter.isEmpty()) {
                 List<String> indexFiles =
                         file.extraFiles().stream()
@@ -201,7 +202,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                             new FileIndexPredicate(
                                     dataFilePathFactory.toPath(indexFiles.get(0)),
                                     fileIO,
-                                    fileSchema.get(formatKey).logicalRowType())) {
+                                    dataSchema.logicalRowType())) {
                         if (!predicate.testPredicate(
                                 PredicateBuilder.and(dataFilter.toArray(new Predicate[0])))) {
                             continue;
