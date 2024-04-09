@@ -198,7 +198,6 @@ public class StatisticTable implements ReadonlyTable {
             if (!(split instanceof StatisticTable.StatisticSplit)) {
                 throw new IllegalArgumentException("Unsupported split: " + split.getClass());
             }
-            Optional<Statistics> statistics1 = dataTable.statistics();
             Statistics statistics = dataTable.statistics().get();
             Iterator<Statistics> statisticsIterator =
                     Collections.singletonList(statistics).iterator();
