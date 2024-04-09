@@ -18,13 +18,14 @@
 
 package org.apache.paimon.flink.sink;
 
-import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.apache.paimon.append.MultiTableAppendOnlyCompactionTask;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.CommitMessage;
 import org.apache.paimon.table.sink.CommitMessageImpl;
+
+import org.apache.flink.streaming.runtime.streamrecord.StreamRecord;
 import org.assertj.core.api.Assertions;
 import org.junit.jupiter.api.Test;
 
@@ -36,21 +37,19 @@ import java.util.stream.Collectors;
 
 import static org.apache.paimon.flink.sink.AppendOnlySingleTableCompactionWorkerOperatorTest.packTask;
 
-/**
- * test for {@link AppendOnlyMultiTableCompactionWorkerOperator}.
- */
+/** test for {@link AppendOnlyMultiTableCompactionWorkerOperator}. */
 public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestBase {
-    private final String[] tables = {
-            "a", "b"
-    };
+    private final String[] tables = {"a", "b"};
+
     @Test
     public void testAsyncCompactionWorks() throws Exception {
 
         AppendOnlyMultiTableCompactionWorkerOperator workerOperator =
-                new AppendOnlyMultiTableCompactionWorkerOperator(()->catalog, "user",new Options());
+                new AppendOnlyMultiTableCompactionWorkerOperator(
+                        () -> catalog, "user", new Options());
 
-        List<StreamRecord<MultiTableAppendOnlyCompactionTask>> records =new ArrayList<>();
-        //create table and write
+        List<StreamRecord<MultiTableAppendOnlyCompactionTask>> records = new ArrayList<>();
+        // create table and write
         for (String table : tables) {
             Identifier identifier = identifier(table);
             createTable(identifier);
@@ -58,9 +57,15 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
             // write 200 files
             List<CommitMessage> commitMessages = writeData(getTable(identifier), 200, 20);
 
-            packTask(commitMessages, 5).stream().map(
-                    task->new StreamRecord<>(new MultiTableAppendOnlyCompactionTask(task.partition(),task.compactBefore(),identifier))
-            ).forEach(records::add);
+            packTask(commitMessages, 5).stream()
+                    .map(
+                            task ->
+                                    new StreamRecord<>(
+                                            new MultiTableAppendOnlyCompactionTask(
+                                                    task.partition(),
+                                                    task.compactBefore(),
+                                                    identifier)))
+                    .forEach(records::add);
         }
 
         Assertions.assertThat(records.size()).isEqualTo(8);
@@ -85,8 +90,8 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                                     throw new RuntimeException(
                                             "Timeout waiting for compaction, maybe some error happens in "
                                                     + AppendOnlySingleTableCompactionWorkerOperator
-                                                    .class
-                                                    .getName());
+                                                            .class
+                                                            .getName());
                                 }
                                 Thread.sleep(1_000L);
                             }
@@ -96,12 +101,15 @@ public class AppendOnlyMultiTableCompactionWorkerOperatorTest extends TableTestB
                 a ->
                         Assertions.assertThat(
                                         ((CommitMessageImpl) a.wrappedCommittable())
-                                                .compactIncrement()
-                                                .compactAfter()
-                                                .size()
+                                                        .compactIncrement()
+                                                        .compactAfter()
+                                                        .size()
                                                 == 1)
                                 .isTrue());
-        Set<String> table = committables.stream().map(MultiTableCommittable::getTable).collect(Collectors.toSet());
+        Set<String> table =
+                committables.stream()
+                        .map(MultiTableCommittable::getTable)
+                        .collect(Collectors.toSet());
         Assertions.assertThat(table).hasSameElementsAs(Arrays.asList(tables));
     }
 }
