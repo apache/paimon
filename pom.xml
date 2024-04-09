@@ -96,7 +96,6 @@ under the License.
         <flink.forkCount>1C</flink.forkCount>
         <flink.reuseForks>true</flink.reuseForks>
         <testcontainers.version>1.19.1</testcontainers.version>
-        <awaitility.version>4.2.0</awaitility.version>
 
         <!-- Can be set to any value to reproduce a specific build. -->
         <test.randomization.seed/>
@@ -190,13 +189,6 @@ under the License.
             <!-- API bridge between log4j 1 and 2 -->
             <groupId>org.apache.logging.log4j</groupId>
             <artifactId>log4j-1.2-api</artifactId>
-            <scope>test</scope>
-        </dependency>
-
-        <dependency>
-            <groupId>org.awaitility</groupId>
-            <artifactId>awaitility</artifactId>
-            <version>${awaitility.version}</version>
             <scope>test</scope>
         </dependency>
     </dependencies>
