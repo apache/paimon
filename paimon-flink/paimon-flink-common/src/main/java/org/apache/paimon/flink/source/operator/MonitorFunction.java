@@ -46,7 +46,11 @@ import org.apache.flink.util.Preconditions;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import java.util.*;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.NavigableMap;
+import java.util.OptionalLong;
+import java.util.TreeMap;
 
 /**
  * This is the single (non-parallel) monitoring task, it is responsible for:
@@ -229,7 +233,7 @@ public class MonitorFunction extends RichSourceFunction<Split>
             boolean emitSnapshotWatermark) {
         KeySelector<Split, Integer> keySelector =
                 split -> {
-                    if (Objects.nonNull(((DataSplit) split).partition())) {
+                    if (((DataSplit) split).partition() != null) {
                         return Math.abs(((DataSplit) split).partition().hashCode())
                                 + ((DataSplit) split).bucket();
                     } else {
