@@ -50,6 +50,24 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertTrue(stats.colStats().isEmpty)
   }
 
+  test("Paimon analyze: test statistic system table only") {
+    spark.sql(
+      s"""
+         |CREATE TABLE T (id STRING, name STRING, i INT, l LONG)
+         |USING PAIMON
+         |TBLPROPERTIES ('primary-key'='id')
+         |""".stripMargin)
+
+    spark.sql(s"INSERT INTO T VALUES ('1', 'a', 1, 1)")
+    spark.sql(s"INSERT INTO T VALUES ('2', 'aaa', 1, 2)")
+
+    spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS")
+
+    val table = "`T$statistic`"
+    val df = spark.sql(s"select * from $table")
+    Assertions.assertEquals(df.collect().size, 1)
+  }
+
   test("Paimon analyze: analyze no scan") {
     spark.sql(s"CREATE TABLE T (id STRING, name STRING)")
     assertThatThrownBy(() => spark.sql(s"ANALYZE TABLE T COMPUTE STATISTICS NOSCAN"))
