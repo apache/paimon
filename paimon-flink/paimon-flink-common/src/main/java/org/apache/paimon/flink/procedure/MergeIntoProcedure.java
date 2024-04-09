@@ -21,7 +21,6 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.MergeIntoAction;
-import org.apache.paimon.flink.action.MergeIntoActionFactory;
 
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -222,7 +221,7 @@ public class MergeIntoProcedure extends ProcedureBase {
         }
 
         action.withStreamExecutionEnvironment(procedureContext.getExecutionEnvironment());
-        MergeIntoActionFactory.validate(action);
+        action.validate();
 
         DataStream<RowData> dataStream = action.buildDataStream();
         TableResult tableResult = action.batchSink(dataStream);
