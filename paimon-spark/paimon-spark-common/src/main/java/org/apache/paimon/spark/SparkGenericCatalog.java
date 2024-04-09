@@ -38,10 +38,10 @@ import org.apache.spark.sql.catalyst.catalog.InMemoryCatalog;
 import org.apache.spark.sql.catalyst.catalog.SessionCatalog;
 import org.apache.spark.sql.connector.catalog.CatalogExtension;
 import org.apache.spark.sql.connector.catalog.CatalogPlugin;
-import org.apache.spark.sql.connector.catalog.CatalogUtils;
 import org.apache.spark.sql.connector.catalog.FunctionCatalog;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.NamespaceChange;
+import org.apache.spark.sql.connector.catalog.PaimonCatalogUtils;
 import org.apache.spark.sql.connector.catalog.SupportsNamespaces;
 import org.apache.spark.sql.connector.catalog.Table;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -260,7 +260,7 @@ public class SparkGenericCatalog extends SparkBaseCatalog implements CatalogExte
                 hadoopConf.set(entry.getKey(), entry.getValue());
             }
             ExternalCatalog externalCatalog =
-                    CatalogUtils.buildExternalCatalog(sparkConf, hadoopConf);
+                    PaimonCatalogUtils.buildExternalCatalog(sparkConf, hadoopConf);
             this.sessionCatalog = new V2SessionCatalog(new SessionCatalog(externalCatalog));
         }
     }

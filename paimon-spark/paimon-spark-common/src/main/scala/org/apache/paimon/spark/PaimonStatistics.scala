@@ -22,7 +22,7 @@ import org.apache.paimon.stats
 import org.apache.paimon.stats.ColStats
 import org.apache.paimon.types.DataType
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.plans.logical.ColumnStat
 import org.apache.spark.sql.connector.expressions.NamedReference
 import org.apache.spark.sql.connector.read.Statistics
@@ -59,7 +59,7 @@ case class PaimonStatistics[T <: PaimonBaseScan](scan: T) extends Statistics {
         .forEach(
           f =>
             resultMap.put(
-              Utils.fieldReference(f.name()),
+              PaimonUtils.fieldReference(f.name()),
               PaimonColumnStats(f.`type`(), paimonColStats.get(f.name()))))
     }
     resultMap

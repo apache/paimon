@@ -23,11 +23,17 @@ import org.apache.spark.sql.catalyst.expressions.Attribute
 import org.apache.spark.sql.catalyst.plans.logical.{ColumnStat, LogicalPlan}
 import org.apache.spark.sql.execution.command.CommandUtils
 import org.apache.spark.sql.internal.SessionState
-import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DateType, DecimalType, DoubleType, FloatType, IntegralType, StringType, TimestampNTZType, TimestampType}
+import org.apache.spark.sql.types.{BinaryType, BooleanType, DataType, DatetimeType, DecimalType, DoubleType, FloatType, IntegralType, StringType}
 
 import java.net.URI
 
-object StatsUtils {
+/**
+ * Some classes or methods defined in the spark project are marked as private under
+ * [[org.apache.spark.sql]] package, Hence, use this class to adapt then so that we can use them
+ * indirectly.
+ */
+object PaimonStatsUtils {
+
   def calculateTotalSize(
       sessionState: SessionState,
       tableName: String,
@@ -45,28 +51,23 @@ object StatsUtils {
     CommandUtils.computeColumnStats(sparkSession, relation, columns)
   }
 
-  /** DatetimeType was added after spark33, overwrite it for compatibility. */
+  /** [[IntegralType]] is private in spark, therefore we need add it here. */
   def analyzeSupportsType(dataType: DataType): Boolean = dataType match {
     case _: IntegralType => true
     case _: DecimalType => true
     case DoubleType | FloatType => true
     case BooleanType => true
-    case DateType => true
-    case TimestampType => true
-    case TimestampNTZType => true
+    case _: DatetimeType => true
     case BinaryType | StringType => true
     case _ => false
   }
 
-  /** DatetimeType was added after spark33, overwrite it for compatibility. */
   def hasMinMax(dataType: DataType): Boolean = dataType match {
     case _: IntegralType => true
     case _: DecimalType => true
     case DoubleType | FloatType => true
     case BooleanType => true
-    case DateType => true
-    case TimestampType => true
-    case TimestampNTZType => true
+    case _: DatetimeType => true
     case _ => false
   }
 }

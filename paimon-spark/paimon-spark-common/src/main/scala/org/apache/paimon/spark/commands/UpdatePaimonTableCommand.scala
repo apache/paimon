@@ -27,7 +27,7 @@ import org.apache.paimon.table.sink.CommitMessage
 import org.apache.paimon.types.RowKind
 
 import org.apache.spark.sql.{Column, Row, SparkSession}
-import org.apache.spark.sql.Utils.createDataset
+import org.apache.spark.sql.PaimonUtils.createDataset
 import org.apache.spark.sql.catalyst.expressions.{Alias, Expression, If}
 import org.apache.spark.sql.catalyst.expressions.Literal.TrueLiteral
 import org.apache.spark.sql.catalyst.plans.logical.{Assignment, Filter, Project, SupportsSubquery}

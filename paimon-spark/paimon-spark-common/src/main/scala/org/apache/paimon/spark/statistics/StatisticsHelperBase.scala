@@ -20,7 +20,7 @@ package org.apache.paimon.spark.statistics
 
 import org.apache.paimon.spark.PaimonColumnStats
 
-import org.apache.spark.sql.Utils
+import org.apache.spark.sql.PaimonUtils
 import org.apache.spark.sql.catalyst.{SQLConfHelper, StructFilters}
 import org.apache.spark.sql.catalyst.expressions.{Attribute, AttributeReference, BoundReference, Expression}
 import org.apache.spark.sql.catalyst.plans.logical
@@ -86,7 +86,7 @@ trait StatisticsHelperBase extends SQLConfHelper {
         v1Stats.attributeStats.foreach {
           case (attr, v1ColStats) =>
             columnStatsMap.put(
-              Utils.fieldReference(attr.name),
+              PaimonUtils.fieldReference(attr.name),
               PaimonColumnStats(v1ColStats)
             )
         }
