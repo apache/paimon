@@ -36,7 +36,7 @@ public class StatisticTableTest extends TableTestBase {
 
     private FileStoreTable table;
     private FileStoreScan scan;
-    private FilesTable statisticTable;
+    private StatisticTable statisticTable;
     private SnapshotManager snapshotManager;
 
     @BeforeEach
@@ -62,7 +62,7 @@ public class StatisticTableTest extends TableTestBase {
 
         Identifier statisticTableId =
                 identifier(tableName + Catalog.SYSTEM_TABLE_SPLITTER + StatisticTable.STATISTIC);
-        statisticTable = (FilesTable) catalog.getTable(statisticTableId);
+        statisticTable = (StatisticTable) catalog.getTable(statisticTableId);
         snapshotManager = new SnapshotManager(fileIO, tablePath);
 
         // snapshot 1: append
