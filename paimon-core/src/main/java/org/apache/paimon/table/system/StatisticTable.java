@@ -41,9 +41,9 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.IteratorRecordReader;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
+import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
-import org.apache.paimon.utils.SnapshotManager;
 
 import java.io.IOException;
 import java.util.*;
@@ -105,7 +105,6 @@ public class StatisticTable implements ReadonlyTable {
     public Table copy(Map<String, String> dynamicOptions) {
         return new StatisticTable(fileIO, location, dataTable.copy(dynamicOptions));
     }
-
 
     private class StatisticScan extends ReadOnceTableScan {
 
