@@ -133,7 +133,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(
                             CompactDatabaseAction.class,
                             "compact_database",
@@ -237,7 +238,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                                 "--table_conf",
                                 CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
             }
-            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().streamingMode().build();
             action.withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         } else {
@@ -513,7 +515,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                 args.add(CoreOptions.CONTINUOUS_DISCOVERY_INTERVAL.key() + "=1s");
             }
 
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(CompactDatabaseAction.class, args)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -615,7 +618,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(true);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().streamingMode().build();
             createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -688,7 +692,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
         }
 
         if (ThreadLocalRandom.current().nextBoolean()) {
-            StreamExecutionEnvironment env = buildDefaultEnv(false);
+            StreamExecutionEnvironment env =
+                    streamExecutionEnvironmentBuilder().batchMode().build();
             createAction(CompactDatabaseAction.class, "compact_database", "--warehouse", warehouse)
                     .withStreamExecutionEnvironment(env)
                     .build();
@@ -747,7 +752,8 @@ public class CompactDatabaseActionITCase extends CompactActionITCaseBase {
                         "--table_conf",
                         CoreOptions.SNAPSHOT_NUM_RETAINED_MAX.key() + "=3");
 
-        StreamExecutionEnvironment env = buildDefaultEnv(true);
+        StreamExecutionEnvironment env =
+                streamExecutionEnvironmentBuilder().streamingMode().build();
         action.withStreamExecutionEnvironment(env).build();
         JobClient jobClient = env.executeAsync();
 

@@ -29,7 +29,6 @@ import org.apache.paimon.utils.SnapshotManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.ImmutableList;
 
-import org.apache.flink.table.api.EnvironmentSettings;
 import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.table.api.config.ExecutionConfigOptions;
 import org.apache.flink.table.api.internal.TableEnvironmentImpl;
@@ -51,7 +50,6 @@ import javax.annotation.Nullable;
 
 import java.io.File;
 import java.io.IOException;
-import java.time.Duration;
 import java.util.Collections;
 import java.util.Comparator;
 import java.util.HashMap;
@@ -59,8 +57,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
-
-import static org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions.CHECKPOINTING_INTERVAL;
 
 /** ITCase for catalog. */
 public abstract class CatalogITCaseBase extends AbstractTestBase {
@@ -71,7 +67,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
 
     @BeforeEach
     public void before() throws IOException {
-        tEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inBatchMode().build());
+        tEnv = tableEnvironmentBuilder().batchMode().build();
         String catalog = "PAIMON";
         path = getTempDirPath();
         String inferScan =
@@ -89,8 +85,7 @@ public abstract class CatalogITCaseBase extends AbstractTestBase {
                                 .collect(Collectors.joining(","))));
         tEnv.useCatalog(catalog);
 
-        sEnv = TableEnvironment.create(EnvironmentSettings.newInstance().inStreamingMode().build());
-        sEnv.getConfig().getConfiguration().set(CHECKPOINTING_INTERVAL, Duration.ofMillis(100));
+        sEnv = tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(100).build();
         sEnv.registerCatalog(catalog, tEnv.getCatalog(catalog).get());
         sEnv.useCatalog(catalog);
 

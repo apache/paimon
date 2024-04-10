@@ -36,7 +36,6 @@ import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.api.common.JobStatus;
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.core.execution.JobClient;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.junit.jupiter.api.AfterEach;
@@ -66,10 +65,12 @@ public class CdcActionITCaseBase extends ActionITCaseBase {
 
     @BeforeEach
     public void setEnv() {
-        env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setParallelism(2);
-        env.enableCheckpointing(1000);
-        env.setRestartStrategy(RestartStrategies.noRestart());
+        env =
+                streamExecutionEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(2)
+                        .checkpointIntervalMs(1000)
+                        .build();
     }
 
     @AfterEach

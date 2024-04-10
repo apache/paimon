@@ -28,10 +28,8 @@ import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.utils.BlockingIterator;
 
-import org.apache.flink.api.common.restartstrategy.RestartStrategies;
 import org.apache.flink.streaming.api.environment.ExecutionCheckpointingOptions;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
+import org.apache.flink.table.api.TableEnvironment;
 import org.apache.flink.types.Row;
 import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.BeforeEach;
@@ -55,18 +53,16 @@ public class FileSystemCatalogITCase extends AbstractTestBase {
     private static final String DB_NAME = "default";
 
     private String path;
-    private StreamTableEnvironment tEnv;
+    private TableEnvironment tEnv;
 
     @BeforeEach
     public void setup() {
-        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.getConfig().setRestartStrategy(RestartStrategies.noRestart());
-        env.setParallelism(1);
-
-        tEnv = StreamTableEnvironment.create(env);
-        tEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false);
+        tEnv =
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .parallelism(1)
+                        .setConf(ExecutionCheckpointingOptions.ENABLE_UNALIGNED, false)
+                        .build();
         path = getTempDirPath();
         tEnv.executeSql(
                 String.format("CREATE CATALOG fs WITH ('type'='paimon', 'warehouse'='%s')", path));

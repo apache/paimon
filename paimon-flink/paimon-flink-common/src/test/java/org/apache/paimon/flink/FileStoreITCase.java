@@ -35,7 +35,6 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.utils.BlockingIterator;
 import org.apache.paimon.utils.FailingFileIO;
 
-import org.apache.flink.api.common.RuntimeExecutionMode;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.dag.Transformation;
 import org.apache.flink.streaming.api.datastream.DataStream;
@@ -396,19 +395,16 @@ public class FileStoreITCase extends AbstractTestBase {
         return wrap(GenericRowData.ofKind(kind, v, StringData.fromString(p), k));
     }
 
-    public static StreamExecutionEnvironment buildStreamEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.STREAMING);
-        env.enableCheckpointing(100);
-        env.setParallelism(2);
-        return env;
+    public StreamExecutionEnvironment buildStreamEnv() {
+        return streamExecutionEnvironmentBuilder()
+                .streamingMode()
+                .checkpointIntervalMs(100)
+                .parallelism(2)
+                .build();
     }
 
-    public static StreamExecutionEnvironment buildBatchEnv() {
-        final StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        env.setRuntimeMode(RuntimeExecutionMode.BATCH);
-        env.setParallelism(2);
-        return env;
+    public StreamExecutionEnvironment buildBatchEnv() {
+        return streamExecutionEnvironmentBuilder().batchMode().parallelism(2).build();
     }
 
     public static FileStoreTable buildFileStoreTable(
