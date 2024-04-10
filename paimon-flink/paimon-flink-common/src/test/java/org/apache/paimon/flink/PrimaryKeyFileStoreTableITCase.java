@@ -107,10 +107,7 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
     @Timeout(1200)
     public void testFullCompactionWithLongCheckpointInterval() throws Exception {
         // create table
-        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().build();
-        bEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+        TableEnvironment bEnv = tableEnvironmentBuilder().batchMode().parallelism(1).build();
         bEnv.executeSql(createCatalogSql("testCatalog", path));
         bEnv.executeSql("USE CATALOG testCatalog");
         bEnv.executeSql(
@@ -126,10 +123,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
         // run select job
         TableEnvironment sEnv =
-                tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(100).build();
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .parallelism(1)
+                        .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path));
         sEnv.executeSql("USE CATALOG testCatalog");
         CloseableIterator<Row> it = sEnv.executeSql("SELECT * FROM T").collect();
@@ -435,9 +433,9 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
                     streamExecutionEnvironmentBuilder()
                             .streamingMode()
                             .checkpointIntervalMs(random.nextInt(1900) + 100)
+                            .parallelism(2)
                             .allowRestart()
                             .build();
-            env.setParallelism(2);
             new CompactAction(path, "default", "T").withStreamExecutionEnvironment(env).build();
             env.executeAsync();
         }
@@ -491,10 +489,11 @@ public class PrimaryKeyFileStoreTableITCase extends AbstractTestBase {
 
     private void checkChangelogTestResult(int numProducers) throws Exception {
         TableEnvironment sEnv =
-                tableEnvironmentBuilder().streamingMode().checkpointIntervalMs(100).build();
-        sEnv.getConfig()
-                .getConfiguration()
-                .set(ExecutionConfigOptions.TABLE_EXEC_RESOURCE_DEFAULT_PARALLELISM, 1);
+                tableEnvironmentBuilder()
+                        .streamingMode()
+                        .checkpointIntervalMs(100)
+                        .parallelism(1)
+                        .build();
         sEnv.executeSql(createCatalogSql("testCatalog", path));
         sEnv.executeSql("USE CATALOG testCatalog");
 

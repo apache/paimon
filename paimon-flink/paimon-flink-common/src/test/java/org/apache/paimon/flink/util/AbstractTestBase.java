@@ -46,7 +46,7 @@ import java.util.UUID;
 /** Similar to Flink's AbstractTestBase but using Junit5. */
 public class AbstractTestBase {
 
-    private static final int DEFAULT_PARALLELISM = 8;
+    private static final int DEFAULT_PARALLELISM = 16;
 
     @RegisterExtension
     protected static final MiniClusterWithClientExtension MINI_CLUSTER_EXTENSION =
