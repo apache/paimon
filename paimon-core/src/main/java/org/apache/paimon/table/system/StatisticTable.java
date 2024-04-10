@@ -68,8 +68,10 @@ public class StatisticTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "schema_id", new BigIntType(false)),
-                            new DataField(2, "mergedRecordCount", SerializationUtils.newStringType(true)),
-                            new DataField(3, "mergedRecordSize", SerializationUtils.newStringType(true)),
+                            new DataField(
+                                    2, "mergedRecordCount", SerializationUtils.newStringType(true)),
+                            new DataField(
+                                    3, "mergedRecordSize", SerializationUtils.newStringType(true)),
                             new DataField(2, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
