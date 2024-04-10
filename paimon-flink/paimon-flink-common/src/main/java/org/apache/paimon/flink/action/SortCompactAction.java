@@ -20,7 +20,7 @@ package org.apache.paimon.flink.action;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
-import org.apache.paimon.flink.sink.FlinkSinkBuilder;
+import org.apache.paimon.flink.sink.SortCompactSinkBuilder;
 import org.apache.paimon.flink.sorter.TableSorter;
 import org.apache.paimon.flink.source.FlinkSourceBuilder;
 import org.apache.paimon.predicate.Predicate;
@@ -38,7 +38,6 @@ import org.slf4j.LoggerFactory;
 
 import java.util.Arrays;
 import java.util.Collections;
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -110,10 +109,10 @@ public class SortCompactAction extends CompactAction {
         TableSorter sorter =
                 TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
 
-        new FlinkSinkBuilder(fileStoreTable)
-                .withInput(sorter.sort())
+        new SortCompactSinkBuilder(fileStoreTable)
                 .forCompact(true)
-                .withOverwritePartition(new HashMap<>())
+                .forRowData(sorter.sort())
+                .overwrite()
                 .build();
     }
 

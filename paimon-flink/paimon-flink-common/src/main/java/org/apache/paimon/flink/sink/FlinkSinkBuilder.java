@@ -18,77 +18,107 @@
 
 package org.apache.paimon.flink.sink;
 
+import org.apache.paimon.annotation.Public;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.sink.index.GlobalDynamicBucketSink;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.Table;
 
+import org.apache.flink.api.common.functions.MapFunction;
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSink;
 import org.apache.flink.table.data.RowData;
+import org.apache.flink.table.data.util.DataFormatConverters;
+import org.apache.flink.table.runtime.typeutils.InternalTypeInfo;
+import org.apache.flink.table.types.DataType;
+import org.apache.flink.table.types.logical.RowType;
+import org.apache.flink.types.Row;
 
 import javax.annotation.Nullable;
 
+import java.util.HashMap;
 import java.util.Map;
 
 import static org.apache.paimon.flink.sink.FlinkStreamPartitioner.partition;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
-/** Builder for {@link FlinkSink}. */
+/**
+ * DataStream API for building Flink Sink.
+ *
+ * @since 0.8
+ */
+@Public
 public class FlinkSinkBuilder {
 
     private final FileStoreTable table;
 
     private DataStream<RowData> input;
     @Nullable private Map<String, String> overwritePartition;
-    @Nullable private LogSinkFunction logSinkFunction;
     @Nullable private Integer parallelism;
-    private boolean boundedInput = false;
-    private boolean compactSink = false;
+    private Boolean boundedInput = null;
 
-    public FlinkSinkBuilder(FileStoreTable table) {
-        this.table = table;
+    // ============== for extension ==============
+
+    protected boolean compactSink = false;
+    @Nullable protected LogSinkFunction logSinkFunction;
+
+    public FlinkSinkBuilder(Table table) {
+        if (!(table instanceof FileStoreTable)) {
+            throw new UnsupportedOperationException("Unsupported table type: " + table);
+        }
+        this.table = (FileStoreTable) table;
     }
 
-    public FlinkSinkBuilder withInput(DataStream<RowData> input) {
+    /**
+     * From {@link DataStream} with {@link Row}, need to provide a {@link DataType} for builder to
+     * convert those {@link Row}s to a {@link RowData} DataStream.
+     */
+    public FlinkSinkBuilder forRow(DataStream<Row> input, DataType rowDataType) {
+        RowType rowType = (RowType) rowDataType.getLogicalType();
+        DataType[] fieldDataTypes = rowDataType.getChildren().toArray(new DataType[0]);
+
+        DataFormatConverters.RowConverter converter =
+                new DataFormatConverters.RowConverter(fieldDataTypes);
+        this.input =
+                input.map((MapFunction<Row, RowData>) converter::toInternal)
+                        .returns(InternalTypeInfo.of(rowType));
+        return this;
+    }
+
+    /** From {@link DataStream} with {@link RowData}. */
+    public FlinkSinkBuilder forRowData(DataStream<RowData> input) {
         this.input = input;
         return this;
     }
 
-    /**
-     * Whether we need to overwrite partitions.
-     *
-     * @param overwritePartition If we pass null, it means not overwrite. If we pass an empty map,
-     *     it means to overwrite every partition it received. If we pass a non-empty map, it means
-     *     we only overwrite the partitions match the map.
-     * @return returns this.
-     */
-    public FlinkSinkBuilder withOverwritePartition(
-            @Nullable Map<String, String> overwritePartition) {
+    /** INSERT OVERWRITE. */
+    public FlinkSinkBuilder overwrite() {
+        return overwrite(new HashMap<>());
+    }
+
+    /** INSERT OVERWRITE PARTITION (...). */
+    public FlinkSinkBuilder overwrite(Map<String, String> overwritePartition) {
         this.overwritePartition = overwritePartition;
         return this;
     }
 
-    public FlinkSinkBuilder withLogSinkFunction(@Nullable LogSinkFunction logSinkFunction) {
-        this.logSinkFunction = logSinkFunction;
-        return this;
-    }
-
-    public FlinkSinkBuilder withParallelism(@Nullable Integer parallelism) {
+    /** Set sink parallelism. */
+    public FlinkSinkBuilder parallelism(int parallelism) {
         this.parallelism = parallelism;
         return this;
     }
 
-    public FlinkSinkBuilder withBoundedInputStream(boolean bounded) {
+    /**
+     * Set input bounded, if it is bounded, append table sink does not generate a topology for
+     * merging small files.
+     */
+    public FlinkSinkBuilder inputBounded(boolean bounded) {
         this.boundedInput = bounded;
         return this;
     }
 
-    public FlinkSinkBuilder forCompact(boolean compactSink) {
-        this.compactSink = compactSink;
-        return this;
-    }
-
+    /** Build {@link DataStreamSink}. */
     public DataStreamSink<?> build() {
         DataStream<InternalRow> input = MapToInternalRow.map(this.input, table.rowType());
         if (table.coreOptions().localMergeEnabled() && table.schema().primaryKeys().size() > 0) {
@@ -143,6 +173,9 @@ public class FlinkSinkBuilder {
         checkArgument(
                 table.primaryKeys().isEmpty(),
                 "Unaware bucket mode only works with append-only table for now.");
+        if (boundedInput == null) {
+            boundedInput = !FlinkSink.isStreaming(input);
+        }
         return new RowUnawareBucketSink(
                         table, overwritePartition, logSinkFunction, parallelism, boundedInput)
                 .sinkFrom(input);
