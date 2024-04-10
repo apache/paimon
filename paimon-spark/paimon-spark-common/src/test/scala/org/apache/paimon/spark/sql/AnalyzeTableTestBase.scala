@@ -64,7 +64,9 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
 
     val df = spark.sql("select snapshot_id, schema_id, schema_id, colstat from `T$statistics`")
     Assertions.assertEquals(df.collect().size, 1)
-    checkAnswer(spark.sql("SELECT snapshot_id, schema_id, schema_id, colstat from `T$statistics`"), Row(2, 0, 2, "{ }"))
+    checkAnswer(
+      spark.sql("SELECT snapshot_id, schema_id, schema_id, colstat from `T$statistics`"),
+      Row(2, 0, 2, "{ }"))
   }
 
   test("Paimon analyze: analyze no scan") {
