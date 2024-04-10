@@ -18,7 +18,9 @@
 
 package org.apache.paimon.spark.commands
 
-import org.apache.paimon.predicate.OnlyPartitionKeyEqualVisitor
+import org.apache.paimon.CoreOptions
+import org.apache.paimon.data.BinaryRow
+import org.apache.paimon.predicate.PartitionKeyVisitor
 import org.apache.paimon.spark.PaimonSplitScan
 import org.apache.paimon.spark.catalyst.Compatibility
 import org.apache.paimon.spark.catalyst.analysis.expressions.ExpressionHelper
@@ -27,6 +29,7 @@ import org.apache.paimon.spark.schema.SparkSystemColumns.ROW_KIND_COL
 import org.apache.paimon.table.FileStoreTable
 import org.apache.paimon.table.sink.{BatchWriteBuilder, CommitMessage}
 import org.apache.paimon.types.RowKind
+import org.apache.paimon.utils.RowDataPartitionComputer
 
 import org.apache.spark.sql.{Row, SparkSession}
 import org.apache.spark.sql.PaimonUtils.createDataset
@@ -36,7 +39,7 @@ import org.apache.spark.sql.catalyst.plans.logical.{Filter, SupportsSubquery}
 import org.apache.spark.sql.execution.datasources.v2.DataSourceV2Relation
 import org.apache.spark.sql.functions.lit
 
-import java.util.{Collections, UUID}
+import java.util.UUID
 
 import scala.collection.JavaConverters._
 
@@ -62,25 +65,26 @@ case class DeleteFromPaimonTableCommand(
         table.partitionKeys().asScala,
         sparkSession.sessionState.conf.resolver)
 
-      // TODO: provide another partition visitor to support more partition predicate.
-      val visitor = new OnlyPartitionKeyEqualVisitor(table.partitionKeys)
-      val partitionPredicate = if (partitionCondition.isEmpty) {
-        None
+      val visitor =
+        new PartitionKeyVisitor(table.partitionKeys, table.newReadBuilder.newScan.listPartitions)
+
+      val (partitionPredicate, candidatePartitions) = if (partitionCondition.isEmpty) {
+        (None, List.empty[BinaryRow])
       } else {
-        convertConditionToPaimonPredicate(
+        val predicate = convertConditionToPaimonPredicate(
           partitionCondition.reduce(And),
           relation.output,
           rowType,
           ignoreFailure = true)
+        (predicate, predicate.map(_.visit(visitor).asScala.toList).getOrElse(List.empty[BinaryRow]))
       }
 
-      // We do not have to scan table if the following three requirements are met:
-      // 1) no other predicate;
-      // 2) partition condition can convert to paimon predicate;
-      // 3) partition predicate can be visit by OnlyPartitionKeyEqualVisitor.
+      // We have to scan table if the following three requirements are met:
+      // 1) non-partitioned table;
+      // 2) no partition predicate;
+      // 3) all the data in candidate partitions should be deleted;
       val forceDeleteByRows =
-        otherCondition.nonEmpty || partitionPredicate.isEmpty || !partitionPredicate.get.visit(
-          visitor)
+        otherCondition.nonEmpty || partitionPredicate.isEmpty || !visitor.isAccurate
 
       if (forceDeleteByRows) {
         val commitMessages = if (withPrimaryKeys) {
@@ -90,9 +94,15 @@ case class DeleteFromPaimonTableCommand(
         }
         writer.commit(commitMessages)
       } else {
-        val dropPartitions = visitor.partitions()
+        val rowDataPartitionComputer = new RowDataPartitionComputer(
+          CoreOptions.PARTITION_DEFAULT_NAME.defaultValue,
+          table.schema().logicalPartitionType(),
+          table.partitionKeys.asScala.toArray
+        )
         commit.dropPartitions(
-          Collections.singletonList(dropPartitions),
+          candidatePartitions.map {
+            partition => rowDataPartitionComputer.generatePartValues(partition).asScala.asJava
+          }.asJava,
           BatchWriteBuilder.COMMIT_IDENTIFIER)
       }
     }
