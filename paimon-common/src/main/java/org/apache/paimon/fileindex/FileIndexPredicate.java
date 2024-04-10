@@ -116,11 +116,11 @@ public class FileIndexPredicate implements Closeable {
     private static class FileIndexFieldPredicate implements PredicateVisitor<Boolean> {
 
         private final String columnName;
-        private final FileIndexReader fileIndexReader;
+        private final List<FileIndexReader> fileIndexReaders;
 
-        public FileIndexFieldPredicate(String columnName, FileIndexReader fileIndexReader) {
+        public FileIndexFieldPredicate(String columnName, List<FileIndexReader> fileIndexReaders) {
             this.columnName = columnName;
-            this.fileIndexReader = fileIndexReader;
+            this.fileIndexReaders = fileIndexReaders;
         }
 
         public Boolean test(Predicate predicate) {
@@ -130,13 +130,15 @@ public class FileIndexPredicate implements Closeable {
         @Override
         public Boolean visit(LeafPredicate predicate) {
             if (columnName.equals(predicate.fieldName())) {
-                return predicate
-                        .function()
-                        .visit(
-                                fileIndexReader,
-                                new FieldRef(
-                                        predicate.index(), predicate.fieldName(), predicate.type()),
-                                predicate.literals());
+                FieldRef fieldRef =
+                        new FieldRef(predicate.index(), predicate.fieldName(), predicate.type());
+                for (FileIndexReader fileIndexReader : fileIndexReaders) {
+                    if (!predicate
+                            .function()
+                            .visit(fileIndexReader, fieldRef, predicate.literals())) {
+                        return false;
+                    }
+                }
             }
             return true;
         }
