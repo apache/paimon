@@ -82,6 +82,7 @@ public class FlinkSinkBuilder {
                 new DataFormatConverters.RowConverter(fieldDataTypes);
         this.input =
                 input.map((MapFunction<Row, RowData>) converter::toInternal)
+                        .setParallelism(input.getParallelism())
                         .returns(InternalTypeInfo.of(rowType));
         return this;
     }

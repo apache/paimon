@@ -143,15 +143,16 @@ public class FileStoreITCase extends AbstractTestBase {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
+        DataStreamSource<RowData> source = buildTestSource(env, isBatch);
         DataStream<Row> input =
-                buildTestSource(env, isBatch)
-                        .map(
+                source.map(
                                 (MapFunction<RowData, Row>)
                                         r ->
                                                 Row.of(
                                                         r.getInt(0),
                                                         r.getString(1).toString(),
-                                                        r.getInt(2)));
+                                                        r.getInt(2)))
+                        .setParallelism(source.getParallelism());
         DataType inputType =
                 DataTypes.ROW(
                         DataTypes.FIELD("v", DataTypes.INT()),
