@@ -43,13 +43,17 @@ public class FileIndexFormatFormatTest {
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
         FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos);
 
-        String type = randomString(RANDOM.nextInt(100));
-        Map<String, byte[]> indexes = new HashMap<>();
-        for (int i = 0; i < RANDOM.nextInt(1000); i++) {
-            indexes.put(randomString(RANDOM.nextInt(20)), randomBytes(RANDOM.nextInt(100000)));
+        Map<String, Map<String, byte[]>> indexes = new HashMap<>();
+        for (int j = 0; j < RANDOM.nextInt(1000); j++) {
+            String type = randomString(RANDOM.nextInt(100));
+            Map<String, byte[]> typeIndex = indexes.computeIfAbsent(type, t -> new HashMap<>());
+            for (int i = 0; i < RANDOM.nextInt(1000); i++) {
+                typeIndex.put(
+                        randomString(RANDOM.nextInt(20)), randomBytes(RANDOM.nextInt(100000)));
+            }
         }
 
-        writer.writeColumnIndex(type, indexes);
+        writer.writeColumnIndexes(indexes);
         writer.close();
 
         byte[] indexBytes = baos.toByteArray();
@@ -58,9 +62,14 @@ public class FileIndexFormatFormatTest {
                 FileIndexFormat.createReader(
                         new ByteArraySeekableStream(indexBytes), RowType.builder().build());
 
-        for (String s : indexes.keySet()) {
-            byte[] b = reader.readColumnInputStream(s).orElseThrow(RuntimeException::new);
-            Assertions.assertThat(b).containsExactly(indexes.get(s));
+        for (Map.Entry<String, Map<String, byte[]>> entry : indexes.entrySet()) {
+            String column = entry.getKey();
+            for (String type : entry.getValue().keySet()) {
+                byte[] b =
+                        reader.readColumnInputStream(column, type)
+                                .orElseThrow(RuntimeException::new);
+                Assertions.assertThat(b).containsExactly(indexes.get(column).get(type));
+            }
         }
     }
 }
