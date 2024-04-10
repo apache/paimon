@@ -68,10 +68,8 @@ public class StatisticTable implements ReadonlyTable {
                     Arrays.asList(
                             new DataField(0, "snapshot_id", new BigIntType(false)),
                             new DataField(1, "schema_id", new BigIntType(false)),
-                            new DataField(
-                                    2, "mergedRecordCount", SerializationUtils.newStringType(true)),
-                            new DataField(
-                                    3, "mergedRecordSize", SerializationUtils.newStringType(true)),
+                            new DataField(2, "mergedRecordCount", new BigIntType(true)),
+                            new DataField(3, "mergedRecordSize", new BigIntType(true)),
                             new DataField(2, "colstat", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
@@ -222,8 +220,8 @@ public class StatisticTable implements ReadonlyTable {
             return GenericRow.of(
                     statistics.snapshotId(),
                     statistics.schemaId(),
-                    statistics.mergedRecordCount().toString(),
-                    statistics.mergedRecordSize().toString(),
+                    statistics.mergedRecordCount().getAsLong(),
+                    statistics.mergedRecordSize().getAsLong(),
                     BinaryString.fromString(JsonSerdeUtil.toJson(statistics.colStats())));
         }
     }
