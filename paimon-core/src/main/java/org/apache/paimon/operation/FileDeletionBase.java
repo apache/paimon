@@ -38,15 +38,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.LinkedList;
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
+import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 import java.util.function.Consumer;
@@ -151,40 +143,14 @@ public abstract class FileDeletionBase {
                 .add(entry.bucket());
     }
 
-    protected void cleanUnusedManifests(
-            Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
-        // clean base and delta manifests
-        List<String> toDeleteManifests = new ArrayList<>();
-        List<ManifestFileMeta> toExpireManifests = new ArrayList<>();
-        toExpireManifests.addAll(tryReadManifestList(snapshot.baseManifestList()));
-        toExpireManifests.addAll(tryReadManifestList(snapshot.deltaManifestList()));
-        for (ManifestFileMeta manifest : toExpireManifests) {
-            String fileName = manifest.fileName();
-            if (!skippingSet.contains(fileName)) {
-                toDeleteManifests.add(fileName);
-                // to avoid other snapshots trying to delete again
-                skippingSet.add(fileName);
-            }
+    public void cleanUnusedStatisticsManifests(Snapshot snapshot, Set<String> skippingSet) {
+        // clean statistics
+        if (snapshot.statistics() != null && !skippingSet.contains(snapshot.statistics())) {
+            statsFileHandler.deleteStats(snapshot.statistics());
         }
-        deleteFiles(toDeleteManifests, manifestFile::delete);
+    }
 
-        toDeleteManifests.clear();
-        if (!skippingSet.contains(snapshot.baseManifestList())) {
-            toDeleteManifests.add(snapshot.baseManifestList());
-        }
-        if (!skippingSet.contains(snapshot.deltaManifestList())) {
-            toDeleteManifests.add(snapshot.deltaManifestList());
-        }
-        deleteFiles(toDeleteManifests, manifestList::delete);
-
-        // clean changelog manifests
-        if (deleteChangelog && snapshot.changelogManifestList() != null) {
-            deleteFiles(
-                    tryReadManifestList(snapshot.changelogManifestList()),
-                    manifest -> manifestFile.delete(manifest.fileName()));
-            manifestList.delete(snapshot.changelogManifestList());
-        }
-
+    public void cleanUnusedIndexManifests(Snapshot snapshot, Set<String> skippingSet) {
         // clean index manifests
         String indexManifest = snapshot.indexManifest();
         // check exists, it may have been deleted by other snapshots
@@ -199,11 +165,35 @@ public abstract class FileDeletionBase {
                 indexFileHandler.deleteManifest(indexManifest);
             }
         }
+    }
 
-        // clean statistics
-        if (snapshot.statistics() != null && !skippingSet.contains(snapshot.statistics())) {
-            statsFileHandler.deleteStats(snapshot.statistics());
+    public void cleanUnusedManifestList(String manifestName, Set<String> skippingSet) {
+        List<String> toDeleteManifests = new ArrayList<>();
+        List<ManifestFileMeta> toExpireManifests = tryReadManifestList(manifestName);
+        for (ManifestFileMeta manifest : toExpireManifests) {
+            String fileName = manifest.fileName();
+            if (!skippingSet.contains(fileName)) {
+                toDeleteManifests.add(fileName);
+                // to avoid other snapshots trying to delete again
+                skippingSet.add(fileName);
+            }
         }
+        if (!skippingSet.contains(manifestName)) {
+            toDeleteManifests.add(manifestName);
+        }
+
+        deleteFiles(toDeleteManifests, manifestFile::delete);
+    }
+
+    public void cleanUnusedManifests(
+            Snapshot snapshot, Set<String> skippingSet, boolean deleteChangelog) {
+        cleanUnusedManifestList(snapshot.baseManifestList(), skippingSet);
+        cleanUnusedManifestList(snapshot.deltaManifestList(), skippingSet);
+        if (deleteChangelog && Objects.nonNull(snapshot.changelogManifestList())) {
+            cleanUnusedManifestList(snapshot.changelogManifestList(), skippingSet);
+        }
+        cleanUnusedIndexManifests(snapshot, skippingSet);
+        cleanUnusedStatisticsManifests(snapshot, skippingSet);
     }
 
     /**
