@@ -24,6 +24,7 @@ import org.apache.paimon.annotation.VisibleForTesting;
 import org.apache.paimon.consumer.ConsumerManager;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
@@ -105,6 +106,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
         if (earliest == null) {
             return 0;
         }
+
+        Preconditions.checkArgument(retainMax > retainMin, "retainMax must greater than retainMin");
 
         // the min snapshot to retain from 'snapshot.num-retained.max'
         // (the maximum number of snapshots to retain)
