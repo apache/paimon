@@ -19,6 +19,7 @@
 package org.apache.paimon.flink.source;
 
 import org.apache.paimon.flink.FlinkConnectorOptions;
+import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.DataTable;
@@ -26,12 +27,16 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.ReadBuilder;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.datastream.DataStreamSource;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
+import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanContext;
 import org.apache.flink.table.connector.source.ScanTableSource.ScanRuntimeProvider;
-import org.apache.flink.table.connector.source.SourceProvider;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.table.plan.stats.TableStats;
 
@@ -46,13 +51,16 @@ public class SystemTableSource extends FlinkTableSource {
     private final boolean isStreamingMode;
     private final int splitBatchSize;
     private final FlinkConnectorOptions.SplitAssignMode splitAssignMode;
+    private final ObjectIdentifier tableIdentifier;
 
-    public SystemTableSource(Table table, boolean isStreamingMode) {
+    public SystemTableSource(
+            Table table, boolean isStreamingMode, ObjectIdentifier tableIdentifier) {
         super(table);
         this.isStreamingMode = isStreamingMode;
         Options options = Options.fromMap(table.options());
         this.splitBatchSize = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_BATCH_SIZE);
         this.splitAssignMode = options.get(FlinkConnectorOptions.SCAN_SPLIT_ENUMERATOR_ASSIGN_MODE);
+        this.tableIdentifier = tableIdentifier;
     }
 
     public SystemTableSource(
@@ -62,11 +70,13 @@ public class SystemTableSource extends FlinkTableSource {
             @Nullable int[][] projectFields,
             @Nullable Long limit,
             int splitBatchSize,
-            FlinkConnectorOptions.SplitAssignMode splitAssignMode) {
+            FlinkConnectorOptions.SplitAssignMode splitAssignMode,
+            ObjectIdentifier tableIdentifier) {
         super(table, predicate, projectFields, limit);
         this.isStreamingMode = isStreamingMode;
         this.splitBatchSize = splitBatchSize;
         this.splitAssignMode = splitAssignMode;
+        this.tableIdentifier = tableIdentifier;
     }
 
     @Override
@@ -85,7 +95,15 @@ public class SystemTableSource extends FlinkTableSource {
         } else {
             source = new StaticFileStoreSource(readBuilder, limit, splitBatchSize, splitAssignMode);
         }
-        return SourceProvider.of(source);
+        return new PaimonDataStreamScanProvider(
+                source.getBoundedness() == Boundedness.BOUNDED,
+                env ->
+                        configSourceParallelism(
+                                env,
+                                env.fromSource(
+                                        source,
+                                        WatermarkStrategy.noWatermarks(),
+                                        tableIdentifier.asSummaryString())));
     }
 
     @Override
@@ -97,7 +115,8 @@ public class SystemTableSource extends FlinkTableSource {
                 projectFields,
                 limit,
                 splitBatchSize,
-                splitAssignMode);
+                splitAssignMode,
+                tableIdentifier);
     }
 
     @Override
@@ -138,5 +157,35 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public boolean isStreaming() {
         return isStreamingMode;
+    }
+
+    private DataStreamSource<RowData> configSourceParallelism(
+            StreamExecutionEnvironment env, DataStreamSource<RowData> source) {
+        Options options = Options.fromMap(this.table.options());
+        Configuration envConfig = (Configuration) env.getConfiguration();
+        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
+            options.set(
+                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
+                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
+        }
+        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+            scanSplitsForInference();
+            parallelism = splitStatistics.splitNumber();
+            if (null != limit && limit > 0) {
+                int limitCount = limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
+                parallelism = Math.min(parallelism, limitCount);
+            }
+
+            parallelism = Math.max(1, parallelism);
+            parallelism =
+                    Math.min(
+                            parallelism,
+                            options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
+        }
+        if (parallelism != null) {
+            source.setParallelism(parallelism);
+        }
+        return source;
     }
 }

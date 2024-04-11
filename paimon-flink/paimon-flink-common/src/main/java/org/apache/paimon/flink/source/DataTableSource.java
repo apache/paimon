@@ -32,7 +32,6 @@ import org.apache.paimon.flink.lookup.LookupRuntimeProviderFactory;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
@@ -67,7 +66,6 @@ import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGN
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_ALIGNMENT_UPDATE_INTERVAL;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_EMIT_STRATEGY;
 import static org.apache.paimon.flink.FlinkConnectorOptions.SCAN_WATERMARK_IDLE_TIMEOUT;
-import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
 import static org.apache.paimon.utils.Preconditions.checkState;
 
 /**
@@ -79,9 +77,6 @@ import static org.apache.paimon.utils.Preconditions.checkState;
  * LogSourceProvider}.
  */
 public class DataTableSource extends FlinkTableSource {
-    private static final String FLINK_INFER_SCAN_PARALLELISM =
-            String.format(
-                    "%s%s", PAIMON_PREFIX, FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key());
 
     private final ObjectIdentifier tableIdentifier;
     private final boolean streaming;
@@ -89,8 +84,6 @@ public class DataTableSource extends FlinkTableSource {
     @Nullable private final LogStoreTableFactory logStoreTableFactory;
 
     @Nullable private WatermarkStrategy<RowData> watermarkStrategy;
-
-    private SplitStatistics splitStatistics;
 
     @Nullable private List<String> dynamicPartitionFilteringFields;
 
@@ -247,14 +240,6 @@ public class DataTableSource extends FlinkTableSource {
         return sourceBuilder.withParallelism(parallelism).withEnv(env).build();
     }
 
-    private void scanSplitsForInference() {
-        if (splitStatistics == null) {
-            List<Split> splits =
-                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
-            splitStatistics = new SplitStatistics(splits);
-        }
-    }
-
     @Override
     public DataTableSource copy() {
         return new DataTableSource(
@@ -334,25 +319,5 @@ public class DataTableSource extends FlinkTableSource {
     @Override
     public boolean isStreaming() {
         return streaming;
-    }
-
-    /** Split statistics for inferring row count and parallelism size. */
-    protected static class SplitStatistics {
-
-        private final int splitNumber;
-        private final long totalRowCount;
-
-        private SplitStatistics(List<Split> splits) {
-            this.splitNumber = splits.size();
-            this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
-        }
-
-        public int splitNumber() {
-            return splitNumber;
-        }
-
-        public long totalRowCount() {
-            return totalRowCount;
-        }
     }
 }
