@@ -29,6 +29,7 @@ import org.apache.paimon.utils.JsonSerdeUtil;
 
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonGetter;
+import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonInclude;
 import org.apache.paimon.shade.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 
@@ -64,6 +65,7 @@ import java.util.Optional;
  *       there is no compatibility issue.
  * </ul>
  */
+@JsonIgnoreProperties(ignoreUnknown = true)
 public class Snapshot {
 
     public static final long FIRST_SNAPSHOT_ID = 1;
@@ -142,6 +144,8 @@ public class Snapshot {
     private final long timeMillis;
 
     @JsonProperty(FIELD_LOG_OFFSETS)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    @Nullable
     private final Map<Integer, Long> logOffsets;
 
     // record count of all changes occurred in this snapshot
@@ -159,6 +163,7 @@ public class Snapshot {
     // record count of all changelog produced in this snapshot
     // null for paimon <= 0.3
     @JsonProperty(FIELD_CHANGELOG_RECORD_COUNT)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     private final Long changelogRecordCount;
 
@@ -167,6 +172,7 @@ public class Snapshot {
     // null if there is no watermark in new committing, and the previous snapshot does not have a
     // watermark
     @JsonProperty(FIELD_WATERMARK)
+    @JsonInclude(JsonInclude.Include.NON_NULL)
     @Nullable
     private final Long watermark;
 
