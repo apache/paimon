@@ -84,7 +84,9 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public void write(Object key) {
-            filter.addHash(hashFunction.hash(key));
+            if (key != null) {
+                filter.addHash(hashFunction.hash(key));
+            }
         }
 
         @Override
@@ -121,7 +123,7 @@ public class BloomFilterFileIndex implements FileIndexer {
 
         @Override
         public Boolean visitEqual(FieldRef fieldRef, Object key) {
-            return filter.testHash(hashFunction.hash(key));
+            return key == null || filter.testHash(hashFunction.hash(key));
         }
     }
 }
