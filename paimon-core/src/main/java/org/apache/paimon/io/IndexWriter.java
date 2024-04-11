@@ -47,7 +47,7 @@ public final class IndexWriter {
 
     private final FileIO fileIO;
 
-    private final DataFilePathFactory pathFactory;
+    private final Path path;
 
     // if the filter size greater than indexSizeInMeta, we put it in file
     private final long indexSizeInMeta;
@@ -60,12 +60,12 @@ public final class IndexWriter {
 
     public IndexWriter(
             FileIO fileIO,
-            DataFilePathFactory pathFactory,
+            Path path,
             RowType rowType,
             Map<String, Map<String, Options>> fileIndexes,
             long indexSizeInMeta) {
         this.fileIO = fileIO;
-        this.pathFactory = pathFactory;
+        this.path = path;
         this.indexSizeInMeta = indexSizeInMeta;
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
@@ -118,7 +118,6 @@ public final class IndexWriter {
         }
 
         if (baos.size() > indexSizeInMeta || resultRow != BinaryRow.EMPTY_ROW) {
-            Path path = pathFactory.newIndexPath();
             try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
                 outputStream.write(baos.toByteArray());
             }

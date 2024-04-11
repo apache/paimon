@@ -60,10 +60,6 @@ public class DataFilePathFactory {
         return newPath(CHANGELOG_FILE_PREFIX);
     }
 
-    public Path newIndexPath() {
-        return newPath(INDEX_PATH_PREFIX, INDEX_PATH_SUFFIX);
-    }
-
     private Path newPath(String prefix, String subffix) {
         String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + subffix;
         return new Path(parent, name);
@@ -80,6 +76,12 @@ public class DataFilePathFactory {
     @VisibleForTesting
     public String uuid() {
         return uuid;
+    }
+
+    public static Path toIndexPath(Path filePath) {
+        return new Path(
+                filePath.getParent(),
+                INDEX_PATH_PREFIX + filePath.getName() + "." + INDEX_PATH_SUFFIX);
     }
 
     public static String formatIdentifier(String fileName) {

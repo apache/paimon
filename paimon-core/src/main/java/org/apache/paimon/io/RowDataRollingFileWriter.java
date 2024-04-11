@@ -49,7 +49,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
                         new RowDataFileWriter(
                                 fileIO,
                                 fileFormat.createWriterFactory(writeSchema),
-                                pathFactory,
+                                pathFactory.newPath(),
                                 writeSchema,
                                 fileFormat instanceof AvroFileFormat
                                         ? null

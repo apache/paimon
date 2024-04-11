@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
@@ -39,6 +40,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
 
+import static org.apache.paimon.io.DataFilePathFactory.toIndexPath;
+
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link InternalRow}.
  * Also produces {@link DataFileMeta} after writing a file.
@@ -53,7 +56,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     public RowDataFileWriter(
             FileIO fileIO,
             FormatWriterFactory factory,
-            DataFilePathFactory pathFactory,
+            Path path,
             RowType writeSchema,
             @Nullable TableStatsExtractor tableStatsExtractor,
             long schemaId,
@@ -65,7 +68,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         super(
                 fileIO,
                 factory,
-                pathFactory.newPath(),
+                path,
                 Function.identity(),
                 writeSchema,
                 tableStatsExtractor,
@@ -75,7 +78,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
         this.indexWriter =
-                new IndexWriter(fileIO, pathFactory, writeSchema, indexExpr, indexSizeInMeta);
+                new IndexWriter(fileIO, toIndexPath(path), writeSchema, indexExpr, indexSizeInMeta);
     }
 
     @Override

@@ -70,8 +70,11 @@ public class RollingFileWriterTest {
                                         LocalFileIO.create(),
                                         fileFormat.createWriterFactory(SCHEMA),
                                         new DataFilePathFactory(
-                                                new Path(tempDir + "/bucket-0"),
-                                                CoreOptions.FILE_FORMAT.defaultValue().toString()),
+                                                        new Path(tempDir + "/bucket-0"),
+                                                        CoreOptions.FILE_FORMAT
+                                                                .defaultValue()
+                                                                .toString())
+                                                .newPath(),
                                         SCHEMA,
                                         fileFormat
                                                 .createStatsExtractor(
