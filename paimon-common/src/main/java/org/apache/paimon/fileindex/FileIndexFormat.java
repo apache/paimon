@@ -85,7 +85,7 @@ import java.util.stream.Collectors;
  * column number:                    4 bytes int
  * column x:                         var bytes utf (length + bytes)
  * index number:                     4 bytes int (how many column items below)
- * column x:                         var bytes utf
+ * index name x:                     var bytes utf
  * start pos:                        4 bytes int
  * length:                           4 bytes int
  * redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
