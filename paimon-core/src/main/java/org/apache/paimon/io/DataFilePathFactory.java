@@ -60,13 +60,9 @@ public class DataFilePathFactory {
         return newPath(CHANGELOG_FILE_PREFIX);
     }
 
-    private Path newPath(String prefix, String subffix) {
-        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + subffix;
-        return new Path(parent, name);
-    }
-
     private Path newPath(String prefix) {
-        return newPath(prefix, formatIdentifier);
+        String name = prefix + uuid + "-" + pathCount.getAndIncrement() + "." + formatIdentifier;
+        return new Path(parent, name);
     }
 
     public Path toPath(String fileName) {
