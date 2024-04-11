@@ -311,7 +311,7 @@ public class SparkTimeTravelITCase extends SparkReadTestBase {
                 GenericRow.of(1, BinaryString.fromString("Hello")),
                 GenericRow.of(2, BinaryString.fromString("Paimon")));
 
-        // snapshot 3
+        // snapshot 2
         writeTableWithWatermark(
                 "t",
                 null,
