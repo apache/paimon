@@ -19,6 +19,7 @@
 package org.apache.paimon.spark.procedure
 
 import org.apache.paimon.spark.PaimonSparkTestBase
+
 import org.apache.spark.sql.{Dataset, Row}
 import org.apache.spark.sql.execution.streaming.MemoryStream
 import org.apache.spark.sql.streaming.StreamTest
@@ -88,11 +89,10 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
       withTempDir {
         checkpointDir =>
           // define a change-log table and test `forEachBatch` api
-          spark.sql(
-            s"""
-               |CREATE TABLE T (a INT, b STRING)
-               |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
-               |""".stripMargin)
+          spark.sql(s"""
+                       |CREATE TABLE T (a INT, b STRING)
+                       |TBLPROPERTIES ('primary-key'='a', 'bucket'='3')
+                       |""".stripMargin)
           val location = loadTable("T").location().toString
 
           val inputData = MemoryStream[(Int, String)]
@@ -127,7 +127,8 @@ class ExpireSnapshotsProcedureTest extends PaimonSparkTestBase with StreamTest {
 
             // expire assert throw exception
             assertThrows[IllegalArgumentException] {
-              spark.sql("CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 2, retain_min => 3)")
+              spark.sql(
+                "CALL paimon.sys.expire_snapshots(table => 'test.T', retain_max => 2, retain_min => 3)")
             }
           } finally {
             stream.stop()
