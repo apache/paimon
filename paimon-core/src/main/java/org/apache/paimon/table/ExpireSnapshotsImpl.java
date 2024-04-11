@@ -107,7 +107,8 @@ public class ExpireSnapshotsImpl implements ExpireSnapshots {
             return 0;
         }
 
-        Preconditions.checkArgument(retainMax > retainMin, "retainMax must greater than retainMin.");
+        Preconditions.checkArgument(
+                retainMax > retainMin, "retainMax must greater than retainMin.");
 
         // the min snapshot to retain from 'snapshot.num-retained.max'
         // (the maximum number of snapshots to retain)
