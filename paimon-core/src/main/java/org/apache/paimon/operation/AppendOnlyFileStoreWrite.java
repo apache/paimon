@@ -33,6 +33,7 @@ import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.io.RowDataRollingFileWriter;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.table.BucketMode;
@@ -74,7 +75,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final boolean spillable;
     private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
-    private final List<String> indexExpr;
+    private final Map<String, Map<String, Options>> fileIndexes;
     private final long indexSizeInMeta;
 
     private boolean forceBufferSpill = false;
@@ -111,7 +112,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.maxDiskSize = options.writeBufferSpillDiskSize();
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
-        this.indexExpr = options.indexColumns();
+        this.fileIndexes = options.indexColumns();
         this.indexSizeInMeta = options.indexSizeInMeta();
     }
 
@@ -160,7 +161,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 spillCompression,
                 statsCollectors,
                 maxDiskSize,
-                indexExpr,
+                fileIndexes,
                 indexSizeInMeta);
     }
 
@@ -181,7 +182,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             new LongCounter(toCompact.get(0).minSequenceNumber()),
                             fileCompression,
                             statsCollectors,
-                            indexExpr,
+                            fileIndexes,
                             indexSizeInMeta);
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));

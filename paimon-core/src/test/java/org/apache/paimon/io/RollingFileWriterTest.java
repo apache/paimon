@@ -86,7 +86,7 @@ public class RollingFileWriterTest {
                                         StatsCollectorFactories.createStatsFactories(
                                                 new CoreOptions(new HashMap<>()),
                                                 SCHEMA.getFieldNames()),
-                                        Collections.emptyList(),
+                                        Collections.emptyMap(),
                                         0),
                         TARGET_FILE_SIZE);
     }

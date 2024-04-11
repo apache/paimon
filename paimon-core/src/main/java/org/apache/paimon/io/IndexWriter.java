@@ -29,7 +29,6 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.Pair;
-import org.apache.paimon.utils.StringUtils;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -63,11 +62,10 @@ public final class IndexWriter {
             FileIO fileIO,
             DataFilePathFactory pathFactory,
             RowType rowType,
-            List<String> indexExpr,
+            Map<String, Map<String, Options>> fileIndexes,
             long indexSizeInMeta) {
         this.fileIO = fileIO;
         this.pathFactory = pathFactory;
-        List<String> indexColumns = indexExpr;
         this.indexSizeInMeta = indexSizeInMeta;
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
@@ -77,45 +75,23 @@ public final class IndexWriter {
                     map.put(dataField.name(), dataField);
                     index.put(dataField.name(), rowType.getFieldIndex(dataField.name()));
                 });
-        for (String columnExpr : indexColumns) {
-            String[] expr = columnExpr.trim().split(":");
-
-            if (expr.length != 3) {
-                throw new IllegalArgumentException(
-                        "index.column should be in pattern: <columnName>:<indexType>:{op1=value1, op2=value2} , but "
-                                + columnExpr
-                                + " does not meet the request.");
-            }
-
-            String columnName = expr[0].trim();
-            String indexType = expr[1].trim();
-            String opString = expr[2].trim();
-
-            String[] ops = opString.substring(1, opString.length() - 1).split(",");
-            Options options = new Options();
-            for (String op : ops) {
-                if (!StringUtils.isBlank(op)) {
-                    String[] kv = op.split("=");
-                    if (kv.length != 2) {
-                        throw new IllegalArgumentException(
-                                "Options in index.columns should be in pattern key=value, but "
-                                        + op
-                                        + " does not meet the request.");
-                    }
-                    options.set(kv[0].trim(), kv[1].trim());
-                }
-            }
-
+        for (Map.Entry<String, Map<String, Options>> entry : fileIndexes.entrySet()) {
+            String columnName = entry.getKey();
             DataField field = map.get(columnName);
             if (field == null) {
-                throw new IllegalArgumentException(columnExpr + " does not exist in column fields");
+                throw new IllegalArgumentException(columnName + " does not exist in column fields");
             }
-            indexMaintainers.add(
-                    new IndexMaintainer(
-                            columnName,
-                            indexType,
-                            FileIndexer.create(indexType, field.type(), options).createWriter(),
-                            InternalRow.createFieldGetter(field.type(), index.get(columnName))));
+            for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
+                String indexType = typeEntry.getKey();
+                indexMaintainers.add(
+                        new IndexMaintainer(
+                                columnName,
+                                indexType,
+                                FileIndexer.create(indexType, field.type(), typeEntry.getValue())
+                                        .createWriter(),
+                                InternalRow.createFieldGetter(
+                                        field.type(), index.get(columnName))));
+            }
         }
     }
 
@@ -132,32 +108,26 @@ public final class IndexWriter {
 
         for (IndexMaintainer indexMaintainer : indexMaintainers) {
             indexMaps
-                    .computeIfAbsent(indexMaintainer.getIndexType(), k -> new HashMap<>())
-                    .put(indexMaintainer.getColumnName(), indexMaintainer.serializedBytes());
+                    .computeIfAbsent(indexMaintainer.getColumnName(), k -> new HashMap<>())
+                    .put(indexMaintainer.getIndexType(), indexMaintainer.serializedBytes());
         }
 
-        for (Map.Entry<String, Map<String, byte[]>> entry : indexMaps.entrySet()) {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
+            writer.writeColumnIndexes(indexMaps);
+        }
 
-            String indexType = entry.getKey();
-            Map<String, byte[]> indexMap = entry.getValue();
-
-            ByteArrayOutputStream baos = new ByteArrayOutputStream();
-            try (FileIndexFormat.Writer writer = FileIndexFormat.createWriter(baos)) {
-                writer.writeColumnIndex(indexType, indexMap);
+        if (baos.size() > indexSizeInMeta || resultRow != BinaryRow.EMPTY_ROW) {
+            Path path = pathFactory.newIndexPath();
+            try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
+                outputStream.write(baos.toByteArray());
             }
-
-            if (baos.size() > indexSizeInMeta || resultRow != BinaryRow.EMPTY_ROW) {
-                Path path = pathFactory.newIndexPath();
-                try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
-                    outputStream.write(baos.toByteArray());
-                }
-                resultFileNames.add(path.getName());
-            } else {
-                resultRow = new BinaryRow(1);
-                BinaryRowWriter binaryRowWriter = new BinaryRowWriter(resultRow);
-                binaryRowWriter.writeBinary(0, baos.toByteArray());
-                binaryRowWriter.complete();
-            }
+            resultFileNames.add(path.getName());
+        } else {
+            resultRow = new BinaryRow(1);
+            BinaryRowWriter binaryRowWriter = new BinaryRowWriter(resultRow);
+            binaryRowWriter.writeBinary(0, baos.toByteArray());
+            binaryRowWriter.complete();
         }
     }
 

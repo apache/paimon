@@ -35,6 +35,7 @@ import org.apache.paimon.memory.MemoryOwner;
 import org.apache.paimon.memory.MemorySegmentPool;
 import org.apache.paimon.operation.AppendOnlyFileStoreWrite;
 import org.apache.paimon.options.MemorySize;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.reader.RecordReaderIterator;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
@@ -51,6 +52,7 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.ExecutionException;
 
 /**
@@ -78,7 +80,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
-    private final List<String> indexExpr;
+    private final Map<String, Map<String, Options>> fileIndexes;
     private final long indexSizeInMeta;
 
     private MemorySegmentPool memorySegmentPool;
@@ -103,7 +105,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
-            List<String> indexExpr,
+            Map<String, Map<String, Options>> fileIndexes,
             long indexSizeInMeta) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
@@ -124,7 +126,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
-        this.indexExpr = indexExpr;
+        this.fileIndexes = fileIndexes;
         this.indexSizeInMeta = indexSizeInMeta;
 
         this.sinkWriter =
@@ -253,7 +255,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                indexExpr,
+                fileIndexes,
                 indexSizeInMeta);
     }
 

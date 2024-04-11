@@ -207,6 +207,18 @@ under the License.
             <td>Whether only overwrite dynamic partition when overwriting a partitioned table with dynamic partition columns. Works only when the table has partition keys.</td>
         </tr>
         <tr>
+            <td><h5>file-index.in-manifest-threshold</h5></td>
+            <td style="word-wrap: break-word;">500 bytes</td>
+            <td>MemorySize</td>
+            <td>The threshold to store file index bytes in manifest.</td>
+        </tr>
+        <tr>
+            <td><h5>file-index.read.enabled</h5></td>
+            <td style="word-wrap: break-word;">true</td>
+            <td>Boolean</td>
+            <td>Whether enabled read file index.</td>
+        </tr>
+        <tr>
             <td><h5>file-reader-async-threshold</h5></td>
             <td style="word-wrap: break-word;">10 mb</td>
             <td>MemorySize</td>
@@ -235,24 +247,6 @@ under the License.
             <td style="word-wrap: break-word;"></td>
             <td>Map</td>
             <td>Define different file format for different level, you can add the conf like this: 'file.format.per.level' = '0:avro,3:parquet', if the file format for level is not provided, the default format which set by `file.format` will be used.</td>
-        </tr>
-        <tr>
-            <td><h5>file.index.columns</h5></td>
-            <td style="word-wrap: break-word;">(none)</td>
-            <td>String</td>
-            <td>The secondary index columns.</td>
-        </tr>
-        <tr>
-            <td><h5>file.index.read.enabled</h5></td>
-            <td style="word-wrap: break-word;">true</td>
-            <td>Boolean</td>
-            <td>Whether enabled read file index.</td>
-        </tr>
-        <tr>
-            <td><h5>file.index.size-in-meta</h5></td>
-            <td style="word-wrap: break-word;">500 bytes</td>
-            <td>MemorySize</td>
-            <td>Max memory size for lookup cache.</td>
         </tr>
         <tr>
             <td><h5>full-compaction.delta-commits</h5></td>

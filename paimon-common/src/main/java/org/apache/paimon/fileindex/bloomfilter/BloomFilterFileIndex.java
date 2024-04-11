@@ -40,7 +40,7 @@ import java.util.BitSet;
  */
 public class BloomFilterFileIndex implements FileIndexer {
 
-    public static final String BLOOM_FILTER = "bloom";
+    public static final String BLOOM_FILTER = "bloom-filter";
 
     private static final int DEFAULT_ITEMS = 1_000_000;
     private static final double DEFAULT_FPP = 0.1;

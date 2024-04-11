@@ -23,6 +23,7 @@ import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
@@ -35,6 +36,7 @@ import javax.annotation.Nullable;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 import java.util.function.Function;
 
 /**
@@ -58,7 +60,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            List<String> indexExpr,
+            Map<String, Map<String, Options>> indexExpr,
             long indexSizeInMeta) {
         super(
                 fileIO,

@@ -70,6 +70,10 @@ public class CoreOptions implements Serializable {
 
     public static final String DISTINCT = "distinct";
 
+    public static final String FILE_INDEX = "file-index";
+
+    public static final String COLUMNS = "columns";
+
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
                     .intType()
@@ -135,20 +139,14 @@ public class CoreOptions implements Serializable {
                             "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
 
-    public static final ConfigOption<String> FILE_INDEX_COLUMNS =
-            key("file.index.columns")
-                    .stringType()
-                    .noDefaultValue()
-                    .withDescription("The secondary index columns.");
-
-    public static final ConfigOption<MemorySize> FILE_INDEX_SIZE_IN_META =
-            key("file.index.size-in-meta")
+    public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
+            key("file-index.in-manifest-threshold")
                     .memoryType()
                     .defaultValue(MemorySize.parse("500 B"))
-                    .withDescription("Max memory size for lookup cache.");
+                    .withDescription("The threshold to store file index bytes in manifest.");
 
     public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
-            key("file.index.read.enabled")
+            key("file-index.read.enabled")
                     .booleanType()
                     .defaultValue(true)
                     .withDescription("Whether enabled read file index.");
@@ -1721,15 +1719,81 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTORS_ENABLED);
     }
 
-    public List<String> indexColumns() {
-        String columns = options.get(FILE_INDEX_COLUMNS);
-        return columns == null || StringUtils.isBlank(columns)
-                ? Collections.emptyList()
-                : Arrays.asList(columns.split(";"));
+    public Map<String, Map<String, Options>> indexColumns() {
+        String fileIndexPrefix = FILE_INDEX + ".";
+        String fileIndexColumnSuffix = "." + COLUMNS;
+
+        Map<String, Map<String, Options>> indexes = new HashMap<>();
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith(fileIndexPrefix)) {
+                // start with file-index, decode this option
+                if (key.endsWith(fileIndexColumnSuffix)) {
+                    // if end with .column, set up indexes
+                    String indexType =
+                            key.substring(
+                                    fileIndexPrefix.length(),
+                                    key.length() - fileIndexColumnSuffix.length());
+                    String[] names = entry.getValue().split(",");
+                    for (String name : names) {
+                        if (StringUtils.isBlank(name)) {
+                            throw new IllegalArgumentException(
+                                    "Wrong option in " + key + ", should be have empty column");
+                        }
+                        indexes.computeIfAbsent(name.trim(), n -> new HashMap<>())
+                                .computeIfAbsent(indexType, t -> new Options());
+                    }
+                } else {
+                    // else, it must be an option
+                    String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
+                    if (kv.length != 3) {
+                        continue;
+                    }
+                    String indexType = kv[0];
+                    String cname = kv[1];
+                    String opkey = kv[2];
+
+                    if (!indexes.containsKey(cname) || !indexes.get(cname).containsKey(indexType)) {
+                        // if indexes have not set, find .column in options, then set them
+                        String columns =
+                                options.get(fileIndexPrefix + indexType + fileIndexColumnSuffix);
+                        if (columns == null) {
+                            continue;
+                        }
+                        String[] names = columns.split(",");
+                        boolean foundTarget = false;
+                        for (String name : names) {
+                            if (StringUtils.isBlank(name)) {
+                                throw new IllegalArgumentException(
+                                        "Wrong option in " + key + ", should be have empty column");
+                            }
+                            String tname = name.trim();
+                            if (cname.equals(tname)) {
+                                foundTarget = true;
+                            }
+                            indexes.computeIfAbsent(tname, n -> new HashMap<>())
+                                    .computeIfAbsent(indexType, t -> new Options());
+                        }
+                        if (!foundTarget) {
+                            throw new IllegalArgumentException(
+                                    "Wrong option in "
+                                            + key
+                                            + ", can't found column "
+                                            + cname
+                                            + " in "
+                                            + columns);
+                        }
+                    }
+
+                    indexes.get(cname).get(indexType).set(opkey, entry.getValue());
+                }
+            }
+        }
+        return indexes;
     }
 
     public long indexSizeInMeta() {
-        return options.get(FILE_INDEX_SIZE_IN_META).getBytes();
+        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
     }
 
     public boolean fileIndexReadEnabled() {
