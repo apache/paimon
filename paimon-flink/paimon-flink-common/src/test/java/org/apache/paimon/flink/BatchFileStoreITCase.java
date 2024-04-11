@@ -25,12 +25,15 @@ import org.apache.paimon.utils.DateTimeUtils;
 
 import org.apache.flink.types.Row;
 import org.apache.flink.types.RowKind;
+import org.apache.flink.util.CloseableIterator;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.Timeout;
 
 import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -218,6 +221,36 @@ public class BatchFileStoreITCase extends CatalogITCaseBase {
                         () -> batchSql("SELECT * FROM T /*+ OPTIONS('scan.tag-name'='unknown') */"))
                 .hasRootCauseInstanceOf(IllegalArgumentException.class)
                 .hasRootCauseMessage("Tag 'unknown' doesn't exist.");
+    }
+
+    @Test
+    @Timeout(120)
+    public void testTimeTravelReadWithWatermark() throws Exception {
+        streamSqlIter(
+                "CREATE TEMPORARY TABLE gen (a STRING, b STRING, c STRING,"
+                        + " dt AS NOW(), WATERMARK FOR dt AS dt) WITH ('connector'='datagen')");
+        sql(
+                "CREATE TABLE WT (a STRING, b STRING, c STRING, dt TIMESTAMP, PRIMARY KEY (a) NOT ENFORCED)");
+        CloseableIterator<Row> insert = streamSqlIter("INSERT INTO WT SELECT * FROM gen ");
+        List<Long> watermarks;
+        while (true) {
+            watermarks =
+                    sql("SELECT `watermark` FROM WT$snapshots").stream()
+                            .map(r -> (Long) r.getField("watermark"))
+                            .collect(Collectors.toList());
+            if (watermarks.size() > 1) {
+                insert.close();
+                break;
+            }
+            Thread.sleep(1000);
+        }
+        Long maxWatermark = watermarks.get(watermarks.size() - 1);
+        assertThat(
+                        batchSql(
+                                String.format(
+                                        "SELECT * FROM WT /*+ OPTIONS('scan.watermark'='%d') */",
+                                        maxWatermark)))
+                .isNotEmpty();
     }
 
     @Test

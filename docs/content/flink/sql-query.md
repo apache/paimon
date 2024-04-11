@@ -53,6 +53,9 @@ SELECT * FROM t /*+ OPTIONS('scan.timestamp-millis' = '1678883047356') */;
 
 -- read tag 'my-tag'
 SELECT * FROM t /*+ OPTIONS('scan.tag-name' = 'my-tag') */;
+
+-- read the snapshot from watermark, will match the first snapshot after the watermark
+SELECT * FROM t /*+ OPTIONS('scan.watermark' = '1678883047356') */; 
 ```
 {{< /tab >}}
 

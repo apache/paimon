@@ -52,6 +52,10 @@ SELECT * FROM t TIMESTAMP AS OF 1678883047;
 
 -- read tag 'my-tag'
 SELECT * FROM t VERSION AS OF 'my-tag';
+
+-- read the snapshot from specified watermark. will match the first snapshot after the watermark
+SELECT * FROM t VERSION AS OF 'watermark-1678883047356';
+
 ```
 
 {{< hint warning >}}

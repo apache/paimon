@@ -508,6 +508,14 @@ public class CoreOptions implements Serializable {
                             "Optional timestamp used in case of \"from-timestamp\" scan mode. "
                                     + "If there is no snapshot earlier than this time, the earliest snapshot will be chosen.");
 
+    public static final ConfigOption<Long> SCAN_WATERMARK =
+            key("scan.watermark")
+                    .longType()
+                    .noDefaultValue()
+                    .withDescription(
+                            "Optional watermark used in case of \"from-snapshot\" scan mode. "
+                                    + "If there is no snapshot later than this watermark, will throw an exceptions.");
+
     public static final ConfigOption<Long> SCAN_FILE_CREATION_TIME_MILLIS =
             key("scan.file-creation-time-millis")
                     .longType()
@@ -1450,6 +1458,7 @@ public class CoreOptions implements Serializable {
                 return StartupMode.FROM_TIMESTAMP;
             } else if (options.getOptional(SCAN_SNAPSHOT_ID).isPresent()
                     || options.getOptional(SCAN_TAG_NAME).isPresent()
+                    || options.getOptional(SCAN_WATERMARK).isPresent()
                     || options.getOptional(SCAN_VERSION).isPresent()) {
                 return StartupMode.FROM_SNAPSHOT;
             } else if (options.getOptional(SCAN_FILE_CREATION_TIME_MILLIS).isPresent()) {
@@ -1469,6 +1478,10 @@ public class CoreOptions implements Serializable {
 
     public Long scanTimestampMills() {
         return options.get(SCAN_TIMESTAMP_MILLIS);
+    }
+
+    public Long scanWatermark() {
+        return options.get(SCAN_WATERMARK);
     }
 
     public Long scanFileCreationTimeMills() {

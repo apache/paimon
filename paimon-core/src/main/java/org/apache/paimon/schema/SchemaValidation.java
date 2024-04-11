@@ -58,6 +58,7 @@ import static org.apache.paimon.CoreOptions.SCAN_MODE;
 import static org.apache.paimon.CoreOptions.SCAN_SNAPSHOT_ID;
 import static org.apache.paimon.CoreOptions.SCAN_TAG_NAME;
 import static org.apache.paimon.CoreOptions.SCAN_TIMESTAMP_MILLIS;
+import static org.apache.paimon.CoreOptions.SCAN_WATERMARK;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MIN;
 import static org.apache.paimon.CoreOptions.STREAMING_READ_OVERWRITE;
@@ -247,7 +248,11 @@ public class SchemaValidation {
                     Collections.singletonList(SCAN_TIMESTAMP_MILLIS));
         } else if (options.startupMode() == CoreOptions.StartupMode.FROM_SNAPSHOT) {
             checkExactOneOptionExistInMode(
-                    options, options.startupMode(), SCAN_SNAPSHOT_ID, SCAN_TAG_NAME);
+                    options,
+                    options.startupMode(),
+                    SCAN_SNAPSHOT_ID,
+                    SCAN_TAG_NAME,
+                    SCAN_WATERMARK);
             checkOptionsConflict(
                     options,
                     Arrays.asList(
