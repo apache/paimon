@@ -516,6 +516,12 @@ This config option does not affect the default filesystem metastore.</td>
             <td>Optional timestamp used in case of "from-timestamp" scan mode. If there is no snapshot earlier than this time, the earliest snapshot will be chosen.</td>
         </tr>
         <tr>
+            <td><h5>scan.watermark</h5></td>
+            <td style="word-wrap: break-word;">(none)</td>
+            <td>Long</td>
+            <td>Optional watermark used in case of "from-snapshot" scan mode. If there is no snapshot later than this watermark, will throw an exceptions.</td>
+        </tr>
+        <tr>
             <td><h5>sequence.field</h5></td>
             <td style="word-wrap: break-word;">(none)</td>
             <td>String</td>

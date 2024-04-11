@@ -50,6 +50,7 @@ import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.table.source.snapshot.SnapshotReader;
 import org.apache.paimon.table.source.snapshot.SnapshotReaderImpl;
 import org.apache.paimon.table.source.snapshot.StaticFromTimestampStartingScanner;
+import org.apache.paimon.table.source.snapshot.StaticFromWatermarkStartingScanner;
 import org.apache.paimon.tag.TagPreview;
 import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
@@ -77,6 +78,7 @@ import static org.apache.paimon.utils.Preconditions.checkNotNull;
 abstract class AbstractFileStoreTable implements FileStoreTable {
 
     private static final long serialVersionUID = 1L;
+    private static final String WATERMARK_PREFIX = "watermark-";
 
     protected final FileIO fileIO;
     protected final Path path;
@@ -386,6 +388,8 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                     return travelToVersion(coreOptions.scanVersion(), options);
                 } else if (coreOptions.scanSnapshotId() != null) {
                     return travelToSnapshot(coreOptions.scanSnapshotId(), options);
+                } else if (coreOptions.scanWatermark() != null) {
+                    return travelToWatermark(coreOptions.scanWatermark(), options);
                 } else {
                     return travelToTag(coreOptions.scanTagName(), options);
                 }
@@ -405,6 +409,10 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         if (tagManager().tagExists(version)) {
             options.set(CoreOptions.SCAN_TAG_NAME, version);
             return travelToTag(version, options);
+        } else if (version.startsWith(WATERMARK_PREFIX)) {
+            long watermark = Long.parseLong(version.substring(WATERMARK_PREFIX.length()));
+            options.set(CoreOptions.SCAN_WATERMARK, watermark);
+            return travelToWatermark(watermark, options);
         } else if (version.chars().allMatch(Character::isDigit)) {
             options.set(CoreOptions.SCAN_SNAPSHOT_ID.key(), version);
             return travelToSnapshot(Long.parseLong(version), options);
@@ -421,6 +429,16 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         SnapshotManager snapshotManager = snapshotManager();
         if (snapshotManager.snapshotExists(snapshotId)) {
             return travelToSnapshot(snapshotManager.snapshot(snapshotId), options);
+        }
+        return Optional.empty();
+    }
+
+    private Optional<TableSchema> travelToWatermark(long watermark, Options options) {
+        Snapshot snapshot =
+                StaticFromWatermarkStartingScanner.timeTravelToWatermark(
+                        snapshotManager(), watermark);
+        if (snapshot != null) {
+            return Optional.of(schemaManager().schema(snapshot.schemaId()).copy(options.toMap()));
         }
         return Optional.empty();
     }

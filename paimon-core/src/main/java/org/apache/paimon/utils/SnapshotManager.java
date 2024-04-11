@@ -307,6 +307,63 @@ public class SnapshotManager implements Serializable {
         return finalSnapshot;
     }
 
+    public @Nullable Snapshot laterOrEqualWatermark(long watermark) {
+        Long earliest = earliestSnapshotId();
+        Long latest = latestSnapshotId();
+        if (earliest == null || latest == null) {
+            return null;
+        }
+        Long earliestWatermark = null;
+        // find the first snapshot with watermark
+        if ((earliestWatermark = snapshot(earliest).watermark()) == null) {
+            while (earliest < latest) {
+                earliest++;
+                earliestWatermark = snapshot(earliest).watermark();
+                if (earliestWatermark != null) {
+                    break;
+                }
+            }
+        }
+        if (earliestWatermark == null) {
+            return null;
+        }
+
+        if (earliestWatermark >= watermark) {
+            return snapshot(earliest);
+        }
+        Snapshot finalSnapshot = null;
+
+        while (earliest <= latest) {
+            long mid = earliest + (latest - earliest) / 2; // Avoid overflow
+            Snapshot snapshot = snapshot(mid);
+            Long commitWatermark = snapshot.watermark();
+            if (commitWatermark == null) {
+                // find the first snapshot with watermark
+                while (mid >= earliest) {
+                    mid--;
+                    commitWatermark = snapshot(mid).watermark();
+                    if (commitWatermark != null) {
+                        break;
+                    }
+                }
+            }
+            if (commitWatermark == null) {
+                earliest = mid + 1;
+            } else {
+                if (commitWatermark > watermark) {
+                    latest = mid - 1; // Search in the left half
+                    finalSnapshot = snapshot;
+                } else if (commitWatermark < watermark) {
+                    earliest = mid + 1; // Search in the right half
+                } else {
+                    finalSnapshot = snapshot; // Found the exact match
+                    break;
+                }
+            }
+        }
+        return finalSnapshot;
+    }
+
     public long snapshotCount() throws IOException {
         return listVersionedFiles(fileIO, snapshotDirectory(), SNAPSHOT_PREFIX).count();
     }
