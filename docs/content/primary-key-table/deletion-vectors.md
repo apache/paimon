@@ -44,7 +44,6 @@ By specifying `'deletion-vectors.enabled' = 'true'`, the Deletion Vectors mode c
 
 ## Limitation
 
-- Only primary key table supports this feature.
 - `changelog-producer` needs to be `none` or `lookup`.
 - `changelog-producer.lookup-wait` can't be `false`.
 - `merge-engine` can't be `first-row`, because the read of first-row is already no merging, deletion vectors are not needed.
