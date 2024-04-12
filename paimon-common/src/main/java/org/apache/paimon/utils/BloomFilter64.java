@@ -115,13 +115,12 @@ public final class BloomFilter64 {
             return data.length * Long.SIZE;
         }
 
-        public byte[] toByteArray(byte[] bytes, int offset, int length) {
+        public void toByteArray(byte[] bytes, int offset, int length) {
             assert length >= data.length * Long.BYTES;
             ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
             for (int i = 0; i < data.length; i++) {
                 bb.putLong(data[i]);
             }
-            return bytes;
         }
     }
 }
