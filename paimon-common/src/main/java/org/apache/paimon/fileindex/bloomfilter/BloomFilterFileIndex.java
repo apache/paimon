@@ -25,10 +25,9 @@ import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.FieldRef;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.utils.BloomFilter64;
+import org.apache.paimon.utils.BloomFilter64.BitSet;
 
 import org.apache.hadoop.util.bloom.HashFunction;
-
-import java.util.BitSet;
 
 /**
  * Bloom filter for file index.
@@ -92,13 +91,12 @@ public class BloomFilterFileIndex implements FileIndexer {
         @Override
         public byte[] serializedBytes() {
             int numHashFunctions = filter.getNumHashFunctions();
-            byte[] bytes = filter.getBitSet().toByteArray();
-            byte[] serialized = new byte[bytes.length + Integer.BYTES];
+            byte[] serialized = new byte[filter.getBitSet().bitSize() / Byte.SIZE + Integer.BYTES];
             serialized[0] = (byte) ((numHashFunctions >>> 24) & 0xFF);
             serialized[1] = (byte) ((numHashFunctions >>> 16) & 0xFF);
             serialized[2] = (byte) ((numHashFunctions >>> 8) & 0xFF);
             serialized[3] = (byte) (numHashFunctions & 0xFF);
-            System.arraycopy(bytes, 0, serialized, 4, bytes.length);
+            filter.getBitSet().toByteArray(serialized, 4, serialized.length - 4);
             return serialized;
         }
     }
@@ -114,9 +112,7 @@ public class BloomFilterFileIndex implements FileIndexer {
                             + (serializedBytes[1] << 16)
                             + (serializedBytes[2] << 8)
                             + serializedBytes[3]);
-            byte[] bytes = new byte[serializedBytes.length - Integer.BYTES];
-            System.arraycopy(serializedBytes, 4, bytes, 0, bytes.length);
-            BitSet bitSet = BitSet.valueOf(bytes);
+            BitSet bitSet = new BitSet(serializedBytes, 4, serializedBytes.length - Integer.BYTES);
             this.filter = new BloomFilter64(numHashFunctions, bitSet);
             this.hashFunction = FastHash.getHashFunction(type);
         }

@@ -18,7 +18,8 @@
 
 package org.apache.paimon.utils;
 
-import java.util.BitSet;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 
 /** Bloom filter 64 handle 64 bits hash. */
 public final class BloomFilter64 {
@@ -32,12 +33,12 @@ public final class BloomFilter64 {
         this.numBits = nb + (Long.SIZE - (nb % Long.SIZE));
         this.numHashFunctions =
                 Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
-        this.bitSet = new BitSet(numBits);
+        this.bitSet = new BitSet(new long[numBits / Long.SIZE]);
     }
 
     public BloomFilter64(int numHashFunctions, BitSet bitSet) {
         this.numHashFunctions = numHashFunctions;
-        this.numBits = bitSet.size();
+        this.numBits = bitSet.bitSize();
         this.bitSet = bitSet;
     }
 
@@ -80,5 +81,47 @@ public final class BloomFilter64 {
 
     public BitSet getBitSet() {
         return bitSet;
+    }
+
+    /** Bit set used for bloom filter 64. */
+    public static class BitSet {
+
+        private final long[] data;
+
+        public BitSet(byte[] bytes, int offset, int length) {
+            assert length % 8 == 0 : "data length should be divisible by 8";
+            int longSize = length / 8;
+            ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
+            this.data = new long[longSize];
+            for (int i = 0; i < longSize; i++) {
+                this.data[i] = bb.getLong();
+            }
+        }
+
+        public BitSet(long[] data) {
+            assert data.length > 0 : "data length is zero!";
+            this.data = data;
+        }
+
+        public void set(int index) {
+            data[index >>> 6] |= (1L << index);
+        }
+
+        public boolean get(int index) {
+            return (data[index >>> 6] & (1L << index)) != 0;
+        }
+
+        public int bitSize() {
+            return data.length * Long.SIZE;
+        }
+
+        public byte[] toByteArray(byte[] bytes, int offset, int length) {
+            assert length >= data.length * Long.BYTES;
+            ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
+            for (int i = 0; i < data.length - 1; i++) {
+                bb.putLong(data[i]);
+            }
+            return bytes;
+        }
     }
 }
