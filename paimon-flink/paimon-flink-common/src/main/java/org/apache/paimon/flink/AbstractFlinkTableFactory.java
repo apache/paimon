@@ -100,7 +100,10 @@ public abstract class AbstractFlinkTableFactory
                         == RuntimeExecutionMode.STREAMING;
         if (origin instanceof SystemCatalogTable) {
             return new PushedTableSource(
-                    new SystemTableSource(((SystemCatalogTable) origin).table(), isStreamingMode));
+                    new SystemTableSource(
+                            ((SystemCatalogTable) origin).table(),
+                            isStreamingMode,
+                            context.getObjectIdentifier()));
         } else {
             Table table = buildPaimonTable(context);
             if (table instanceof FileStoreTable) {

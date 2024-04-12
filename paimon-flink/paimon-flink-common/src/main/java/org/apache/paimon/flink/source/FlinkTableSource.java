@@ -18,15 +18,21 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
+import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.predicate.PredicateVisitor;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
@@ -46,16 +52,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
 
+import static org.apache.paimon.options.OptionsUtils.PAIMON_PREFIX;
+
 /** A Flink {@link ScanTableSource} for paimon. */
 public abstract class FlinkTableSource {
 
     private static final Logger LOG = LoggerFactory.getLogger(FlinkTableSource.class);
+
+    protected static final String FLINK_INFER_SCAN_PARALLELISM =
+            String.format(
+                    "%s%s", PAIMON_PREFIX, FlinkConnectorOptions.INFER_SCAN_PARALLELISM.key());
 
     protected final Table table;
 
     @Nullable protected Predicate predicate;
     @Nullable protected int[][] projectFields;
     @Nullable protected Long limit;
+    protected SplitStatistics splitStatistics;
 
     public FlinkTableSource(Table table) {
         this(table, null, null, null);
@@ -132,4 +145,68 @@ public abstract class FlinkTableSource {
     public abstract void applyDynamicFiltering(List<String> candidateFilterFields);
 
     public abstract boolean isStreaming();
+
+    @Nullable
+    protected Integer inferSourceParallelism(StreamExecutionEnvironment env) {
+        Options options = Options.fromMap(this.table.options());
+        Configuration envConfig = (Configuration) env.getConfiguration();
+        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
+            options.set(
+                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
+                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
+        }
+        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+            if (isStreaming()) {
+                parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
+            } else {
+                scanSplitsForInference();
+                parallelism = splitStatistics.splitNumber();
+                if (null != limit && limit > 0) {
+                    int limitCount =
+                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
+                    parallelism = Math.min(parallelism, limitCount);
+                }
+
+                parallelism = Math.max(1, parallelism);
+                parallelism =
+                        Math.min(
+                                parallelism,
+                                options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
+            }
+        }
+        return parallelism;
+    }
+
+    protected void scanSplitsForInference() {
+        if (splitStatistics == null) {
+            List<Split> splits =
+                    table.newReadBuilder().withFilter(predicate).newScan().plan().splits();
+            splitStatistics = new SplitStatistics(splits);
+        }
+    }
+
+    /** Split statistics for inferring row count and parallelism size. */
+    protected static class SplitStatistics {
+
+        private final int splitNumber;
+        private final long totalRowCount;
+
+        protected SplitStatistics(List<Split> splits) {
+            this.splitNumber = splits.size();
+            this.totalRowCount = splits.stream().mapToLong(Split::rowCount).sum();
+        }
+
+        public int splitNumber() {
+            return splitNumber;
+        }
+
+        public long totalRowCount() {
+            return totalRowCount;
+        }
+    }
+
+    public Table getTable() {
+        return table;
+    }
 }
