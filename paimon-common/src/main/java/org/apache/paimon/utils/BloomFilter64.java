@@ -108,8 +108,8 @@ public final class BloomFilter64 {
         }
 
         public void toByteArray(byte[] bytes, int offset, int length) {
-            for (int i = 0; i < length; i++) {
-                bytes[offset + i] = data[this.offset + i];
+            if (length >= 0) {
+                System.arraycopy(data, this.offset, bytes, offset, length);
             }
         }
     }
