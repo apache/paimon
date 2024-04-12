@@ -307,6 +307,15 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
         assertThat(sql("SELECT * FROM append_table LIMIT 1")).hasSize(1);
     }
 
+    @Test
+    public void testFileIndex() {
+        batchSql(
+                "INSERT INTO index_table VALUES (1, 'a', 'AAA'), (1, 'a', 'AAA'), (2, 'c', 'BBB'), (3, 'c', 'BBB')");
+
+        assertThat(batchSql("SELECT * FROM index_table WHERE indexc = 'c'"))
+                .containsExactlyInAnyOrder(Row.of(2, "c", "BBB"), Row.of(3, "c", "BBB"));
+    }
+
     @Override
     protected List<String> ddl() {
         return Arrays.asList(
@@ -314,16 +323,6 @@ public class UnawareBucketAppendOnlyTableITCase extends CatalogITCaseBase {
                 "CREATE TABLE IF NOT EXISTS part_table (id INT, data STRING, dt STRING) PARTITIONED BY (dt) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS complex_table (id INT, data MAP<INT, INT>) WITH ('bucket' = '-1')",
                 "CREATE TABLE IF NOT EXISTS index_table (id INT, indexc STRING, data STRING) WITH ('bucket' = '-1', 'index.columns'='indexc', 'index.type'='bloom')");
-    }
-
-    @Test
-    public void testSkipDedup2() {
-        batchSql(
-                "INSERT INTO index_table VALUES (1, 'a', 'AAA'), (1, 'a', 'AAA'), (2, 'c', 'BBB'), (3, 'c', 'BBB')");
-
-        batchSql("SELECT * FROM index_table WHERE indexc = 'c'");
-
-        return;
     }
 
     @Override
