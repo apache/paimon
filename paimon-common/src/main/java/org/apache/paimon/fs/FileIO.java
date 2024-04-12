@@ -37,6 +37,7 @@ import java.io.Serializable;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.Iterator;
@@ -101,6 +102,20 @@ public interface FileIO extends Serializable {
      * @return the statuses of the files/directories in the given path
      */
     FileStatus[] listStatus(Path path) throws IOException;
+
+    /**
+     * List the statuses of the directories in the given path if the path is a directory.
+     *
+     * @param path given path
+     * @return the statuses of the directories in the given path
+     */
+    default FileStatus[] listDirectories(Path path) throws IOException {
+        FileStatus[] statuses = listStatus(path);
+        if (statuses != null) {
+            statuses = Arrays.stream(statuses).filter(FileStatus::isDir).toArray(FileStatus[]::new);
+        }
+        return statuses;
+    }
 
     /**
      * Check if exists.
