@@ -59,7 +59,7 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     public List<String> listDatabases() {
         List<String> databases = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listStatus(warehouse))) {
+        for (FileStatus status : uncheck(() -> fileIO.listDirectories(warehouse))) {
             Path path = status.getPath();
             if (status.isDir() && isDatabase(path)) {
                 databases.add(database(path));
@@ -100,7 +100,8 @@ public class FileSystemCatalog extends AbstractCatalog {
     @Override
     protected List<String> listTablesImpl(String databaseName) {
         List<String> tables = new ArrayList<>();
-        for (FileStatus status : uncheck(() -> fileIO.listStatus(newDatabasePath(databaseName)))) {
+        for (FileStatus status :
+                uncheck(() -> fileIO.listDirectories(newDatabasePath(databaseName)))) {
             if (status.isDir() && tableExists(status.getPath())) {
                 tables.add(status.getPath().getName());
             }
