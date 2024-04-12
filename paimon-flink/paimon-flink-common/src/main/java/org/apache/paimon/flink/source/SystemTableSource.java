@@ -29,9 +29,7 @@ import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
-import org.apache.flink.configuration.Configuration;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource;
@@ -97,13 +95,18 @@ public class SystemTableSource extends FlinkTableSource {
         }
         return new PaimonDataStreamScanProvider(
                 source.getBoundedness() == Boundedness.BOUNDED,
-                env ->
-                        configSourceParallelism(
-                                env,
-                                env.fromSource(
-                                        source,
-                                        WatermarkStrategy.noWatermarks(),
-                                        tableIdentifier.asSummaryString())));
+                env -> {
+                    Integer parallelism = inferSourceParallelism(env);
+                    DataStreamSource<RowData> dataStreamSource =
+                            env.fromSource(
+                                    source,
+                                    WatermarkStrategy.noWatermarks(),
+                                    tableIdentifier.asSummaryString());
+                    if (parallelism != null) {
+                        dataStreamSource.setParallelism(parallelism);
+                    }
+                    return dataStreamSource;
+                });
     }
 
     @Override
@@ -157,35 +160,5 @@ public class SystemTableSource extends FlinkTableSource {
     @Override
     public boolean isStreaming() {
         return isStreamingMode;
-    }
-
-    private DataStreamSource<RowData> configSourceParallelism(
-            StreamExecutionEnvironment env, DataStreamSource<RowData> source) {
-        Options options = Options.fromMap(this.table.options());
-        Configuration envConfig = (Configuration) env.getConfiguration();
-        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
-            options.set(
-                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
-                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
-        }
-        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
-            scanSplitsForInference();
-            parallelism = splitStatistics.splitNumber();
-            if (null != limit && limit > 0) {
-                int limitCount = limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
-                parallelism = Math.min(parallelism, limitCount);
-            }
-
-            parallelism = Math.max(1, parallelism);
-            parallelism =
-                    Math.min(
-                            parallelism,
-                            options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
-        }
-        if (parallelism != null) {
-            source.setParallelism(parallelism);
-        }
-        return source;
     }
 }

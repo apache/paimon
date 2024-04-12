@@ -22,7 +22,6 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.CoreOptions.ChangelogProducer;
 import org.apache.paimon.CoreOptions.LogChangelogMode;
 import org.apache.paimon.CoreOptions.LogConsistency;
-import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions.WatermarkEmitStrategy;
 import org.apache.paimon.flink.PaimonDataStreamScanProvider;
 import org.apache.paimon.flink.log.LogSourceProvider;
@@ -35,9 +34,6 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.utils.Projection;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
-import org.apache.flink.configuration.Configuration;
-import org.apache.flink.streaming.api.datastream.DataStream;
-import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
@@ -204,40 +200,12 @@ public class DataTableSource extends FlinkTableSource {
                         .withDynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
 
         return new PaimonDataStreamScanProvider(
-                !streaming, env -> configureSource(sourceBuilder, env));
-    }
-
-    private DataStream<RowData> configureSource(
-            FlinkSourceBuilder sourceBuilder, StreamExecutionEnvironment env) {
-        Options options = Options.fromMap(this.table.options());
-        Configuration envConfig = (Configuration) env.getConfiguration();
-        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
-            options.set(
-                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
-                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
-        }
-        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
-        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
-            if (streaming) {
-                parallelism = options.get(CoreOptions.BUCKET);
-            } else {
-                scanSplitsForInference();
-                parallelism = splitStatistics.splitNumber();
-                if (null != limit && limit > 0) {
-                    int limitCount =
-                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
-                    parallelism = Math.min(parallelism, limitCount);
-                }
-
-                parallelism = Math.max(1, parallelism);
-            }
-            parallelism =
-                    Math.min(
-                            parallelism,
-                            options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
-        }
-
-        return sourceBuilder.withParallelism(parallelism).withEnv(env).build();
+                !streaming,
+                env ->
+                        sourceBuilder
+                                .withParallelism(inferSourceParallelism(env))
+                                .withEnv(env)
+                                .build());
     }
 
     @Override

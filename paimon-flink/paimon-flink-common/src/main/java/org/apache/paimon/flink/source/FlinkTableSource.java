@@ -18,9 +18,11 @@
 
 package org.apache.paimon.flink.source;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.flink.FlinkConnectorOptions;
 import org.apache.paimon.flink.LogicalTypeConversion;
 import org.apache.paimon.flink.PredicateConverter;
+import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.PartitionPredicateVisitor;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
@@ -29,6 +31,8 @@ import org.apache.paimon.table.Table;
 import org.apache.paimon.table.source.Split;
 
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.configuration.Configuration;
+import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupContext;
 import org.apache.flink.table.connector.source.LookupTableSource.LookupRuntimeProvider;
@@ -141,6 +145,38 @@ public abstract class FlinkTableSource {
     public abstract void applyDynamicFiltering(List<String> candidateFilterFields);
 
     public abstract boolean isStreaming();
+
+    @Nullable
+    protected Integer inferSourceParallelism(StreamExecutionEnvironment env) {
+        Options options = Options.fromMap(this.table.options());
+        Configuration envConfig = (Configuration) env.getConfiguration();
+        if (envConfig.containsKey(FLINK_INFER_SCAN_PARALLELISM)) {
+            options.set(
+                    FlinkConnectorOptions.INFER_SCAN_PARALLELISM,
+                    Boolean.parseBoolean(envConfig.toMap().get(FLINK_INFER_SCAN_PARALLELISM)));
+        }
+        Integer parallelism = options.get(FlinkConnectorOptions.SCAN_PARALLELISM);
+        if (parallelism == null && options.get(FlinkConnectorOptions.INFER_SCAN_PARALLELISM)) {
+            if (isStreaming()) {
+                parallelism = Math.max(1, options.get(CoreOptions.BUCKET));
+            } else {
+                scanSplitsForInference();
+                parallelism = splitStatistics.splitNumber();
+                if (null != limit && limit > 0) {
+                    int limitCount =
+                            limit >= Integer.MAX_VALUE ? Integer.MAX_VALUE : limit.intValue();
+                    parallelism = Math.min(parallelism, limitCount);
+                }
+
+                parallelism = Math.max(1, parallelism);
+                parallelism =
+                        Math.min(
+                                parallelism,
+                                options.get(FlinkConnectorOptions.INFER_SCAN_MAX_PARALLELISM));
+            }
+        }
+        return parallelism;
+    }
 
     protected void scanSplitsForInference() {
         if (splitStatistics == null) {
