@@ -139,7 +139,7 @@ public class FileStoreITCase extends AbstractTestBase {
     }
 
     @TestTemplate
-    public void testRowSink() throws Exception {
+    public void testRowSourceSink() throws Exception {
         FileStoreTable table = buildFileStoreTable(new int[] {1}, new int[] {1, 2});
 
         // write
@@ -163,7 +163,8 @@ public class FileStoreITCase extends AbstractTestBase {
 
         // read
         List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+                executeAndCollectRow(
+                        new FlinkSourceBuilder(table).env(env).sourceBounded(true).buildForRow());
 
         // assert
         Row[] expected =
@@ -182,8 +183,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
 
         // assert
         Row[] expected =
@@ -202,8 +202,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
 
         // assert
         Row[] expected = new Row[] {Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)};
@@ -232,8 +231,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
 
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
@@ -248,7 +246,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
         expected = new Row[] {Row.of(19, "p2", 6), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
 
@@ -268,7 +266,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
         expected = new Row[] {Row.of(20, "p2", 3)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
@@ -282,8 +280,7 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results =
-                executeAndCollect(new FlinkSourceBuilder(IDENTIFIER, table).withEnv(env).build());
+        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
 
         // assert
         // in streaming mode, expect origin data X 2 (FiniteTestSource)
@@ -320,9 +317,9 @@ public class FileStoreITCase extends AbstractTestBase {
                                         projection.project(TABLE_TYPE)));
         List<Row> results =
                 executeAndCollect(
-                        new FlinkSourceBuilder(IDENTIFIER, table)
-                                .withProjection(projection.toNestedIndexes())
-                                .withEnv(env)
+                        new FlinkSourceBuilder(table)
+                                .projection(projection.toNestedIndexes())
+                                .env(env)
                                 .build(),
                         converter);
 
@@ -360,10 +357,7 @@ public class FileStoreITCase extends AbstractTestBase {
                 table.copy(
                         Collections.singletonMap(CoreOptions.SCAN_BOUNDED_WATERMARK.key(), "1024"));
         DataStream<RowData> source =
-                new FlinkSourceBuilder(IDENTIFIER, table)
-                        .withContinuousMode(true)
-                        .withEnv(env)
-                        .build();
+                new FlinkSourceBuilder(table).sourceBounded(false).env(env).build();
         Transformation<RowData> transformation = source.getTransformation();
         assertThat(transformation).isInstanceOf(SourceTransformation.class);
         assertThat(((SourceTransformation<?, ?, ?>) transformation).getSource().getBoundedness())
@@ -375,9 +369,9 @@ public class FileStoreITCase extends AbstractTestBase {
 
         BlockingIterator<RowData, Row> iterator =
                 BlockingIterator.of(
-                        new FlinkSourceBuilder(IDENTIFIER, table)
-                                .withContinuousMode(true)
-                                .withEnv(env)
+                        new FlinkSourceBuilder(table)
+                                .sourceBounded(false)
+                                .env(env)
                                 .build()
                                 .executeAndCollect(),
                         CONVERTER::toExternal);
@@ -496,6 +490,16 @@ public class FileStoreITCase extends AbstractTestBase {
         List<Row> results = new ArrayList<>();
         while (iterator.hasNext()) {
             results.add(converter.toExternal(iterator.next()));
+        }
+        iterator.close();
+        return results;
+    }
+
+    public static List<Row> executeAndCollectRow(DataStream<Row> source) throws Exception {
+        CloseableIterator<Row> iterator = source.executeAndCollect();
+        List<Row> results = new ArrayList<>();
+        while (iterator.hasNext()) {
+            results.add(iterator.next());
         }
         iterator.close();
         return results;

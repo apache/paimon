@@ -127,10 +127,14 @@ public class WriteToTable {
 ## Read from Table
 
 ```java
+import org.apache.paimon.catalog.Catalog;
+import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.flink.source.FlinkSourceBuilder;
+import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
+
 import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
-import org.apache.flink.table.api.Table;
-import org.apache.flink.table.api.bridge.java.StreamTableEnvironment;
 import org.apache.flink.types.Row;
 
 public class ReadFromTable {
@@ -138,15 +142,22 @@ public class ReadFromTable {
     public static void readFrom() throws Exception {
         // create environments of both APIs
         StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
-        StreamTableEnvironment tableEnv = StreamTableEnvironment.create(env);
 
-        // create paimon catalog
-        tableEnv.executeSql("CREATE CATALOG paimon WITH ('type' = 'paimon', 'warehouse'='...')");
-        tableEnv.executeSql("USE CATALOG paimon");
+        // get table from catalog
+        Options catalogOptions = new Options();
+        catalogOptions.set("warehouse", "/path/to/warehouse");
+        Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
+        Table table = catalog.getTable(Identifier.create("my_db", "T"));
 
-        // convert to DataStream
-        Table table = tableEnv.sqlQuery("SELECT * FROM my_paimon_table");
-        DataStream<Row> dataStream = tableEnv.toChangelogStream(table);
+        FlinkSourceBuilder builder = new FlinkSourceBuilder(table).env(env);
+        
+        // builder.sourceBounded(true);
+        // builder.projection(...);
+        // builder.predicate(...);
+        // builder.limit(...);
+        // builder.sourceParallelism(...);
+
+        DataStream<Row> dataStream = builder.buildForRow();
 
         // use this datastream
         dataStream.executeAndCollect().forEachRemaining(System.out::println);
@@ -211,29 +222,15 @@ public class WriteCdcToTable {
         catalogOptions.set("warehouse", "/path/to/warehouse");
         Catalog.Loader catalogLoader = 
                 () -> FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
-        
-        new RichCdcSinkBuilder()
-                .withInput(dataStream)
-                .withTable(createTableIfNotExists(catalogLoader.load(), identifier))
-                .withIdentifier(identifier)
-                .withCatalogLoader(catalogLoader)
+        Table table = catalogLoader.load().getTable(identifier);
+
+        new RichCdcSinkBuilder(table)
+                .forRichCdcRecord(dataStream)
+                .identifier(identifier)
+                .catalogLoader(catalogLoader)
                 .build();
 
         env.execute();
-    }
-
-    private static Table createTableIfNotExists(Catalog catalog, Identifier identifier) throws Exception {
-        Schema.Builder schemaBuilder = Schema.newBuilder();
-        schemaBuilder.primaryKey("order_id");
-        schemaBuilder.column("order_id", DataTypes.BIGINT());
-        schemaBuilder.column("price", DataTypes.DOUBLE());
-        Schema schema = schemaBuilder.build();
-        try {
-            catalog.createTable(identifier, schema, false);
-        } catch (Catalog.TableAlreadyExistException e) {
-            // do something
-        }
-        return catalog.getTable(identifier);
     }
 }
 ```

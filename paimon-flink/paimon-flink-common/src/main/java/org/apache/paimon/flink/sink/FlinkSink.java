@@ -311,7 +311,11 @@ public abstract class FlinkSink<T> implements Serializable {
     protected abstract CommittableStateManager<ManifestCommittable> createCommittableStateManager();
 
     public static boolean isStreaming(DataStream<?> input) {
-        return input.getExecutionEnvironment().getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
+        return isStreaming(input.getExecutionEnvironment());
+    }
+
+    public static boolean isStreaming(StreamExecutionEnvironment env) {
+        return env.getConfiguration().get(ExecutionOptions.RUNTIME_MODE)
                 == RuntimeExecutionMode.STREAMING;
     }
 }

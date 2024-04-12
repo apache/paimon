@@ -84,12 +84,13 @@ public class SortCompactAction extends CompactAction {
         }
         Map<String, String> tableConfig = fileStoreTable.options();
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(
-                        ObjectIdentifier.of(
-                                catalogName,
-                                identifier.getDatabaseName(),
-                                identifier.getObjectName()),
-                        fileStoreTable);
+                new FlinkSourceBuilder(fileStoreTable)
+                        .sourceName(
+                                ObjectIdentifier.of(
+                                                catalogName,
+                                                identifier.getDatabaseName(),
+                                                identifier.getObjectName())
+                                        .asSummaryString());
 
         if (getPartitions() != null) {
             Predicate partitionPredicate =
@@ -97,15 +98,15 @@ public class SortCompactAction extends CompactAction {
                             getPartitions().stream()
                                     .map(p -> PredicateBuilder.partition(p, table.rowType()))
                                     .toArray(Predicate[]::new));
-            sourceBuilder.withPredicate(partitionPredicate);
+            sourceBuilder.predicate(partitionPredicate);
         }
 
         String scanParallelism = tableConfig.get(FlinkConnectorOptions.SCAN_PARALLELISM.key());
         if (scanParallelism != null) {
-            sourceBuilder.withParallelism(Integer.parseInt(scanParallelism));
+            sourceBuilder.sourceParallelism(Integer.parseInt(scanParallelism));
         }
 
-        DataStream<RowData> source = sourceBuilder.withEnv(env).withContinuousMode(false).build();
+        DataStream<RowData> source = sourceBuilder.env(env).sourceBounded(true).build();
         TableSorter sorter =
                 TableSorter.getSorter(env, source, fileStoreTable, sortStrategy, orderColumns);
 
