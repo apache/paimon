@@ -1792,7 +1792,7 @@ public class CoreOptions implements Serializable {
         return indexes;
     }
 
-    public long indexSizeInMeta() {
+    public long fileIndexInManifestThreshold() {
         return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
     }
 

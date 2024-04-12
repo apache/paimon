@@ -125,7 +125,6 @@ public class IndexBootstrapTest extends TableTestBase {
                 "",
                 1,
                 1,
-                DataFileMeta.EMPTY_FILTER,
                 DataFileMeta.EMPTY_MIN_KEY,
                 DataFileMeta.EMPTY_MAX_KEY,
                 DataFileMeta.EMPTY_KEY_STATS,
@@ -139,7 +138,8 @@ public class IndexBootstrapTest extends TableTestBase {
                         Instant.ofEpochMilli(timeMillis)
                                 .atZone(ZoneId.systemDefault())
                                 .toLocalDateTime()),
-                0L);
+                0L,
+                null);
     }
 
     private Pair<InternalRow, Integer> row(int pt, int col, int pk, int bucket) {

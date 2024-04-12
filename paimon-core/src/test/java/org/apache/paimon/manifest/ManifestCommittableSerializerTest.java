@@ -107,7 +107,6 @@ public class ManifestCommittableSerializerTest {
                 String.valueOf(name),
                 0,
                 1,
-                DataFileMeta.EMPTY_FILTER,
                 row(0),
                 row(0),
                 newTableStats(0, 1),
@@ -116,6 +115,7 @@ public class ManifestCommittableSerializerTest {
                 1,
                 0,
                 level,
-                0L);
+                0L,
+                null);
     }
 }

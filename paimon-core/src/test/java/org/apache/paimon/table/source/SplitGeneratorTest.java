@@ -49,14 +49,14 @@ public class SplitGeneratorTest {
                 1,
                 EMPTY_ROW,
                 EMPTY_ROW,
-                EMPTY_ROW,
                 null,
                 null,
                 minSequence,
                 maxSequence,
                 0,
                 0,
-                0L);
+                0L,
+                null);
     }
 
     @Test

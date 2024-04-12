@@ -55,7 +55,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 toStringArrayData(meta.extraFiles()),
                 meta.creationTime(),
                 meta.deleteRowCount().orElse(null),
-                serializeBinaryRow(meta.filter()));
+                meta.embeddedIndex());
     }
 
     @Override
@@ -64,9 +64,6 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getString(0).toString(),
                 row.getLong(1),
                 row.getLong(2),
-                row.isNullAt(14)
-                        ? DataFileMeta.EMPTY_FILTER
-                        : deserializeBinaryRow(row.getBinary(14)),
                 deserializeBinaryRow(row.getBinary(3)),
                 deserializeBinaryRow(row.getBinary(4)),
                 BinaryTableStats.fromRow(row.getRow(5, 3)),
@@ -77,6 +74,7 @@ public class DataFileMetaSerializer extends ObjectSerializer<DataFileMeta> {
                 row.getInt(10),
                 fromStringArrayData(row.getArray(11)),
                 row.getTimestamp(12, 3),
-                row.isNullAt(13) ? null : row.getLong(13));
+                row.isNullAt(13) ? null : row.getLong(13),
+                row.isNullAt(14) ? null : row.getBinary(14));
     }
 }

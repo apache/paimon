@@ -19,7 +19,6 @@
 package org.apache.paimon.operation;
 
 import org.apache.paimon.AppendOnlyFileStore;
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
@@ -32,6 +31,8 @@ import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.stats.FieldStatsConverters;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.SnapshotManager;
+
+import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.HashMap;
@@ -101,7 +102,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         serializer.evolution(stats.minValues()),
                         serializer.evolution(stats.maxValues()),
                         serializer.evolution(stats.nullCounts(), entry.file().rowCount()))
-                && (!fileIndexReadEnabled || testFileIndex(entry.file().filter(), entry));
+                && (!fileIndexReadEnabled || testFileIndex(entry.file().embeddedIndex(), entry));
     }
 
     @Override
@@ -110,8 +111,8 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
         return entries;
     }
 
-    private boolean testFileIndex(BinaryRow filterRow, ManifestEntry entry) {
-        if (filterRow.getFieldCount() == 0 || filterRow.isNullAt(0)) {
+    private boolean testFileIndex(@Nullable byte[] embeddedIndexBytes, ManifestEntry entry) {
+        if (embeddedIndexBytes == null) {
             return true;
         }
 
@@ -123,7 +124,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
                         id -> fieldStatsConverters.convertFilter(entry.file().schemaId(), filter));
 
         try (FileIndexPredicate predicate =
-                new FileIndexPredicate(filterRow.getBinary(0), dataRowType)) {
+                new FileIndexPredicate(embeddedIndexBytes, dataRowType)) {
             return predicate.testPredicate(dataPredicate);
         } catch (IOException e) {
             throw new RuntimeException("Exception happens while checking predicate.", e);

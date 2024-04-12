@@ -76,7 +76,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
     private final MemorySize maxDiskSize;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final Map<String, Map<String, Options>> fileIndexes;
-    private final long indexSizeInMeta;
+    private final long inManifestThreshold;
 
     private boolean forceBufferSpill = false;
     private boolean skipCompaction;
@@ -113,7 +113,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
         this.statsCollectors =
                 StatsCollectorFactories.createStatsFactories(options, rowType.getFieldNames());
         this.fileIndexes = options.indexColumns();
-        this.indexSizeInMeta = options.indexSizeInMeta();
+        this.inManifestThreshold = options.fileIndexInManifestThreshold();
     }
 
     @Override
@@ -162,7 +162,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                 statsCollectors,
                 maxDiskSize,
                 fileIndexes,
-                indexSizeInMeta);
+                inManifestThreshold);
     }
 
     public AppendOnlyCompactManager.CompactRewriter compactRewriter(
@@ -183,7 +183,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                             fileCompression,
                             statsCollectors,
                             fileIndexes,
-                            indexSizeInMeta);
+                            inManifestThreshold);
             try {
                 rewriter.write(bucketReader(partition, bucket).read(toCompact));
             } finally {

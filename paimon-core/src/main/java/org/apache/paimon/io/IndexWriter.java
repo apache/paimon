@@ -18,8 +18,6 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.BinaryRow;
-import org.apache.paimon.data.BinaryRowWriter;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexer;
@@ -42,31 +40,31 @@ import java.util.Map;
 /** Index file writer. */
 public final class IndexWriter {
 
-    private static final Pair<BinaryRow, List<String>> EMPTY_RESULT =
-            Pair.of(BinaryRow.EMPTY_ROW, Collections.emptyList());
+    private static final Pair<byte[], List<String>> EMPTY_RESULT =
+            Pair.of(null, Collections.emptyList());
 
     private final FileIO fileIO;
 
     private final Path path;
 
-    // if the filter size greater than indexSizeInMeta, we put it in file
-    private final long indexSizeInMeta;
+    // if the filter size greater than fileIndexInManifestThreshold, we put it in file
+    private final long inManifestThreshold;
 
     private final List<IndexMaintainer> indexMaintainers = new ArrayList<>();
 
     private final List<String> resultFileNames = new ArrayList<>();
 
-    private BinaryRow resultRow = BinaryRow.EMPTY_ROW;
+    private byte[] embeddedIndexBytes;
 
     public IndexWriter(
             FileIO fileIO,
             Path path,
             RowType rowType,
             Map<String, Map<String, Options>> fileIndexes,
-            long indexSizeInMeta) {
+            long inManifestThreshold) {
         this.fileIO = fileIO;
         this.path = path;
-        this.indexSizeInMeta = indexSizeInMeta;
+        this.inManifestThreshold = inManifestThreshold;
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
         Map<String, Integer> index = new HashMap<>();
@@ -117,20 +115,19 @@ public final class IndexWriter {
             writer.writeColumnIndexes(indexMaps);
         }
 
-        if (baos.size() > indexSizeInMeta || resultRow != BinaryRow.EMPTY_ROW) {
+        if (baos.size() > inManifestThreshold) {
             try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
                 outputStream.write(baos.toByteArray());
             }
             resultFileNames.add(path.getName());
         } else {
-            resultRow = new BinaryRow(1);
-            BinaryRowWriter binaryRowWriter = new BinaryRowWriter(resultRow);
-            binaryRowWriter.writeBinary(0, baos.toByteArray());
-            binaryRowWriter.complete();
+            embeddedIndexBytes = baos.toByteArray();
         }
     }
 
-    public Pair<BinaryRow, List<String>> result() {
-        return indexMaintainers.isEmpty() ? EMPTY_RESULT : Pair.of(resultRow, resultFileNames);
+    public Pair<byte[], List<String>> result() {
+        return indexMaintainers.isEmpty()
+                ? EMPTY_RESULT
+                : Pair.of(embeddedIndexBytes, resultFileNames);
     }
 }

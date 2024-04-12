@@ -171,7 +171,6 @@ public class IntervalPartitionTest {
                 "DUMMY",
                 100,
                 25,
-                DataFileMeta.EMPTY_FILTER,
                 minKey,
                 maxKey,
                 newTableStats(left, right),
@@ -182,7 +181,8 @@ public class IntervalPartitionTest {
                 0,
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100000),
-                0L);
+                0L,
+                null);
     }
 
     private List<Map<SortedRun, Integer>> toMultiset(List<List<SortedRun>> sections) {

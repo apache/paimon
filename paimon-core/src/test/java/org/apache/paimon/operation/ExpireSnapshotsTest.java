@@ -190,7 +190,6 @@ public class ExpireSnapshotsTest {
                         "myDataFile",
                         1,
                         1,
-                        DataFileMeta.EMPTY_FILTER,
                         EMPTY_ROW,
                         EMPTY_ROW,
                         null,
@@ -201,7 +200,8 @@ public class ExpireSnapshotsTest {
                         0,
                         extraFiles,
                         Timestamp.now(),
-                        0L);
+                        0L,
+                        null);
         ManifestEntry add = new ManifestEntry(FileKind.ADD, partition, 0, 1, dataFile);
         ManifestEntry delete = new ManifestEntry(FileKind.DELETE, partition, 0, 1, dataFile);
 

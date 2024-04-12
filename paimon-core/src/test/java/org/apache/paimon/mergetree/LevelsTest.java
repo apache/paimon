@@ -74,13 +74,13 @@ public class LevelsTest {
                 1,
                 row(0),
                 row(0),
-                row(0),
                 null,
                 null,
                 0,
                 1,
                 0,
                 level,
-                0L);
+                0L,
+                null);
     }
 }

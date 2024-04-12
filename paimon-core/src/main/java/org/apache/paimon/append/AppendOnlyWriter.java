@@ -81,7 +81,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
     private final Map<String, Map<String, Options>> fileIndexes;
-    private final long indexSizeInMeta;
+    private final long inManifestThreshold;
 
     private MemorySegmentPool memorySegmentPool;
     private MemorySize maxDiskSize;
@@ -106,7 +106,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             FieldStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
             Map<String, Map<String, Options>> fileIndexes,
-            long indexSizeInMeta) {
+            long inManifestThreshold) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -127,7 +127,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
         this.fileIndexes = fileIndexes;
-        this.indexSizeInMeta = indexSizeInMeta;
+        this.inManifestThreshold = inManifestThreshold;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -256,7 +256,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 fileCompression,
                 statsCollectors,
                 fileIndexes,
-                indexSizeInMeta);
+                inManifestThreshold);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

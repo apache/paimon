@@ -18,7 +18,6 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
@@ -64,7 +63,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
             Map<String, Map<String, Options>> indexExpr,
-            long indexSizeInMeta) {
+            long inManifestThreshold) {
         super(
                 fileIO,
                 factory,
@@ -78,7 +77,8 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
         this.indexWriter =
-                new IndexWriter(fileIO, toIndexPath(path), writeSchema, indexExpr, indexSizeInMeta);
+                new IndexWriter(
+                        fileIO, toIndexPath(path), writeSchema, indexExpr, inManifestThreshold);
     }
 
     @Override
@@ -98,16 +98,16 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     @Override
     public DataFileMeta result() throws IOException {
         BinaryTableStats stats = statsArraySerializer.toBinary(fieldStats());
-        Pair<BinaryRow, List<String>> indexResult = indexWriter.result();
+        Pair<byte[], List<String>> indexResult = indexWriter.result();
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),
                 recordCount(),
                 stats,
-                indexResult.getLeft(),
                 seqNumCounter.getValue() - super.recordCount(),
                 seqNumCounter.getValue() - 1,
                 schemaId,
-                indexResult.getRight() == null ? Collections.emptyList() : indexResult.getRight());
+                indexResult.getRight() == null ? Collections.emptyList() : indexResult.getRight(),
+                indexResult.getLeft());
     }
 }

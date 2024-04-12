@@ -178,7 +178,6 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 UUID.randomUUID().toString(),
                 fileSize,
                 1,
-                BinaryRow.EMPTY_ROW,
                 row(0),
                 row(0),
                 newTableStats(0, 1),
@@ -187,6 +186,7 @@ public class AppendOnlyTableCompactionCoordinatorTest {
                 0,
                 0,
                 0,
-                0L);
+                0L,
+                null);
     }
 }

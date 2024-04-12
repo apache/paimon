@@ -160,8 +160,6 @@ public class KeyValueDataFileWriter
                 path.getName(),
                 fileIO.getFileSize(path),
                 recordCount(),
-                // TODO: enable file filter for primary key table (e.g. deletion table).
-                BinaryRow.EMPTY_ROW,
                 minKey,
                 keySerializer.toBinaryRow(maxKey).copy(),
                 keyStats,
@@ -170,6 +168,8 @@ public class KeyValueDataFileWriter
                 maxSeqNumber,
                 schemaId,
                 level,
-                deleteRecordCount);
+                deleteRecordCount,
+                // TODO: enable file filter for primary key table (e.g. deletion table).
+                null);
     }
 }
