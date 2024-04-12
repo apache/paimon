@@ -92,6 +92,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         public byte[] serializedBytes() {
             int numHashFunctions = filter.getNumHashFunctions();
             byte[] serialized = new byte[filter.getBitSet().bitSize() / Byte.SIZE + Integer.BYTES];
+            // little endian
             serialized[0] = (byte) ((numHashFunctions >>> 24) & 0xFF);
             serialized[1] = (byte) ((numHashFunctions >>> 16) & 0xFF);
             serialized[2] = (byte) ((numHashFunctions >>> 8) & 0xFF);
@@ -107,6 +108,7 @@ public class BloomFilterFileIndex implements FileIndexer {
         private final FastHash hashFunction;
 
         public Reader(DataType type, byte[] serializedBytes) {
+            // little endian
             int numHashFunctions =
                     ((serializedBytes[0] << 24)
                             + (serializedBytes[1] << 16)
