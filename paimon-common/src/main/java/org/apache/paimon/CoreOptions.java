@@ -1738,7 +1738,7 @@ public class CoreOptions implements Serializable {
                     for (String name : names) {
                         if (StringUtils.isBlank(name)) {
                             throw new IllegalArgumentException(
-                                    "Wrong option in " + key + ", should be have empty column");
+                                    "Wrong option in " + key + ", should not have empty column");
                         }
                         indexes.computeIfAbsent(name.trim(), n -> new HashMap<>())
                                 .computeIfAbsent(indexType, t -> new Options());
@@ -1765,7 +1765,9 @@ public class CoreOptions implements Serializable {
                         for (String name : names) {
                             if (StringUtils.isBlank(name)) {
                                 throw new IllegalArgumentException(
-                                        "Wrong option in " + key + ", should be have empty column");
+                                        "Wrong option in "
+                                                + key
+                                                + ", should not have empty column");
                             }
                             String tname = name.trim();
                             if (cname.equals(tname)) {

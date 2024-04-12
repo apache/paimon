@@ -428,7 +428,7 @@ public class DataFileMeta {
         fields.add(new DataField(11, "_EXTRA_FILES", new ArrayType(false, newStringType(false))));
         fields.add(new DataField(12, "_CREATION_TIME", DataTypes.TIMESTAMP_MILLIS()));
         fields.add(new DataField(13, "_DELETE_ROW_COUNT", new BigIntType(true)));
-        fields.add(new DataField(14, "_FILTER", newBytesType(true)));
+        fields.add(new DataField(14, "_EMBEDDED_FILE_INDEX", newBytesType(true)));
         return new RowType(fields);
     }
 
