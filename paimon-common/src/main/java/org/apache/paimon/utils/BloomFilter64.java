@@ -86,7 +86,7 @@ public final class BloomFilter64 {
     /** Bit set used for bloom filter 64. */
     public static class BitSet {
 
-        private final long[] data;
+        public final long[] data;
 
         public BitSet(byte[] bytes, int offset, int length) {
             assert length % 8 == 0 : "data length should be divisible by 8";
@@ -118,7 +118,7 @@ public final class BloomFilter64 {
         public byte[] toByteArray(byte[] bytes, int offset, int length) {
             assert length >= data.length * Long.BYTES;
             ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
-            for (int i = 0; i < data.length - 1; i++) {
+            for (int i = 0; i < data.length; i++) {
                 bb.putLong(data[i]);
             }
             return bytes;
