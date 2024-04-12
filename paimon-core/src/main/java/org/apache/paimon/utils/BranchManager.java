@@ -37,7 +37,7 @@ import java.util.PriorityQueue;
 import java.util.SortedMap;
 import java.util.stream.Collectors;
 
-import static org.apache.paimon.utils.FileUtils.listVersionedFileStatus;
+import static org.apache.paimon.utils.FileUtils.listVersionedDirectories;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
 /** Manager for {@code Branch}. */
@@ -153,7 +153,7 @@ public class BranchManager {
     /** Get branch count for the table. */
     public long branchCount() {
         try {
-            return listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX).count();
+            return listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX).count();
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
@@ -163,7 +163,7 @@ public class BranchManager {
     public List<TableBranch> branches() {
         try {
             List<Pair<Path, Long>> paths =
-                    listVersionedFileStatus(fileIO, branchDirectory(), BRANCH_PREFIX)
+                    listVersionedDirectories(fileIO, branchDirectory(), BRANCH_PREFIX)
                             .map(status -> Pair.of(status.getPath(), status.getModificationTime()))
                             .collect(Collectors.toList());
             PriorityQueue<TableBranch> pq =

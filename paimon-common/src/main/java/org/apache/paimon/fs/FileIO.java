@@ -106,6 +106,8 @@ public interface FileIO extends Serializable {
     /**
      * List the statuses of the directories in the given path if the path is a directory.
      *
+     * <p>{@link FileIO} implementation may have optimization for list directories.
+     *
      * @param path given path
      * @return the statuses of the directories in the given path
      */
