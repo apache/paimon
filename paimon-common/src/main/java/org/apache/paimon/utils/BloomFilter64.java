@@ -18,9 +18,6 @@
 
 package org.apache.paimon.utils;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-
 /** Bloom filter 64 handle 64 bits hash. */
 public final class BloomFilter64 {
 
@@ -30,10 +27,10 @@ public final class BloomFilter64 {
 
     public BloomFilter64(long items, double fpp) {
         int nb = (int) (-items * Math.log(fpp) / (Math.log(2) * Math.log(2)));
-        this.numBits = nb + (Long.SIZE - (nb % Long.SIZE));
+        this.numBits = nb + (Byte.SIZE - (nb % Byte.SIZE));
         this.numHashFunctions =
                 Math.max(1, (int) Math.round((double) numBits / items * Math.log(2)));
-        this.bitSet = new BitSet(new long[numBits / Long.SIZE]);
+        this.bitSet = new BitSet(new byte[numBits / Byte.SIZE], 0);
     }
 
     public BloomFilter64(int numHashFunctions, BitSet bitSet) {
@@ -86,40 +83,33 @@ public final class BloomFilter64 {
     /** Bit set used for bloom filter 64. */
     public static class BitSet {
 
-        public final long[] data;
+        private static final byte MAST = 0x07;
 
-        public BitSet(byte[] bytes, int offset, int length) {
-            assert length % 8 == 0 : "data length should be divisible by 8";
-            int longSize = length / 8;
-            ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
-            this.data = new long[longSize];
-            for (int i = 0; i < longSize; i++) {
-                this.data[i] = bb.getLong();
-            }
-        }
+        private final byte[] data;
+        private final int offset;
 
-        public BitSet(long[] data) {
+        public BitSet(byte[] data, int offset) {
             assert data.length > 0 : "data length is zero!";
+            assert offset >= 0 : "offset is negative!";
             this.data = data;
+            this.offset = offset;
         }
 
         public void set(int index) {
-            data[index >>> 6] |= (1L << index);
+            data[(index >>> 3) + offset] |= (byte) ((byte) 1 << (index & MAST));
         }
 
         public boolean get(int index) {
-            return (data[index >>> 6] & (1L << index)) != 0;
+            return (data[(index >>> 3) + offset] & ((byte) 1 << (index & MAST))) != 0;
         }
 
         public int bitSize() {
-            return data.length * Long.SIZE;
+            return (data.length - offset) * Byte.SIZE;
         }
 
         public void toByteArray(byte[] bytes, int offset, int length) {
-            assert length >= data.length * Long.BYTES;
-            ByteBuffer bb = ByteBuffer.wrap(bytes, offset, length).order(ByteOrder.LITTLE_ENDIAN);
-            for (int i = 0; i < data.length; i++) {
-                bb.putLong(data[i]);
+            for (int i = 0; i < length; i++) {
+                bytes[offset + i] = data[this.offset + i];
             }
         }
     }

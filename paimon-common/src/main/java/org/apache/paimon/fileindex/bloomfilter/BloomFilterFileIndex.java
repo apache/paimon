@@ -114,7 +114,7 @@ public class BloomFilterFileIndex implements FileIndexer {
                             + (serializedBytes[1] << 16)
                             + (serializedBytes[2] << 8)
                             + serializedBytes[3]);
-            BitSet bitSet = new BitSet(serializedBytes, 4, serializedBytes.length - Integer.BYTES);
+            BitSet bitSet = new BitSet(serializedBytes, 4);
             this.filter = new BloomFilter64(numHashFunctions, bitSet);
             this.hashFunction = FastHash.getHashFunction(type);
         }
