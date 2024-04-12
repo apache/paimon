@@ -183,7 +183,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        List<Row> results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         Row[] expected =
@@ -202,7 +204,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        List<Row> results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         Row[] expected = new Row[] {Row.of(5, "p2", 1), Row.of(0, "p1", 2), Row.of(3, "p2", 5)};
@@ -231,7 +235,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        List<Row> results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         Row[] expected = new Row[] {Row.of(9, "p2", 5), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
@@ -246,7 +252,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
         expected = new Row[] {Row.of(19, "p2", 6), Row.of(5, "p1", 1), Row.of(0, "p1", 2)};
         assertThat(results).containsExactlyInAnyOrder(expected);
 
@@ -266,7 +274,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
         expected = new Row[] {Row.of(20, "p2", 3)};
         assertThat(results).containsExactlyInAnyOrder(expected);
     }
@@ -280,7 +290,9 @@ public class FileStoreITCase extends AbstractTestBase {
         env.execute();
 
         // read
-        List<Row> results = executeAndCollect(new FlinkSourceBuilder(table).env(env).build());
+        List<Row> results =
+                executeAndCollect(
+                        new FlinkSourceBuilder(table).sourceBounded(true).env(env).build());
 
         // assert
         // in streaming mode, expect origin data X 2 (FiniteTestSource)
@@ -318,6 +330,7 @@ public class FileStoreITCase extends AbstractTestBase {
         List<Row> results =
                 executeAndCollect(
                         new FlinkSourceBuilder(table)
+                                .sourceBounded(true)
                                 .projection(projection.toNestedIndexes())
                                 .env(env)
                                 .build(),
