@@ -46,6 +46,11 @@ public class HeapRowVector extends AbstractHeapVector
     }
 
     @Override
+    public VectorizedColumnBatch getBatch() {
+        return new VectorizedColumnBatch(fields);
+    }
+
+    @Override
     public void reset() {
         super.reset();
         for (WritableColumnVector field : fields) {

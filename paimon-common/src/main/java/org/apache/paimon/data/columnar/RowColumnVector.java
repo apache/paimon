@@ -23,4 +23,6 @@ import org.apache.paimon.data.InternalRow;
 /** Row column vector. */
 public interface RowColumnVector extends ColumnVector {
     InternalRow getRow(int i);
+
+    VectorizedColumnBatch getBatch();
 }
