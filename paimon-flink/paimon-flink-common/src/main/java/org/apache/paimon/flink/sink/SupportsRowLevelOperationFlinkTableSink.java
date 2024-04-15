@@ -59,6 +59,8 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.CoreOptions.MERGE_ENGINE;
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 
 /** Flink table sink that supports row level update and delete. */
 public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTableSinkBase
@@ -115,11 +117,10 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
                 });
 
         MergeEngine mergeEngine = options.get(MERGE_ENGINE);
-        if (!mergeEngine.supportBatchUpdate()) {
+        boolean supportUpdate = mergeEngine == DEDUPLICATE || mergeEngine == PARTIAL_UPDATE;
+        if (!supportUpdate) {
             throw new UnsupportedOperationException(
-                    String.format(
-                            "Merge engine %s can not support batch update. Support batch update merge engines are: %s.",
-                            mergeEngine, CoreOptions.MergeEngine.supportBatchUpdateEngines()));
+                    String.format("Merge engine %s can not support batch update.", mergeEngine));
         }
 
         // Even with partial-update we still need all columns. Because the topology
@@ -184,11 +185,9 @@ public abstract class SupportsRowLevelOperationFlinkTableSink extends FlinkTable
         }
 
         MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
-        if (!mergeEngine.supportBatchDelete()) {
+        if (mergeEngine != DEDUPLICATE) {
             throw new UnsupportedOperationException(
-                    String.format(
-                            "Merge engine %s can not support batch delete. Support batch delete merge engines are: %s.",
-                            mergeEngine, CoreOptions.MergeEngine.supportBatchDeleteEngines()));
+                    String.format("Merge engine %s can not support batch delete.", mergeEngine));
         }
     }
 

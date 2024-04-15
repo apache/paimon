@@ -45,6 +45,8 @@ import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import static org.apache.paimon.CoreOptions.MergeEngine.DEDUPLICATE;
+import static org.apache.paimon.CoreOptions.MergeEngine.PARTIAL_UPDATE;
 import static org.apache.paimon.utils.ParameterUtils.parseCommaSeparatedKeyValues;
 
 /**
@@ -223,20 +225,10 @@ public class MergeIntoAction extends TableActionBase {
         }
 
         CoreOptions.MergeEngine mergeEngine = CoreOptions.fromMap(table.options()).mergeEngine();
-        if ((matchedUpsert || notMatchedUpsert) && !mergeEngine.supportBatchUpdate()) {
+        boolean supportMergeInto = mergeEngine == DEDUPLICATE || mergeEngine == PARTIAL_UPDATE;
+        if (!supportMergeInto) {
             throw new UnsupportedOperationException(
-                    String.format(
-                            "merge-into is executed in batch mode, and you have set matched_upsert or not_matched_by_source_upsert."
-                                    + " But merge engine %s can not support batch update. Support batch update merge engines are: %s.",
-                            mergeEngine, CoreOptions.MergeEngine.supportBatchUpdateEngines()));
-        }
-
-        if ((matchedDelete || notMatchedDelete) && !mergeEngine.supportBatchDelete()) {
-            throw new UnsupportedOperationException(
-                    String.format(
-                            "merge-into is executed in batch mode, and you have set matched_delete or not_matched_by_source_delete."
-                                    + " But merge engine %s can not support batch delete. Support batch delete merge engines are: %s.",
-                            mergeEngine, CoreOptions.MergeEngine.supportBatchDeleteEngines()));
+                    String.format("Merge engine %s can not support merge-into.", mergeEngine));
         }
 
         if ((matchedUpsert && matchedDelete)
