@@ -87,6 +87,8 @@ public class SchemaValidation {
 
         CoreOptions options = new CoreOptions(schema.options());
 
+        validateBucket(schema, options);
+
         validateDefaultValues(schema);
 
         validateStartupMode(options);
@@ -156,18 +158,6 @@ public class SchemaValidation {
                                             f, KEY_FIELD_PREFIX));
                         });
 
-        if (options.bucket() == -1 && options.toMap().get(BUCKET_KEY.key()) != null) {
-            throw new RuntimeException(
-                    "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
-        }
-
-        if (options.bucket() == -1
-                && schema.primaryKeys().isEmpty()
-                && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
-            throw new RuntimeException(
-                    "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
-        }
-
         if (schema.primaryKeys().isEmpty() && options.streamingReadOverwrite()) {
             throw new RuntimeException(
                     "Doesn't support streaming read the changes from overwrite when the primary keys are not defined.");
@@ -180,17 +170,7 @@ public class SchemaValidation {
             }
         }
 
-        if (schema.crossPartitionUpdate()) {
-            if (options.bucket() != -1) {
-                throw new IllegalArgumentException(
-                        String.format(
-                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
-                                        + "(Primary key constraint %s not include all partition fields %s).",
-                                schema.primaryKeys(), schema.partitionKeys()));
-            }
-        }
-
-        if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+        if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
             if (options.changelogProducer() != ChangelogProducer.LOOKUP) {
                 throw new IllegalArgumentException(
                         "Only support 'lookup' changelog-producer on FIRST_MERGE merge engine");
@@ -522,7 +502,7 @@ public class SchemaValidation {
                                 field);
                     });
 
-            if (options.mergeEngine() == CoreOptions.MergeEngine.FIRST_ROW) {
+            if (options.mergeEngine() == MergeEngine.FIRST_ROW) {
                 throw new IllegalArgumentException(
                         "Do not support use sequence field on FIRST_MERGE merge engine.");
             }
@@ -532,6 +512,32 @@ public class SchemaValidation {
                         String.format(
                                 "You can not use sequence.field in cross partition update case "
                                         + "(Primary key constraint '%s' not include all partition fields '%s').",
+                                schema.primaryKeys(), schema.partitionKeys()));
+            }
+        }
+    }
+
+    private static void validateBucket(TableSchema schema, CoreOptions options) {
+        int bucket = options.bucket();
+        if (bucket == -1) {
+            if (options.toMap().get(BUCKET_KEY.key()) != null) {
+                throw new RuntimeException(
+                        "Cannot define 'bucket-key' in unaware or dynamic bucket mode.");
+            }
+
+            if (schema.primaryKeys().isEmpty()
+                    && options.toMap().get(FULL_COMPACTION_DELTA_COMMITS.key()) != null) {
+                throw new RuntimeException(
+                        "AppendOnlyTable of unware or dynamic bucket does not support 'full-compaction.delta-commits'");
+            }
+        } else if (bucket < 1) {
+            throw new RuntimeException("The number of buckets needs to be greater than 0.");
+        } else {
+            if (schema.crossPartitionUpdate()) {
+                throw new IllegalArgumentException(
+                        String.format(
+                                "You should use dynamic bucket (bucket = -1) mode in cross partition update case "
+                                        + "(Primary key constraint %s not include all partition fields %s).",
                                 schema.primaryKeys(), schema.partitionKeys()));
             }
         }

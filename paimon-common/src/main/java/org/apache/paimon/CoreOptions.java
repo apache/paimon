@@ -74,7 +74,13 @@ public class CoreOptions implements Serializable {
             key("bucket")
                     .intType()
                     .defaultValue(-1)
-                    .withDescription("Bucket number for file store.");
+                    .withDescription(
+                            Description.builder()
+                                    .text("Bucket number for file store.")
+                                    .linebreak()
+                                    .text(
+                                            "It should either be equal to -1 (dynamic bucket mode), or it must be greater than 0 (fixed bucket mode).")
+                                    .build());
 
     @Immutable
     public static final ConfigOption<String> BUCKET_KEY =

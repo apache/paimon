@@ -207,9 +207,9 @@ public interface FileIO extends Serializable {
 
     /** Read file to UTF_8 decoding. */
     default String readFileUtf8(Path path) throws IOException {
-        try (SeekableInputStream in = newInputStream(path)) {
-            BufferedReader reader =
-                    new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8));
+        try (SeekableInputStream in = newInputStream(path);
+                BufferedReader reader =
+                        new BufferedReader(new InputStreamReader(in, StandardCharsets.UTF_8))) {
             StringBuilder builder = new StringBuilder();
             String line;
             while ((line = reader.readLine()) != null) {
@@ -233,8 +233,9 @@ public interface FileIO extends Serializable {
         Path tmp = path.createTempPath();
         boolean success = false;
         try {
-            try (PositionOutputStream out = newOutputStream(tmp, false)) {
-                OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+            try (PositionOutputStream out = newOutputStream(tmp, false);
+                    OutputStreamWriter writer =
+                            new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
                 writer.write(content);
                 writer.flush();
             }
@@ -254,8 +255,8 @@ public interface FileIO extends Serializable {
      * implementations.
      */
     default void overwriteFileUtf8(Path path, String content) throws IOException {
-        try (PositionOutputStream out = newOutputStream(path, true)) {
-            OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8);
+        try (PositionOutputStream out = newOutputStream(path, true);
+                OutputStreamWriter writer = new OutputStreamWriter(out, StandardCharsets.UTF_8)) {
             writer.write(content);
             writer.flush();
         }
@@ -337,9 +338,9 @@ public interface FileIO extends Serializable {
         List<IOException> ioExceptionList = new ArrayList<>();
 
         // load preferIO
-        FileIOLoader perferIOLoader = config.preferIO();
+        FileIOLoader preferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(perferIOLoader, path, config);
+            loader = checkAccess(preferIOLoader, path, config);
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -403,10 +404,10 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             String fallbackMsg = "";
             String preferMsg = "";
-            if (perferIOLoader != null) {
+            if (preferIOLoader != null) {
                 preferMsg =
                         " "
-                                + perferIOLoader.getClass().getSimpleName()
+                                + preferIOLoader.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
             if (fallbackIO != null) {
