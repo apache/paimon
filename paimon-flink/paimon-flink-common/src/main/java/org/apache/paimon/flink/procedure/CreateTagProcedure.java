@@ -21,6 +21,7 @@ package org.apache.paimon.flink.procedure;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.table.Table;
+import org.apache.paimon.utils.TimeUtils;
 
 import org.apache.flink.table.procedure.ProcedureContext;
 
@@ -30,7 +31,7 @@ import javax.annotation.Nullable;
  * Create tag procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.create_tag('tableId', 'tagName', snapshotId)
+ *  CALL sys.create_tag('tableId', 'tagName', 'timeRetained', snapshotId)
  * </code></pre>
  */
 public class CreateTagProcedure extends ProcedureBase {
@@ -38,23 +39,29 @@ public class CreateTagProcedure extends ProcedureBase {
     public static final String IDENTIFIER = "create_tag";
 
     public String[] call(
-            ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
+            ProcedureContext procedureContext,
+            String tableId,
+            String tagName,
+            String timeRetained,
+            long snapshotId)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, tagName, snapshotId);
+        return innerCall(tableId, tagName, timeRetained, snapshotId);
     }
 
-    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+    public String[] call(
+            ProcedureContext procedureContext, String tableId, String tagName, String timeRetained)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, tagName, null);
+        return innerCall(tableId, tagName, timeRetained, null);
     }
 
-    private String[] innerCall(String tableId, String tagName, @Nullable Long snapshotId)
+    private String[] innerCall(
+            String tableId, String tagName, String timeRetained, @Nullable Long snapshotId)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (snapshotId == null) {
-            table.createTag(tagName);
+            table.createTag(tagName, TimeUtils.parseDuration(timeRetained));
         } else {
-            table.createTag(tagName, snapshotId);
+            table.createTag(tagName, TimeUtils.parseDuration(timeRetained), snapshotId);
         }
         return new String[] {"Success"};
     }

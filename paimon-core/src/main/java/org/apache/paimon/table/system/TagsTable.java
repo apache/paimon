@@ -19,7 +19,6 @@
 package org.apache.paimon.table.system;
 
 import org.apache.paimon.CoreOptions;
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
@@ -39,6 +38,7 @@ import org.apache.paimon.table.source.InnerTableScan;
 import org.apache.paimon.table.source.ReadOnceTableScan;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.BigIntType;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
@@ -51,6 +51,7 @@ import org.apache.paimon.utils.TagManager;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Iterators;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -79,7 +80,10 @@ public class TagsTable implements ReadonlyTable {
                             new DataField(2, "schema_id", new BigIntType(false)),
                             new DataField(3, "commit_time", new TimestampType(false, 3)),
                             new DataField(4, "record_count", new BigIntType(true)),
-                            new DataField(5, "branches", SerializationUtils.newStringType(true))));
+                            new DataField(5, "branches", SerializationUtils.newStringType(true)),
+                            new DataField(6, "create_time", new TimestampType(false, 3)),
+                            new DataField(
+                                    7, "time_retained", SerializationUtils.newStringType(true))));
 
     private final FileIO fileIO;
     private final Path location;
@@ -204,9 +208,9 @@ public class TagsTable implements ReadonlyTable {
             Options options = new Options();
             options.set(CoreOptions.PATH, location.toUri().toString());
             FileStoreTable table = FileStoreTableFactory.create(fileIO, options);
-            SortedMap<Snapshot, List<String>> tags = table.tagManager().tags();
-            Map<String, Snapshot> nameToSnapshot = new LinkedHashMap<>();
-            for (Map.Entry<Snapshot, List<String>> tag : tags.entrySet()) {
+            SortedMap<Tag, List<String>> tags = table.tagManager().tagsWithTimeRetained();
+            Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
+            for (Map.Entry<Tag, List<String>> tag : tags.entrySet()) {
                 for (String tagName : tag.getValue()) {
                     nameToSnapshot.put(tagName, tag.getKey());
                 }
@@ -234,17 +238,24 @@ public class TagsTable implements ReadonlyTable {
         }
 
         private InternalRow toRow(
-                Map.Entry<String, Snapshot> tag, Map<String, List<String>> tagBranches) {
-            Snapshot snapshot = tag.getValue();
-            List<String> branches = tagBranches.get(tag.getKey());
+                Map.Entry<String, Tag> snapshot, Map<String, List<String>> tagBranches) {
+            Tag tag = snapshot.getValue();
+            List<String> branches = tagBranches.get(snapshot.getKey());
             return GenericRow.of(
-                    BinaryString.fromString(tag.getKey()),
-                    snapshot.id(),
-                    snapshot.schemaId(),
+                    BinaryString.fromString(snapshot.getKey()),
+                    tag.id(),
+                    tag.schemaId(),
+                    Timestamp.fromLocalDateTime(DateTimeUtils.toLocalDateTime(tag.timeMillis())),
+                    tag.totalRecordCount(),
+                    BinaryString.fromString(branches == null ? "[]" : branches.toString()),
                     Timestamp.fromLocalDateTime(
-                            DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                    snapshot.totalRecordCount(),
-                    BinaryString.fromString(branches == null ? "[]" : branches.toString()));
+                            tag.getTagCreateTime() == null
+                                    ? LocalDateTime.MIN
+                                    : tag.getTagCreateTime()),
+                    BinaryString.fromString(
+                            tag.getTagTimeRetained() == null
+                                    ? ""
+                                    : tag.getTagTimeRetained().toString()));
         }
     }
 }

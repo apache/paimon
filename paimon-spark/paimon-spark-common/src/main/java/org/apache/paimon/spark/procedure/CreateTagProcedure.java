@@ -18,6 +18,8 @@
 
 package org.apache.paimon.spark.procedure;
 
+import org.apache.paimon.utils.TimeUtils;
+
 import org.apache.spark.sql.catalyst.InternalRow;
 import org.apache.spark.sql.connector.catalog.Identifier;
 import org.apache.spark.sql.connector.catalog.TableCatalog;
@@ -25,6 +27,8 @@ import org.apache.spark.sql.types.DataTypes;
 import org.apache.spark.sql.types.Metadata;
 import org.apache.spark.sql.types.StructField;
 import org.apache.spark.sql.types.StructType;
+
+import java.time.Duration;
 
 import static org.apache.spark.sql.types.DataTypes.LongType;
 import static org.apache.spark.sql.types.DataTypes.StringType;
@@ -36,6 +40,7 @@ public class CreateTagProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("tag", StringType),
+                ProcedureParameter.optional("time_retained", StringType),
                 ProcedureParameter.optional("snapshot", LongType)
             };
 
@@ -63,15 +68,17 @@ public class CreateTagProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String tag = args.getString(1);
-        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
+        Duration timeRetained =
+                args.isNullAt(2) ? null : TimeUtils.parseDuration(args.getString(2));
+        Long snapshot = args.isNullAt(3) ? null : args.getLong(3);
 
         return modifyPaimonTable(
                 tableIdent,
                 table -> {
                     if (snapshot == null) {
-                        table.createTag(tag);
+                        table.createTag(tag, timeRetained);
                     } else {
-                        table.createTag(tag, snapshot);
+                        table.createTag(tag, timeRetained, snapshot);
                     }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};

@@ -60,6 +60,7 @@ import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -461,8 +462,7 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
         rollbackHelper().cleanLargerThan(snapshotManager.snapshot(snapshotId));
     }
 
-    @Override
-    public void createTag(String tagName, long fromSnapshotId) {
+    public Snapshot createTagInternal(long fromSnapshotId) {
         SnapshotManager snapshotManager = snapshotManager();
         Snapshot snapshot = null;
         if (snapshotManager.snapshotExists(fromSnapshotId)) {
@@ -482,18 +482,36 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
                 snapshot != null,
                 "Cannot create tag because given snapshot #%s doesn't exist.",
                 fromSnapshotId);
-        createTag(tagName, snapshot);
+        return snapshot;
+    }
+
+    @Override
+    public void createTag(String tagName, long fromSnapshotId) {
+        createTag(
+                tagName, coreOptions().tagDefaultTimeRetained(), createTagInternal(fromSnapshotId));
+    }
+
+    @Override
+    public void createTag(String tagName, @Nullable Duration timeRetained, long fromSnapshotId) {
+        createTag(tagName, timeRetained, createTagInternal(fromSnapshotId));
     }
 
     @Override
     public void createTag(String tagName) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
-        createTag(tagName, latestSnapshot);
+        createTag(tagName, coreOptions().tagDefaultTimeRetained(), latestSnapshot);
     }
 
-    private void createTag(String tagName, Snapshot fromSnapshot) {
-        tagManager().createTag(fromSnapshot, tagName, store().createTagCallbacks());
+    @Override
+    public void createTag(String tagName, @Nullable Duration timeRetained) {
+        Snapshot latestSnapshot = snapshotManager().latestSnapshot();
+        checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
+        createTag(tagName, timeRetained, latestSnapshot);
+    }
+
+    private void createTag(String tagName, @Nullable Duration timeRetained, Snapshot fromSnapshot) {
+        tagManager().createTag(fromSnapshot, tagName, timeRetained, store().createTagCallbacks());
     }
 
     @Override

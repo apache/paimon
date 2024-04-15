@@ -33,7 +33,7 @@ import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
 import org.apache.paimon.table.BucketMode;
 import org.apache.paimon.table.sink.TagCallback;
-import org.apache.paimon.tag.TagAutoCreation;
+import org.apache.paimon.tag.TagAutoManager;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.SnapshotManager;
@@ -93,7 +93,7 @@ public interface FileStore<T> extends Serializable {
     PartitionExpire newPartitionExpire(String commitUser);
 
     @Nullable
-    TagAutoCreation newTagCreationManager();
+    TagAutoManager newTagCreationManager();
 
     ServiceManager newServiceManager();
 
