@@ -124,66 +124,9 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
-                            key -> {
-                                TableSchema tableSchema = schema;
-                                TableSchema dataSchema =
-                                        key.schemaId == schema.id()
-                                                ? schema
-                                                : schemaManager.schema(key.schemaId);
+                            this::createBulkFormatMapping);
 
-                                // projection to data schema
-                                int[][] dataProjection =
-                                        SchemaEvolutionUtil.createDataProjection(
-                                                tableSchema.fields(),
-                                                dataSchema.fields(),
-                                                projection);
-
-                                IndexCastMapping indexCastMapping =
-                                        SchemaEvolutionUtil.createIndexCastMapping(
-                                                Projection.of(projection).toTopLevelIndexes(),
-                                                tableSchema.fields(),
-                                                Projection.of(dataProjection).toTopLevelIndexes(),
-                                                dataSchema.fields());
-
-                                List<Predicate> dataFilters =
-                                        this.schema.id() == key.schemaId
-                                                ? filters
-                                                : SchemaEvolutionUtil.createDataFilters(
-                                                        tableSchema.fields(),
-                                                        dataSchema.fields(),
-                                                        filters);
-
-                                Pair<int[], RowType> partitionPair = null;
-                                if (!dataSchema.partitionKeys().isEmpty()) {
-                                    Pair<int[], int[][]> partitionMapping =
-                                            PartitionUtils.constructPartitionMapping(
-                                                    dataSchema, dataProjection);
-                                    // if partition fields are not selected, we just do nothing
-                                    if (partitionMapping != null) {
-                                        dataProjection = partitionMapping.getRight();
-                                        partitionPair =
-                                                Pair.of(
-                                                        partitionMapping.getLeft(),
-                                                        dataSchema.projectedLogicalRowType(
-                                                                dataSchema.partitionKeys()));
-                                    }
-                                }
-
-                                RowType projectedRowType =
-                                        Projection.of(dataProjection)
-                                                .project(dataSchema.logicalRowType());
-
-                                return new BulkFormatMapping(
-                                        indexCastMapping.getIndexMapping(),
-                                        indexCastMapping.getCastMapping(),
-                                        partitionPair,
-                                        formatDiscover
-                                                .discover(formatIdentifier)
-                                                .createReaderFactory(
-                                                        projectedRowType, dataFilters));
-                            });
-
-            final BinaryRow partition = split.partition();
+            BinaryRow partition = split.partition();
             suppliers.add(
                     () ->
                             createFileReader(
@@ -195,6 +138,55 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         }
 
         return ConcatRecordReader.create(suppliers);
+    }
+
+    private BulkFormatMapping createBulkFormatMapping(FormatKey key) {
+        TableSchema tableSchema = schema;
+        TableSchema dataSchema =
+                key.schemaId == schema.id() ? schema : schemaManager.schema(key.schemaId);
+
+        // projection to data schema
+        int[][] dataProjection =
+                SchemaEvolutionUtil.createDataProjection(
+                        tableSchema.fields(), dataSchema.fields(), projection);
+
+        IndexCastMapping indexCastMapping =
+                SchemaEvolutionUtil.createIndexCastMapping(
+                        Projection.of(projection).toTopLevelIndexes(),
+                        tableSchema.fields(),
+                        Projection.of(dataProjection).toTopLevelIndexes(),
+                        dataSchema.fields());
+
+        List<Predicate> dataFilters =
+                this.schema.id() == key.schemaId
+                        ? filters
+                        : SchemaEvolutionUtil.createDataFilters(
+                                tableSchema.fields(), dataSchema.fields(), filters);
+
+        Pair<int[], RowType> partitionPair = null;
+        if (!dataSchema.partitionKeys().isEmpty()) {
+            Pair<int[], int[][]> partitionMapping =
+                    PartitionUtils.constructPartitionMapping(dataSchema, dataProjection);
+            // if partition fields are not selected, we just do nothing
+            if (partitionMapping != null) {
+                dataProjection = partitionMapping.getRight();
+                partitionPair =
+                        Pair.of(
+                                partitionMapping.getLeft(),
+                                dataSchema.projectedLogicalRowType(dataSchema.partitionKeys()));
+            }
+        }
+
+        RowType projectedRowType =
+                Projection.of(dataProjection).project(dataSchema.logicalRowType());
+
+        return new BulkFormatMapping(
+                indexCastMapping.getIndexMapping(),
+                indexCastMapping.getCastMapping(),
+                partitionPair,
+                formatDiscover
+                        .discover(key.format)
+                        .createReaderFactory(projectedRowType, dataFilters));
     }
 
     private RecordReader<InternalRow> createFileReader(
