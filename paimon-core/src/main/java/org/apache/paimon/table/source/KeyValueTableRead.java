@@ -117,7 +117,7 @@ public final class KeyValueTableRead extends AbstractDataTableRead<KeyValue> {
     @Override
     public RecordReader<InternalRow> reader(Split split) throws IOException {
         DataSplit dataSplit = (DataSplit) split;
-        if (!dataSplit.isStreaming() && split.convertToRawFiles().isPresent()) {
+        if (!forceKeepDelete && !dataSplit.isStreaming() && split.convertToRawFiles().isPresent()) {
             return batchRawRead.get().createReader(dataSplit);
         }
 
