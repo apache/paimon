@@ -1720,11 +1720,11 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTORS_ENABLED);
     }
 
-    public FileIndexOptions indexColumns() {
+    public FileIndexOptions indexColumnsOptions() {
         String fileIndexPrefix = FILE_INDEX + ".";
         String fileIndexColumnSuffix = "." + COLUMNS;
 
-        FileIndexOptions fileIndexOptions = new FileIndexOptions();
+        FileIndexOptions fileIndexOptions = new FileIndexOptions(fileIndexInManifestThreshold());
         for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
             String key = entry.getKey();
             if (key.startsWith(fileIndexPrefix)) {

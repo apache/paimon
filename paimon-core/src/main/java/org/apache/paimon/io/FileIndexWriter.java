@@ -57,14 +57,9 @@ public final class FileIndexWriter {
     private byte[] embeddedIndexBytes;
 
     public FileIndexWriter(
-            FileIO fileIO,
-            Path path,
-            RowType rowType,
-            FileIndexOptions fileIndexes,
-            long inManifestThreshold) {
+            FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
         this.fileIO = fileIO;
         this.path = path;
-        this.inManifestThreshold = inManifestThreshold;
         List<DataField> fields = rowType.getFields();
         Map<String, DataField> map = new HashMap<>();
         Map<String, Integer> index = new HashMap<>();
@@ -73,7 +68,7 @@ public final class FileIndexWriter {
                     map.put(dataField.name(), dataField);
                     index.put(dataField.name(), rowType.getFieldIndex(dataField.name()));
                 });
-        for (Map.Entry<String, Map<String, Options>> entry : fileIndexes.entrySet()) {
+        for (Map.Entry<String, Map<String, Options>> entry : fileIndexOptions.entrySet()) {
             String columnName = entry.getKey();
             DataField field = map.get(columnName);
             if (field == null) {
@@ -91,6 +86,7 @@ public final class FileIndexWriter {
                                         field.type(), index.get(columnName))));
             }
         }
+        this.inManifestThreshold = fileIndexOptions.fileIndexInManifestThreshold();
     }
 
     public void write(InternalRow row) {
@@ -127,14 +123,10 @@ public final class FileIndexWriter {
 
     @Nullable
     public static FileIndexWriter create(
-            FileIO fileIO,
-            Path path,
-            RowType rowType,
-            FileIndexOptions fileIndexOptions,
-            long inManifestThreshold) {
+            FileIO fileIO, Path path, RowType rowType, FileIndexOptions fileIndexOptions) {
         return fileIndexOptions.isEmpty()
                 ? null
-                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions, inManifestThreshold);
+                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions);
     }
 
     /** File index result. */

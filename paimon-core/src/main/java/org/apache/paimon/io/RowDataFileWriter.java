@@ -59,8 +59,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            FileIndexOptions fileIndexOptions,
-            long inManifestThreshold) {
+            FileIndexOptions fileIndexOptions) {
         super(
                 fileIO,
                 factory,
@@ -75,11 +74,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
         this.fileIndexWriter =
                 FileIndexWriter.create(
-                        fileIO,
-                        toFileIndexPath(path),
-                        writeSchema,
-                        fileIndexOptions,
-                        inManifestThreshold);
+                        fileIO, toFileIndexPath(path), writeSchema, fileIndexOptions);
     }
 
     @Override

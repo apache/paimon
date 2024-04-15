@@ -79,8 +79,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
     private SinkWriter sinkWriter;
     private final FieldStatsCollector.Factory[] statsCollectors;
     private final IOManager ioManager;
-    private final FileIndexOptions fileIndexes;
-    private final long inManifestThreshold;
+    private final FileIndexOptions fileIndexOptions;
 
     private MemorySegmentPool memorySegmentPool;
     private MemorySize maxDiskSize;
@@ -104,8 +103,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
             String spillCompression,
             FieldStatsCollector.Factory[] statsCollectors,
             MemorySize maxDiskSize,
-            FileIndexOptions fileIndexes,
-            long inManifestThreshold) {
+            FileIndexOptions fileIndexOptions) {
         this.fileIO = fileIO;
         this.schemaId = schemaId;
         this.fileFormat = fileFormat;
@@ -125,8 +123,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
         this.ioManager = ioManager;
         this.statsCollectors = statsCollectors;
         this.maxDiskSize = maxDiskSize;
-        this.fileIndexes = fileIndexes;
-        this.inManifestThreshold = inManifestThreshold;
+        this.fileIndexOptions = fileIndexOptions;
 
         this.sinkWriter =
                 useWriteBuffer
@@ -254,8 +251,7 @@ public class AppendOnlyWriter implements RecordWriter<InternalRow>, MemoryOwner 
                 seqNumCounter,
                 fileCompression,
                 statsCollectors,
-                fileIndexes,
-                inManifestThreshold);
+                fileIndexOptions);
     }
 
     private void trySyncLatestCompaction(boolean blocking)

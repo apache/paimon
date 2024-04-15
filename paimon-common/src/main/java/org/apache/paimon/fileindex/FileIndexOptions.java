@@ -18,6 +18,7 @@
 
 package org.apache.paimon.fileindex;
 
+import org.apache.paimon.CoreOptions;
 import org.apache.paimon.options.Options;
 
 import java.util.HashMap;
@@ -28,10 +29,18 @@ import java.util.Set;
 /** Options of file index column. */
 public class FileIndexOptions {
 
+    // if the filter size greater than fileIndexInManifestThreshold, we put it in file
+    private final long fileIndexInManifestThreshold;
+
     private final Map<String, Map<String, Options>> indexTypeOptions;
 
     public FileIndexOptions() {
+        this(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.defaultValue().getBytes());
+    }
+
+    public FileIndexOptions(long fileIndexInManifestThreshold) {
         this.indexTypeOptions = new HashMap<>();
+        this.fileIndexInManifestThreshold = fileIndexInManifestThreshold;
     }
 
     public void computeIfAbsent(String column, String indexType) {
@@ -48,6 +57,10 @@ public class FileIndexOptions {
 
     public boolean isEmpty() {
         return indexTypeOptions.isEmpty();
+    }
+
+    public long fileIndexInManifestThreshold() {
+        return fileIndexInManifestThreshold;
     }
 
     public Set<Map.Entry<String, Map<String, Options>>> entrySet() {
