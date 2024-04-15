@@ -1332,9 +1332,6 @@ public class ReadWriteTableITCase extends AbstractTestBase {
     @ParameterizedTest
     @EnumSource(CoreOptions.MergeEngine.class)
     public void testUpdateWithPrimaryKey(CoreOptions.MergeEngine mergeEngine) throws Exception {
-        Set<CoreOptions.MergeEngine> supportUpdateEngines = new HashSet<>();
-        supportUpdateEngines.add(DEDUPLICATE);
-        supportUpdateEngines.add(CoreOptions.MergeEngine.PARTIAL_UPDATE);
         // Step1: define table schema
         Map<String, String> options = new HashMap<>();
         options.put(MERGE_ENGINE.key(), mergeEngine.toString());
@@ -1361,12 +1358,17 @@ public class ReadWriteTableITCase extends AbstractTestBase {
                 "(3, 'Euro', 119, '2022-01-02')");
 
         // Step3: prepare expected data.
-        String rowKind = mergeEngine == CoreOptions.MergeEngine.PARTIAL_UPDATE ? "+I" : "+U";
+        String rowKind = mergeEngine == FIRST_ROW ? "+I" : "+U";
         List<Row> expectedRecords =
                 Arrays.asList(
                         // part = 2022-01-01
                         changelogRow("+I", 1L, "US Dollar", 114L, "2022-01-01"),
-                        changelogRow(rowKind, 2L, "Yen", 1L, "2022-01-01"),
+                        changelogRow(
+                                rowKind,
+                                2L,
+                                mergeEngine == FIRST_ROW ? "UNKNOWN" : "Yen",
+                                mergeEngine == FIRST_ROW ? -1 : 1L,
+                                "2022-01-01"),
                         changelogRow("+I", 3L, "Euro", 114L, "2022-01-01"),
                         // part = 2022-01-02
                         changelogRow("+I", 3L, "Euro", 119L, "2022-01-02"));
@@ -1374,15 +1376,14 @@ public class ReadWriteTableITCase extends AbstractTestBase {
         // Step4: prepare update statement
         String updateStatement =
                 String.format(
-                        ""
-                                + "UPDATE %s "
+                        "UPDATE %s "
                                 + "SET currency = 'Yen', "
                                 + "rate = 1 "
                                 + "WHERE currency = 'UNKNOWN' and dt = '2022-01-01'",
                         table);
 
         // Step5: execute update statement and verify result
-        if (supportUpdateEngines.contains(mergeEngine)) {
+        if (mergeEngine.supportBatchUpdate()) {
             bEnv.executeSql(updateStatement).await();
             String querySql = String.format("SELECT * FROM %s", table);
             testBatchRead(querySql, expectedRecords);

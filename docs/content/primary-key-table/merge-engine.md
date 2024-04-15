@@ -34,6 +34,12 @@ result in strange behavior. When the input is out of order, we recommend that yo
 [Sequence Field]({{< ref "primary-key-table/sequence-rowkind#sequence-field" >}}) to correct disorder.
 {{< /hint >}}
 
+{{< hint info >}}
+Some compute engines support row level update and delete in batch mode but not all merge engines support them.
+- Support batch update merge engines: `deduplicate` and `first-row`.
+- Support batch delete merge engines: `deduplicate`.
+{{< /hint >}}
+
 ## Deduplicate
 
 `deduplicate` merge engine is the default merge engine. Paimon will only keep the latest record and throw away other records with the same primary keys.
