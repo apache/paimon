@@ -18,9 +18,10 @@
 
 package org.apache.paimon.operation;
 
-import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
+import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
@@ -53,13 +54,14 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreRead} for {@link AppendOnlyFileStore}. */
-public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
+/** A {@link SplitRead} to read raw file directly from {@link DataSplit}. */
+public class RawFileSplitRead implements SplitRead<InternalRow> {
 
-    private static final Logger LOG = LoggerFactory.getLogger(AppendOnlyFileStoreRead.class);
+    private static final Logger LOG = LoggerFactory.getLogger(RawFileSplitRead.class);
 
     private final FileIO fileIO;
     private final SchemaManager schemaManager;
@@ -72,7 +74,7 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
 
     @Nullable private List<Predicate> filters;
 
-    public AppendOnlyFileStoreRead(
+    public RawFileSplitRead(
             FileIO fileIO,
             SchemaManager schemaManager,
             TableSchema schema,
@@ -89,14 +91,18 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
 
-    public FileStoreRead<InternalRow> withProjection(int[][] projectedFields) {
-        projection = projectedFields;
+    public RawFileSplitRead withProjection(int[][] projectedFields) {
+        if (projectedFields != null) {
+            projection = projectedFields;
+        }
         return this;
     }
 
     @Override
-    public FileStoreRead<InternalRow> withFilter(Predicate predicate) {
-        this.filters = splitAnd(predicate);
+    public RawFileSplitRead withFilter(Predicate predicate) {
+        if (predicate != null) {
+            this.filters = splitAnd(predicate);
+        }
         return this;
     }
 
@@ -108,6 +114,11 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
         if (split.beforeFiles().size() > 0) {
             LOG.info("Ignore split before files: " + split.beforeFiles());
         }
+
+        DeletionVector.Factory dvFactory =
+                DeletionVector.factory(
+                        fileIO, split.dataFiles(), split.deletionFiles().orElse(null));
+
         for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
             BulkFormatMapping bulkFormatMapping =
@@ -175,18 +186,39 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             final BinaryRow partition = split.partition();
             suppliers.add(
                     () ->
-                            new FileRecordReader(
-                                    bulkFormatMapping.getReaderFactory(),
-                                    new FormatReaderContext(
-                                            fileIO,
-                                            dataFilePathFactory.toPath(file.fileName()),
-                                            file.fileSize()),
-                                    bulkFormatMapping.getIndexMapping(),
-                                    bulkFormatMapping.getCastMapping(),
-                                    PartitionUtils.create(
-                                            bulkFormatMapping.getPartitionPair(), partition)));
+                            createFileReader(
+                                    partition,
+                                    file,
+                                    dataFilePathFactory,
+                                    bulkFormatMapping,
+                                    dvFactory));
         }
 
         return ConcatRecordReader.create(suppliers);
+    }
+
+    private RecordReader<InternalRow> createFileReader(
+            BinaryRow partition,
+            DataFileMeta file,
+            DataFilePathFactory dataFilePathFactory,
+            BulkFormatMapping bulkFormatMapping,
+            DeletionVector.Factory dvFactory)
+            throws IOException {
+        FileRecordReader fileRecordReader =
+                new FileRecordReader(
+                        bulkFormatMapping.getReaderFactory(),
+                        new FormatReaderContext(
+                                fileIO,
+                                dataFilePathFactory.toPath(file.fileName()),
+                                file.fileSize()),
+                        bulkFormatMapping.getIndexMapping(),
+                        bulkFormatMapping.getCastMapping(),
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            return new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
+        }
+        return fileRecordReader;
     }
 }

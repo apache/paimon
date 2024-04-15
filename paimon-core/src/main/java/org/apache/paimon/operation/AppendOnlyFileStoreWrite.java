@@ -59,7 +59,7 @@ import static org.apache.paimon.io.DataFileMeta.getMaxSequenceNumber;
 public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> {
 
     private final FileIO fileIO;
-    private final AppendOnlyFileStoreRead read;
+    private final RawFileSplitRead read;
     private final long schemaId;
     private final RowType rowType;
     private final FileFormat fileFormat;
@@ -81,7 +81,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
 
     public AppendOnlyFileStoreWrite(
             FileIO fileIO,
-            AppendOnlyFileStoreRead read,
+            RawFileSplitRead read,
             long schemaId,
             String commitUser,
             RowType rowType,

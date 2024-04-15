@@ -28,9 +28,10 @@ import org.apache.paimon.index.IndexMaintainer;
 import org.apache.paimon.io.KeyValueFileReaderFactory;
 import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.mergetree.compact.MergeFunctionFactory;
-import org.apache.paimon.operation.KeyValueFileStoreRead;
 import org.apache.paimon.operation.KeyValueFileStoreScan;
 import org.apache.paimon.operation.KeyValueFileStoreWrite;
+import org.apache.paimon.operation.MergeFileSplitRead;
+import org.apache.paimon.operation.RawFileSplitRead;
 import org.apache.paimon.operation.ScanBucketFilter;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.schema.KeyValueFieldsExtractor;
@@ -119,8 +120,8 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
     }
 
     @Override
-    public KeyValueFileStoreRead newRead() {
-        return new KeyValueFileStoreRead(
+    public MergeFileSplitRead newRead() {
+        return new MergeFileSplitRead(
                 options,
                 schema,
                 keyType,
@@ -128,6 +129,16 @@ public class KeyValueFileStore extends AbstractFileStore<KeyValue> {
                 newKeyComparator(),
                 mfFactory,
                 newReaderFactoryBuilder());
+    }
+
+    public RawFileSplitRead newBatchRawFileRead() {
+        return new RawFileSplitRead(
+                fileIO,
+                schemaManager,
+                schema,
+                valueType,
+                FileFormatDiscover.of(options),
+                pathFactory());
     }
 
     public KeyValueFileReaderFactory.Builder newReaderFactoryBuilder() {
