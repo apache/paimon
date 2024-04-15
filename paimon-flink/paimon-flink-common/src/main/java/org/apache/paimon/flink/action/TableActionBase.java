@@ -61,7 +61,7 @@ public abstract class TableActionBase extends ActionBase {
         List<Transformation<?>> transformations =
                 Collections.singletonList(
                         new FlinkSinkBuilder((FileStoreTable) table)
-                                .withInput(dataStream)
+                                .forRowData(dataStream)
                                 .build()
                                 .getTransformation());
 

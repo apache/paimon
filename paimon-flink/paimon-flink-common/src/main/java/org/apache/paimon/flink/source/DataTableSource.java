@@ -190,21 +190,22 @@ public class DataTableSource extends FlinkTableSource {
         }
 
         FlinkSourceBuilder sourceBuilder =
-                new FlinkSourceBuilder(tableIdentifier, table)
-                        .withContinuousMode(streaming)
-                        .withLogSourceProvider(logSourceProvider)
-                        .withProjection(projectFields)
-                        .withPredicate(predicate)
-                        .withLimit(limit)
-                        .withWatermarkStrategy(watermarkStrategy)
-                        .withDynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
+                new FlinkSourceBuilder(table)
+                        .sourceName(tableIdentifier.asSummaryString())
+                        .sourceBounded(!streaming)
+                        .logSourceProvider(logSourceProvider)
+                        .projection(projectFields)
+                        .predicate(predicate)
+                        .limit(limit)
+                        .watermarkStrategy(watermarkStrategy)
+                        .dynamicPartitionFilteringFields(dynamicPartitionFilteringFields);
 
         return new PaimonDataStreamScanProvider(
                 !streaming,
                 env ->
                         sourceBuilder
-                                .withParallelism(inferSourceParallelism(env))
-                                .withEnv(env)
+                                .sourceParallelism(inferSourceParallelism(env))
+                                .env(env)
                                 .build());
     }
 
