@@ -48,6 +48,7 @@ public class AppendOnlyFileStoreScan extends AbstractFileStoreScan {
 
     private Predicate filter;
 
+    // just cache.
     private final Map<Long, Predicate> dataFilterMapping = new HashMap<>();
 
     public AppendOnlyFileStoreScan(

@@ -21,18 +21,17 @@ package org.apache.paimon.operation;
 import org.apache.paimon.AppendOnlyFileStore;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
-import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileIndexFileReader;
 import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -56,7 +55,6 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.stream.Collectors;
 
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
@@ -188,31 +186,9 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
             TableSchema dataSchema = formatMappingTriple.f0;
             List<Predicate> dataFilter = formatMappingTriple.f1;
             BulkFormatMapping bulkFormatMapping = formatMappingTriple.f2;
-            if (dataFilter != null && !dataFilter.isEmpty()) {
-                List<String> indexFiles =
-                        file.extraFiles().stream()
-                                .filter(
-                                        name ->
-                                                name.startsWith(
-                                                        DataFilePathFactory.INDEX_PATH_PREFIX))
-                                .collect(Collectors.toList());
-                if (fileIndexReadEnabled && !indexFiles.isEmpty()) {
-                    // go to file index check
-                    try (FileIndexPredicate predicate =
-                            new FileIndexPredicate(
-                                    dataFilePathFactory.toPath(indexFiles.get(0)),
-                                    fileIO,
-                                    dataSchema.logicalRowType())) {
-                        if (!predicate.testPredicate(
-                                PredicateBuilder.and(dataFilter.toArray(new Predicate[0])))) {
-                            continue;
-                        }
-                    }
-                }
-            }
 
             final BinaryRow partition = split.partition();
-            suppliers.add(
+            ConcatRecordReader.ReaderSupplier<InternalRow> supplier =
                     () ->
                             new FileRecordReader(
                                     bulkFormatMapping.getReaderFactory(),
@@ -223,7 +199,19 @@ public class AppendOnlyFileStoreRead implements FileStoreRead<InternalRow> {
                                     bulkFormatMapping.getIndexMapping(),
                                     bulkFormatMapping.getCastMapping(),
                                     PartitionUtils.create(
-                                            bulkFormatMapping.getPartitionPair(), partition)));
+                                            bulkFormatMapping.getPartitionPair(), partition));
+
+            suppliers.add(
+                    fileIndexReadEnabled
+                            ? () ->
+                                    new FileIndexFileReader(
+                                            fileIO,
+                                            dataSchema,
+                                            dataFilter,
+                                            dataFilePathFactory,
+                                            file,
+                                            supplier)
+                            : supplier);
         }
 
         return ConcatRecordReader.create(suppliers);

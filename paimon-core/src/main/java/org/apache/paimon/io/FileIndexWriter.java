@@ -20,28 +20,28 @@ package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexFormat;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexer;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
 import org.apache.paimon.types.RowType;
-import org.apache.paimon.utils.Pair;
+
+import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
 /** Index file writer. */
-public final class IndexWriter {
+public final class FileIndexWriter {
 
-    private static final Pair<byte[], List<String>> EMPTY_RESULT =
-            Pair.of(null, Collections.emptyList());
+    public static final FileIndexResult EMPTY_RESULT = FileIndexResult.of(null, null);
 
     private final FileIO fileIO;
 
@@ -52,15 +52,15 @@ public final class IndexWriter {
 
     private final List<IndexMaintainer> indexMaintainers = new ArrayList<>();
 
-    private final List<String> resultFileNames = new ArrayList<>();
+    private String resultFileName;
 
     private byte[] embeddedIndexBytes;
 
-    public IndexWriter(
+    public FileIndexWriter(
             FileIO fileIO,
             Path path,
             RowType rowType,
-            Map<String, Map<String, Options>> fileIndexes,
+            FileIndexOptions fileIndexes,
             long inManifestThreshold) {
         this.fileIO = fileIO;
         this.path = path;
@@ -98,10 +98,6 @@ public final class IndexWriter {
     }
 
     public void close() throws IOException {
-        if (indexMaintainers.isEmpty()) {
-            return;
-        }
-
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
 
         for (IndexMaintainer indexMaintainer : indexMaintainers) {
@@ -119,15 +115,86 @@ public final class IndexWriter {
             try (OutputStream outputStream = fileIO.newOutputStream(path, false)) {
                 outputStream.write(baos.toByteArray());
             }
-            resultFileNames.add(path.getName());
+            resultFileName = path.getName();
         } else {
             embeddedIndexBytes = baos.toByteArray();
         }
     }
 
-    public Pair<byte[], List<String>> result() {
-        return indexMaintainers.isEmpty()
-                ? EMPTY_RESULT
-                : Pair.of(embeddedIndexBytes, resultFileNames);
+    public FileIndexResult result() {
+        return FileIndexResult.of(embeddedIndexBytes, resultFileName);
+    }
+
+    @Nullable
+    public static FileIndexWriter create(
+            FileIO fileIO,
+            Path path,
+            RowType rowType,
+            FileIndexOptions fileIndexOptions,
+            long inManifestThreshold) {
+        return fileIndexOptions.isEmpty()
+                ? null
+                : new FileIndexWriter(fileIO, path, rowType, fileIndexOptions, inManifestThreshold);
+    }
+
+    /** File index result. */
+    public interface FileIndexResult {
+
+        @Nullable
+        byte[] embeddedIndexBytes();
+
+        @Nullable
+        String independentIndexFile();
+
+        static FileIndexResult of(byte[] embeddedIndexBytes, String resultFileName) {
+            return new FileIndexResult() {
+
+                @Override
+                public byte[] embeddedIndexBytes() {
+                    return embeddedIndexBytes;
+                }
+
+                @Override
+                public String independentIndexFile() {
+                    return resultFileName;
+                }
+            };
+        }
+    }
+
+    /** One index maintainer for one column. */
+    private static class IndexMaintainer {
+
+        private final String columnName;
+        private final String indexType;
+        private final org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter;
+        private final InternalRow.FieldGetter getter;
+
+        public IndexMaintainer(
+                String columnName,
+                String indexType,
+                org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter,
+                InternalRow.FieldGetter getter) {
+            this.columnName = columnName;
+            this.indexType = indexType;
+            this.fileIndexWriter = fileIndexWriter;
+            this.getter = getter;
+        }
+
+        public void write(InternalRow row) {
+            fileIndexWriter.write(getter.getFieldOrNull(row));
+        }
+
+        public String getIndexType() {
+            return indexType;
+        }
+
+        public String getColumnName() {
+            return columnName;
+        }
+
+        public byte[] serializedBytes() {
+            return fileIndexWriter.serializedBytes();
+        }
     }
 }

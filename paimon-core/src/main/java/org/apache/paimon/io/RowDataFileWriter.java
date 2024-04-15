@@ -19,27 +19,24 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FormatWriterFactory;
 import org.apache.paimon.format.TableStatsExtractor;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.stats.BinaryTableStats;
 import org.apache.paimon.stats.FieldStatsArraySerializer;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-import org.apache.paimon.utils.Pair;
 
 import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.Collections;
-import java.util.List;
-import java.util.Map;
 import java.util.function.Function;
 
-import static org.apache.paimon.io.DataFilePathFactory.toIndexPath;
+import static org.apache.paimon.io.DataFilePathFactory.toFileIndexPath;
 
 /**
  * A {@link StatsCollectingSingleFileWriter} to write data files containing {@link InternalRow}.
@@ -50,7 +47,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
     private final long schemaId;
     private final LongCounter seqNumCounter;
     private final FieldStatsArraySerializer statsArraySerializer;
-    private final IndexWriter indexWriter;
+    @Nullable private final FileIndexWriter fileIndexWriter;
 
     public RowDataFileWriter(
             FileIO fileIO,
@@ -62,7 +59,7 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            Map<String, Map<String, Options>> indexExpr,
+            FileIndexOptions fileIndexOptions,
             long inManifestThreshold) {
         super(
                 fileIO,
@@ -76,29 +73,38 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
         this.schemaId = schemaId;
         this.seqNumCounter = seqNumCounter;
         this.statsArraySerializer = new FieldStatsArraySerializer(writeSchema);
-        this.indexWriter =
-                new IndexWriter(
-                        fileIO, toIndexPath(path), writeSchema, indexExpr, inManifestThreshold);
+        this.fileIndexWriter =
+                FileIndexWriter.create(
+                        fileIO,
+                        toFileIndexPath(path),
+                        writeSchema,
+                        fileIndexOptions,
+                        inManifestThreshold);
     }
 
     @Override
     public void write(InternalRow row) throws IOException {
         super.write(row);
         // add row to index if needed
-        indexWriter.write(row);
+        if (fileIndexWriter != null) {
+            fileIndexWriter.write(row);
+        }
         seqNumCounter.add(1L);
     }
 
     @Override
     public void close() throws IOException {
-        indexWriter.close();
+        if (fileIndexWriter != null) {
+            fileIndexWriter.close();
+        }
         super.close();
     }
 
     @Override
     public DataFileMeta result() throws IOException {
         BinaryTableStats stats = statsArraySerializer.toBinary(fieldStats());
-        Pair<byte[], List<String>> indexResult = indexWriter.result();
+        FileIndexWriter.FileIndexResult indexResult =
+                fileIndexWriter == null ? FileIndexWriter.EMPTY_RESULT : fileIndexWriter.result();
         return DataFileMeta.forAppend(
                 path.getName(),
                 fileIO.getFileSize(path),
@@ -107,7 +113,9 @@ public class RowDataFileWriter extends StatsCollectingSingleFileWriter<InternalR
                 seqNumCounter.getValue() - super.recordCount(),
                 seqNumCounter.getValue() - 1,
                 schemaId,
-                indexResult.getRight() == null ? Collections.emptyList() : indexResult.getRight(),
-                indexResult.getLeft());
+                indexResult.independentIndexFile() == null
+                        ? Collections.emptyList()
+                        : Collections.singletonList(indexResult.independentIndexFile()),
+                indexResult.embeddedIndexBytes());
     }
 }

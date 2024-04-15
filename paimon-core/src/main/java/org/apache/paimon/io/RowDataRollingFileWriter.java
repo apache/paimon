@@ -19,15 +19,13 @@
 package org.apache.paimon.io;
 
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.format.avro.AvroFileFormat;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.options.Options;
 import org.apache.paimon.statistics.FieldStatsCollector;
 import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.LongCounter;
-
-import java.util.Map;
 
 /** {@link RollingFileWriter} for data files containing {@link InternalRow}. */
 public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, DataFileMeta> {
@@ -42,7 +40,7 @@ public class RowDataRollingFileWriter extends RollingFileWriter<InternalRow, Dat
             LongCounter seqNumCounter,
             String fileCompression,
             FieldStatsCollector.Factory[] statsCollectors,
-            Map<String, Map<String, Options>> fileIndexes,
+            FileIndexOptions fileIndexes,
             long inManifestThreshold) {
         super(
                 () ->

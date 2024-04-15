@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -1719,11 +1720,11 @@ public class CoreOptions implements Serializable {
         return options.get(DELETION_VECTORS_ENABLED);
     }
 
-    public Map<String, Map<String, Options>> indexColumns() {
+    public FileIndexOptions indexColumns() {
         String fileIndexPrefix = FILE_INDEX + ".";
         String fileIndexColumnSuffix = "." + COLUMNS;
 
-        Map<String, Map<String, Options>> indexes = new HashMap<>();
+        FileIndexOptions fileIndexOptions = new FileIndexOptions();
         for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
             String key = entry.getKey();
             if (key.startsWith(fileIndexPrefix)) {
@@ -1740,8 +1741,7 @@ public class CoreOptions implements Serializable {
                             throw new IllegalArgumentException(
                                     "Wrong option in " + key + ", should not have empty column");
                         }
-                        indexes.computeIfAbsent(name.trim(), n -> new HashMap<>())
-                                .computeIfAbsent(indexType, t -> new Options());
+                        fileIndexOptions.computeIfAbsent(name.trim(), indexType);
                     }
                 } else {
                     // else, it must be an option
@@ -1753,7 +1753,7 @@ public class CoreOptions implements Serializable {
                     String cname = kv[1];
                     String opkey = kv[2];
 
-                    if (!indexes.containsKey(cname) || !indexes.get(cname).containsKey(indexType)) {
+                    if (fileIndexOptions.get(cname, indexType) == null) {
                         // if indexes have not set, find .column in options, then set them
                         String columns =
                                 options.get(fileIndexPrefix + indexType + fileIndexColumnSuffix);
@@ -1773,8 +1773,7 @@ public class CoreOptions implements Serializable {
                             if (cname.equals(tname)) {
                                 foundTarget = true;
                             }
-                            indexes.computeIfAbsent(tname, n -> new HashMap<>())
-                                    .computeIfAbsent(indexType, t -> new Options());
+                            fileIndexOptions.computeIfAbsent(name.trim(), indexType);
                         }
                         if (!foundTarget) {
                             throw new IllegalArgumentException(
@@ -1786,12 +1785,11 @@ public class CoreOptions implements Serializable {
                                             + columns);
                         }
                     }
-
-                    indexes.get(cname).get(indexType).set(opkey, entry.getValue());
+                    fileIndexOptions.get(cname, indexType).set(opkey, entry.getValue());
                 }
             }
         }
-        return indexes;
+        return fileIndexOptions;
     }
 
     public long fileIndexInManifestThreshold() {
