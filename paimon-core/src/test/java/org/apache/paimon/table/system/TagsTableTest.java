@@ -18,7 +18,6 @@
 
 package org.apache.paimon.table.system;
 
-import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
@@ -30,6 +29,7 @@ import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
 import org.apache.paimon.table.TableTestBase;
 import org.apache.paimon.table.sink.TableCommitImpl;
+import org.apache.paimon.tag.Tag;
 import org.apache.paimon.types.DataTypes;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.TagManager;
@@ -120,19 +120,27 @@ class TagsTableTest extends TableTestBase {
     private List<InternalRow> getExceptedResult(
             Function<String, List<String>> tagBranchesFunction) {
         List<InternalRow> internalRows = new ArrayList<>();
-        for (Map.Entry<Snapshot, List<String>> tag : tagManager.tags().entrySet()) {
-            Snapshot snapshot = tag.getKey();
-            for (String tagName : tag.getValue()) {
+        for (Map.Entry<Tag, List<String>> snapshot : tagManager.tagsWithTimeRetained().entrySet()) {
+            Tag tag = snapshot.getKey();
+            for (String tagName : snapshot.getValue()) {
                 internalRows.add(
                         GenericRow.of(
                                 BinaryString.fromString(tagName),
-                                snapshot.id(),
-                                snapshot.schemaId(),
+                                tag.id(),
+                                tag.schemaId(),
                                 Timestamp.fromLocalDateTime(
-                                        DateTimeUtils.toLocalDateTime(snapshot.timeMillis())),
-                                snapshot.totalRecordCount(),
+                                        DateTimeUtils.toLocalDateTime(tag.timeMillis())),
+                                tag.totalRecordCount(),
                                 BinaryString.fromString(
-                                        tagBranchesFunction.apply(tagName).toString())));
+                                        tagBranchesFunction.apply(tagName).toString()),
+                                Timestamp.fromLocalDateTime(
+                                        tag.getTagCreateTime() == null
+                                                ? LocalDateTime.MIN
+                                                : tag.getTagCreateTime()),
+                                BinaryString.fromString(
+                                        tag.getTagTimeRetained() == null
+                                                ? ""
+                                                : tag.getTagTimeRetained().toString())));
             }
         }
         return internalRows;

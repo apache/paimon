@@ -21,6 +21,7 @@ package org.apache.paimon.tag;
 import org.apache.paimon.CoreOptions.TagCreationMode;
 import org.apache.paimon.CoreOptions.TagCreationPeriod;
 import org.apache.paimon.CoreOptions.TagPeriodFormatter;
+import org.apache.paimon.Snapshot;
 import org.apache.paimon.catalog.PrimaryKeyTableTestBase;
 import org.apache.paimon.manifest.ManifestCommittable;
 import org.apache.paimon.options.Options;
@@ -33,6 +34,7 @@ import org.junit.jupiter.api.Test;
 import java.time.Duration;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
+import java.util.Collections;
 
 import static org.apache.paimon.CoreOptions.SINK_WATERMARK_TIME_ZONE;
 import static org.apache.paimon.CoreOptions.SNAPSHOT_NUM_RETAINED_MAX;
@@ -41,12 +43,13 @@ import static org.apache.paimon.CoreOptions.SNAPSHOT_WATERMARK_IDLE_TIMEOUT;
 import static org.apache.paimon.CoreOptions.TAG_AUTOMATIC_CREATION;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_DELAY;
 import static org.apache.paimon.CoreOptions.TAG_CREATION_PERIOD;
+import static org.apache.paimon.CoreOptions.TAG_DEFAULT_TIME_RETAINED;
 import static org.apache.paimon.CoreOptions.TAG_NUM_RETAINED_MAX;
 import static org.apache.paimon.CoreOptions.TAG_PERIOD_FORMATTER;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Test for tag automatic creation. */
-public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
+public class TagAutoManagerTest extends PrimaryKeyTableTestBase {
 
     @Test
     public void testTag() throws Exception {
@@ -317,6 +320,104 @@ public class TagAutoCreationTest extends PrimaryKeyTableTestBase {
         Long watermark1 = table.snapshotManager().snapshot(1).watermark();
         Long watermark2 = table.snapshotManager().snapshot(2).watermark();
         assertThat(watermark2 - watermark1).isEqualTo(10000);
+        commit.close();
+    }
+
+    @Test
+    public void testAutoCreateTagNotExpiredByTimeRetained() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_NUM_RETAINED_MAX, 3);
+        options.set(TAG_DEFAULT_TIME_RETAINED, Duration.ofMillis(500));
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        // test normal creation
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
+        commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:12:00")));
+        commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
+
+        // test expire old tag by time-retained
+        Thread.sleep(1000);
+        commit.commit(new ManifestCommittable(4, utcMills("2023-07-18T19:00:00")));
+        assertThat(tagManager.allTagNames()).containsOnly("2023-07-18 18");
+
+        commit.close();
+    }
+
+    @Test
+    public void testExpireTagsByTimeRetained() throws Exception {
+        Options options = new Options();
+        options.set(TAG_AUTOMATIC_CREATION, TagCreationMode.WATERMARK);
+        options.set(TAG_CREATION_PERIOD, TagCreationPeriod.HOURLY);
+        options.set(TAG_NUM_RETAINED_MAX, 3);
+        options.set(TAG_DEFAULT_TIME_RETAINED, Duration.ofMillis(500));
+        FileStoreTable table = this.table.copy(options.toMap());
+        TableCommitImpl commit = table.newCommit(commitUser).ignoreEmptyCommit(false);
+        TagManager tagManager = table.store().newTagManager();
+
+        // test normal creation
+        commit.commit(new ManifestCommittable(0, utcMills("2023-07-18T12:12:00")));
+        commit.commit(new ManifestCommittable(1, utcMills("2023-07-18T14:00:00")));
+        commit.commit(new ManifestCommittable(2, utcMills("2023-07-18T15:12:00")));
+        commit.commit(new ManifestCommittable(3, utcMills("2023-07-18T16:00:00")));
+
+        Snapshot snapshot1 =
+                new Snapshot(
+                        4,
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        Snapshot.CommitKind.APPEND,
+                        1000,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        tagManager.createTag(
+                snapshot1,
+                "non-auto-create-tag-shoule-expire",
+                Duration.ofMillis(500),
+                Collections.emptyList());
+
+        Snapshot snapshot2 =
+                new Snapshot(
+                        5,
+                        0L,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        0L,
+                        Snapshot.CommitKind.APPEND,
+                        1000,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null,
+                        null);
+        tagManager.createTag(
+                snapshot2,
+                "non-auto-create-tag-shoule-not-expire",
+                Duration.ofDays(1),
+                Collections.emptyList());
+
+        // test expire old tag by time-retained
+        Thread.sleep(1000);
+        commit.commit(new ManifestCommittable(6, utcMills("2023-07-18T19:00:00")));
+        assertThat(tagManager.allTagNames())
+                .containsOnly("2023-07-18 18", "non-auto-create-tag-shoule-not-expire");
         commit.close();
     }
 

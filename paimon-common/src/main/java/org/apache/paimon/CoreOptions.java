@@ -1014,6 +1014,12 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription("The maximum number of tags to retain.");
 
+    public static final ConfigOption<Duration> TAG_DEFAULT_TIME_RETAINED =
+            key("tag.default-time-retained")
+                    .durationType()
+                    .noDefaultValue()
+                    .withDescription("The maximum default time retained for all tags.");
+
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
                     .durationType()
@@ -1645,6 +1651,10 @@ public class CoreOptions implements Serializable {
 
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
+    }
+
+    public Duration tagDefaultTimeRetained() {
+        return options.get(TAG_DEFAULT_TIME_RETAINED);
     }
 
     public Duration snapshotWatermarkIdleTimeout() {

@@ -140,7 +140,11 @@ public class ExpireSnapshotsTest {
         // create tags for each snapshot
         for (int id = 1; id <= latestSnapshotId; id++) {
             Snapshot snapshot = snapshotManager.snapshot(id);
-            tagManager.createTag(snapshot, "tag" + id, Collections.emptyList());
+            tagManager.createTag(
+                    snapshot,
+                    "tag" + id,
+                    store.options().tagDefaultTimeRetained(),
+                    Collections.emptyList());
         }
 
         // randomly expire snapshots
