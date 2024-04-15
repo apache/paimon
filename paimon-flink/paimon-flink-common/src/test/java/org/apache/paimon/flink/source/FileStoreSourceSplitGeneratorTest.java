@@ -112,7 +112,8 @@ public class FileStoreSourceSplitGeneratorTest {
                             0, // not used
                             0, // not used
                             0, // not used
-                            0L // not used
+                            0L, // not used
+                            null // not used
                             ));
         }
         return DataSplit.builder()

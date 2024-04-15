@@ -168,6 +168,8 @@ public class KeyValueDataFileWriter
                 maxSeqNumber,
                 schemaId,
                 level,
-                deleteRecordCount);
+                deleteRecordCount,
+                // TODO: enable file filter for primary key table (e.g. deletion table).
+                null);
     }
 }

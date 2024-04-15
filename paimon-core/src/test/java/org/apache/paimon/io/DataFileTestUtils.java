@@ -51,7 +51,8 @@ public class DataFileTestUtils {
                 DataFileMeta.DUMMY_LEVEL,
                 Collections.emptyList(),
                 Timestamp.fromEpochMillis(100),
-                maxSeq - minSeq + 1);
+                maxSeq - minSeq + 1,
+                null);
     }
 
     public static DataFileMeta newFile() {
@@ -67,7 +68,8 @@ public class DataFileTestUtils {
                 0,
                 0,
                 0,
-                0L);
+                0L,
+                null);
     }
 
     public static DataFileMeta newFile(
@@ -89,7 +91,8 @@ public class DataFileTestUtils {
                 maxSequence,
                 0,
                 level,
-                deleteRowCount);
+                deleteRowCount,
+                null);
     }
 
     public static BinaryRow row(int i) {

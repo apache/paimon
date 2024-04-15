@@ -20,14 +20,19 @@ package org.apache.paimon.table;
 
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
+import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
+import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.schema.SchemaUtils;
@@ -41,6 +46,9 @@ import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.types.DataTypes;
+import org.apache.paimon.types.RowType;
 
 import org.junit.jupiter.api.Test;
 
@@ -349,6 +357,129 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
     }
 
     @Test
+    public void testBloomFilterInMemory() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("index_column", DataTypes.STRING())
+                        .field("index_column2", DataTypes.INT())
+                        .field("index_column3", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "index_column, index_column2, index_column3");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column.items",
+                                    "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column2.items",
+                                    "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column3.items",
+                                    "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "500 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("a"), 2, 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("c"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("b"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        TableScan.Plan plan =
+                table.newScan()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(1);
+    }
+
+    @Test
+    public void testBloomFilterInDisk() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("index_column", DataTypes.STRING())
+                        .field("index_column2", DataTypes.INT())
+                        .field("index_column3", DataTypes.BIGINT())
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "index_column, index_column2, index_column3");
+                            options.set(CoreOptions.FILE_INDEX_IN_MANIFEST_THRESHOLD.key(), "50 B");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(GenericRow.of(1, BinaryString.fromString("a"), 2, 3L));
+        write.write(GenericRow.of(1, BinaryString.fromString("c"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(GenericRow.of(1, BinaryString.fromString("b"), 2, 3L));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+
+        TableScan.Plan plan =
+                table.newScan()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(2);
+
+        RecordReader<InternalRow> reader =
+                table.newRead()
+                        .withFilter(
+                                new PredicateBuilder(rowType)
+                                        .equal(1, BinaryString.fromString("b")))
+                        .createReader(plan.splits());
+        reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
     public void testStreamingProjection() throws Exception {
         writeData();
         FileStoreTable table = createFileStoreTable();
@@ -590,6 +721,24 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         new SchemaManager(LocalFileIO.create(), tablePath),
                         new Schema(
                                 ROW_TYPE.getFields(),
+                                Collections.emptyList(),
+                                Collections.emptyList(),
+                                conf.toMap(),
+                                ""));
+        return new AppendOnlyFileStoreTable(FileIOFinder.find(tablePath), tablePath, tableSchema);
+    }
+
+    protected FileStoreTable createUnawareBucketFileStoreTable(
+            RowType rowType, Consumer<Options> configure) throws Exception {
+        Options conf = new Options();
+        conf.set(CoreOptions.PATH, tablePath.toString());
+        conf.set(CoreOptions.BUCKET, -1);
+        configure.accept(conf);
+        TableSchema tableSchema =
+                SchemaUtils.forceCommit(
+                        new SchemaManager(LocalFileIO.create(), tablePath),
+                        new Schema(
+                                rowType.getFields(),
                                 Collections.emptyList(),
                                 Collections.emptyList(),
                                 conf.toMap(),

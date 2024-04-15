@@ -46,12 +46,12 @@ import java.util.stream.Collectors;
  * File index file format. Put all column and offset in the header.
  *
  * <pre>
- * _______________________________________    _____________________
+ *   _____________________________________    _____________________
  * ｜     magic    ｜version｜head length ｜
  * ｜-------------------------------------｜
- * ｜              column size            ｜
+ * ｜            column number            ｜
  * ｜-------------------------------------｜
- * ｜   column 1        ｜   index size   ｜
+ * ｜   column 1        ｜ index number   ｜
  * ｜-------------------------------------｜
  * ｜  index name 1 ｜start pos ｜length  ｜
  * ｜-------------------------------------｜
@@ -59,7 +59,7 @@ import java.util.stream.Collectors;
  * ｜-------------------------------------｜
  * ｜  index name 3 ｜start pos ｜length  ｜
  * ｜-------------------------------------｜            HEAD
- * ｜   column 2        ｜   index size   ｜
+ * ｜   column 2        ｜ index number   ｜
  * ｜-------------------------------------｜
  * ｜  index name 1 ｜start pos ｜length  ｜
  * ｜-------------------------------------｜
@@ -82,14 +82,15 @@ import java.util.stream.Collectors;
  * magic:                            8 bytes long
  * version:                          4 bytes int
  * head length:                      4 bytes int
- * index type:                       var bytes utf (length + bytes)
- * body info size:                   4 bytes int (how many column items below)
- * column name:                      var bytes utf
+ * column number:                    4 bytes int
+ * column x:                         var bytes utf (length + bytes)
+ * index number:                     4 bytes int (how many column items below)
+ * index name x:                     var bytes utf
  * start pos:                        4 bytes int
  * length:                           4 bytes int
  * redundant length:                 4 bytes int (for compatibility with later versions, in this version, content is zero)
  * redundant bytes:                  var bytes (for compatibility with later version, in this version, is empty)
- * BODY:                             column bytes + column bytes + column bytes + .......
+ * BODY:                             column index bytes + column index bytes + column index bytes + .......
  *
  * </pre>
  */

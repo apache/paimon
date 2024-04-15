@@ -161,7 +161,8 @@ public class DataFileTestDataGenerator {
                         maxSequenceNumber,
                         0,
                         level,
-                        kvs.stream().filter(kv -> kv.valueKind().isRetract()).count()),
+                        kvs.stream().filter(kv -> kv.valueKind().isRetract()).count(),
+                        null),
                 kvs);
     }
 

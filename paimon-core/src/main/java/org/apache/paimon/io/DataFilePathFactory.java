@@ -34,6 +34,8 @@ public class DataFilePathFactory {
 
     public static final String CHANGELOG_FILE_PREFIX = "changelog-";
 
+    public static final String INDEX_PATH_SUFFIX = ".index";
+
     private final Path parent;
     private final String uuid;
 
@@ -68,6 +70,10 @@ public class DataFilePathFactory {
     @VisibleForTesting
     public String uuid() {
         return uuid;
+    }
+
+    public static Path toFileIndexPath(Path filePath) {
+        return new Path(filePath.getParent(), filePath.getName() + INDEX_PATH_SUFFIX);
     }
 
     public static String formatIdentifier(String fileName) {

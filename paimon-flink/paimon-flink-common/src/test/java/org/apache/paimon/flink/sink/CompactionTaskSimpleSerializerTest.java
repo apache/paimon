@@ -75,6 +75,7 @@ public class CompactionTaskSimpleSerializerTest {
                 1,
                 0,
                 0,
-                0L);
+                0L,
+                null);
     }
 }

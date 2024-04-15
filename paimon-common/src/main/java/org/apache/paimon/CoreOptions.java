@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.lookup.LookupStrategy;
@@ -69,6 +70,10 @@ public class CoreOptions implements Serializable {
     public static final String NESTED_KEY = "nested-key";
 
     public static final String DISTINCT = "distinct";
+
+    public static final String FILE_INDEX = "file-index";
+
+    public static final String COLUMNS = "columns";
 
     public static final ConfigOption<Integer> BUCKET =
             key("bucket")
@@ -134,6 +139,18 @@ public class CoreOptions implements Serializable {
                     .withDescription(
                             "Default file compression format, orc is lz4 and parquet is snappy. It can be overridden by "
                                     + FILE_COMPRESSION_PER_LEVEL.key());
+
+    public static final ConfigOption<MemorySize> FILE_INDEX_IN_MANIFEST_THRESHOLD =
+            key("file-index.in-manifest-threshold")
+                    .memoryType()
+                    .defaultValue(MemorySize.parse("500 B"))
+                    .withDescription("The threshold to store file index bytes in manifest.");
+
+    public static final ConfigOption<Boolean> FILE_INDEX_READ_ENABLED =
+            key("file-index.read.enabled")
+                    .booleanType()
+                    .defaultValue(true)
+                    .withDescription("Whether enabled read file index.");
 
     public static final ConfigOption<FileFormatType> MANIFEST_FORMAT =
             key("manifest.format")
@@ -1701,6 +1718,86 @@ public class CoreOptions implements Serializable {
 
     public boolean deletionVectorsEnabled() {
         return options.get(DELETION_VECTORS_ENABLED);
+    }
+
+    public FileIndexOptions indexColumnsOptions() {
+        String fileIndexPrefix = FILE_INDEX + ".";
+        String fileIndexColumnSuffix = "." + COLUMNS;
+
+        FileIndexOptions fileIndexOptions = new FileIndexOptions(fileIndexInManifestThreshold());
+        for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
+            String key = entry.getKey();
+            if (key.startsWith(fileIndexPrefix)) {
+                // start with file-index, decode this option
+                if (key.endsWith(fileIndexColumnSuffix)) {
+                    // if end with .column, set up indexes
+                    String indexType =
+                            key.substring(
+                                    fileIndexPrefix.length(),
+                                    key.length() - fileIndexColumnSuffix.length());
+                    String[] names = entry.getValue().split(",");
+                    for (String name : names) {
+                        if (StringUtils.isBlank(name)) {
+                            throw new IllegalArgumentException(
+                                    "Wrong option in " + key + ", should not have empty column");
+                        }
+                        fileIndexOptions.computeIfAbsent(name.trim(), indexType);
+                    }
+                } else {
+                    // else, it must be an option
+                    String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
+                    if (kv.length != 3) {
+                        continue;
+                    }
+                    String indexType = kv[0];
+                    String cname = kv[1];
+                    String opkey = kv[2];
+
+                    if (fileIndexOptions.get(cname, indexType) == null) {
+                        // if indexes have not set, find .column in options, then set them
+                        String columns =
+                                options.get(fileIndexPrefix + indexType + fileIndexColumnSuffix);
+                        if (columns == null) {
+                            continue;
+                        }
+                        String[] names = columns.split(",");
+                        boolean foundTarget = false;
+                        for (String name : names) {
+                            if (StringUtils.isBlank(name)) {
+                                throw new IllegalArgumentException(
+                                        "Wrong option in "
+                                                + key
+                                                + ", should not have empty column");
+                            }
+                            String tname = name.trim();
+                            if (cname.equals(tname)) {
+                                foundTarget = true;
+                            }
+                            fileIndexOptions.computeIfAbsent(name.trim(), indexType);
+                        }
+                        if (!foundTarget) {
+                            throw new IllegalArgumentException(
+                                    "Wrong option in "
+                                            + key
+                                            + ", can't found column "
+                                            + cname
+                                            + " in "
+                                            + columns);
+                        }
+                    }
+                    fileIndexOptions.get(cname, indexType).set(opkey, entry.getValue());
+                }
+            }
+        }
+        return fileIndexOptions;
+    }
+
+    public long fileIndexInManifestThreshold() {
+        return options.get(FILE_INDEX_IN_MANIFEST_THRESHOLD).getBytes();
+    }
+
+    public boolean fileIndexReadEnabled() {
+        return options.get(FILE_INDEX_READ_ENABLED);
     }
 
     /** Specifies the merge engine for table with primary key. */

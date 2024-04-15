@@ -85,7 +85,8 @@ public class FileStoreSourceSplitSerializerTest {
                 1,
                 0,
                 level,
-                0L);
+                0L,
+                null);
     }
 
     public static FileStoreSourceSplit newSourceSplit(
