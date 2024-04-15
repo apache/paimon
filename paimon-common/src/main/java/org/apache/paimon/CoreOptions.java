@@ -1802,28 +1802,20 @@ public class CoreOptions implements Serializable {
 
     /** Specifies the merge engine for table with primary key. */
     public enum MergeEngine implements DescribedEnum {
-        DEDUPLICATE("deduplicate", "De-duplicate and keep the last row.", true, true),
+        DEDUPLICATE("deduplicate", "De-duplicate and keep the last row."),
 
-        PARTIAL_UPDATE("partial-update", "Partial update non-null fields.", false, false),
+        PARTIAL_UPDATE("partial-update", "Partial update non-null fields."),
 
-        AGGREGATE("aggregation", "Aggregate fields with same primary key.", false, false),
+        AGGREGATE("aggregation", "Aggregate fields with same primary key."),
 
-        FIRST_ROW("first-row", "De-duplicate and keep the first row.", true, false);
+        FIRST_ROW("first-row", "De-duplicate and keep the first row.");
 
         private final String value;
         private final String description;
-        private final boolean supportBatchUpdate;
-        private final boolean supportBatchDelete;
 
-        MergeEngine(
-                String value,
-                String description,
-                boolean supportBatchUpdate,
-                boolean supportBatchDelete) {
+        MergeEngine(String value, String description) {
             this.value = value;
             this.description = description;
-            this.supportBatchUpdate = supportBatchUpdate;
-            this.supportBatchDelete = supportBatchDelete;
         }
 
         @Override
@@ -1834,26 +1826,6 @@ public class CoreOptions implements Serializable {
         @Override
         public InlineElement getDescription() {
             return text(description);
-        }
-
-        public boolean supportBatchUpdate() {
-            return supportBatchUpdate;
-        }
-
-        public boolean supportBatchDelete() {
-            return supportBatchDelete;
-        }
-
-        public static List<MergeEngine> supportBatchUpdateEngines() {
-            return Arrays.stream(MergeEngine.values())
-                    .filter(MergeEngine::supportBatchUpdate)
-                    .collect(Collectors.toList());
-        }
-
-        public static List<MergeEngine> supportBatchDeleteEngines() {
-            return Arrays.stream(MergeEngine.values())
-                    .filter(MergeEngine::supportBatchDelete)
-                    .collect(Collectors.toList());
         }
     }
 
