@@ -16,23 +16,33 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.operation;
+package org.apache.paimon.utils;
 
-import org.apache.paimon.predicate.Predicate;
-import org.apache.paimon.reader.RecordReader;
-import org.apache.paimon.table.source.DataSplit;
+import java.util.function.Supplier;
 
-import java.io.IOException;
+/** A class to lazy initialized field. */
+public class LazyField<T> {
 
-/**
- * Read operation which provides {@link RecordReader} creation.
- *
- * @param <T> type of record to read.
- */
-public interface FileStoreRead<T> {
+    private final Supplier<T> supplier;
 
-    FileStoreRead<T> withFilter(Predicate predicate);
+    private boolean initialized;
+    private T value;
 
-    /** Create a {@link RecordReader} from split. */
-    RecordReader<T> createReader(DataSplit split) throws IOException;
+    public LazyField(Supplier<T> supplier) {
+        this.supplier = supplier;
+    }
+
+    public T get() {
+        if (!initialized) {
+            T t = supplier.get();
+            value = t;
+            initialized = true;
+            return t;
+        }
+        return value;
+    }
+
+    public boolean initialized() {
+        return initialized;
+    }
 }

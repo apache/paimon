@@ -65,8 +65,8 @@ import java.util.stream.Stream;
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 import static org.assertj.core.api.Assertions.assertThat;
 
-/** Tests for {@link KeyValueFileStoreRead}. */
-public class KeyValueFileStoreReadTest {
+/** Tests for {@link MergeFileSplitRead}. */
+public class MergeFileSplitReadTest {
 
     @TempDir java.nio.file.Path tempDir;
 
@@ -226,7 +226,7 @@ public class KeyValueFileStoreReadTest {
         Map<BinaryRow, List<ManifestEntry>> filesGroupedByPartition =
                 scan.withSnapshot(snapshotId).plan().files().stream()
                         .collect(Collectors.groupingBy(ManifestEntry::partition));
-        KeyValueFileStoreRead read = store.newRead();
+        MergeFileSplitRead read = store.newRead();
         if (keyProjection != null) {
             read.withKeyProjection(keyProjection);
         }

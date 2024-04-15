@@ -64,8 +64,13 @@ import static org.apache.paimon.io.DataFilePathFactory.CHANGELOG_FILE_PREFIX;
 import static org.apache.paimon.predicate.PredicateBuilder.containsFields;
 import static org.apache.paimon.predicate.PredicateBuilder.splitAnd;
 
-/** {@link FileStoreRead} implementation for {@link KeyValueFileStore}. */
-public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
+/**
+ * An implementation for {@link KeyValueFileStore}, this class handle LSM merging and changelog row
+ * kind things, it will force reading fields such as sequence and row_kind.
+ *
+ * @see RawFileSplitRead If in batch mode and reading raw files, it is recommended to use this read.
+ */
+public class MergeFileSplitRead implements SplitRead<KeyValue> {
 
     private final TableSchema tableSchema;
     private final FileIO fileIO;
@@ -86,7 +91,7 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
 
     private boolean forceKeepDelete = false;
 
-    public KeyValueFileStoreRead(
+    public MergeFileSplitRead(
             CoreOptions options,
             TableSchema schema,
             RowType keyType,
@@ -105,13 +110,13 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         this.sequenceFields = options.sequenceField();
     }
 
-    public KeyValueFileStoreRead withKeyProjection(@Nullable int[][] projectedFields) {
+    public MergeFileSplitRead withKeyProjection(@Nullable int[][] projectedFields) {
         readerFactoryBuilder.withKeyProjection(projectedFields);
         this.keyProjectedFields = projectedFields;
         return this;
     }
 
-    public KeyValueFileStoreRead withValueProjection(@Nullable int[][] projectedFields) {
+    public MergeFileSplitRead withValueProjection(@Nullable int[][] projectedFields) {
         if (projectedFields == null) {
             return this;
         }
@@ -155,18 +160,22 @@ public class KeyValueFileStoreRead implements FileStoreRead<KeyValue> {
         return this;
     }
 
-    public KeyValueFileStoreRead withIOManager(IOManager ioManager) {
+    public MergeFileSplitRead withIOManager(IOManager ioManager) {
         this.mergeSorter.setIOManager(ioManager);
         return this;
     }
 
-    public KeyValueFileStoreRead forceKeepDelete() {
+    public MergeFileSplitRead forceKeepDelete() {
         this.forceKeepDelete = true;
         return this;
     }
 
     @Override
-    public FileStoreRead<KeyValue> withFilter(Predicate predicate) {
+    public MergeFileSplitRead withFilter(Predicate predicate) {
+        if (predicate == null) {
+            return this;
+        }
+
         List<Predicate> allFilters = new ArrayList<>();
         List<Predicate> pkFilters = null;
         List<String> primaryKeys = tableSchema.trimmedPrimaryKeys();

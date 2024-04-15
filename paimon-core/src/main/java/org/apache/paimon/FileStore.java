@@ -23,11 +23,11 @@ import org.apache.paimon.manifest.ManifestCacheFilter;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestList;
 import org.apache.paimon.operation.FileStoreCommit;
-import org.apache.paimon.operation.FileStoreRead;
 import org.apache.paimon.operation.FileStoreScan;
 import org.apache.paimon.operation.FileStoreWrite;
 import org.apache.paimon.operation.PartitionExpire;
 import org.apache.paimon.operation.SnapshotDeletion;
+import org.apache.paimon.operation.SplitRead;
 import org.apache.paimon.operation.TagDeletion;
 import org.apache.paimon.service.ServiceManager;
 import org.apache.paimon.stats.StatsFileHandler;
@@ -73,7 +73,7 @@ public interface FileStore<T> extends Serializable {
 
     StatsFileHandler newStatsFileHandler();
 
-    FileStoreRead<T> newRead();
+    SplitRead<T> newRead();
 
     FileStoreWrite<T> newWrite(String commitUser);
 

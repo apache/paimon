@@ -24,7 +24,6 @@ import org.apache.paimon.reader.RecordReader;
 import javax.annotation.Nullable;
 
 import java.io.IOException;
-import java.util.Optional;
 
 import static org.apache.paimon.utils.Preconditions.checkArgument;
 
@@ -38,18 +37,6 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
     public ApplyDeletionVectorReader(RecordReader<T> reader, DeletionVector deletionVector) {
         this.reader = reader;
         this.deletionVector = deletionVector;
-    }
-
-    public static <T> RecordReader<T> create(RecordReader<T> reader, Optional<DeletionVector> dv) {
-        return create(reader, dv.orElse(null));
-    }
-
-    public static <T> RecordReader<T> create(RecordReader<T> reader, @Nullable DeletionVector dv) {
-        if (dv == null) {
-            return reader;
-        }
-
-        return new ApplyDeletionVectorReader<>(reader, dv);
     }
 
     @Nullable
