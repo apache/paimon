@@ -18,6 +18,7 @@
 
 package org.apache.paimon.operation;
 
+import org.apache.paimon.casting.CastFieldGetter;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.deletionvectors.ApplyDeletionVectorReader;
@@ -25,9 +26,11 @@ import org.apache.paimon.deletionvectors.DeletionVector;
 import org.apache.paimon.format.FileFormatDiscover;
 import org.apache.paimon.format.FormatKey;
 import org.apache.paimon.format.FormatReaderContext;
+import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
+import org.apache.paimon.io.FileIndexFileReader;
 import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
@@ -68,7 +71,8 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
     private final TableSchema schema;
     private final FileFormatDiscover formatDiscover;
     private final FileStorePathFactory pathFactory;
-    private final Map<FormatKey, BulkFormatMapping> bulkFormatMappings;
+    private final Map<FormatKey, RawFileBulkFormatMapping> bulkFormatMappings;
+    private final boolean fileIndexReadEnabled;
 
     private int[][] projection;
 
@@ -80,13 +84,15 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             TableSchema schema,
             RowType rowType,
             FileFormatDiscover formatDiscover,
-            FileStorePathFactory pathFactory) {
+            FileStorePathFactory pathFactory,
+            boolean fileIndexReadEnabled) {
         this.fileIO = fileIO;
         this.schemaManager = schemaManager;
         this.schema = schema;
         this.formatDiscover = formatDiscover;
         this.pathFactory = pathFactory;
         this.bulkFormatMappings = new HashMap<>();
+        this.fileIndexReadEnabled = fileIndexReadEnabled;
 
         this.projection = Projection.range(0, rowType.getFieldCount()).toNestedIndexes();
     }
@@ -121,26 +127,38 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
 
         for (DataFileMeta file : split.dataFiles()) {
             String formatIdentifier = DataFilePathFactory.formatIdentifier(file.fileName());
-            BulkFormatMapping bulkFormatMapping =
+            RawFileBulkFormatMapping bulkFormatMapping =
                     bulkFormatMappings.computeIfAbsent(
                             new FormatKey(file.schemaId(), formatIdentifier),
                             this::createBulkFormatMapping);
 
             BinaryRow partition = split.partition();
-            suppliers.add(
+            ConcatRecordReader.ReaderSupplier<InternalRow> supplier =
                     () ->
                             createFileReader(
                                     partition,
                                     file,
                                     dataFilePathFactory,
                                     bulkFormatMapping,
-                                    dvFactory));
+                                    dvFactory);
+
+            suppliers.add(
+                    fileIndexReadEnabled
+                            ? () ->
+                                    new FileIndexFileReader(
+                                            fileIO,
+                                            bulkFormatMapping.getDataSchema(),
+                                            bulkFormatMapping.getDataFilters(),
+                                            dataFilePathFactory,
+                                            file,
+                                            supplier)
+                            : supplier);
         }
 
         return ConcatRecordReader.create(suppliers);
     }
 
-    private BulkFormatMapping createBulkFormatMapping(FormatKey key) {
+    private RawFileBulkFormatMapping createBulkFormatMapping(FormatKey key) {
         TableSchema tableSchema = schema;
         TableSchema dataSchema =
                 key.schemaId == schema.id() ? schema : schemaManager.schema(key.schemaId);
@@ -180,13 +198,15 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
         RowType projectedRowType =
                 Projection.of(dataProjection).project(dataSchema.logicalRowType());
 
-        return new BulkFormatMapping(
+        return new RawFileBulkFormatMapping(
                 indexCastMapping.getIndexMapping(),
                 indexCastMapping.getCastMapping(),
                 partitionPair,
                 formatDiscover
                         .discover(key.format)
-                        .createReaderFactory(projectedRowType, dataFilters));
+                        .createReaderFactory(projectedRowType, dataFilters),
+                dataSchema,
+                dataFilters);
     }
 
     private RecordReader<InternalRow> createFileReader(
@@ -212,5 +232,32 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             return new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
         }
         return fileRecordReader;
+    }
+
+    /** Bulk format mapping with data schema and data filters. */
+    private static class RawFileBulkFormatMapping extends BulkFormatMapping {
+
+        private final TableSchema dataSchema;
+        private final List<Predicate> dataFilters;
+
+        public RawFileBulkFormatMapping(
+                int[] indexMapping,
+                CastFieldGetter[] castMapping,
+                Pair<int[], RowType> partitionPair,
+                FormatReaderFactory bulkFormat,
+                TableSchema dataSchema,
+                List<Predicate> dataFilters) {
+            super(indexMapping, castMapping, partitionPair, bulkFormat);
+            this.dataSchema = dataSchema;
+            this.dataFilters = dataFilters;
+        }
+
+        public TableSchema getDataSchema() {
+            return dataSchema;
+        }
+
+        public List<Predicate> getDataFilters() {
+            return dataFilters;
+        }
     }
 }

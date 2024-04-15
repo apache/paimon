@@ -31,6 +31,7 @@ import org.apache.paimon.types.RowType;
 import javax.annotation.Nullable;
 
 import java.io.ByteArrayOutputStream;
+import java.io.Closeable;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayList;
@@ -39,7 +40,7 @@ import java.util.List;
 import java.util.Map;
 
 /** Index file writer. */
-public final class FileIndexWriter {
+public final class FileIndexWriter implements Closeable {
 
     public static final FileIndexResult EMPTY_RESULT = FileIndexResult.of(null, null);
 
@@ -93,6 +94,7 @@ public final class FileIndexWriter {
         indexMaintainers.forEach(indexMaintainer -> indexMaintainer.write(row));
     }
 
+    @Override
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
 

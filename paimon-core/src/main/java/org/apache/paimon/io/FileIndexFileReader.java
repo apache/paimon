@@ -53,6 +53,11 @@ public class FileIndexFileReader implements RecordReader<InternalRow> {
                             .filter(name -> name.endsWith(DataFilePathFactory.INDEX_PATH_SUFFIX))
                             .collect(Collectors.toList());
             if (!indexFiles.isEmpty()) {
+                if (indexFiles.size() > 1) {
+                    throw new RuntimeException(
+                            "Found more than one index file for one data file: "
+                                    + String.join(" and ", indexFiles));
+                }
                 // go to file index check
                 try (FileIndexPredicate predicate =
                         new FileIndexPredicate(
