@@ -30,7 +30,7 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.FileIndexFileReader;
+import org.apache.paimon.io.FileIndexRecordReader;
 import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
@@ -133,26 +133,14 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
                             this::createBulkFormatMapping);
 
             BinaryRow partition = split.partition();
-            ConcatRecordReader.ReaderSupplier<InternalRow> supplier =
+            suppliers.add(
                     () ->
                             createFileReader(
                                     partition,
                                     file,
                                     dataFilePathFactory,
                                     bulkFormatMapping,
-                                    dvFactory);
-
-            suppliers.add(
-                    fileIndexReadEnabled
-                            ? () ->
-                                    new FileIndexFileReader(
-                                            fileIO,
-                                            bulkFormatMapping.getDataSchema(),
-                                            bulkFormatMapping.getDataFilters(),
-                                            dataFilePathFactory,
-                                            file,
-                                            supplier)
-                            : supplier);
+                                    dvFactory));
         }
 
         return ConcatRecordReader.create(suppliers);
@@ -213,25 +201,40 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             BinaryRow partition,
             DataFileMeta file,
             DataFilePathFactory dataFilePathFactory,
-            BulkFormatMapping bulkFormatMapping,
+            RawFileBulkFormatMapping bulkFormatMapping,
             DeletionVector.Factory dvFactory)
             throws IOException {
-        FileRecordReader fileRecordReader =
-                new FileRecordReader(
-                        bulkFormatMapping.getReaderFactory(),
-                        new FormatReaderContext(
-                                fileIO,
-                                dataFilePathFactory.toPath(file.fileName()),
-                                file.fileSize()),
-                        bulkFormatMapping.getIndexMapping(),
-                        bulkFormatMapping.getCastMapping(),
-                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
+        ConcatRecordReader.ReaderSupplier<InternalRow> supplier =
+                () -> {
+                    FileRecordReader fileRecordReader =
+                            new FileRecordReader(
+                                    bulkFormatMapping.getReaderFactory(),
+                                    new FormatReaderContext(
+                                            fileIO,
+                                            dataFilePathFactory.toPath(file.fileName()),
+                                            file.fileSize()),
+                                    bulkFormatMapping.getIndexMapping(),
+                                    bulkFormatMapping.getCastMapping(),
+                                    PartitionUtils.create(
+                                            bulkFormatMapping.getPartitionPair(), partition));
 
-        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
-        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-            return new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
-        }
-        return fileRecordReader;
+                    Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+                    if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+                        return new ApplyDeletionVectorReader<>(
+                                fileRecordReader, deletionVector.get());
+                    }
+                    return fileRecordReader;
+                };
+
+        return fileIndexReadEnabled
+                ? new FileIndexRecordReader(
+                        fileIO,
+                        bulkFormatMapping.getDataSchema(),
+                        bulkFormatMapping.getDataFilters(),
+                        dataFilePathFactory,
+                        file,
+                        supplier)
+                : supplier.get();
     }
 
     /** Bulk format mapping with data schema and data filters. */

@@ -34,11 +34,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 /** File index reader, do the filter in the constructor. */
-public class FileIndexFileReader implements RecordReader<InternalRow> {
+public class FileIndexRecordReader implements RecordReader<InternalRow> {
 
     private final RecordReader<InternalRow> reader;
 
-    public FileIndexFileReader(
+    public FileIndexRecordReader(
             FileIO fileIO,
             TableSchema dataSchema,
             List<Predicate> dataFilter,
