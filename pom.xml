@@ -493,6 +493,10 @@ under the License.
                         <junit.jupiter.extensions.autodetection.enabled>true</junit.jupiter.extensions.autodetection.enabled>
                     </systemPropertyVariables>
                     <argLine>-Xms256m -Xmx2048m -Dmvn.forkNumber=${surefire.forkNumber} -XX:+UseG1GC</argLine>
+                    <!-- By removing all default exclusions the nested classes get executed too -->
+                    <excludes>
+                        <exclude/>
+                    </excludes>
                 </configuration>
                 <executions>
                     <!--execute all the unit tests-->
