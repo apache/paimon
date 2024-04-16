@@ -133,12 +133,15 @@ public abstract class MergeTreeTestBase {
     }
 
     private void recreateMergeTree(long targetFileSize) {
-        Options configuration = new Options();
-        configuration.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
-        configuration.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
-        configuration.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
-        configuration.set(CoreOptions.SORT_ENGINE, getSortEngine());
-        options = new CoreOptions(configuration);
+        Options options = new Options();
+        options.set(CoreOptions.WRITE_BUFFER_SIZE, new MemorySize(4096 * 3));
+        options.set(CoreOptions.PAGE_SIZE, new MemorySize(4096));
+        options.set(CoreOptions.TARGET_FILE_SIZE, new MemorySize(targetFileSize));
+        options.set(CoreOptions.SORT_ENGINE, getSortEngine());
+        options.set(
+                CoreOptions.NUM_SORTED_RUNS_STOP_TRIGGER,
+                options.get(CoreOptions.NUM_SORTED_RUNS_COMPACTION_TRIGGER) + 1);
+        this.options = new CoreOptions(options);
         RowType keyType = new RowType(singletonList(new DataField(0, "k", new IntType())));
         RowType valueType = new RowType(singletonList(new DataField(0, "v", new IntType())));
 
@@ -188,9 +191,9 @@ public abstract class MergeTreeTestBase {
                         valueType,
                         flushingAvro,
                         pathFactoryMap,
-                        options.targetFileSize());
-        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
-        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, options);
+                        this.options.targetFileSize());
+        writerFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
+        compactWriterFactory = writerFactoryBuilder.build(BinaryRow.EMPTY_ROW, 0, this.options);
         writer = createMergeTreeWriter(Collections.emptyList());
     }
 

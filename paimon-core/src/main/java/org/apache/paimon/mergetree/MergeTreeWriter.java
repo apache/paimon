@@ -241,10 +241,18 @@ public class MergeTreeWriter implements RecordWriter<KeyValue>, MemoryOwner {
     @Override
     public CommitIncrement prepareCommit(boolean waitCompaction) throws Exception {
         flushWriteBuffer(waitCompaction, false);
-        trySyncLatestCompaction(
-                waitCompaction
-                        || commitForceCompact
-                        || compactManager.shouldWaitForPreparingCheckpoint());
+        if (commitForceCompact) {
+            waitCompaction = true;
+        }
+        // Decide again whether to wait here.
+        // For example, in the case of repeated failures in writing, it is possible that Level 0
+        // files were successfully committed, but failed to restart during the compaction phase,
+        // which may result in an increasing number of Level 0 files. This wait can avoid this
+        // situation.
+        if (compactManager.shouldWaitForPreparingCheckpoint()) {
+            waitCompaction = true;
+        }
+        trySyncLatestCompaction(waitCompaction);
         return drainIncrement();
     }
 
