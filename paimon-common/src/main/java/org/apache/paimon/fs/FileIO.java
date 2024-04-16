@@ -337,9 +337,9 @@ public interface FileIO extends Serializable {
         List<IOException> ioExceptionList = new ArrayList<>();
 
         // load preferIO
-        FileIOLoader perferIOLoader = config.preferIO();
+        FileIOLoader preferIOLoader = config.preferIO();
         try {
-            loader = checkAccess(perferIOLoader, path, config);
+            loader = checkAccess(preferIOLoader, path, config);
         } catch (IOException ioException) {
             ioExceptionList.add(ioException);
         }
@@ -403,10 +403,10 @@ public interface FileIO extends Serializable {
         if (loader == null) {
             String fallbackMsg = "";
             String preferMsg = "";
-            if (perferIOLoader != null) {
+            if (preferIOLoader != null) {
                 preferMsg =
                         " "
-                                + perferIOLoader.getClass().getSimpleName()
+                                + preferIOLoader.getClass().getSimpleName()
                                 + " also cannot access this path.";
             }
             if (fallbackIO != null) {
