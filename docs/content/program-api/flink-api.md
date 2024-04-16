@@ -149,6 +149,8 @@ public class ReadFromTable {
         Catalog catalog = FlinkCatalogFactory.createPaimonCatalog(catalogOptions);
         Table table = catalog.getTable(Identifier.create("my_db", "T"));
 
+        // table = table.copy(Collections.singletonMap("scan.file-creation-time-millis", "..."));
+        
         FlinkSourceBuilder builder = new FlinkSourceBuilder(table).env(env);
         
         // builder.sourceBounded(true);
