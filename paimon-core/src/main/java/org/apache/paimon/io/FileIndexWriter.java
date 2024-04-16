@@ -227,7 +227,7 @@ public final class FileIndexWriter implements Closeable {
     /** File index writer for map data type. */
     private static class MapFileIndexMaintainer {
 
-        private static final String NESTED_FIELDS = "nested-fields";
+        private static final String NESTED_FIELDS = "map-keys";
 
         private final String columnName;
         private final String indexType;
