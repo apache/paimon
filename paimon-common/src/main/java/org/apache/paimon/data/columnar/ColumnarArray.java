@@ -44,15 +44,6 @@ public final class ColumnarArray implements InternalArray, DataSetters, Serializ
         this.numElements = numElements;
     }
 
-    public ColumnVector foo() {
-        return new ColumnVector() {
-            @Override
-            public boolean isNullAt(int i) {
-                return false;
-            }
-        };
-    }
-
     @Override
     public int size() {
         return numElements;
