@@ -18,8 +18,8 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.AbstractFileStore;
 import org.apache.paimon.CoreOptions;
+import org.apache.paimon.FileStore;
 import org.apache.paimon.Snapshot;
 import org.apache.paimon.TestFileStore;
 import org.apache.paimon.data.BinaryRow;
@@ -1182,7 +1182,7 @@ public abstract class FileStoreTableTestBase {
         SnapshotManager snapshotManager = table.snapshotManager();
         long latestSnapshotId = snapshotManager.latestSnapshotId();
 
-        AbstractFileStore<?> store = (AbstractFileStore<?>) table.store();
+        FileStore<?> store = table.store();
         Set<Path> filesInUse =
                 TestFileStore.getFilesInUse(
                         latestSnapshotId,

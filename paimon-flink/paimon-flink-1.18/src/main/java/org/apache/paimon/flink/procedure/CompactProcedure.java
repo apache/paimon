@@ -18,7 +18,6 @@
 
 package org.apache.paimon.flink.procedure;
 
-import org.apache.paimon.catalog.AbstractCatalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.action.CompactAction;
 import org.apache.paimon.flink.action.SortCompactAction;
@@ -78,8 +77,8 @@ public class CompactProcedure extends ProcedureBase {
             String orderByColumns,
             String tableOptions)
             throws Exception {
-        String warehouse = ((AbstractCatalog) catalog).warehouse();
-        Map<String, String> catalogOptions = ((AbstractCatalog) catalog).options();
+        String warehouse = catalog.warehouse();
+        Map<String, String> catalogOptions = catalog.options();
         Map<String, String> tableConf =
                 StringUtils.isBlank(tableOptions)
                         ? Collections.emptyMap()

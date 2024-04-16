@@ -45,3 +45,8 @@ org.apache.paimon.flink.procedure.MigrateFileProcedure
 org.apache.paimon.flink.procedure.RemoveOrphanFilesProcedure
 org.apache.paimon.flink.procedure.QueryServiceProcedure
 org.apache.paimon.flink.procedure.ExpireSnapshotsProcedure
+org.apache.paimon.flink.procedure.privilege.InitFileBasedPrivilegeProcedure
+org.apache.paimon.flink.procedure.privilege.CreatePrivilegedUserProcedure
+org.apache.paimon.flink.procedure.privilege.DropPrivilegedUserProcedure
+org.apache.paimon.flink.procedure.privilege.GrantPrivilegeToUserProcedure
+org.apache.paimon.flink.procedure.privilege.RevokePrivilegeFromUserProcedure
