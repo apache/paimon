@@ -1415,7 +1415,7 @@ public class CoreOptions implements Serializable {
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
-            stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
+            stopTrigger = MathUtils.addSafely(numSortedRunCompactionTrigger(), 5);
         }
         return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
