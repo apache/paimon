@@ -23,4 +23,6 @@ import org.apache.paimon.data.InternalArray;
 /** Array column vector. */
 public interface ArrayColumnVector extends ColumnVector {
     InternalArray getArray(int i);
+
+    ColumnVector getColumnVector();
 }

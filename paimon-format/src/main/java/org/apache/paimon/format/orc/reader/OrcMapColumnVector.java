@@ -46,4 +46,14 @@ public class OrcMapColumnVector extends AbstractOrcColumnVector
         long length = hiveVector.lengths[i];
         return new ColumnarMap(keyPaimonVector, valuePaimonVector, (int) offset, (int) length);
     }
+
+    @Override
+    public ColumnVector getKeyColumnVector() {
+        return keyPaimonVector;
+    }
+
+    @Override
+    public ColumnVector getValueColumnVector() {
+        return valuePaimonVector;
+    }
 }
