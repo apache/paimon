@@ -65,8 +65,8 @@ public class CreateTagActionFactory implements ActionFactory {
                         tablePath.f2,
                         catalogConfig,
                         tagName,
-                        timeRetained,
-                        snapshot);
+                        snapshot,
+                        timeRetained);
         return Optional.of(action);
     }
 

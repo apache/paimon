@@ -30,19 +30,19 @@ import java.util.List;
 public class TagAutoManager {
 
     private final TagAutoCreation tagAutoCreation;
-    private final TagAutoExpire tagAutoExpire;
+    private final TagTimeExpire tagTimeExpire;
 
-    private TagAutoManager(TagAutoCreation tagAutoCreation, TagAutoExpire tagAutoExpire) {
+    private TagAutoManager(TagAutoCreation tagAutoCreation, TagTimeExpire tagTimeExpire) {
         this.tagAutoCreation = tagAutoCreation;
-        this.tagAutoExpire = tagAutoExpire;
+        this.tagTimeExpire = tagTimeExpire;
     }
 
     public void run() {
         if (tagAutoCreation != null) {
             tagAutoCreation.run();
         }
-        if (tagAutoExpire != null) {
-            tagAutoExpire.run();
+        if (tagTimeExpire != null) {
+            tagTimeExpire.run();
         }
     }
 
@@ -57,8 +57,9 @@ public class TagAutoManager {
         return new TagAutoManager(
                 extractor == null
                         ? null
-                        : TagAutoCreation.create(options, snapshotManager, tagManager, callbacks),
-                TagAutoExpire.create(options, snapshotManager, tagManager, tagDeletion, callbacks));
+                        : TagAutoCreation.create(
+                                options, snapshotManager, tagManager, tagDeletion, callbacks),
+                TagTimeExpire.create(snapshotManager, tagManager, tagDeletion, callbacks));
     }
 
     public TagAutoCreation getTagAutoCreation() {

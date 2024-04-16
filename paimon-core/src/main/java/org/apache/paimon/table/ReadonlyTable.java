@@ -18,15 +18,12 @@
 
 package org.apache.paimon.table;
 
-import org.apache.paimon.annotation.Experimental;
 import org.apache.paimon.stats.Statistics;
 import org.apache.paimon.table.sink.BatchWriteBuilder;
 import org.apache.paimon.table.sink.InnerTableCommit;
 import org.apache.paimon.table.sink.InnerTableWrite;
 import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.InnerStreamTableScan;
-
-import javax.annotation.Nullable;
 
 import java.time.Duration;
 import java.util.Collections;
@@ -113,8 +110,8 @@ public interface ReadonlyTable extends InnerTable {
                         this.getClass().getSimpleName()));
     }
 
-    @Experimental
-    default void createTag(String tagName, @Nullable Duration timeRetained, long fromSnapshotId) {
+    @Override
+    default void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support createTag.",
@@ -129,8 +126,8 @@ public interface ReadonlyTable extends InnerTable {
                         this.getClass().getSimpleName()));
     }
 
-    @Experimental
-    default void createTag(String tagName, @Nullable Duration timeRetained) {
+    @Override
+    default void createTag(String tagName, Duration timeRetained) {
         throw new UnsupportedOperationException(
                 String.format(
                         "Readonly Table %s does not support createTag.",

@@ -26,8 +26,6 @@ import org.apache.paimon.table.sink.StreamWriteBuilder;
 import org.apache.paimon.table.source.ReadBuilder;
 import org.apache.paimon.types.RowType;
 
-import javax.annotation.Nullable;
-
 import java.io.Serializable;
 import java.time.Duration;
 import java.util.List;
@@ -80,14 +78,14 @@ public interface Table extends Serializable {
     void createTag(String tagName, long fromSnapshotId);
 
     @Experimental
-    void createTag(String tagName, @Nullable Duration timeRetained, long fromSnapshotId);
+    void createTag(String tagName, long fromSnapshotId, Duration timeRetained);
 
     /** Create a tag from latest snapshot. */
     @Experimental
     void createTag(String tagName);
 
     @Experimental
-    void createTag(String tagName, @Nullable Duration timeRetained);
+    void createTag(String tagName, Duration timeRetained);
 
     /** Delete a tag by name. */
     @Experimental

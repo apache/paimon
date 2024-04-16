@@ -65,7 +65,7 @@ class BranchActionITCase extends ActionITCaseBase {
         TagManager tagManager = new TagManager(table.fileIO(), table.location());
         callProcedure(
                 String.format(
-                        "CALL sys.create_tag('%s.%s', 'tag2', '5 d', 2)", database, tableName));
+                        "CALL sys.create_tag('%s.%s', 'tag2', 2, '5 d')", database, tableName));
         assertThat(tagManager.tagExists("tag2")).isTrue();
 
         BranchManager branchManager = table.branchManager();

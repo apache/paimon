@@ -46,7 +46,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.SortedMap;
 import java.util.concurrent.ThreadLocalRandom;
 
 import static org.apache.paimon.operation.FileStoreTestUtils.commitData;
@@ -122,14 +121,14 @@ public class TagManagerTest {
         tagManager.createTag(
                 snapshotManager.snapshot(1), "tag", Duration.ofDays(1), Collections.emptyList());
         assertThat(tagManager.tagExists("tag")).isTrue();
-        SortedMap<Tag, List<String>> tagsWithTimeRetained = tagManager.tagsWithTimeRetained();
-        Assertions.assertEquals(1, tagsWithTimeRetained.size());
-        Tag tag = tagsWithTimeRetained.firstKey();
+        List<Pair<Tag, String>> tags = tagManager.tagObjects();
+        Assertions.assertEquals(1, tags.size());
+        Tag tag = tags.get(0).getKey();
         String tagJson = tag.toJson();
         Assertions.assertTrue(
                 tagJson.contains("tagCreateTime") && tagJson.contains("tagTimeRetained"));
         Assertions.assertEquals(tag, Tag.fromJson(tagJson));
-        assertThat(tagsWithTimeRetained.get(tag)).contains("tag");
+        assertThat(tags.get(0).getValue()).contains("tag");
     }
 
     private TestFileStore createStore(TestKeyValueGenerator.GeneratorMode mode, int buckets)
