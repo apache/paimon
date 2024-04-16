@@ -130,7 +130,11 @@ case class PaimonSparkWriter(table: FileStoreTable) {
         // Topology: input -> shuffle by special key & partition hash -> bucket-assigner -> shuffle by partition & bucket
         val numParallelism = Option(table.coreOptions.dynamicBucketAssignerParallelism)
           .map(_.toInt)
-          .getOrElse(sparkSession.sparkContext.defaultParallelism)
+          .getOrElse {
+            val defaultParallelism = sparkSession.sparkContext.defaultParallelism
+            val numShufflePartitions = sparkSession.sessionState.conf.numShufflePartitions
+            Math.max(defaultParallelism, numShufflePartitions)
+          }
         val numAssigners = Option(table.coreOptions.dynamicBucketInitialBuckets)
           .map(initialBuckets => Math.min(initialBuckets.toInt, numParallelism))
           .getOrElse(numParallelism)
