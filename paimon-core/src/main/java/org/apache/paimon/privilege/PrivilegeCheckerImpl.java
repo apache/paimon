@@ -24,15 +24,15 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Set;
 
-/** {@link PrivilegeChecker} based on Paimon table files. */
-public class FileBasedPrivilegeChecker implements PrivilegeChecker {
+/** Default implementation of {@link PrivilegeChecker}. */
+public class PrivilegeCheckerImpl implements PrivilegeChecker {
 
     private static final long serialVersionUID = 1L;
 
     private final String user;
     private final Map<String, Set<PrivilegeType>> privileges;
 
-    public FileBasedPrivilegeChecker(String user, Map<String, Set<PrivilegeType>> privileges) {
+    public PrivilegeCheckerImpl(String user, Map<String, Set<PrivilegeType>> privileges) {
         this.user = user;
         this.privileges = privileges;
     }
@@ -148,7 +148,7 @@ public class FileBasedPrivilegeChecker implements PrivilegeChecker {
         if (o == null || getClass() != o.getClass()) {
             return false;
         }
-        FileBasedPrivilegeChecker that = (FileBasedPrivilegeChecker) o;
+        PrivilegeCheckerImpl that = (PrivilegeCheckerImpl) o;
         return Objects.equals(user, that.user) && Objects.equals(privileges, that.privileges);
     }
 }

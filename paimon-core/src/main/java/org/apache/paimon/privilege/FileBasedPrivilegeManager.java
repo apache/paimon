@@ -253,7 +253,7 @@ public class FileBasedPrivilegeManager implements PrivilegeManager {
         } catch (Exception e) {
             throw new RuntimeException(e);
         }
-        return new FileBasedPrivilegeChecker(user, privileges);
+        return new PrivilegeCheckerImpl(user, privileges);
     }
 
     private void createUserImpl(String user, String password) {

@@ -42,6 +42,7 @@ import org.apache.paimon.utils.BranchManager;
 import org.apache.paimon.utils.SnapshotManager;
 import org.apache.paimon.utils.TagManager;
 
+import java.time.Duration;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
@@ -150,15 +151,27 @@ public class PrivilegedFileStoreTable implements FileStoreTable {
     }
 
     @Override
+    public void createTag(String tagName) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createTag(tagName);
+    }
+
+    @Override
     public void createTag(String tagName, long fromSnapshotId) {
         privilegeChecker.assertCanInsert(identifier);
         wrapped.createTag(tagName, fromSnapshotId);
     }
 
     @Override
-    public void createTag(String tagName) {
+    public void createTag(String tagName, Duration timeRetained) {
         privilegeChecker.assertCanInsert(identifier);
-        wrapped.createTag(tagName);
+        wrapped.createTag(tagName, timeRetained);
+    }
+
+    @Override
+    public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        privilegeChecker.assertCanInsert(identifier);
+        wrapped.createTag(tagName, fromSnapshotId, timeRetained);
     }
 
     @Override
