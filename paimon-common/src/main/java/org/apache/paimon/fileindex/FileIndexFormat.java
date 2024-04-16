@@ -288,13 +288,13 @@ public final class FileIndexFormat {
         }
 
         public FileIndexReader readColumnIndex(String columnName, String indexType) {
-
             return readColumnInputStream(columnName, indexType)
                     .map(
                             serializedBytes ->
                                     FileIndexer.create(
                                                     indexType,
-                                                    fields.get(columnName).type(),
+                                                    FileIndexCommon.getFieldType(
+                                                            fields, columnName),
                                                     new Options())
                                             .createReader(serializedBytes))
                     .orElse(null);

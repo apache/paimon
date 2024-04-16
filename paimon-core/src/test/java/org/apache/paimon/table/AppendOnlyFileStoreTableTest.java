@@ -21,6 +21,7 @@ package org.apache.paimon.table;
 import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryRow;
 import org.apache.paimon.data.BinaryString;
+import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
@@ -30,6 +31,8 @@ import org.apache.paimon.fs.Path;
 import org.apache.paimon.fs.local.LocalFileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.predicate.Equal;
+import org.apache.paimon.predicate.LeafPredicate;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.reader.RecordReader;
@@ -476,6 +479,147 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                 new PredicateBuilder(rowType)
                                         .equal(1, BinaryString.fromString("b")))
                         .createReader(plan.splits());
+        reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
+    }
+
+    @Test
+    public void testBloomFilterForMapField() throws Exception {
+        RowType rowType =
+                RowType.builder()
+                        .field("id", DataTypes.INT())
+                        .field("index_column", DataTypes.STRING())
+                        .field("index_column2", DataTypes.INT())
+                        .field(
+                                "index_column3",
+                                DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()))
+                        .build();
+        // in unaware-bucket mode, we split files into splits all the time
+        FileStoreTable table =
+                createUnawareBucketFileStoreTable(
+                        rowType,
+                        options -> {
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + "."
+                                            + CoreOptions.COLUMNS,
+                                    "index_column, index_column2, index_column3");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column3.nested-fields",
+                                    "a,b,c,d");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column.items",
+                                    "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column2.items",
+                                    "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column3.items",
+                                    "150");
+                        });
+
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        List<CommitMessage> result = new ArrayList<>();
+        write.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("a"),
+                        2,
+                        new GenericMap(
+                                new HashMap<BinaryString, BinaryString>() {
+                                    {
+                                        put(
+                                                BinaryString.fromString("a"),
+                                                BinaryString.fromString("10086"));
+                                        put(
+                                                BinaryString.fromString("b"),
+                                                BinaryString.fromString("1008611"));
+                                        put(
+                                                BinaryString.fromString("c"),
+                                                BinaryString.fromString("1008612"));
+                                        put(
+                                                BinaryString.fromString("d"),
+                                                BinaryString.fromString("1008613"));
+                                    }
+                                })));
+        write.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("c"),
+                        2,
+                        new GenericMap(
+                                new HashMap<BinaryString, BinaryString>() {
+                                    {
+                                        put(
+                                                BinaryString.fromString("a"),
+                                                BinaryString.fromString("我是一个粉刷匠"));
+                                        put(
+                                                BinaryString.fromString("b"),
+                                                BinaryString.fromString("啦啦啦"));
+                                        put(
+                                                BinaryString.fromString("c"),
+                                                BinaryString.fromString("快乐的粉刷匠"));
+                                        put(
+                                                BinaryString.fromString("d"),
+                                                BinaryString.fromString("大风大雨去刷墙"));
+                                    }
+                                })));
+        result.addAll(write.prepareCommit(true, 0));
+        write.write(
+                GenericRow.of(
+                        1,
+                        BinaryString.fromString("b"),
+                        2,
+                        new GenericMap(
+                                new HashMap<BinaryString, BinaryString>() {
+                                    {
+                                        put(
+                                                BinaryString.fromString("a"),
+                                                BinaryString.fromString("I am a good girl"));
+                                        put(
+                                                BinaryString.fromString("b"),
+                                                BinaryString.fromString("A good girl"));
+                                        put(
+                                                BinaryString.fromString("c"),
+                                                BinaryString.fromString("Good girl"));
+                                        put(
+                                                BinaryString.fromString("d"),
+                                                BinaryString.fromString("Girl"));
+                                    }
+                                })));
+        result.addAll(write.prepareCommit(true, 0));
+        commit.commit(0, result);
+        result.clear();
+        Predicate predicate =
+                new LeafPredicate(
+                        Equal.INSTANCE,
+                        DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
+                        3,
+                        "index_column3##a",
+                        Collections.singletonList(BinaryString.fromString("I am a good girl")));
+        TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
+        List<DataFileMeta> metas =
+                plan.splits().stream()
+                        .flatMap(split -> ((DataSplit) split).dataFiles().stream())
+                        .collect(Collectors.toList());
+        assertThat(metas.size()).isEqualTo(2);
+
+        RecordReader<InternalRow> reader =
+                table.newRead().withFilter(predicate).createReader(plan.splits());
         reader.forEachRemaining(row -> assertThat(row.getString(1).toString()).isEqualTo("b"));
     }
 

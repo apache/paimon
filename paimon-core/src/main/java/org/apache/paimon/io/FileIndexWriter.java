@@ -18,7 +18,10 @@
 
 package org.apache.paimon.io;
 
+import org.apache.paimon.data.InternalArray;
+import org.apache.paimon.data.InternalMap;
 import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexFormat;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.fileindex.FileIndexer;
@@ -26,6 +29,9 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.types.DataField;
+import org.apache.paimon.types.DataType;
+import org.apache.paimon.types.DataTypeRoot;
+import org.apache.paimon.types.MapType;
 import org.apache.paimon.types.RowType;
 
 import javax.annotation.Nullable;
@@ -51,7 +57,8 @@ public final class FileIndexWriter implements Closeable {
     // if the filter size greater than fileIndexInManifestThreshold, we put it in file
     private final long inManifestThreshold;
 
-    private final List<IndexMaintainer> indexMaintainers = new ArrayList<>();
+    private final List<FileIndexMaintainer> fileIndexMaintainers = new ArrayList<>();
+    private final List<MapFileIndexMaintainer> mapFileIndexMaintainers = new ArrayList<>();
 
     private String resultFileName;
 
@@ -75,33 +82,58 @@ public final class FileIndexWriter implements Closeable {
             if (field == null) {
                 throw new IllegalArgumentException(columnName + " does not exist in column fields");
             }
+
             for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
                 String indexType = typeEntry.getKey();
-                indexMaintainers.add(
-                        new IndexMaintainer(
-                                columnName,
-                                indexType,
-                                FileIndexer.create(indexType, field.type(), typeEntry.getValue())
-                                        .createWriter(),
-                                InternalRow.createFieldGetter(
-                                        field.type(), index.get(columnName))));
+                if (field.type().getTypeRoot() == DataTypeRoot.MAP) {
+                    MapType mapType = (MapType) field.type();
+                    mapFileIndexMaintainers.add(
+                            new MapFileIndexMaintainer(
+                                    columnName,
+                                    indexType,
+                                    mapType.getKeyType(),
+                                    mapType.getValueType(),
+                                    typeEntry.getValue(),
+                                    index.get(columnName)));
+                } else {
+                    fileIndexMaintainers.add(
+                            new FileIndexMaintainer(
+                                    columnName,
+                                    indexType,
+                                    FileIndexer.create(
+                                                    indexType, field.type(), typeEntry.getValue())
+                                            .createWriter(),
+                                    InternalRow.createFieldGetter(
+                                            field.type(), index.get(columnName))));
+                }
             }
         }
         this.inManifestThreshold = fileIndexOptions.fileIndexInManifestThreshold();
     }
 
     public void write(InternalRow row) {
-        indexMaintainers.forEach(indexMaintainer -> indexMaintainer.write(row));
+        fileIndexMaintainers.forEach(fileIndexMaintainer -> fileIndexMaintainer.write(row));
+        mapFileIndexMaintainers.forEach(
+                mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
     }
 
     @Override
     public void close() throws IOException {
         Map<String, Map<String, byte[]>> indexMaps = new HashMap<>();
 
-        for (IndexMaintainer indexMaintainer : indexMaintainers) {
+        for (FileIndexMaintainer fileIndexMaintainer : fileIndexMaintainers) {
             indexMaps
-                    .computeIfAbsent(indexMaintainer.getColumnName(), k -> new HashMap<>())
-                    .put(indexMaintainer.getIndexType(), indexMaintainer.serializedBytes());
+                    .computeIfAbsent(fileIndexMaintainer.getColumnName(), k -> new HashMap<>())
+                    .put(fileIndexMaintainer.getIndexType(), fileIndexMaintainer.serializedBytes());
+        }
+
+        for (MapFileIndexMaintainer mapFileIndexMaintainer : mapFileIndexMaintainers) {
+            Map<String, byte[]> mapBytes = mapFileIndexMaintainer.serializedBytes();
+            for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
+                indexMaps
+                        .computeIfAbsent(entry.getKey(), k -> new HashMap<>())
+                        .put(mapFileIndexMaintainer.getIndexType(), entry.getValue());
+            }
         }
 
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
@@ -157,14 +189,14 @@ public final class FileIndexWriter implements Closeable {
     }
 
     /** One index maintainer for one column. */
-    private static class IndexMaintainer {
+    private static class FileIndexMaintainer {
 
         private final String columnName;
         private final String indexType;
         private final org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter;
         private final InternalRow.FieldGetter getter;
 
-        public IndexMaintainer(
+        public FileIndexMaintainer(
                 String columnName,
                 String indexType,
                 org.apache.paimon.fileindex.FileIndexWriter fileIndexWriter,
@@ -189,6 +221,78 @@ public final class FileIndexWriter implements Closeable {
 
         public byte[] serializedBytes() {
             return fileIndexWriter.serializedBytes();
+        }
+    }
+
+    /** File index writer for map data type. */
+    private static class MapFileIndexMaintainer {
+
+        private static final String NESTED_FIELDS = "nested-fields";
+
+        private final String columnName;
+        private final String indexType;
+        private final Map<String, org.apache.paimon.fileindex.FileIndexWriter> indexWritersMap;
+        private final InternalArray.ElementGetter valueElementGetter;
+        private final int position;
+
+        public MapFileIndexMaintainer(
+                String columnName,
+                String indexType,
+                DataType keyType,
+                DataType valueType,
+                Options options,
+                int position) {
+            this.columnName = columnName;
+            this.indexType = indexType;
+            this.position = position;
+            this.indexWritersMap = new HashMap<>();
+            this.valueElementGetter = InternalArray.createElementGetter(valueType);
+
+            DataTypeRoot rootType = keyType.getTypeRoot();
+            if (rootType != DataTypeRoot.CHAR && rootType != DataTypeRoot.VARCHAR) {
+                throw new IllegalArgumentException(
+                        "Only support map data type with key field of CHAR、VARCHAR、STRING.");
+            }
+
+            String[] nestedFields =
+                    options.getOrThrow(
+                                    NESTED_FIELDS,
+                                    () ->
+                                            new RuntimeException(
+                                                    "Bloom filter in map must has nested-fields option, which specify map keys to be indexed."))
+                            .split(",");
+            for (String mapKey : nestedFields) {
+                indexWritersMap.put(
+                        mapKey, FileIndexer.create(indexType, valueType, options).createWriter());
+            }
+        }
+
+        public void write(InternalRow row) {
+            InternalMap internalMap = row.getMap(position);
+            InternalArray keyArray = internalMap.keyArray();
+            InternalArray valueArray = internalMap.valueArray();
+
+            for (int i = 0; i < keyArray.size(); i++) {
+                String key = keyArray.getString(i).toString();
+                org.apache.paimon.fileindex.FileIndexWriter writer =
+                        indexWritersMap.getOrDefault(key, null);
+                if (writer != null) {
+                    writer.write(valueElementGetter.getElementOrNull(valueArray, i));
+                }
+            }
+        }
+
+        public String getIndexType() {
+            return indexType;
+        }
+
+        public Map<String, byte[]> serializedBytes() {
+            Map<String, byte[]> result = new HashMap<>();
+            indexWritersMap.forEach(
+                    (k, v) ->
+                            result.put(
+                                    FileIndexCommon.toMapKey(columnName, k), v.serializedBytes()));
+            return result;
         }
     }
 }

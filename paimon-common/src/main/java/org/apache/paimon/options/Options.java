@@ -30,6 +30,7 @@ import java.util.Optional;
 import java.util.Properties;
 import java.util.Set;
 import java.util.function.BiFunction;
+import java.util.function.Supplier;
 
 import static org.apache.paimon.options.OptionsUtils.canBePrefixMap;
 import static org.apache.paimon.options.OptionsUtils.containsPrefixMap;
@@ -92,6 +93,15 @@ public class Options implements Serializable {
 
     public synchronized String get(String key) {
         return data.get(key);
+    }
+
+    public synchronized <X extends Throwable> String getOrThrow(String key, Supplier<X> supplier)
+            throws X {
+        String value = data.get(key);
+        if (value == null) {
+            throw supplier.get();
+        }
+        return value;
     }
 
     public synchronized <T> Optional<T> getOptional(ConfigOption<T> option) {
