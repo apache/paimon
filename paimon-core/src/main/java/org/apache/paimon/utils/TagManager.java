@@ -242,7 +242,8 @@ public class TagManager {
     /** Get the tagged snapshot by name. */
     public Snapshot taggedSnapshot(String tagName) {
         checkArgument(tagExists(tagName), "Tag '%s' doesn't exist.", tagName);
-        return Tag.fromPath(fileIO, tagPath(tagName)).toSnapshot();
+        // Trim to snapshot to avoid equals and compare snapshot.
+        return Tag.fromPath(fileIO, tagPath(tagName)).trimToSnapshot();
     }
 
     public long tagCount() {
@@ -258,41 +259,25 @@ public class TagManager {
         return new ArrayList<>(tags().keySet());
     }
 
-    /** Get all tag sorted by Tag. */
-    public SortedMap<Tag, List<String>> tagsWithTimeRetained() {
-        return tagsWithFilter(tagName -> true);
-    }
-
     /** Get all tagged snapshots with tag names sorted by snapshot id. */
     public SortedMap<Snapshot, List<String>> tags() {
         return tags(tagName -> true);
     }
 
-    public SortedMap<Snapshot, List<String>> tags(Predicate<String> filter) {
-        SortedMap<Snapshot, List<String>> sortedTagMap =
-                new TreeMap<>(Comparator.comparingLong(Snapshot::id));
-        SortedMap<Tag, List<String>> tags = tagsWithFilter(filter);
-        tags.forEach(
-                (key, value) ->
-                        sortedTagMap
-                                .computeIfAbsent(key.toSnapshot(), tagNames -> new ArrayList<>())
-                                .addAll(value));
-        return sortedTagMap;
-    }
-
     /**
-     * Retrieves a sorted map of tags filtered based on a provided predicate. The predicate
-     * determines which tag names should be included in the result. Only tags with tag names that
-     * pass the predicate test are included.
+     * Retrieves a sorted map of snapshots filtered based on a provided predicate. The predicate
+     * determines which tag names should be included in the result. Only snapshots with tag names
+     * that pass the predicate test are included.
      *
-     * @param filter A Predicate that tests each tag name. Tags with tag names that fail the test
-     *     are excluded from the result.
-     * @return A sorted map of filtered tags keyed by Tag.TAG_COMPARATOR, each associated with its
-     *     tag name.
-     * @throws RuntimeException if an IOException occurs during retrieval of tags.
+     * @param filter A Predicate that tests each tag name. Snapshots with tag names that fail the
+     *     test are excluded from the result.
+     * @return A sorted map of filtered snapshots keyed by their IDs, each associated with its tag
+     *     name.
+     * @throws RuntimeException if an IOException occurs during retrieval of snapshots.
      */
-    public SortedMap<Tag, List<String>> tagsWithFilter(Predicate<String> filter) {
-        TreeMap<Tag, List<String>> tags = new TreeMap<>(Tag.TAG_COMPARATOR);
+    public SortedMap<Snapshot, List<String>> tags(Predicate<String> filter) {
+        TreeMap<Snapshot, List<String>> tags =
+                new TreeMap<>(Comparator.comparingLong(Snapshot::id));
         try {
             List<Path> paths =
                     listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
@@ -307,16 +292,36 @@ public class TagManager {
                 }
                 // If the tag file is not found, it might be deleted by
                 // other processes, so just skip this tag
-                Tag.safelyFromTagPath(fileIO, path)
-                        .ifPresent(
-                                tag ->
-                                        tags.computeIfAbsent(tag, s -> new ArrayList<>())
-                                                .add(tagName));
+                Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
+                if (snapshot != null) {
+                    tags.computeIfAbsent(snapshot, s -> new ArrayList<>()).add(tagName);
+                }
             }
         } catch (IOException e) {
             throw new RuntimeException(e);
         }
         return tags;
+    }
+
+    /** Get all {@link Tag}s. */
+    public List<Pair<Tag, String>> tagObjects() {
+        try {
+            List<Path> paths =
+                    listVersionedFileStatus(fileIO, tagDirectory(), TAG_PREFIX)
+                            .map(FileStatus::getPath)
+                            .collect(Collectors.toList());
+            List<Pair<Tag, String>> tags = new ArrayList<>();
+            for (Path path : paths) {
+                String tagName = path.getName().substring(TAG_PREFIX.length());
+                Tag tag = Tag.safelyFromPath(fileIO, path);
+                if (tag != null) {
+                    tags.add(Pair.of(tag, tagName));
+                }
+            }
+            return tags;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public List<String> sortTagsOfOneSnapshot(List<String> tagNames) {

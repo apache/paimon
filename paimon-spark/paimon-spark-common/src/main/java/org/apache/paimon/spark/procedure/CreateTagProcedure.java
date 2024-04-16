@@ -40,8 +40,8 @@ public class CreateTagProcedure extends BaseProcedure {
             new ProcedureParameter[] {
                 ProcedureParameter.required("table", StringType),
                 ProcedureParameter.required("tag", StringType),
-                ProcedureParameter.optional("time_retained", StringType),
-                ProcedureParameter.optional("snapshot", LongType)
+                ProcedureParameter.optional("snapshot", LongType),
+                ProcedureParameter.optional("time_retained", StringType)
             };
 
     private static final StructType OUTPUT_TYPE =
@@ -68,9 +68,9 @@ public class CreateTagProcedure extends BaseProcedure {
     public InternalRow[] call(InternalRow args) {
         Identifier tableIdent = toIdentifier(args.getString(0), PARAMETERS[0].name());
         String tag = args.getString(1);
+        Long snapshot = args.isNullAt(2) ? null : args.getLong(2);
         Duration timeRetained =
-                args.isNullAt(2) ? null : TimeUtils.parseDuration(args.getString(2));
-        Long snapshot = args.isNullAt(3) ? null : args.getLong(3);
+                args.isNullAt(3) ? null : TimeUtils.parseDuration(args.getString(3));
 
         return modifyPaimonTable(
                 tableIdent,
@@ -78,7 +78,7 @@ public class CreateTagProcedure extends BaseProcedure {
                     if (snapshot == null) {
                         table.createTag(tag, timeRetained);
                     } else {
-                        table.createTag(tag, timeRetained, snapshot);
+                        table.createTag(tag, snapshot, timeRetained);
                     }
                     InternalRow outputRow = newInternalRow(true);
                     return new InternalRow[] {outputRow};

@@ -27,11 +27,13 @@ import org.apache.flink.table.procedure.ProcedureContext;
 
 import javax.annotation.Nullable;
 
+import java.time.Duration;
+
 /**
  * Create tag procedure. Usage:
  *
  * <pre><code>
- *  CALL sys.create_tag('tableId', 'tagName', 'timeRetained', snapshotId)
+ *  CALL sys.create_tag('tableId', 'tagName', snapshotId, 'timeRetained')
  * </code></pre>
  */
 public class CreateTagProcedure extends ProcedureBase {
@@ -39,31 +41,54 @@ public class CreateTagProcedure extends ProcedureBase {
     public static final String IDENTIFIER = "create_tag";
 
     public String[] call(
+            ProcedureContext procedureContext, String tableId, String tagName, long snapshotId)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, snapshotId, null);
+    }
+
+    public String[] call(ProcedureContext procedureContext, String tableId, String tagName)
+            throws Catalog.TableNotExistException {
+        return innerCall(tableId, tagName, null, null);
+    }
+
+    public String[] call(
             ProcedureContext procedureContext,
             String tableId,
             String tagName,
-            String timeRetained,
-            long snapshotId)
+            long snapshotId,
+            String timeRetained)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, tagName, timeRetained, snapshotId);
+        return innerCall(tableId, tagName, snapshotId, timeRetained);
     }
 
     public String[] call(
             ProcedureContext procedureContext, String tableId, String tagName, String timeRetained)
             throws Catalog.TableNotExistException {
-        return innerCall(tableId, tagName, timeRetained, null);
+        return innerCall(tableId, tagName, null, timeRetained);
     }
 
     private String[] innerCall(
-            String tableId, String tagName, String timeRetained, @Nullable Long snapshotId)
+            String tableId,
+            String tagName,
+            @Nullable Long snapshotId,
+            @Nullable String timeRetained)
             throws Catalog.TableNotExistException {
         Table table = catalog.getTable(Identifier.fromString(tableId));
         if (snapshotId == null) {
-            table.createTag(tagName, TimeUtils.parseDuration(timeRetained));
+            table.createTag(tagName, toDuration(timeRetained));
         } else {
-            table.createTag(tagName, TimeUtils.parseDuration(timeRetained), snapshotId);
+            table.createTag(tagName, snapshotId, toDuration(timeRetained));
         }
         return new String[] {"Success"};
+    }
+
+    @Nullable
+    private static Duration toDuration(@Nullable String s) {
+        if (s == null) {
+            return null;
+        }
+
+        return TimeUtils.parseDuration(s);
     }
 
     @Override

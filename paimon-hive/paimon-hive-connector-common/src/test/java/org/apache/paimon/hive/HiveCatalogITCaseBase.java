@@ -913,7 +913,7 @@ public abstract class HiveCatalogITCaseBase {
                         "    'metastore.tag-to-partition' = 'dt'",
                         ")"));
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', '5 d', 1)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
 
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("dt=2023-10-16");
@@ -927,7 +927,7 @@ public abstract class HiveCatalogITCaseBase {
         // another tag
 
         tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', '5 d', 2)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
 
         assertThat(hiveShell.executeQuery("SELECT * FROM t"))
                 .containsExactlyInAnyOrder(
@@ -951,9 +951,9 @@ public abstract class HiveCatalogITCaseBase {
                         + "    'metastore.tag-to-partition' = 'dt'\n"
                         + ")");
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', '5 d', 1)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
         tEnv.executeSql("INSERT INTO t VALUES (3, 30)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', '5 d', 2)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
 
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("dt=2023-10-16", "dt=2023-10-17");
@@ -979,7 +979,7 @@ public abstract class HiveCatalogITCaseBase {
                         "    'metastore.tag-to-partition' = 'dt'",
                         ")"));
         tEnv.executeSql("INSERT INTO t VALUES (1, 10), (2, 20)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', '5 d', 1)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-16', 1)");
 
         assertThat(hiveShell.executeQuery("SHOW PARTITIONS t"))
                 .containsExactlyInAnyOrder("dt=2023-10-16");
@@ -991,7 +991,7 @@ public abstract class HiveCatalogITCaseBase {
                 .containsExactlyInAnyOrder("1\t10\t2023-10-16", "2\t20\t2023-10-16");
 
         tEnv.executeSql("INSERT INTO t VALUES (3, 30), (4, 40)").await();
-        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', '5 d', 2)");
+        tEnv.executeSql("CALL sys.create_tag('test_db.t', '2023-10-17', 2)");
 
         tEnv.executeSql("ALTER TABLE t ADD z INT");
         tEnv.executeSql("INSERT INTO t VALUES (3, 30, 5), (4, 40, 6)").await();

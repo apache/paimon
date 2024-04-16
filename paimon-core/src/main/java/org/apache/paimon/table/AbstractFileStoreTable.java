@@ -488,29 +488,29 @@ abstract class AbstractFileStoreTable implements FileStoreTable {
     @Override
     public void createTag(String tagName, long fromSnapshotId) {
         createTag(
-                tagName, coreOptions().tagDefaultTimeRetained(), createTagInternal(fromSnapshotId));
+                tagName, createTagInternal(fromSnapshotId), coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
-    public void createTag(String tagName, @Nullable Duration timeRetained, long fromSnapshotId) {
-        createTag(tagName, timeRetained, createTagInternal(fromSnapshotId));
+    public void createTag(String tagName, long fromSnapshotId, Duration timeRetained) {
+        createTag(tagName, createTagInternal(fromSnapshotId), timeRetained);
     }
 
     @Override
     public void createTag(String tagName) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
-        createTag(tagName, coreOptions().tagDefaultTimeRetained(), latestSnapshot);
+        createTag(tagName, latestSnapshot, coreOptions().tagDefaultTimeRetained());
     }
 
     @Override
-    public void createTag(String tagName, @Nullable Duration timeRetained) {
+    public void createTag(String tagName, Duration timeRetained) {
         Snapshot latestSnapshot = snapshotManager().latestSnapshot();
         checkNotNull(latestSnapshot, "Cannot create tag because latest snapshot doesn't exist.");
-        createTag(tagName, timeRetained, latestSnapshot);
+        createTag(tagName, latestSnapshot, timeRetained);
     }
 
-    private void createTag(String tagName, @Nullable Duration timeRetained, Snapshot fromSnapshot) {
+    private void createTag(String tagName, Snapshot fromSnapshot, @Nullable Duration timeRetained) {
         tagManager().createTag(fromSnapshot, tagName, timeRetained, store().createTagCallbacks());
     }
 

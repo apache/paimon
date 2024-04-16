@@ -1024,7 +1024,7 @@ public class CoreOptions implements Serializable {
             key("tag.default-time-retained")
                     .durationType()
                     .noDefaultValue()
-                    .withDescription("The maximum default time retained for all tags.");
+                    .withDescription("The default maximum time retained for newly created tags.");
 
     public static final ConfigOption<Duration> SNAPSHOT_WATERMARK_IDLE_TIMEOUT =
             key("snapshot.watermark-idle-timeout")
@@ -1655,6 +1655,7 @@ public class CoreOptions implements Serializable {
         return options.get(TAG_PERIOD_FORMATTER);
     }
 
+    @Nullable
     public Integer tagNumRetainedMax() {
         return options.get(TAG_NUM_RETAINED_MAX);
     }

@@ -25,8 +25,6 @@ import org.junit.Test;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 /** Test for {@link Tag}. */
 public class TagTest {
@@ -100,82 +98,5 @@ public class TagTest {
 
         Tag newTag = Tag.fromJson(tagJson);
         Assert.assertEquals(tag, newTag);
-    }
-
-    @Test
-    public void testTagComparator() {
-        Tag tag1 =
-                new Tag(
-                        3,
-                        2L,
-                        0,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        8,
-                        Snapshot.CommitKind.APPEND,
-                        1000,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        LocalDateTime.now(),
-                        Duration.ofSeconds(10));
-
-        Tag tag2 =
-                new Tag(
-                        3,
-                        1L,
-                        0,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        8,
-                        Snapshot.CommitKind.APPEND,
-                        1000,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        LocalDateTime.now(),
-                        Duration.ofSeconds(10));
-
-        Tag tag3 =
-                new Tag(
-                        3,
-                        0L,
-                        0,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        8,
-                        Snapshot.CommitKind.APPEND,
-                        1000,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        null,
-                        LocalDateTime.now(),
-                        Duration.ofSeconds(10));
-        List<Tag> tags = new ArrayList<>();
-        tags.add(tag1);
-        tags.add(tag2);
-        tags.add(tag3);
-        tags.sort(Tag.TAG_COMPARATOR);
-        Assert.assertEquals(0, tags.get(0).id());
-        Assert.assertEquals(1, tags.get(1).id());
-        Assert.assertEquals(2, tags.get(2).id());
     }
 }

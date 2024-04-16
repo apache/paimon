@@ -248,7 +248,6 @@ public abstract class AbstractFileStore<T> implements FileStore<T> {
     }
 
     @Override
-    @Nullable
     public TagAutoManager newTagCreationManager() {
         return TagAutoManager.create(
                 options,

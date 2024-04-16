@@ -134,11 +134,9 @@ public class TableCommitImpl implements InnerTableCommit {
         if (this.forceCreatingSnapshot) {
             return true;
         }
-        if (tagAutoManager != null) {
-            return tagAutoManager.getTagAutoCreation() != null
-                    && tagAutoManager.getTagAutoCreation().forceCreatingSnapshot();
-        }
-        return false;
+        return tagAutoManager != null
+                && tagAutoManager.getTagAutoCreation() != null
+                && tagAutoManager.getTagAutoCreation().forceCreatingSnapshot();
     }
 
     @Override

@@ -394,7 +394,10 @@ public class SnapshotManager implements Serializable {
 
         List<Snapshot> snapshots = new ArrayList<>();
         for (Path path : paths) {
-            Snapshot.safelyFromPath(fileIO, path).ifPresent(snapshots::add);
+            Snapshot snapshot = Snapshot.safelyFromPath(fileIO, path);
+            if (snapshot != null) {
+                snapshots.add(snapshot);
+            }
         }
 
         return snapshots;

@@ -45,6 +45,7 @@ import org.apache.paimon.types.RowType;
 import org.apache.paimon.types.TimestampType;
 import org.apache.paimon.utils.DateTimeUtils;
 import org.apache.paimon.utils.IteratorRecordReader;
+import org.apache.paimon.utils.Pair;
 import org.apache.paimon.utils.ProjectedRow;
 import org.apache.paimon.utils.SerializationUtils;
 import org.apache.paimon.utils.TagManager;
@@ -61,7 +62,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.SortedMap;
 
 import static org.apache.paimon.catalog.Catalog.SYSTEM_TABLE_SPLITTER;
 
@@ -208,12 +208,10 @@ public class TagsTable implements ReadonlyTable {
             Options options = new Options();
             options.set(CoreOptions.PATH, location.toUri().toString());
             FileStoreTable table = FileStoreTableFactory.create(fileIO, options);
-            SortedMap<Tag, List<String>> tags = table.tagManager().tagsWithTimeRetained();
+            List<Pair<Tag, String>> tags = table.tagManager().tagObjects();
             Map<String, Tag> nameToSnapshot = new LinkedHashMap<>();
-            for (Map.Entry<Tag, List<String>> tag : tags.entrySet()) {
-                for (String tagName : tag.getValue()) {
-                    nameToSnapshot.put(tagName, tag.getKey());
-                }
+            for (Pair<Tag, String> tag : tags) {
+                nameToSnapshot.put(tag.getValue(), tag.getKey());
             }
             Map<String, List<String>> tagBranches = new HashMap<>();
             table.branchManager()

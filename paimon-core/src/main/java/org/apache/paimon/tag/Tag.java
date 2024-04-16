@@ -34,15 +34,11 @@ import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.LocalDateTime;
-import java.util.Comparator;
 import java.util.Map;
 import java.util.Objects;
-import java.util.Optional;
 
 /** Snapshot with tagCreateTime and tagTimeRetained. */
 public class Tag extends Snapshot {
-
-    public static final Comparator<Tag> TAG_COMPARATOR = new TagComparator();
 
     private static final String FIELD_TAG_CREATE_TIME = "tagCreateTime";
     private static final String FIELD_TAG_TIME_RETAINED = "tagTimeRetained";
@@ -110,6 +106,7 @@ public class Tag extends Snapshot {
         return tagTimeRetained;
     }
 
+    @Override
     public String toJson() {
         return JsonSerdeUtil.toJson(this);
     }
@@ -127,12 +124,13 @@ public class Tag extends Snapshot {
         }
     }
 
-    public static Optional<Tag> safelyFromTagPath(FileIO fileIO, Path path) throws IOException {
+    @Nullable
+    public static Tag safelyFromPath(FileIO fileIO, Path path) throws IOException {
         try {
             String json = fileIO.readFileUtf8(path);
-            return Optional.of(Tag.fromJson(json));
+            return Tag.fromJson(json);
         } catch (FileNotFoundException e) {
-            return Optional.empty();
+            return null;
         }
     }
 
@@ -160,7 +158,7 @@ public class Tag extends Snapshot {
                 tagTimeRetained);
     }
 
-    public Snapshot toSnapshot() {
+    public Snapshot trimToSnapshot() {
         return new Snapshot(
                 version,
                 id,
@@ -200,156 +198,5 @@ public class Tag extends Snapshot {
         Tag that = (Tag) o;
         return Objects.equals(tagCreateTime, that.tagCreateTime)
                 && Objects.equals(tagTimeRetained, that.tagTimeRetained);
-    }
-
-    private static class TagComparator implements Comparator<Tag> {
-        @Override
-        public int compare(Tag tag1, Tag tag2) {
-            int comparisonResult = 0;
-
-            // Compare id
-            comparisonResult = Long.compare(tag1.id, tag2.id);
-            if (comparisonResult != 0) {
-                return comparisonResult;
-            }
-
-            // Compare tagCreateTime
-            if (tag1.tagCreateTime != null && tag2.tagCreateTime != null) {
-                comparisonResult = tag1.tagCreateTime.compareTo(tag2.tagCreateTime);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare tagTimeRetained
-            if (tag1.tagTimeRetained != null && tag2.tagTimeRetained != null) {
-                comparisonResult = tag1.tagTimeRetained.compareTo(tag2.tagTimeRetained);
-            }
-
-            // Compare version
-            if (tag1.version != null && tag2.version != null) {
-                comparisonResult = Integer.compare(tag1.version, tag2.version);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare schemaId
-            comparisonResult = Long.compare(tag1.schemaId, tag2.schemaId);
-            if (comparisonResult != 0) {
-                return comparisonResult;
-            }
-
-            // Compare baseManifestList
-            if (tag1.baseManifestList != null && tag2.baseManifestList != null) {
-                comparisonResult = tag1.baseManifestList.compareTo(tag2.baseManifestList);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare deltaManifestList
-            if (tag1.deltaManifestList != null && tag2.deltaManifestList != null) {
-                comparisonResult = tag1.deltaManifestList.compareTo(tag2.deltaManifestList);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare changelogManifestList
-            if (tag1.changelogManifestList != null && tag2.changelogManifestList != null) {
-                comparisonResult = tag1.changelogManifestList.compareTo(tag2.changelogManifestList);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare indexManifest
-            if (tag1.indexManifest != null && tag2.indexManifest != null) {
-                comparisonResult = tag1.indexManifest.compareTo(tag2.indexManifest);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare commitUser
-            if (tag1.commitUser != null && tag2.commitUser != null) {
-                comparisonResult = tag1.commitUser.compareTo(tag2.commitUser);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare commitIdentifier
-            comparisonResult = Long.compare(tag1.commitIdentifier, tag2.commitIdentifier);
-            if (comparisonResult != 0) {
-                return comparisonResult;
-            }
-
-            // Compare commitKind
-            if (tag1.commitKind != null && tag2.commitKind != null) {
-                comparisonResult = tag1.commitKind.compareTo(tag2.commitKind);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare timeMillis
-            comparisonResult = Long.compare(tag1.timeMillis, tag2.timeMillis);
-            if (comparisonResult != 0) {
-                return comparisonResult;
-            }
-
-            // Compare logOffsets
-            if (tag1.logOffsets != null && tag2.logOffsets != null) {
-                comparisonResult = Integer.compare(tag1.logOffsets.size(), tag2.logOffsets.size());
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare totalRecordCount
-            if (tag1.totalRecordCount != null && tag2.totalRecordCount != null) {
-                comparisonResult = Long.compare(tag1.totalRecordCount, tag2.totalRecordCount);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare deltaRecordCount
-            if (tag1.deltaRecordCount != null && tag2.deltaRecordCount != null) {
-                comparisonResult = Long.compare(tag1.deltaRecordCount, tag2.deltaRecordCount);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare changelogRecordCount
-            if (tag1.changelogRecordCount != null && tag2.changelogRecordCount != null) {
-                comparisonResult =
-                        Long.compare(tag1.changelogRecordCount, tag2.changelogRecordCount);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare watermark
-            if (tag1.watermark != null && tag2.watermark != null) {
-                comparisonResult = Long.compare(tag1.watermark, tag2.watermark);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            // Compare statistics
-            if (tag1.statistics != null && tag2.statistics != null) {
-                comparisonResult = tag1.statistics.compareTo(tag2.statistics);
-                if (comparisonResult != 0) {
-                    return comparisonResult;
-                }
-            }
-
-            return comparisonResult;
-        }
     }
 }
