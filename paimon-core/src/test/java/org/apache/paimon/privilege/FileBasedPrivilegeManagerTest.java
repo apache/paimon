@@ -70,12 +70,16 @@ public class FileBasedPrivilegeManagerTest {
                 IllegalArgumentException.class, () -> rootManager.createUser("test", "changed"));
 
         FileBasedPrivilegeManager testManager = getPrivilegeManager("test", "passwd");
-        assertThrows(IllegalArgumentException.class, () -> getPrivilegeManager("test", "wrong"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> getPrivilegeManager("test", "wrong").getPrivilegeChecker());
         assertThrows(NoPrivilegeException.class, () -> testManager.createUser("test2", "passwd"));
 
         rootManager.dropUser("test");
         rootManager.dropUser("test");
-        assertThrows(IllegalArgumentException.class, () -> getPrivilegeManager("test", "passwd"));
+        assertThrows(
+                IllegalArgumentException.class,
+                () -> getPrivilegeManager("test", "passwd").getPrivilegeChecker());
         assertThrows(IllegalArgumentException.class, () -> rootManager.dropUser("root"));
         assertThrows(IllegalArgumentException.class, () -> rootManager.dropUser("anonymous"));
     }
