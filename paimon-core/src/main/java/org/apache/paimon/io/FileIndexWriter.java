@@ -93,6 +93,7 @@ public final class FileIndexWriter implements Closeable {
                                     indexType,
                                     mapType.getKeyType(),
                                     mapType.getValueType(),
+                                    fileIndexOptions,
                                     typeEntry.getValue(),
                                     index.get(columnName)));
                 } else {
@@ -240,6 +241,7 @@ public final class FileIndexWriter implements Closeable {
                 String indexType,
                 DataType keyType,
                 DataType valueType,
+                FileIndexOptions fileIndexOptions,
                 Options options,
                 int position) {
             this.columnName = columnName;
@@ -262,8 +264,19 @@ public final class FileIndexWriter implements Closeable {
                                                     "Bloom filter in map must has nested-fields option, which specify map keys to be indexed."))
                             .split(",");
             for (String mapKey : nestedFields) {
+                Options nestedOptions =
+                        fileIndexOptions.get(
+                                FileIndexCommon.toMapKey(columnName, mapKey), indexType);
                 indexWritersMap.put(
-                        mapKey, FileIndexer.create(indexType, valueType, options).createWriter());
+                        mapKey,
+                        FileIndexer.create(
+                                        indexType,
+                                        valueType,
+                                        nestedOptions == null
+                                                ? options
+                                                : new Options(
+                                                        options.toMap(), nestedOptions.toMap()))
+                                .createWriter());
             }
         }
 

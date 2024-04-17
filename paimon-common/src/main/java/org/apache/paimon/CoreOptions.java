@@ -22,6 +22,7 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
+import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
@@ -1782,13 +1783,17 @@ public class CoreOptions implements Serializable {
                             fileIndexOptions.computeIfAbsent(name.trim(), indexType);
                         }
                         if (!foundTarget) {
-                            throw new IllegalArgumentException(
-                                    "Wrong option in "
-                                            + key
-                                            + ", can't found column "
-                                            + cname
-                                            + " in "
-                                            + columns);
+                            if (FileIndexCommon.isNestedColumn(cname)) {
+                                fileIndexOptions.computeIfAbsent(cname, indexType);
+                            } else {
+                                throw new IllegalArgumentException(
+                                        "Wrong option in "
+                                                + key
+                                                + ", can't found column "
+                                                + cname
+                                                + " in "
+                                                + columns);
+                            }
                         }
                     }
                     fileIndexOptions.get(cname, indexType).set(opkey, entry.getValue());

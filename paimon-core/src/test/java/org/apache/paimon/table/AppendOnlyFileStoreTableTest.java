@@ -25,6 +25,7 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -529,6 +530,14 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column3.items",
                                     "150");
+                            options.set(
+                                    CoreOptions.FILE_INDEX
+                                            + "."
+                                            + BloomFilterFileIndex.BLOOM_FILTER
+                                            + ".index_column3"
+                                            + FileIndexCommon.JUNCTION_SYMBOL
+                                            + "a.items",
+                                    "10000");
                         });
 
         StreamTableWrite write = table.newWrite(commitUser);

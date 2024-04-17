@@ -25,6 +25,7 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Options of file index column. */
 public class FileIndexOptions {
@@ -64,6 +65,8 @@ public class FileIndexOptions {
     }
 
     public Set<Map.Entry<String, Map<String, Options>>> entrySet() {
-        return indexTypeOptions.entrySet();
+        return indexTypeOptions.entrySet().stream()
+                .filter(entry -> !entry.getKey().contains(FileIndexCommon.JUNCTION_SYMBOL))
+                .collect(Collectors.toSet());
     }
 }

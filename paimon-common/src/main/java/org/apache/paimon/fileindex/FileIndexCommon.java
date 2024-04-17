@@ -27,7 +27,7 @@ import java.util.Map;
 /** Common function of file index put here. */
 public class FileIndexCommon {
 
-    private static final String JUNCTION_SYMBOL = "##";
+    public static final String JUNCTION_SYMBOL = "##";
 
     public static String toMapKey(String mapColumnName, String keyName) {
         return mapColumnName + JUNCTION_SYMBOL + keyName;
@@ -40,5 +40,9 @@ public class FileIndexCommon {
         } else {
             return ((MapType) fields.get(columnsName.substring(0, index)).type()).getValueType();
         }
+    }
+
+    public static boolean isNestedColumn(String columnName) {
+        return columnName.contains(JUNCTION_SYMBOL);
     }
 }
