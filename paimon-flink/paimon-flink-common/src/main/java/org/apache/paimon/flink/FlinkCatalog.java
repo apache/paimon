@@ -191,22 +191,23 @@ public class FlinkCatalog extends AbstractCatalog {
     @Override
     public void createDatabase(String name, CatalogDatabase database, boolean ignoreIfExists)
             throws DatabaseAlreadyExistException, CatalogException {
-        // todo: flink hive catalog support create db with props
-        if (database != null) {
-            if (database.getProperties().size() > 0) {
-                throw new UnsupportedOperationException(
-                        "Create database with properties is unsupported.");
-            }
-
-            if (database.getDescription().isPresent()
-                    && !database.getDescription().get().equals("")) {
-                throw new UnsupportedOperationException(
-                        "Create database with description is unsupported.");
-            }
-        }
-
         try {
-            catalog.createDatabase(name, ignoreIfExists);
+            if (database != null) {
+                if (database.getProperties().size() > 0 && !catalog.supportDatabaseProperties()) {
+                    throw new UnsupportedOperationException(
+                            "Create database with properties is unsupported.");
+                }
+
+                if (database.getDescription().isPresent()
+                        && !database.getDescription().get().equals("")) {
+                    throw new UnsupportedOperationException(
+                            "Create database with description is unsupported.");
+                }
+
+                catalog.createDatabase(name, ignoreIfExists, database.getProperties());
+            } else {
+                catalog.createDatabase(name, ignoreIfExists);
+            }
         } catch (Catalog.DatabaseAlreadyExistException e) {
             throw new DatabaseAlreadyExistException(getName(), e.database());
         }

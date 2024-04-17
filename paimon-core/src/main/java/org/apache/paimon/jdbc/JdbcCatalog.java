@@ -353,6 +353,11 @@ public class JdbcCatalog extends AbstractCatalog {
         return Optional.of(new JdbcCatalogLockContext(connections, catalogKey, options));
     }
 
+    @Override
+    public boolean supportDatabaseProperties() {
+        return true;
+    }
+
     private Lock lock(Identifier identifier) {
         if (!lockEnabled()) {
             return new Lock.EmptyLock();

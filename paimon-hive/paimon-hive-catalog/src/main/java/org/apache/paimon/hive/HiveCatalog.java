@@ -236,6 +236,11 @@ public class HiveCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    public boolean supportDatabaseProperties() {
+        return true;
+    }
+
     private Database convertToHiveDatabase(String name, Map<String, String> properties) {
         Database database = new Database();
         database.setName(name);

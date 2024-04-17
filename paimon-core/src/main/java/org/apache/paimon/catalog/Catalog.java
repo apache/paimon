@@ -249,6 +249,14 @@ public interface Catalog extends AutoCloseable {
         return true;
     }
 
+    /**
+     * Return a boolean that indicates whether this catalog supports create database with
+     * properties.
+     */
+    default boolean supportDatabaseProperties() {
+        return false;
+    }
+
     /** Exception for trying to drop on a database that is not empty. */
     class DatabaseNotEmptyException extends Exception {
         private static final String MSG = "Database %s is not empty.";
