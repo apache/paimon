@@ -20,16 +20,20 @@ package org.apache.paimon.jdbc;
 
 import org.apache.paimon.catalog.CatalogTestBase;
 import org.apache.paimon.catalog.Identifier;
+import org.apache.paimon.fs.Path;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.options.Options;
+import org.apache.paimon.table.Table;
 
 import org.apache.paimon.shade.guava30.com.google.common.collect.Maps;
 
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.sql.SQLException;
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -111,5 +115,21 @@ public class JdbcCatalogTest extends CatalogTestBase {
                                         false))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("Table name [NEW_TABLE] cannot contain upper case in the catalog.");
+    }
+
+    @Test
+    public void testUseDatabaseLocation() throws Exception {
+        String databaseName = "test_db_location";
+        Path databaseLocation = new Path(warehouse, UUID.randomUUID().toString());
+        Map<String, String> properties =
+                Collections.singletonMap("location", databaseLocation.toString());
+
+        catalog.createDatabase(databaseName, false, properties);
+        catalog.createTable(
+                Identifier.create(databaseName, "new_table"), DEFAULT_TABLE_SCHEMA, false);
+        Table table = catalog.getTable(Identifier.create(databaseName, "new_table"));
+
+        Assertions.assertEquals(
+                new Path(databaseLocation, table.name()).toString(), table.options().get("path"));
     }
 }

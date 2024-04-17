@@ -373,6 +373,17 @@ public class JdbcCatalog extends AbstractCatalog {
         }
     }
 
+    @Override
+    public Path getDataTableLocation(Identifier identifier) {
+        Map<String, String> databaseProperties =
+                loadDatabasePropertiesImpl(identifier.getDatabaseName());
+        if (databaseProperties.containsKey(DB_LOCATION_PROP)) {
+            return new Path(databaseProperties.get(DB_LOCATION_PROP), identifier.getObjectName());
+        } else {
+            return super.getDataTableLocation(identifier);
+        }
+    }
+
     private SchemaManager getSchemaManager(Identifier identifier) {
         return new SchemaManager(fileIO, getDataTableLocation(identifier))
                 .withLock(lock(identifier));
