@@ -288,7 +288,7 @@ abstract class AnalyzeTableTestBase extends PaimonSparkTestBase {
     Assertions.assertEquals(2, statsFileCount(tableLocation, fileIO))
 
     // test expire statistic
-    spark.sql("CALL sys.expire_snapshots(table => 'test.T', retain_max => 1)")
+    spark.sql("CALL sys.expire_snapshots(table => 'test.T', retain_max => 1, retain_min => 1)")
     Assertions.assertEquals(1, statsFileCount(tableLocation, fileIO))
 
     val orphanStats = new Path(tableLocation, "statistics/stats-orphan-0")
