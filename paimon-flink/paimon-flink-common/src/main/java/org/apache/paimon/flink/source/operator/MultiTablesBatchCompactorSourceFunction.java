@@ -21,8 +21,10 @@ package org.apache.paimon.flink.source.operator;
 import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.Identifier;
 import org.apache.paimon.flink.utils.JavaTypeInfo;
+import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.EndOfScanException;
+import org.apache.paimon.table.source.InnerStreamTableScanImpl;
 import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.StreamTableScan;
 
@@ -81,8 +83,19 @@ public class MultiTablesBatchCompactorSourceFunction extends MultiTablesCompacto
                     for (Map.Entry<Identifier, StreamTableScan> entry : scansMap.entrySet()) {
                         Identifier identifier = entry.getKey();
                         StreamTableScan scan = entry.getValue();
+                        int maxLevel = ((InnerStreamTableScanImpl) scan).options().numLevels() - 1;
                         splits.addAll(
                                 scan.plan().splits().stream()
+                                        .filter(
+                                                split -> {
+                                                    DataSplit dataSplit = (DataSplit) split;
+                                                    if (dataSplit.dataFiles().isEmpty()) {
+                                                        return false;
+                                                    }
+                                                    return dataSplit.dataFiles().stream()
+                                                            .map(DataFileMeta::level)
+                                                            .anyMatch(level -> level != maxLevel);
+                                                })
                                         .map(split -> new Tuple2<>(split, identifier.getFullName()))
                                         .collect(Collectors.toList()));
                     }
