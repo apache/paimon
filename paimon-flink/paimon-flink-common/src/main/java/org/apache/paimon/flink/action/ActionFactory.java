@@ -101,6 +101,16 @@ public interface ActionFactory extends Factory {
         String database = params.get(DATABASE);
         String table = params.get(TABLE);
         String path = params.get(PATH);
+        return getTablePathInternal(warehouse, database, table, path);
+    }
+
+    default Tuple3<String, String, String> getTablePath(
+            String warehouse, String database, String table, String path) {
+        return getTablePathInternal(warehouse, database, table, path);
+    }
+
+    default Tuple3<String, String, String> getTablePathInternal(
+            String warehouse, String database, String table, String path) {
 
         Tuple3<String, String, String> tablePath = null;
         int count = 0;

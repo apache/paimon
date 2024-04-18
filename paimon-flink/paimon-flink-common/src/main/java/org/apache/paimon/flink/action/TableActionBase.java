@@ -40,7 +40,11 @@ import java.util.Map;
 public abstract class TableActionBase extends ActionBase {
 
     protected Table table;
-    protected final Identifier identifier;
+    protected Identifier identifier;
+
+    TableActionBase(String warehouse, Map<String, String> catalogConfig) {
+        super(warehouse, catalogConfig);
+    }
 
     TableActionBase(
             String warehouse,

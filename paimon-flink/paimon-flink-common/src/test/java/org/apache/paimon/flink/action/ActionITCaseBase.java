@@ -22,18 +22,13 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.catalog.CatalogContext;
 import org.apache.paimon.catalog.CatalogFactory;
 import org.apache.paimon.catalog.Identifier;
-import org.apache.paimon.data.DataFormatTestUtil;
 import org.apache.paimon.data.GenericRow;
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.flink.util.AbstractTestBase;
 import org.apache.paimon.fs.Path;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.Schema;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
-import org.apache.paimon.table.source.Split;
-import org.apache.paimon.table.source.TableRead;
 import org.apache.paimon.types.RowType;
 
 import org.apache.flink.table.api.TableEnvironment;
@@ -42,7 +37,6 @@ import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -59,7 +53,7 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
     protected StreamTableWrite write;
     protected StreamTableCommit commit;
     protected Catalog catalog;
-    private long incrementalIdentifier;
+    protected long incrementalIdentifier;
 
     @BeforeEach
     public void before() throws IOException {
@@ -113,6 +107,11 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         return (FileStoreTable) catalog.getTable(identifier);
     }
 
+    protected FileStoreTable getFileStoreTable(String database, String tableName) throws Exception {
+        Identifier identifier = Identifier.create(database, tableName);
+        return (FileStoreTable) catalog.getTable(identifier);
+    }
+
     protected FileStoreTable getFileStoreTable(String tableName) throws Exception {
         Identifier identifier = Identifier.create(database, tableName);
         return (FileStoreTable) catalog.getTable(identifier);
@@ -128,16 +127,6 @@ public abstract class ActionITCaseBase extends AbstractTestBase {
         }
         commit.commit(incrementalIdentifier, write.prepareCommit(true, incrementalIdentifier));
         incrementalIdentifier++;
-    }
-
-    protected List<String> getResult(TableRead read, List<Split> splits, RowType rowType)
-            throws Exception {
-        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
-            List<String> result = new ArrayList<>();
-            recordReader.forEachRemaining(
-                    row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
-            return result;
-        }
     }
 
     @Override

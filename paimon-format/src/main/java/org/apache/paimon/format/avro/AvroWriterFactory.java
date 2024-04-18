@@ -23,13 +23,14 @@ import org.apache.paimon.fs.PositionOutputStream;
 import org.apache.avro.file.DataFileWriter;
 
 import java.io.IOException;
+import java.io.Serializable;
 
 /**
  * A factory that creates an {@link AvroBulkWriter}.
  *
  * @param <T> The type of record to write.
  */
-public class AvroWriterFactory<T> {
+public class AvroWriterFactory<T> implements Serializable {
 
     /** The builder to construct the Avro {@link DataFileWriter}. */
     private final AvroBuilder<T> avroBuilder;

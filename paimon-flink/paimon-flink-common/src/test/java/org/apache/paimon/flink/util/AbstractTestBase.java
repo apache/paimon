@@ -18,6 +18,15 @@
 
 package org.apache.paimon.flink.util;
 
+import org.apache.paimon.data.DataFormatTestUtil;
+import org.apache.paimon.data.InternalRow;
+import org.apache.paimon.reader.RecordReader;
+import org.apache.paimon.table.FileStoreTable;
+import org.apache.paimon.table.source.Split;
+import org.apache.paimon.table.source.TableRead;
+import org.apache.paimon.table.source.TableScan;
+import org.apache.paimon.table.source.snapshot.SnapshotReader;
+import org.apache.paimon.types.RowType;
 import org.apache.paimon.utils.FileIOUtils;
 
 import org.apache.flink.api.common.RuntimeExecutionMode;
@@ -41,7 +50,12 @@ import java.io.File;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.TimeoutException;
+
+import static org.assertj.core.api.Assertions.assertThat;
 
 /** Similar to Flink's AbstractTestBase but using Junit5. */
 public class AbstractTestBase {
@@ -302,6 +316,69 @@ public class AbstractTestBase {
             env.configure(conf);
 
             return env;
+        }
+    }
+
+    protected void validateResult(
+            FileStoreTable table,
+            RowType rowType,
+            SnapshotReader.Plan plan,
+            List<String> expected,
+            long timeout)
+            throws Exception {
+        List<String> actual = new ArrayList<>();
+        long start = System.currentTimeMillis();
+        while (actual.size() != expected.size()) {
+            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), rowType));
+
+            if (System.currentTimeMillis() - start > timeout) {
+                break;
+            }
+        }
+        if (actual.size() != expected.size()) {
+            throw new TimeoutException(
+                    String.format(
+                            "Cannot collect %s records in %s milliseconds.",
+                            expected.size(), timeout));
+        }
+        actual.sort(String::compareTo);
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    protected void validateResult(
+            FileStoreTable table,
+            RowType rowType,
+            TableScan scan,
+            List<String> expected,
+            long timeout)
+            throws Exception {
+        List<String> actual = new ArrayList<>();
+        long start = System.currentTimeMillis();
+        while (actual.size() != expected.size()) {
+            TableScan.Plan plan = scan.plan();
+            actual.addAll(getResult(table.newReadBuilder().newRead(), plan.splits(), rowType));
+
+            if (System.currentTimeMillis() - start > timeout) {
+                break;
+            }
+        }
+        if (actual.size() != expected.size()) {
+            throw new TimeoutException(
+                    String.format(
+                            "Cannot collect %s records in %s milliseconds.",
+                            expected.size(), timeout));
+        }
+        actual.sort(String::compareTo);
+        assertThat(actual).isEqualTo(expected);
+    }
+
+    protected List<String> getResult(TableRead read, List<Split> splits, RowType rowType)
+            throws Exception {
+        try (RecordReader<InternalRow> recordReader = read.createReader(splits)) {
+            List<String> result = new ArrayList<>();
+            recordReader.forEachRemaining(
+                    row -> result.add(DataFormatTestUtil.internalRowToString(row, rowType)));
+            return result;
         }
     }
 }

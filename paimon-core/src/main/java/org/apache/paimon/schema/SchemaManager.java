@@ -502,8 +502,12 @@ public class SchemaManager implements Serializable {
     }
 
     @VisibleForTesting
-    public Path toSchemaPath(long id) {
-        return new Path(tableRoot + "/schema/" + SCHEMA_PREFIX + id);
+    public Path toSchemaPath(long schemaId) {
+        return new Path(tableRoot + "/schema/" + schemaFileName(schemaId));
+    }
+
+    public String schemaFileName(long schemaId) {
+        return SCHEMA_PREFIX + schemaId;
     }
 
     public Path branchSchemaDirectory(String branchName) {
@@ -512,7 +516,7 @@ public class SchemaManager implements Serializable {
 
     public Path branchSchemaPath(String branchName, long schemaId) {
         return new Path(
-                getBranchPath(tableRoot, branchName) + "/schema/" + SCHEMA_PREFIX + schemaId);
+                getBranchPath(tableRoot, branchName) + "/schema/" + schemaFileName(schemaId));
     }
 
     /**

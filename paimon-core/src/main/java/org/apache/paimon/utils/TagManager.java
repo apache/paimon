@@ -54,7 +54,7 @@ public class TagManager {
 
     private static final Logger LOG = LoggerFactory.getLogger(TagManager.class);
 
-    private static final String TAG_PREFIX = "tag-";
+    public static final String TAG_PREFIX = "tag-";
 
     private final FileIO fileIO;
     private final Path tablePath;
