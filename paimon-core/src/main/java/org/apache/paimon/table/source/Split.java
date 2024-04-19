@@ -52,6 +52,12 @@ public interface Split extends Serializable {
         return Optional.empty();
     }
 
+    /**
+     * * Return the index file of the data file, for example, bloom-filter index. All the type of
+     * indexes and columns will be stored in one single index file.
+     *
+     * <p>If there is no corresponding index file, the element will be null.
+     */
     default Optional<List<IndexFile>> indexFiles() {
         return Optional.empty();
     }
