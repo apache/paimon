@@ -24,6 +24,7 @@ import org.apache.paimon.io.DataOutputView;
 import java.io.IOException;
 import java.util.Objects;
 
+/** Index file for data file. */
 public class IndexFile {
 
     private final String path;

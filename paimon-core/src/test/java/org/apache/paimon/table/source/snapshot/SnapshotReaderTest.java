@@ -27,7 +27,6 @@ import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
-import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -58,6 +57,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
+import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /** Tests for {@link SnapshotReader}. */
@@ -289,7 +289,10 @@ public class SnapshotReaderTest {
                 .hasValue(
                         Collections.singletonList(
                                 new IndexFile(
-                                        meta.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX)));
+                                        String.format(
+                                                "%s/bucket-0/%s" + INDEX_PATH_SUFFIX,
+                                                tablePath,
+                                                meta.fileName()))));
 
         // change file schema
 
@@ -317,9 +320,15 @@ public class SnapshotReaderTest {
                 .hasValue(
                         Arrays.asList(
                                 new IndexFile(
-                                        meta0.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX),
+                                        String.format(
+                                                "%s/bucket-0/%s" + INDEX_PATH_SUFFIX,
+                                                tablePath,
+                                                meta0.fileName())),
                                 new IndexFile(
-                                        meta1.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX)));
+                                        String.format(
+                                                "%s/bucket-0/%s" + INDEX_PATH_SUFFIX,
+                                                tablePath,
+                                                meta1.fileName()))));
 
         write.close();
         commit.close();

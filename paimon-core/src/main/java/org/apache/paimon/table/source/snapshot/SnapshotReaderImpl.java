@@ -292,12 +292,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 : null;
                 for (SplitGenerator.SplitGroup splitGroup : splitGroups) {
                     List<DataFileMeta> dataFiles = splitGroup.files;
+                    String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
                     builder.withDataFiles(dataFiles);
                     builder.rawFiles(
                             splitGroup.rawConvertible
-                                    ? convertToRawFiles(partition, bucket, dataFiles)
+                                    ? convertToRawFiles(bucketPath, dataFiles)
                                     : Collections.emptyList());
-                    builder.indexFiles(convertToIndexFiles(dataFiles));
+                    builder.indexFiles(convertToIndexFiles(bucketPath, dataFiles));
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
@@ -442,15 +443,13 @@ public class SnapshotReaderImpl implements SnapshotReader {
         return deletionFiles;
     }
 
-    private List<RawFile> convertToRawFiles(
-            BinaryRow partition, int bucket, List<DataFileMeta> dataFiles) {
-        String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
+    private List<RawFile> convertToRawFiles(String bucketPath, List<DataFileMeta> dataFiles) {
         return dataFiles.stream()
                 .map(f -> makeRawTableFile(bucketPath, f))
                 .collect(Collectors.toList());
     }
 
-    private List<IndexFile> convertToIndexFiles(List<DataFileMeta> dataFiles) {
+    private List<IndexFile> convertToIndexFiles(String bucketPath, List<DataFileMeta> dataFiles) {
         return dataFiles.stream()
                 .map(
                         file -> {
@@ -459,7 +458,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             .filter(s -> s.endsWith(INDEX_PATH_SUFFIX))
                                             .collect(Collectors.toList());
                             if (exFiles.size() == 1) {
-                                return exFiles.get(0);
+                                return bucketPath + "/" + exFiles.get(0);
                             } else if (exFiles.size() == 0) {
                                 return null;
                             } else {
