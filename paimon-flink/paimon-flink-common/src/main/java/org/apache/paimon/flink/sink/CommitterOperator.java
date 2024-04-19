@@ -106,8 +106,7 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         super.initializeState(context);
 
         Preconditions.checkArgument(
-                !forceSingleParallelism
-                        || getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
+                !forceSingleParallelism || getRuntimeContext().getNumberOfParallelSubtasks() == 1,
                 "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;
