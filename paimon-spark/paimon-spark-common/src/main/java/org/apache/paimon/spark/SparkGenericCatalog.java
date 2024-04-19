@@ -22,7 +22,7 @@ import org.apache.paimon.catalog.Catalog;
 import org.apache.paimon.hive.HiveCatalogOptions;
 import org.apache.paimon.options.CatalogOptions;
 import org.apache.paimon.spark.catalog.SparkBaseCatalog;
-import org.apache.paimon.spark.utils.SQLConfUtils;
+import org.apache.paimon.spark.util.SQLConfUtils;
 import org.apache.paimon.utils.Preconditions;
 
 import org.apache.hadoop.conf.Configuration;
