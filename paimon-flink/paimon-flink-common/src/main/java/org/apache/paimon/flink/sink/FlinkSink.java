@@ -228,6 +228,7 @@ public abstract class FlinkSink<T> implements Serializable {
         OneInputStreamOperator<Committable, Committable> committerOperator =
                 new CommitterOperator<>(
                         streamingCheckpointEnabled,
+                        true,
                         commitUser,
                         createCommitterFactory(streamingCheckpointEnabled),
                         createCommittableStateManager());

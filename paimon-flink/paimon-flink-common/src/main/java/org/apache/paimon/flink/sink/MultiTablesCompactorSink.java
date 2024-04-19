@@ -128,6 +128,7 @@ public class MultiTablesCompactorSink implements Serializable {
                                 new MultiTableCommittableTypeInfo(),
                                 new CommitterOperator<>(
                                         streamingCheckpointEnabled,
+                                        false,
                                         commitUser,
                                         createCommitterFactory(),
                                         createCommittableStateManager()))

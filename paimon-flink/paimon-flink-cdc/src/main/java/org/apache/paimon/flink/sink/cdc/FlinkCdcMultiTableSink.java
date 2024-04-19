@@ -127,6 +127,7 @@ public class FlinkCdcMultiTableSink implements Serializable {
                                 typeInfo,
                                 new CommitterOperator<>(
                                         true,
+                                        false,
                                         commitUser,
                                         createCommitterFactory(),
                                         createCommittableStateManager()))
