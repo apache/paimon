@@ -16,14 +16,13 @@
  * limitations under the License.
  */
 
-package org.apache.paimon.spark.utils;
+package org.apache.paimon.spark.utils
 
-import org.apache.paimon.catalog.Catalog;
-import org.apache.spark.sql.internal.SQLConf;
+import org.apache.paimon.catalog.Catalog
+
+import org.apache.spark.sql.internal.SQLConf
 
 /** SQLConf utils. */
-public class SQLConfUtils {
-    public static String defaultDatabase(SQLConf sqlConf) {
-        return Catalog.DEFAULT_DATABASE;
-    }
+object SQLConfUtils {
+  def defaultDatabase(sqlConf: SQLConf): String = Catalog.DEFAULT_DATABASE
 }
