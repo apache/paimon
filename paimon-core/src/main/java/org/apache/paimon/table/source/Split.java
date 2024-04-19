@@ -51,4 +51,8 @@ public interface Split extends Serializable {
     default Optional<List<DeletionFile>> deletionFiles() {
         return Optional.empty();
     }
+
+    default Optional<List<IndexFile>> indexFiles() {
+        return Optional.empty();
+    }
 }

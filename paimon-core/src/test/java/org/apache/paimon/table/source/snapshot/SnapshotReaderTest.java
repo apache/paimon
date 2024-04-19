@@ -22,10 +22,12 @@ import org.apache.paimon.CoreOptions;
 import org.apache.paimon.data.BinaryString;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
+import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
 import org.apache.paimon.io.DataFileMeta;
+import org.apache.paimon.io.DataFilePathFactory;
 import org.apache.paimon.operation.Lock;
 import org.apache.paimon.options.Options;
 import org.apache.paimon.schema.Schema;
@@ -38,6 +40,7 @@ import org.apache.paimon.table.FileStoreTableFactory;
 import org.apache.paimon.table.sink.StreamTableCommit;
 import org.apache.paimon.table.sink.StreamTableWrite;
 import org.apache.paimon.table.source.DataSplit;
+import org.apache.paimon.table.source.IndexFile;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.DataTypes;
@@ -255,6 +258,73 @@ public class SnapshotReaderTest {
         commit.close();
     }
 
+    @Test
+    public void testGetAppendOnlyIndexFiles() throws Exception {
+        RowType rowType =
+                RowType.of(
+                        new DataType[] {DataTypes.INT(), DataTypes.BIGINT()},
+                        new String[] {"k", "v"});
+        FileStoreTable table =
+                createFileStoreTable(rowType, Collections.emptyList(), Collections.emptyList());
+
+        String commitUser = UUID.randomUUID().toString();
+        StreamTableWrite write = table.newWrite(commitUser);
+        StreamTableCommit commit = table.newCommit(commitUser);
+        SnapshotReader reader = table.newSnapshotReader();
+
+        // write one file
+
+        write.write(GenericRow.of(11, 1101L));
+        write.write(GenericRow.of(12, 1201L));
+        write.write(GenericRow.of(21, 2101L));
+        write.write(GenericRow.of(22, 2201L));
+        commit.commit(1, write.prepareCommit(false, 1));
+
+        List<DataSplit> dataSplits = reader.read().dataSplits();
+        assertThat(dataSplits).hasSize(1);
+        DataSplit dataSplit = dataSplits.get(0);
+        assertThat(dataSplit.dataFiles()).hasSize(1);
+        DataFileMeta meta = dataSplit.dataFiles().get(0);
+        assertThat(dataSplit.indexFiles())
+                .hasValue(
+                        Collections.singletonList(
+                                new IndexFile(
+                                        meta.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX)));
+
+        // change file schema
+
+        write.close();
+        SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
+        schemaManager.commitChanges(SchemaChange.addColumn("v2", DataTypes.STRING()));
+        table = table.copyWithLatestSchema();
+        write = table.newWrite(commitUser);
+
+        // write another file
+
+        write.write(GenericRow.of(11, 1102L, BinaryString.fromString("eleven")));
+        write.write(GenericRow.of(12, 1202L, BinaryString.fromString("twelve")));
+        write.write(GenericRow.of(21, 2102L, BinaryString.fromString("twenty-one")));
+        write.write(GenericRow.of(22, 2202L, BinaryString.fromString("twenty-two")));
+        commit.commit(2, write.prepareCommit(false, 2));
+
+        dataSplits = reader.read().dataSplits();
+        assertThat(dataSplits).hasSize(1);
+        dataSplit = dataSplits.get(0);
+        assertThat(dataSplit.dataFiles()).hasSize(2);
+        DataFileMeta meta0 = dataSplit.dataFiles().get(0);
+        DataFileMeta meta1 = dataSplit.dataFiles().get(1);
+        assertThat(dataSplit.indexFiles())
+                .hasValue(
+                        Arrays.asList(
+                                new IndexFile(
+                                        meta0.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX),
+                                new IndexFile(
+                                        meta1.fileName() + DataFilePathFactory.INDEX_PATH_SUFFIX)));
+
+        write.close();
+        commit.close();
+    }
+
     private FileStoreTable createFileStoreTable(
             RowType rowType, List<String> partitionKeys, List<String> primaryKeys)
             throws Exception {
@@ -265,6 +335,14 @@ public class SnapshotReaderTest {
         Map<String, String> formatPerLevel = new HashMap<>();
         formatPerLevel.put("5", "orc");
         options.set(CoreOptions.FILE_FORMAT_PER_LEVEL, formatPerLevel);
+        // test read with extra files
+        options.set(
+                CoreOptions.FILE_INDEX
+                        + "."
+                        + BloomFilterFileIndex.BLOOM_FILTER
+                        + "."
+                        + CoreOptions.COLUMNS,
+                rowType.getFieldNames().get(0));
 
         SchemaManager schemaManager = new SchemaManager(fileIO, tablePath);
         TableSchema tableSchema =

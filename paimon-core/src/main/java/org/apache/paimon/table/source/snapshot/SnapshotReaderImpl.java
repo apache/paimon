@@ -39,6 +39,7 @@ import org.apache.paimon.predicate.PredicateBuilder;
 import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
+import org.apache.paimon.table.source.IndexFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
@@ -65,6 +66,7 @@ import java.util.function.BiConsumer;
 import java.util.stream.Collectors;
 
 import static org.apache.paimon.deletionvectors.DeletionVectorsIndexFile.DELETION_VECTORS_INDEX;
+import static org.apache.paimon.io.DataFilePathFactory.INDEX_PATH_SUFFIX;
 import static org.apache.paimon.operation.FileStoreScan.Plan.groupByPartFiles;
 import static org.apache.paimon.predicate.PredicateBuilder.transformFieldMapping;
 
@@ -295,6 +297,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                             splitGroup.rawConvertible
                                     ? convertToRawFiles(partition, bucket, dataFiles)
                                     : Collections.emptyList());
+                    builder.indexFiles(convertToIndexFiles(dataFiles));
                     if (deletionVectors) {
                         builder.withDataDeletionFiles(
                                 getDeletionFiles(dataFiles, deletionIndexFile));
@@ -444,6 +447,30 @@ public class SnapshotReaderImpl implements SnapshotReader {
         String bucketPath = pathFactory.bucketPath(partition, bucket).toString();
         return dataFiles.stream()
                 .map(f -> makeRawTableFile(bucketPath, f))
+                .collect(Collectors.toList());
+    }
+
+    private List<IndexFile> convertToIndexFiles(List<DataFileMeta> dataFiles) {
+        return dataFiles.stream()
+                .map(
+                        file -> {
+                            List<String> exFiles =
+                                    file.extraFiles().stream()
+                                            .filter(s -> s.endsWith(INDEX_PATH_SUFFIX))
+                                            .collect(Collectors.toList());
+                            if (exFiles.size() == 1) {
+                                return exFiles.get(0);
+                            } else if (exFiles.size() == 0) {
+                                return null;
+                            } else {
+                                throw new RuntimeException(
+                                        "Wrong number of file index for file "
+                                                + file.fileName()
+                                                + " index files: "
+                                                + String.join(",", exFiles));
+                            }
+                        })
+                .map(IndexFile::new)
                 .collect(Collectors.toList());
     }
 

@@ -57,6 +57,7 @@ public class DataSplit implements Split {
     @Nullable private List<DeletionFile> dataDeletionFiles;
 
     private List<RawFile> rawFiles = Collections.emptyList();
+    private List<IndexFile> indexFiles = Collections.emptyList();
 
     public DataSplit() {}
 
@@ -116,6 +117,15 @@ public class DataSplit implements Split {
     }
 
     @Override
+    public Optional<List<IndexFile>> indexFiles() {
+        if (indexFiles.isEmpty()) {
+            return Optional.empty();
+        } else {
+            return Optional.of(indexFiles);
+        }
+    }
+
+    @Override
     public boolean equals(Object o) {
         if (this == o) {
             return true;
@@ -131,7 +141,8 @@ public class DataSplit implements Split {
                 && Objects.equals(dataFiles, split.dataFiles)
                 && Objects.equals(dataDeletionFiles, split.dataDeletionFiles)
                 && isStreaming == split.isStreaming
-                && Objects.equals(rawFiles, split.rawFiles);
+                && Objects.equals(rawFiles, split.rawFiles)
+                && Objects.equals(indexFiles, split.indexFiles);
     }
 
     @Override
@@ -144,7 +155,8 @@ public class DataSplit implements Split {
                 dataFiles,
                 dataDeletionFiles,
                 isStreaming,
-                rawFiles);
+                rawFiles,
+                indexFiles);
     }
 
     private void writeObject(ObjectOutputStream out) throws IOException {
@@ -165,6 +177,7 @@ public class DataSplit implements Split {
         this.dataDeletionFiles = other.dataDeletionFiles;
         this.isStreaming = other.isStreaming;
         this.rawFiles = other.rawFiles;
+        this.indexFiles = other.indexFiles;
     }
 
     public void serialize(DataOutputView out) throws IOException {
@@ -192,6 +205,11 @@ public class DataSplit implements Split {
         out.writeInt(rawFiles.size());
         for (RawFile rawFile : rawFiles) {
             rawFile.serialize(out);
+        }
+
+        out.writeInt(indexFiles.size());
+        for (IndexFile indexFile : indexFiles) {
+            indexFile.serialize(out);
         }
     }
 
@@ -225,6 +243,12 @@ public class DataSplit implements Split {
             rawFiles.add(RawFile.deserialize(in));
         }
 
+        int indexFileNum = in.readInt();
+        List<IndexFile> indexFiles = new ArrayList<>();
+        for (int i = 0; i < indexFileNum; i++) {
+            indexFiles.add(IndexFile.deserialize(in));
+        }
+
         DataSplit.Builder builder =
                 builder()
                         .withSnapshot(snapshotId)
@@ -233,7 +257,8 @@ public class DataSplit implements Split {
                         .withBeforeFiles(beforeFiles)
                         .withDataFiles(dataFiles)
                         .isStreaming(isStreaming)
-                        .rawFiles(rawFiles);
+                        .rawFiles(rawFiles)
+                        .indexFiles(indexFiles);
         if (beforeDeletionFiles != null) {
             builder.withBeforeDeletionFiles(beforeDeletionFiles);
         }
@@ -294,6 +319,11 @@ public class DataSplit implements Split {
 
         public Builder rawFiles(List<RawFile> rawFiles) {
             this.split.rawFiles = rawFiles;
+            return this;
+        }
+
+        public Builder indexFiles(List<IndexFile> indexFiles) {
+            this.split.indexFiles = indexFiles;
             return this;
         }
 
