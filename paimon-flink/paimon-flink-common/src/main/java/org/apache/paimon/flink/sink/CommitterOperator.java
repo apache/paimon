@@ -57,6 +57,9 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
      */
     private final boolean streamingCheckpointEnabled;
 
+    /** Whether to check the parallelism while runtime. */
+    private final boolean forceSingleParallelism;
+
     /**
      * This commitUser is valid only for new jobs. After the job starts, this commitUser will be
      * recorded into the states of write and commit operators. When the job restarts, commitUser
@@ -85,10 +88,12 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
 
     public CommitterOperator(
             boolean streamingCheckpointEnabled,
+            boolean forceSingleParallelism,
             String initialCommitUser,
             Committer.Factory<CommitT, GlobalCommitT> committerFactory,
             CommittableStateManager<GlobalCommitT> committableStateManager) {
         this.streamingCheckpointEnabled = streamingCheckpointEnabled;
+        this.forceSingleParallelism = forceSingleParallelism;
         this.initialCommitUser = initialCommitUser;
         this.committablesPerCheckpoint = new TreeMap<>();
         this.committerFactory = checkNotNull(committerFactory);
@@ -101,7 +106,8 @@ public class CommitterOperator<CommitT, GlobalCommitT> extends AbstractStreamOpe
         super.initializeState(context);
 
         Preconditions.checkArgument(
-                getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
+                forceSingleParallelism
+                        && getRuntimeContext().getTaskInfo().getNumberOfParallelSubtasks() == 1,
                 "Committer Operator parallelism in paimon MUST be one.");
 
         this.currentWatermark = Long.MIN_VALUE;

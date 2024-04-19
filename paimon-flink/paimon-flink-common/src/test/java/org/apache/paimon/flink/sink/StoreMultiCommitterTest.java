@@ -636,6 +636,7 @@ class StoreMultiCommitterTest {
         CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
                 new CommitterOperator<>(
                         true,
+                        false,
                         initialCommitUser,
                         (user, metricGroup) ->
                                 new StoreMultiCommitter(
@@ -652,6 +653,7 @@ class StoreMultiCommitterTest {
         CommitterOperator<MultiTableCommittable, WrappedManifestCommittable> operator =
                 new CommitterOperator<>(
                         true,
+                        false,
                         initialCommitUser,
                         (user, metricGroup) ->
                                 new StoreMultiCommitter(
