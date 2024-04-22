@@ -207,10 +207,7 @@ public class DataSplit implements Split {
             rawFile.serialize(out);
         }
 
-        out.writeInt(indexFiles.size());
-        for (IndexFile indexFile : indexFiles) {
-            indexFile.serialize(out);
-        }
+        IndexFile.serializeList(out, indexFiles);
     }
 
     public static DataSplit deserialize(DataInputView in) throws IOException {
@@ -243,11 +240,7 @@ public class DataSplit implements Split {
             rawFiles.add(RawFile.deserialize(in));
         }
 
-        int indexFileNum = in.readInt();
-        List<IndexFile> indexFiles = new ArrayList<>();
-        for (int i = 0; i < indexFileNum; i++) {
-            indexFiles.add(IndexFile.deserialize(in));
-        }
+        List<IndexFile> indexFiles = IndexFile.deserializeList(in);
 
         DataSplit.Builder builder =
                 builder()

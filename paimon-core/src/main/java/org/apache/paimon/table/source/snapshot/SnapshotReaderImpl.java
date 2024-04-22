@@ -458,7 +458,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                             .filter(s -> s.endsWith(INDEX_PATH_SUFFIX))
                                             .collect(Collectors.toList());
                             if (exFiles.size() == 1) {
-                                return bucketPath + "/" + exFiles.get(0);
+                                return new IndexFile(bucketPath + "/" + exFiles.get(0));
                             } else if (exFiles.size() == 0) {
                                 return null;
                             } else {
@@ -469,7 +469,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                                 + String.join(",", exFiles));
                             }
                         })
-                .map(IndexFile::new)
                 .collect(Collectors.toList());
     }
 
