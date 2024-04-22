@@ -22,7 +22,6 @@ import org.apache.paimon.annotation.Documentation;
 import org.apache.paimon.annotation.Documentation.ExcludeFromDocumentation;
 import org.apache.paimon.annotation.Documentation.Immutable;
 import org.apache.paimon.annotation.VisibleForTesting;
-import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.FileIndexOptions;
 import org.apache.paimon.format.FileFormat;
 import org.apache.paimon.fs.Path;
@@ -1732,6 +1731,8 @@ public class CoreOptions implements Serializable {
         String fileIndexColumnSuffix = "." + COLUMNS;
 
         FileIndexOptions fileIndexOptions = new FileIndexOptions(fileIndexInManifestThreshold());
+        Map<String, String> optionMap = new HashMap<>();
+        // find the column to be indexed.
         for (Map.Entry<String, String> entry : options.toMap().entrySet()) {
             String key = entry.getKey();
             if (key.startsWith(fileIndexPrefix)) {
@@ -1751,55 +1752,40 @@ public class CoreOptions implements Serializable {
                         fileIndexOptions.computeIfAbsent(name.trim(), indexType);
                     }
                 } else {
-                    // else, it must be an option
-                    String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
-                    if (kv.length != 3) {
-                        continue;
-                    }
-                    String indexType = kv[0];
-                    String cname = kv[1];
-                    String opkey = kv[2];
-
-                    if (fileIndexOptions.get(cname, indexType) == null) {
-                        // if indexes have not set, find .column in options, then set them
-                        String columns =
-                                options.get(fileIndexPrefix + indexType + fileIndexColumnSuffix);
-                        if (columns == null) {
-                            continue;
-                        }
-                        String[] names = columns.split(",");
-                        boolean foundTarget = false;
-                        for (String name : names) {
-                            if (StringUtils.isBlank(name)) {
-                                throw new IllegalArgumentException(
-                                        "Wrong option in "
-                                                + key
-                                                + ", should not have empty column");
-                            }
-                            String tname = name.trim();
-                            if (cname.equals(tname)) {
-                                foundTarget = true;
-                            }
-                            fileIndexOptions.computeIfAbsent(name.trim(), indexType);
-                        }
-                        if (!foundTarget) {
-                            if (FileIndexCommon.isNestedColumn(cname)) {
-                                fileIndexOptions.computeIfAbsent(cname, indexType);
-                            } else {
-                                throw new IllegalArgumentException(
-                                        "Wrong option in "
-                                                + key
-                                                + ", can't found column "
-                                                + cname
-                                                + " in "
-                                                + columns);
-                            }
-                        }
-                    }
-                    fileIndexOptions.get(cname, indexType).set(opkey, entry.getValue());
+                    optionMap.put(entry.getKey(), entry.getValue());
                 }
             }
         }
+
+        // fill out the options
+        for (Map.Entry<String, String> optionEntry : optionMap.entrySet()) {
+            String key = optionEntry.getKey();
+
+            String[] kv = key.substring(fileIndexPrefix.length()).split("\\.");
+            if (kv.length != 3) {
+                // just ignore options those are not expected
+                continue;
+            }
+            String indexType = kv[0];
+            String cname = kv[1];
+            String opkey = kv[2];
+
+            // if reaches here, must be an option.
+            if (fileIndexOptions.get(cname, indexType) == null) {
+                throw new IllegalArgumentException(
+                        "Wrong option in \""
+                                + key
+                                + "\", can't found column \""
+                                + cname
+                                + "\" in \""
+                                + fileIndexPrefix
+                                + indexType
+                                + fileIndexColumnSuffix
+                                + "\"");
+            }
+            fileIndexOptions.get(cname, indexType).set(opkey, optionEntry.getValue());
+        }
+
         return fileIndexOptions;
     }
 

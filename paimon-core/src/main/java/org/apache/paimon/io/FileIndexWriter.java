@@ -58,7 +58,7 @@ public final class FileIndexWriter implements Closeable {
     private final long inManifestThreshold;
 
     private final List<FileIndexMaintainer> fileIndexMaintainers = new ArrayList<>();
-    private final List<MapFileIndexMaintainer> mapFileIndexMaintainers = new ArrayList<>();
+    private final Map<String, MapFileIndexMaintainer> mapFileIndexMaintainers = new HashMap<>();
 
     private String resultFileName;
 
@@ -76,8 +76,10 @@ public final class FileIndexWriter implements Closeable {
                     map.put(dataField.name(), dataField);
                     index.put(dataField.name(), rowType.getFieldIndex(dataField.name()));
                 });
-        for (Map.Entry<String, Map<String, Options>> entry : fileIndexOptions.entrySet()) {
-            String columnName = entry.getKey();
+        for (Map.Entry<FileIndexOptions.Column, Map<String, Options>> entry :
+                fileIndexOptions.entrySet()) {
+            FileIndexOptions.Column entryColumn = entry.getKey();
+            String columnName = entryColumn.getColumnName();
             DataField field = map.get(columnName);
             if (field == null) {
                 throw new IllegalArgumentException(columnName + " does not exist in column fields");
@@ -85,17 +87,27 @@ public final class FileIndexWriter implements Closeable {
 
             for (Map.Entry<String, Options> typeEntry : entry.getValue().entrySet()) {
                 String indexType = typeEntry.getKey();
-                if (field.type().getTypeRoot() == DataTypeRoot.MAP) {
+                if (entryColumn.isNestedColumn()) {
+                    if (field.type().getTypeRoot() != DataTypeRoot.MAP) {
+                        throw new IllegalArgumentException(
+                                "Column "
+                                        + columnName
+                                        + " is nested column, but is not map type. Only should map type yet.");
+                    }
                     MapType mapType = (MapType) field.type();
-                    mapFileIndexMaintainers.add(
-                            new MapFileIndexMaintainer(
+                    mapFileIndexMaintainers
+                            .computeIfAbsent(
                                     columnName,
-                                    indexType,
-                                    mapType.getKeyType(),
-                                    mapType.getValueType(),
-                                    fileIndexOptions,
-                                    typeEntry.getValue(),
-                                    index.get(columnName)));
+                                    name ->
+                                            new MapFileIndexMaintainer(
+                                                    columnName,
+                                                    indexType,
+                                                    mapType.getKeyType(),
+                                                    mapType.getValueType(),
+                                                    fileIndexOptions.get(
+                                                            columnName, typeEntry.getKey()),
+                                                    index.get(columnName)))
+                            .add(entryColumn.getNestedColumnName(), typeEntry.getValue());
                 } else {
                     fileIndexMaintainers.add(
                             new FileIndexMaintainer(
@@ -114,8 +126,9 @@ public final class FileIndexWriter implements Closeable {
 
     public void write(InternalRow row) {
         fileIndexMaintainers.forEach(fileIndexMaintainer -> fileIndexMaintainer.write(row));
-        mapFileIndexMaintainers.forEach(
-                mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
+        mapFileIndexMaintainers
+                .values()
+                .forEach(mapFileIndexMaintainer -> mapFileIndexMaintainer.write(row));
     }
 
     @Override
@@ -128,7 +141,7 @@ public final class FileIndexWriter implements Closeable {
                     .put(fileIndexMaintainer.getIndexType(), fileIndexMaintainer.serializedBytes());
         }
 
-        for (MapFileIndexMaintainer mapFileIndexMaintainer : mapFileIndexMaintainers) {
+        for (MapFileIndexMaintainer mapFileIndexMaintainer : mapFileIndexMaintainers.values()) {
             Map<String, byte[]> mapBytes = mapFileIndexMaintainer.serializedBytes();
             for (Map.Entry<String, byte[]> entry : mapBytes.entrySet()) {
                 indexMaps
@@ -228,10 +241,10 @@ public final class FileIndexWriter implements Closeable {
     /** File index writer for map data type. */
     private static class MapFileIndexMaintainer {
 
-        private static final String NESTED_FIELDS = "map-keys";
-
         private final String columnName;
         private final String indexType;
+        private final Options options;
+        private final DataType valueType;
         private final Map<String, org.apache.paimon.fileindex.FileIndexWriter> indexWritersMap;
         private final InternalArray.ElementGetter valueElementGetter;
         private final int position;
@@ -241,11 +254,12 @@ public final class FileIndexWriter implements Closeable {
                 String indexType,
                 DataType keyType,
                 DataType valueType,
-                FileIndexOptions fileIndexOptions,
                 Options options,
                 int position) {
             this.columnName = columnName;
             this.indexType = indexType;
+            this.valueType = valueType;
+            this.options = options;
             this.position = position;
             this.indexWritersMap = new HashMap<>();
             this.valueElementGetter = InternalArray.createElementGetter(valueType);
@@ -256,28 +270,31 @@ public final class FileIndexWriter implements Closeable {
                         "Only support map data type with key field of CHAR、VARCHAR、STRING.");
             }
 
-            String[] nestedFields =
-                    options.getOrThrow(
-                                    NESTED_FIELDS,
-                                    () ->
-                                            new RuntimeException(
-                                                    "Bloom filter in map must has nested-fields option, which specify map keys to be indexed."))
-                            .split(",");
-            for (String mapKey : nestedFields) {
-                Options nestedOptions =
-                        fileIndexOptions.get(
-                                FileIndexCommon.toMapKey(columnName, mapKey), indexType);
-                indexWritersMap.put(
-                        mapKey,
-                        FileIndexer.create(
-                                        indexType,
-                                        valueType,
-                                        nestedOptions == null
-                                                ? options
-                                                : new Options(
-                                                        options.toMap(), nestedOptions.toMap()))
-                                .createWriter());
-            }
+            //            String[] nestedFields =
+            //                    options.getOrThrow(
+            //                                    NESTED_FIELDS,
+            //                                    () ->
+            //                                            new RuntimeException(
+            //                                                    "Bloom filter in map must has
+            // nested-fields option, which specify map keys to be indexed."))
+            //                            .split(",");
+            //            for (String mapKey : nestedFields) {
+            //                Options nestedOptions =
+            //                        fileIndexOptions.get(
+            //                                FileIndexCommon.toMapKey(columnName, mapKey),
+            // indexType);
+            //                indexWritersMap.put(
+            //                        mapKey,
+            //                        FileIndexer.create(
+            //                                        indexType,
+            //                                        valueType,
+            //                                        nestedOptions == null
+            //                                                ? options
+            //                                                : new Options(
+            //                                                        options.toMap(),
+            // nestedOptions.toMap()))
+            //                                .createWriter());
+            //            }
         }
 
         public void write(InternalRow row) {
@@ -293,6 +310,18 @@ public final class FileIndexWriter implements Closeable {
                     writer.write(valueElementGetter.getElementOrNull(valueArray, i));
                 }
             }
+        }
+
+        public void add(String nestedKey, Options nestedOptions) {
+            indexWritersMap.put(
+                    nestedKey,
+                    FileIndexer.create(
+                                    indexType,
+                                    valueType,
+                                    nestedOptions == null
+                                            ? options
+                                            : new Options(options.toMap(), nestedOptions.toMap()))
+                            .createWriter());
         }
 
         public String getIndexType() {

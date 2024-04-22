@@ -25,7 +25,6 @@ import org.apache.paimon.data.GenericMap;
 import org.apache.paimon.data.GenericRow;
 import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.data.serializer.InternalRowSerializer;
-import org.apache.paimon.fileindex.FileIndexCommon;
 import org.apache.paimon.fileindex.bloomfilter.BloomFilterFileIndex;
 import org.apache.paimon.fs.FileIOFinder;
 import org.apache.paimon.fs.Path;
@@ -505,7 +504,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                             + BloomFilterFileIndex.BLOOM_FILTER
                                             + "."
                                             + CoreOptions.COLUMNS,
-                                    "index_column, index_column2, index_column3");
+                                    "index_column, index_column2, index_column3[a], index_column3[b], index_column3[c], index_column3[d]");
                             options.set(
                                     CoreOptions.FILE_INDEX
                                             + "."
@@ -534,9 +533,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                     CoreOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
-                                            + ".index_column3"
-                                            + FileIndexCommon.JUNCTION_SYMBOL
-                                            + "a.items",
+                                            + ".index_column3[a].items",
                                     "10000");
                         });
 
@@ -618,7 +615,7 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                         Equal.INSTANCE,
                         DataTypes.MAP(DataTypes.STRING(), DataTypes.STRING()),
                         3,
-                        "index_column3##a",
+                        "index_column3[a]",
                         Collections.singletonList(BinaryString.fromString("I am a good girl")));
         TableScan.Plan plan = table.newScan().withFilter(predicate).plan();
         List<DataFileMeta> metas =

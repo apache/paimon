@@ -23,26 +23,22 @@ import org.apache.paimon.types.DataType;
 import org.apache.paimon.types.MapType;
 
 import java.util.Map;
+import java.util.Optional;
 
 /** Common function of file index put here. */
 public class FileIndexCommon {
 
-    public static final String JUNCTION_SYMBOL = "##";
-
     public static String toMapKey(String mapColumnName, String keyName) {
-        return mapColumnName + JUNCTION_SYMBOL + keyName;
+        return mapColumnName + "[" + keyName + "]";
     }
 
     public static DataType getFieldType(Map<String, DataField> fields, String columnsName) {
-        int index = columnsName.indexOf(JUNCTION_SYMBOL);
-        if (index == -1) {
-            return fields.get(columnsName).type();
+        Optional<Integer> nestedIndex = FileIndexOptions.getNestedColumn(columnsName);
+        if (nestedIndex.isPresent()) {
+            return ((MapType) fields.get(columnsName.substring(0, nestedIndex.get())).type())
+                    .getValueType();
         } else {
-            return ((MapType) fields.get(columnsName.substring(0, index)).type()).getValueType();
+            return fields.get(columnsName).type();
         }
-    }
-
-    public static boolean isNestedColumn(String columnName) {
-        return columnName.contains(JUNCTION_SYMBOL);
     }
 }
