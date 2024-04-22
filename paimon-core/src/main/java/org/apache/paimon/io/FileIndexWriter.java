@@ -269,32 +269,6 @@ public final class FileIndexWriter implements Closeable {
                 throw new IllegalArgumentException(
                         "Only support map data type with key field of CHAR、VARCHAR、STRING.");
             }
-
-            //            String[] nestedFields =
-            //                    options.getOrThrow(
-            //                                    NESTED_FIELDS,
-            //                                    () ->
-            //                                            new RuntimeException(
-            //                                                    "Bloom filter in map must has
-            // nested-fields option, which specify map keys to be indexed."))
-            //                            .split(",");
-            //            for (String mapKey : nestedFields) {
-            //                Options nestedOptions =
-            //                        fileIndexOptions.get(
-            //                                FileIndexCommon.toMapKey(columnName, mapKey),
-            // indexType);
-            //                indexWritersMap.put(
-            //                        mapKey,
-            //                        FileIndexer.create(
-            //                                        indexType,
-            //                                        valueType,
-            //                                        nestedOptions == null
-            //                                                ? options
-            //                                                : new Options(
-            //                                                        options.toMap(),
-            // nestedOptions.toMap()))
-            //                                .createWriter());
-            //            }
         }
 
         public void write(InternalRow row) {
@@ -318,9 +292,7 @@ public final class FileIndexWriter implements Closeable {
                     FileIndexer.create(
                                     indexType,
                                     valueType,
-                                    nestedOptions == null
-                                            ? options
-                                            : new Options(options.toMap(), nestedOptions.toMap()))
+                                    new Options(options.toMap(), nestedOptions.toMap()))
                             .createWriter());
         }
 

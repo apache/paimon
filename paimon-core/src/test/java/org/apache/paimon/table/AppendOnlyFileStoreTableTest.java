@@ -509,12 +509,6 @@ public class AppendOnlyFileStoreTableTest extends FileStoreTableTestBase {
                                     CoreOptions.FILE_INDEX
                                             + "."
                                             + BloomFilterFileIndex.BLOOM_FILTER
-                                            + ".index_column3.map-keys",
-                                    "a,b,c,d");
-                            options.set(
-                                    CoreOptions.FILE_INDEX
-                                            + "."
-                                            + BloomFilterFileIndex.BLOOM_FILTER
                                             + ".index_column.items",
                                     "150");
                             options.set(
