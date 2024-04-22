@@ -839,6 +839,9 @@ public class FlinkCatalog extends AbstractCatalog {
             }
 
             ReadBuilder readBuilder = table.newReadBuilder();
+            if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
+                readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
+            }
             List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
             org.apache.paimon.types.RowType partitionRowType =
                     fileStoreTable.schema().logicalPartitionType();
