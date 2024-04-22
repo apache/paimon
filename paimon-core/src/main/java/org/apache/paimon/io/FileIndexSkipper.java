@@ -18,35 +18,26 @@
 
 package org.apache.paimon.io;
 
-import org.apache.paimon.data.InternalRow;
 import org.apache.paimon.fileindex.FileIndexPredicate;
 import org.apache.paimon.fs.FileIO;
-import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.predicate.Predicate;
 import org.apache.paimon.predicate.PredicateBuilder;
-import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.TableSchema;
-
-import javax.annotation.Nullable;
 
 import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
 /** File index reader, do the filter in the constructor. */
-public class FileIndexRecordReader implements RecordReader<InternalRow> {
+public class FileIndexSkipper {
 
-    private final RecordReader<InternalRow> reader;
-
-    public FileIndexRecordReader(
+    public static boolean skip(
             FileIO fileIO,
             TableSchema dataSchema,
             List<Predicate> dataFilter,
             DataFilePathFactory dataFilePathFactory,
-            DataFileMeta file,
-            ConcatRecordReader.ReaderSupplier<InternalRow> readerSupplier)
+            DataFileMeta file)
             throws IOException {
-        boolean filterThisFile = false;
         if (dataFilter != null && !dataFilter.isEmpty()) {
             List<String> indexFiles =
                     file.extraFiles().stream()
@@ -66,25 +57,12 @@ public class FileIndexRecordReader implements RecordReader<InternalRow> {
                                 dataSchema.logicalRowType())) {
                     if (!predicate.testPredicate(
                             PredicateBuilder.and(dataFilter.toArray(new Predicate[0])))) {
-                        filterThisFile = true;
+                        return true;
                     }
                 }
             }
         }
 
-        this.reader = filterThisFile ? null : readerSupplier.get();
-    }
-
-    @Nullable
-    @Override
-    public RecordIterator<InternalRow> readBatch() throws IOException {
-        return reader == null ? null : reader.readBatch();
-    }
-
-    @Override
-    public void close() throws IOException {
-        if (reader != null) {
-            reader.close();
-        }
+        return false;
     }
 }

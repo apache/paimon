@@ -30,11 +30,12 @@ import org.apache.paimon.format.FormatReaderFactory;
 import org.apache.paimon.fs.FileIO;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.io.DataFilePathFactory;
-import org.apache.paimon.io.FileIndexRecordReader;
+import org.apache.paimon.io.FileIndexSkipper;
 import org.apache.paimon.io.FileRecordReader;
 import org.apache.paimon.mergetree.compact.ConcatRecordReader;
 import org.apache.paimon.partition.PartitionUtils;
 import org.apache.paimon.predicate.Predicate;
+import org.apache.paimon.reader.EmptyRecordReader;
 import org.apache.paimon.reader.RecordReader;
 import org.apache.paimon.schema.IndexCastMapping;
 import org.apache.paimon.schema.SchemaEvolutionUtil;
@@ -204,37 +205,35 @@ public class RawFileSplitRead implements SplitRead<InternalRow> {
             RawFileBulkFormatMapping bulkFormatMapping,
             DeletionVector.Factory dvFactory)
             throws IOException {
-        ConcatRecordReader.ReaderSupplier<InternalRow> supplier =
-                () -> {
-                    FileRecordReader fileRecordReader =
-                            new FileRecordReader(
-                                    bulkFormatMapping.getReaderFactory(),
-                                    new FormatReaderContext(
-                                            fileIO,
-                                            dataFilePathFactory.toPath(file.fileName()),
-                                            file.fileSize()),
-                                    bulkFormatMapping.getIndexMapping(),
-                                    bulkFormatMapping.getCastMapping(),
-                                    PartitionUtils.create(
-                                            bulkFormatMapping.getPartitionPair(), partition));
+        if (fileIndexReadEnabled) {
+            boolean skip =
+                    FileIndexSkipper.skip(
+                            fileIO,
+                            bulkFormatMapping.getDataSchema(),
+                            bulkFormatMapping.getDataFilters(),
+                            dataFilePathFactory,
+                            file);
+            if (skip) {
+                return new EmptyRecordReader<>();
+            }
+        }
 
-                    Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
-                    if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
-                        return new ApplyDeletionVectorReader<>(
-                                fileRecordReader, deletionVector.get());
-                    }
-                    return fileRecordReader;
-                };
+        FileRecordReader fileRecordReader =
+                new FileRecordReader(
+                        bulkFormatMapping.getReaderFactory(),
+                        new FormatReaderContext(
+                                fileIO,
+                                dataFilePathFactory.toPath(file.fileName()),
+                                file.fileSize()),
+                        bulkFormatMapping.getIndexMapping(),
+                        bulkFormatMapping.getCastMapping(),
+                        PartitionUtils.create(bulkFormatMapping.getPartitionPair(), partition));
 
-        return fileIndexReadEnabled
-                ? new FileIndexRecordReader(
-                        fileIO,
-                        bulkFormatMapping.getDataSchema(),
-                        bulkFormatMapping.getDataFilters(),
-                        dataFilePathFactory,
-                        file,
-                        supplier)
-                : supplier.get();
+        Optional<DeletionVector> deletionVector = dvFactory.create(file.fileName());
+        if (deletionVector.isPresent() && !deletionVector.get().isEmpty()) {
+            return new ApplyDeletionVectorReader<>(fileRecordReader, deletionVector.get());
+        }
+        return fileRecordReader;
     }
 
     /** Bulk format mapping with data schema and data filters. */

@@ -39,6 +39,14 @@ public class ApplyDeletionVectorReader<T> implements RecordReader<T> {
         this.deletionVector = deletionVector;
     }
 
+    public RecordReader<T> reader() {
+        return reader;
+    }
+
+    public DeletionVector deletionVector() {
+        return deletionVector;
+    }
+
     @Nullable
     @Override
     public RecordIterator<T> readBatch() throws IOException {
