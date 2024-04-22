@@ -27,7 +27,6 @@ import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.manifest.ManifestFile;
 import org.apache.paimon.manifest.ManifestFileMeta;
 import org.apache.paimon.manifest.ManifestList;
-import org.apache.paimon.manifest.PartitionFileEntry;
 import org.apache.paimon.manifest.SimpleFileEntry;
 import org.apache.paimon.operation.metrics.ScanMetrics;
 import org.apache.paimon.operation.metrics.ScanStats;
@@ -334,29 +333,6 @@ public abstract class AbstractFileStoreScan implements FileStoreScan {
                             files.size()));
         }
         return Pair.of(snapshot, files);
-    }
-
-    public List<BinaryRow> readPartitions() {
-        Pair<Snapshot, List<ManifestFileMeta>> snapshotListPair = readManifests();
-        List<ManifestFileMeta> manifestList = snapshotListPair.getRight();
-        Collection<PartitionFileEntry> fileEntries =
-                readAndMergeFileEntries(
-                        manifestList,
-                        this::readPartitionEntries,
-                        Filter.alwaysTrue(),
-                        new AtomicLong());
-        return fileEntries.stream().map(FileEntry::partition).collect(Collectors.toList());
-    }
-
-    private List<PartitionFileEntry> readPartitionEntries(ManifestFileMeta manifest) {
-        return manifestFileFactory
-                .createPartitionInfoReader()
-                .read(
-                        manifest.fileName(),
-                        manifest.fileSize(),
-                        ManifestEntry.createCacheRowFilter(manifestCacheFilter, numOfBuckets),
-                        ManifestEntry.createEntryRowFilter(
-                                partitionFilter, bucketFilter, numOfBuckets));
     }
 
     public <T extends FileEntry> Collection<T> readAndMergeFileEntries(
