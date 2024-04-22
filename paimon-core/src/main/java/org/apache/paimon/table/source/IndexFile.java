@@ -34,11 +34,16 @@ public class IndexFile {
     }
 
     public void serialize(DataOutputView out) throws IOException {
-        out.writeUTF(path);
+        if (path != null) {
+            out.writeBoolean(true);
+            out.writeUTF(path);
+        } else {
+            out.writeBoolean(false);
+        }
     }
 
     public static IndexFile deserialize(DataInputView in) throws IOException {
-        return new IndexFile(in.readUTF());
+        return in.readBoolean() ? new IndexFile(in.readUTF()) : new IndexFile(null);
     }
 
     @Override
