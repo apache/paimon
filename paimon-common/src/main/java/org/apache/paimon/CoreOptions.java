@@ -421,7 +421,7 @@ public class CoreOptions implements Serializable {
                     .noDefaultValue()
                     .withDescription(
                             "The number of sorted runs that trigger the stopping of writes,"
-                                    + " the default value is 'num-sorted-run.compaction-trigger' + 1.");
+                                    + " the default value is 'num-sorted-run.compaction-trigger' + 3.");
 
     public static final ConfigOption<Integer> NUM_LEVELS =
             key("num-levels")
@@ -1415,7 +1415,7 @@ public class CoreOptions implements Serializable {
     public int numSortedRunStopTrigger() {
         Integer stopTrigger = options.get(NUM_SORTED_RUNS_STOP_TRIGGER);
         if (stopTrigger == null) {
-            stopTrigger = MathUtils.incrementSafely(numSortedRunCompactionTrigger());
+            stopTrigger = MathUtils.addSafely(numSortedRunCompactionTrigger(), 3);
         }
         return Math.max(numSortedRunCompactionTrigger(), stopTrigger);
     }
