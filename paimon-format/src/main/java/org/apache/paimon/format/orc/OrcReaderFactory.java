@@ -326,26 +326,6 @@ public class OrcReaderFactory implements FormatReaderFactory {
         }
     }
 
-    /**
-     * Computes the ORC projection mask of the fields to include from the selected
-     * fields.rowOrcInputFormat.nextRecord(null).
-     *
-     * @return The ORC projection mask.
-     */
-    private static boolean[] computeProjectionMask(TypeDescription schema, int[] selectedFields) {
-        // mask with all fields of the schema
-        boolean[] projectionMask = new boolean[schema.getMaximumId() + 1];
-        // for each selected field
-        for (int inIdx : selectedFields) {
-            // set all nested fields of a selected field to true
-            TypeDescription fieldSchema = schema.getChildren().get(inIdx);
-            for (int i = fieldSchema.getId(); i <= fieldSchema.getMaximumId(); i++) {
-                projectionMask[i] = true;
-            }
-        }
-        return projectionMask;
-    }
-
     public static org.apache.orc.Reader createReader(
             org.apache.hadoop.conf.Configuration conf,
             FileIO fileIO,
