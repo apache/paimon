@@ -29,7 +29,6 @@ import org.apache.paimon.index.IndexFileHandler;
 import org.apache.paimon.index.IndexFileMeta;
 import org.apache.paimon.io.DataFileMeta;
 import org.apache.paimon.manifest.FileKind;
-import org.apache.paimon.manifest.ManifestEntry;
 import org.apache.paimon.metrics.MetricRegistry;
 import org.apache.paimon.operation.DefaultValueAssigner;
 import org.apache.paimon.operation.FileStoreScan;
@@ -309,19 +308,7 @@ public class SnapshotReaderImpl implements SnapshotReader {
 
     @Override
     public List<BinaryRow> partitions() {
-        List<ManifestEntry> entryList = scan.plan().files();
-
-        return entryList.stream()
-                .collect(
-                        Collectors.groupingBy(
-                                ManifestEntry::partition,
-                                LinkedHashMap::new,
-                                Collectors.reducing((a, b) -> b)))
-                .values()
-                .stream()
-                .map(Optional::get)
-                .map(ManifestEntry::partition)
-                .collect(Collectors.toList());
+        return scan.readPartitions();
     }
 
     @Override

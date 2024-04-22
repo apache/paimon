@@ -202,5 +202,16 @@ public class ManifestFile extends ObjectsFile<ManifestEntry> {
                     pathFactory.manifestFileFactory(),
                     cache);
         }
+
+        public ObjectsFile<PartitionFileEntry> createPartitionInfoReader() {
+            RowType entryType = VersionedObjectSerializer.versionType(ManifestEntry.schema());
+            return new ObjectsFile<>(
+                    this.fileIO,
+                    new PartitionInfoSerializer(),
+                    this.fileFormat.createReaderFactory(entryType),
+                    this.fileFormat.createWriterFactory(entryType),
+                    this.pathFactory.manifestFileFactory(),
+                    this.cache);
+        }
     }
 }

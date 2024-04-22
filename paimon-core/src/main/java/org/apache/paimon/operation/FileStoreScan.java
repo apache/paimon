@@ -71,6 +71,8 @@ public interface FileStoreScan {
 
     FileStoreScan withMetrics(ScanMetrics metrics);
 
+    List<BinaryRow> readPartitions();
+
     /** Produce a {@link Plan}. */
     Plan plan();
 
