@@ -30,9 +30,7 @@ import org.apache.paimon.schema.SchemaChange;
 import org.apache.paimon.schema.SchemaManager;
 import org.apache.paimon.table.FileStoreTable;
 import org.apache.paimon.table.Table;
-import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.ReadBuilder;
-import org.apache.paimon.table.source.Split;
 import org.apache.paimon.utils.FileStorePathFactory;
 import org.apache.paimon.utils.Preconditions;
 import org.apache.paimon.utils.RowDataPartitionComputer;
@@ -841,22 +839,10 @@ public class FlinkCatalog extends AbstractCatalog {
             }
 
             ReadBuilder readBuilder = table.newReadBuilder();
-            List<Split> splits;
             if (partitionSpec != null && partitionSpec.getPartitionSpec() != null) {
-                splits =
-                        readBuilder
-                                .withPartitionFilter(partitionSpec.getPartitionSpec())
-                                .newScan()
-                                .plan()
-                                .splits();
-            } else {
-                splits = readBuilder.newScan().plan().splits();
+                readBuilder.withPartitionFilter(partitionSpec.getPartitionSpec());
             }
-
-            List<BinaryRow> partitions =
-                    splits.stream()
-                            .map(m -> ((DataSplit) m).partition())
-                            .collect(Collectors.toList());
+            List<BinaryRow> partitions = readBuilder.newScan().listPartitions();
             org.apache.paimon.types.RowType partitionRowType =
                     fileStoreTable.schema().logicalPartitionType();
 
