@@ -371,6 +371,8 @@ public class DataSplit implements Split {
             checkArgument(split.partition != null);
             checkArgument(split.bucket != -1);
             checkArgument(split.dataFiles != null);
+            checkArgument(split.bucketPath != null);
+            checkArgument(split.defaultFormat != null);
 
             DataSplit split = new DataSplit();
             split.assign(this.split);
