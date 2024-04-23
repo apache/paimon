@@ -51,7 +51,7 @@ https://paimon.apache.org/docs/master/project/download/
 
 | Version       | Package                                                                                                                                       |
 |---------------|-----------------------------------------------------------------------------------------------------------------------------------------------|
-| [422, 426]    | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
+| [420, 426]    | [paimon-trino-422-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-422/{{< version >}}/) |
 | [427, latest] | [paimon-trino-427-{{< version >}}-plugin.tar.gz](https://repository.apache.org/snapshots/org/apache/paimon/paimon-trino-427/{{< version >}}/) |
 
 {{< /unstable >}}
