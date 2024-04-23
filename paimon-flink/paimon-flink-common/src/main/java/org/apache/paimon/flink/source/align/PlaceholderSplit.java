@@ -34,7 +34,10 @@ import java.util.Objects;
  * contain any {@link org.apache.paimon.table.source.Split}.
  */
 public class PlaceholderSplit extends DataSplit {
+
     private static final long serialVersionUID = 3L;
+    private static final String NO_USE_BUCKET_PATH = "/no-used";
+    private static final String NO_USE_DEFAULT_FORMAT = "orc";
 
     private final DataSplit dataSplit;
 
@@ -47,6 +50,9 @@ public class PlaceholderSplit extends DataSplit {
                         .withDataFiles(Collections.emptyList())
                         .withPartition(BinaryRow.EMPTY_ROW)
                         .isStreaming(true)
+                        .rawConvertible(false)
+                        .withBucketPath(NO_USE_BUCKET_PATH)
+                        .withDefaultFormat(NO_USE_DEFAULT_FORMAT)
                         .build();
     }
 

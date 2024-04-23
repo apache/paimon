@@ -201,7 +201,8 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                                 pathFactory
                                                         .bucketPath(partition, bucket)
                                                         .toString())
-                                        .withDefaultFormat(fileFormat.getFormatIdentifier())
+                                        .withDefaultFormat(
+                                                fileFormat.getFormatIdentifier().toLowerCase())
                                         .build()));
     }
 

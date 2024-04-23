@@ -380,7 +380,10 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBucket(bucket)
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
-                                .isStreaming(isStreaming);
+                                .isStreaming(isStreaming)
+                                .withBucketPath(pathFactory.bucketPath(part, bucket).toString())
+                                .withDefaultFormat(
+                                        options.fileFormat().getFormatIdentifier().toLowerCase());
                 if (deletionVectors) {
                     IndexFileMeta beforeDeletionIndex =
                             indexFileHandler

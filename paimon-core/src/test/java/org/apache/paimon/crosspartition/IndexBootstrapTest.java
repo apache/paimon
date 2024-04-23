@@ -117,6 +117,8 @@ public class IndexBootstrapTest extends TableTestBase {
                 .withPartition(EMPTY_ROW)
                 .withBucket(0)
                 .withDataFiles(Arrays.asList(files))
+                .withBucketPath("") // not used
+                .withDefaultFormat("orc") // not used
                 .build();
     }
 
