@@ -59,6 +59,14 @@ under the License.
             <scope>provided</scope>
         </dependency>
 
+        <!-- lookup service -->
+
+        <dependency>
+            <groupId>org.apache.paimon</groupId>
+            <artifactId>paimon-shade-netty-4</artifactId>
+            <version>${paimon.shade.netty.version}-${paimon.shade.version}</version>
+        </dependency>
+
         <!-- test dependencies -->
 
         <dependency>
@@ -140,6 +148,7 @@ under the License.
                                     <include>org.apache.paimon:paimon-bundle</include>
                                     <include>org.apache.paimon:paimon-service-client</include>
                                     <include>org.apache.paimon:paimon-service-runtime</include>
+                                    <include>org.apache.paimon:paimon-shade-netty-4</include>
                                 </includes>
                             </artifactSet>
                         </configuration>
