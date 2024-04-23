@@ -197,6 +197,7 @@ public class AppendOnlyFileStoreWrite extends MemoryFileStoreWrite<InternalRow> 
                                         .withPartition(partition)
                                         .withBucket(bucket)
                                         .withDataFiles(files)
+                                        .rawConvertible(true)
                                         .withBucketPath(
                                                 pathFactory
                                                         .bucketPath(partition, bucket)
