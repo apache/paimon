@@ -26,6 +26,7 @@ import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
 import org.apache.paimon.table.source.ScanMode;
+import org.apache.paimon.table.source.Split;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.utils.SnapshotManager;
 
@@ -64,7 +65,9 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
                                 new SplitInfo(
                                         split.partition(),
                                         split.bucket(),
-                                        split.rawConvertible(),
+                                        // take it for false, because multiple snapshot read may
+                                        // need merge for primary key table
+                                        false,
                                         split.getBucketPath(),
                                         split.getDefaultFormat(),
                                         split.deletionFiles().orElse(null)),
@@ -73,7 +76,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        List<DataSplit> result = new ArrayList<>();
+        List<Split> result = new ArrayList<>();
         for (Map.Entry<SplitInfo, List<DataFileMeta>> entry : grouped.entrySet()) {
             BinaryRow partition = entry.getKey().partition;
             int bucket = entry.getKey().bucket;
@@ -99,7 +102,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             }
         }
 
-        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, (List) result));
+        return StartingScanner.fromPlan(new PlanImpl(null, endingSnapshotId, result));
     }
 
     private List<DataSplit> readSplits(SnapshotReader reader, Snapshot s) {
@@ -119,7 +122,7 @@ public class IncrementalStartingScanner extends AbstractStartingScanner {
             // ignore COMPACT and OVERWRITE
             return Collections.emptyList();
         }
-        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).readChanges().splits();
+        return (List) reader.withSnapshot(s).withMode(ScanMode.DELTA).read().splits();
     }
 
     @SuppressWarnings({"unchecked", "rawtypes"})

@@ -40,7 +40,6 @@ import org.apache.paimon.schema.TableSchema;
 import org.apache.paimon.table.source.DataSplit;
 import org.apache.paimon.table.source.DeletionFile;
 import org.apache.paimon.table.source.PlanImpl;
-import org.apache.paimon.table.source.RawFile;
 import org.apache.paimon.table.source.ScanMode;
 import org.apache.paimon.table.source.SplitGenerator;
 import org.apache.paimon.types.RowType;
@@ -381,8 +380,6 @@ public class SnapshotReaderImpl implements SnapshotReader {
                                 .withBeforeFiles(before)
                                 .withDataFiles(data)
                                 .isStreaming(isStreaming)
-                                // maybe append only file could set to true
-                                .rawConvertible(false)
                                 .withBucketPath(pathFactory.bucketPath(part, bucket).toString())
                                 .withDefaultFormat(
                                         options.fileFormat().getFormatIdentifier().toLowerCase());
@@ -446,21 +443,5 @@ public class SnapshotReaderImpl implements SnapshotReader {
         }
 
         return deletionFiles;
-    }
-
-    private RawFile makeRawTableFile(String bucketPath, DataFileMeta meta) {
-        return new RawFile(
-                bucketPath + "/" + meta.fileName(),
-                0,
-                meta.fileSize(),
-                meta.fileFormat()
-                        .map(t -> t.toString().toLowerCase())
-                        .orElse(
-                                new CoreOptions(tableSchema.options())
-                                        .formatType()
-                                        .toString()
-                                        .toLowerCase()),
-                meta.schemaId(),
-                meta.rowCount());
     }
 }
